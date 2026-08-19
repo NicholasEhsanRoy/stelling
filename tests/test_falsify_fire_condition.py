@@ -51,6 +51,7 @@ import subprocess
 import sys
 import time
 import textwrap
+from fractions import Fraction
 
 import pytest
 
@@ -68,6 +69,11 @@ from stelling.falsify import (  # noqa: E402
     Declaration,
     VerifiedFalsified,
     _admissible,
+    _int_ok,
+    _rat_convert,
+    _rat_pow,
+    _rat_sqrt,
+    _Unreplayable,
     _window,
     probe,
 )
@@ -1154,6 +1160,16 @@ REASON_COVERAGE = {
         "boundary — `assume(y * 0.1 * 10.0 <= y)` under the Kahan assert"
     ),
     "no-margin-no-boundary-search": "driven: an assert with no comparison",
+    "executed-float-depends-on-granularity": (
+        "driven: `jnp.mean` under `ieee` — the trace inlines the `jit` "
+        "`jnp.mean` is built out of, so `_execute` walks op by op what the "
+        "caller's own call compiles whole"
+    ),
+    "whole-program-route-unavailable": (
+        "driven with a route that raises: no program is known that traces "
+        "and executes op by op and then cannot be staged under one `jit`, "
+        "and 'not shown to move' is not 'shown not to move'"
+    ),
     "obligation-count-changed": (
         "DEFENCE IN DEPTH, no known reaching input: `_read` and `_execute` "
         "walk the same equation list, so the counts cannot diverge; the "
@@ -1810,43 +1826,78 @@ def test_the_guards_named_in_the_readings_table_are_LIVE_in_the_source():
 
     This module has been here before: ``_CALL_PRIMITIVES`` named four jax
     primitives that do not exist, under a comment describing what it
-    would do if they did, and nothing failed for a batch. So each guard
-    ``_READINGS`` claims is grepped for in ``falsify.py`` — the point-level
-    ones as a ``skips.add`` literal, the whole-probe ones as the sentence
-    the user is shown.
+    would do if they did, and nothing failed for a batch.
+
+    **AND "SOMEWHERE IN THE FILE" IS NOT A BINDING.** This test used to
+    grep each guard as a bare literal anywhere in ``falsify.py``, and only
+    three of the five guarded fields had a comparison of their own pinned
+    beside it. So a new field could declare ANY decline reason the file
+    already emits and be green in both tests — driven: a ``_Census`` field
+    added with ``guard="bound-nan"``, a ``_window`` decline about a NaN
+    endpoint that has nothing to do with any field, passed. The docstring
+    of ``_Reading`` was honest about this for ``why`` and read stronger
+    than it was for ``guard``.
+
+    Each reading now carries the SOURCE TEXT of the ``if`` that takes its
+    guard, and this test parses ``falsify.py`` and demands that the ``if``
+    exist and that the guard be emitted INSIDE it. A guard is then bound
+    to one line, not to a file.
     """
+    import ast
+
     import stelling.falsify as F
 
-    source = PROBE_SRC.read_text(encoding="utf-8")
+    tree = ast.parse(PROBE_SRC.read_text(encoding="utf-8"))
+    ifs = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If):
+            ifs.setdefault(ast.unparse(node.test), []).append(node)
 
-    # the whole-probe guards emit a SENTENCE rather than a code, so what is
-    # grepped for is the comparison that produces it: the reading against
-    # the every-depth total. Without this the table could name a guard the
-    # code had stopped taking.
-    comparisons = {
-        "declarations":
-            "len(census.declarations) != census.declarations_in_program",
-        "assert_positions":
-            "len(census.assert_positions) != census.obligations_in_program",
-        "assumes": "len(run.assumes) != census.assumes_in_program",
-    }
-    for r in F._READINGS:
-        if r.guard is None:
-            continue
-        if r.name in comparisons:
-            assert comparisons[r.name] in source, (
-                f"_READINGS says {r.subject}.{r.name} is guarded and "
-                f"falsify.py no longer contains "
-                f"`{comparisons[r.name]}`"
-            )
+    guarded = [r for r in F._READINGS if r.guard is not None]
+    assert guarded, "no reading in _READINGS carries a guard at all"
+    for r in guarded:
+        assert r.site, (
+            f"{r.subject}.{r.name} declares guard {r.guard!r} and no "
+            f"`site`. A guard name on its own is satisfied by any decline "
+            f"reason already spelled anywhere in falsify.py; name the "
+            f"`if` that takes THIS field's reading."
+        )
+        sites = ifs.get(r.site)
+        assert sites, (
+            f"_READINGS says {r.subject}.{r.name} is guarded by "
+            f"`if {r.site}:` and falsify.py has no such `if`. Either the "
+            f"guard was moved and the table was not, or it was taken out."
+        )
+        assert len(sites) == 1, (
+            f"`if {r.site}:` appears {len(sites)} times in falsify.py, so "
+            f"the table cannot say which one guards {r.subject}.{r.name}"
+        )
         if r.guard in F._WHOLE_PROBE_GUARDS:
+            # a SENTENCE rather than a code: what is pinned is that the
+            # comparison is still taken and still declines the whole probe
+            body = ast.unparse(sites[0])
+            assert "ProbeReport(" in body and "declined=" in body, (
+                f"{r.subject}.{r.name}'s guard no longer declines the "
+                f"whole probe at `if {r.site}:`"
+            )
             continue
-        assert (
-            f'skips.add("{r.guard}")' in source
-            or f'return None, "{r.guard}"' in source
-        ), (
+        emitted = {
+            n.value
+            for n in ast.walk(sites[0])
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        }
+        assert r.guard in emitted, (
             f"_READINGS says {r.subject}.{r.name} declines under "
-            f"{r.guard!r} and nothing in falsify.py emits it"
+            f"{r.guard!r}, and `if {r.site}:` emits {sorted(emitted)!r}. "
+            f"The guard must be taken where the reading is checked; a "
+            f"reason emitted somewhere else in the file binds nothing."
+        )
+
+    # and the reverse: a `site` that is not attached to a guard is a
+    # sentence in the table nothing holds
+    for r in F._READINGS:
+        assert (r.guard is None) == (not r.site), (
+            f"{r.subject}.{r.name} has guard={r.guard!r} and site={r.site!r}"
         )
 
 
@@ -2183,3 +2234,471 @@ def test_the_totality_walk_counts_each_declaration_ONCE(name, wrapper):
     assert found is None, found and found.render()
     assert "assume-not-fully-executed" not in dict(report.skips), report.skips
     assert report.declined is None, report.declined
+
+
+# ------------------------- a reading of the program can be at the WRONG GRAIN
+
+
+MEAN_X0 = 1.3102272059107631
+
+
+def mean_of_a_stack(x):
+    """``mean([x, 2x, 3x])`` — a program with no ``jit`` written in it."""
+    return jnp.mean(jnp.stack([x, x * 2.0, x * 3.0]))
+
+
+def mean3_at_its_own_value():
+    """An obligation the program satisfies at the only point it declares.
+
+    ``C`` is the value the PROGRAM computes at ``MEAN_X0``, read back from
+    the program itself, so ``mean3(x) <= C`` is true there by construction
+    — eagerly and under ``jax.jit`` alike. A firing on it is a false alarm
+    whatever a solver thinks, because the bound came from the program.
+    """
+    c = float(np.asarray(mean_of_a_stack(jnp.asarray(MEAN_X0, "float64"))))
+
+    def harness():
+        x = any_array((), "float64", (MEAN_X0, MEAN_X0))
+        return assert_(mean_of_a_stack(x) <= c)
+
+    return harness
+
+
+def test_the_EXECUTED_walk_reads_the_program_at_the_TRACES_granularity():
+    """THE FIFTH INSTANCE, INSIDE THE SENTENCE THAT JUSTIFIED THE FOURTH.
+
+    ``_execute`` binds one equation at a time, so XLA never sees two of
+    them together. The docstring that justified this defended it with
+    *"what this loop reproduces is what the user's own code does: their
+    un-jitted top level op by op, their ``jit`` compiled whole."* **jax
+    does not divide the two that way.** ``jnp.mean`` is a compiled region
+    on the eager path and ``jax.make_jaxpr`` INLINES it, so the traced top
+    level carries a bare ``reduce_sum ; div`` for a call the caller
+    compiles whole — and the two give different floats, one ulp apart.
+
+    So this test drives the three facts in order: the trace has no call
+    equation to hand whole to ``bind``; the two routes disagree; and the
+    probe, which used to raise *"stelling is UNSOUND at this query"* on
+    the obligation below, declines it by name.
+    """
+    import stelling.falsify as F
+
+    x = jnp.asarray(MEAN_X0, "float64")
+    closed = jax.make_jaxpr(mean_of_a_stack)(x)
+    names = [e.primitive.name for e in closed.jaxpr.eqns]
+    assert not any(n in F._CALL_PRIMITIVES for n in names), (
+        f"this jax no longer inlines the `jit` inside `jnp.mean`: {names}. "
+        f"Re-derive the argument in `_execute` before relaxing the guard — "
+        f"a top-level call equation is one `_execute` hands whole to `bind`"
+    )
+    assert "reduce_sum" in names and "div" in names, names
+
+    # the two routes, on the same jaxpr at the same point
+    eager = float(np.asarray(mean_of_a_stack(x)))
+    census = F._read(closed)
+    env = {v: c for v, c in zip(closed.jaxpr.constvars, closed.consts)}
+    env[closed.jaxpr.invars[0]] = x
+    for eqn in closed.jaxpr.eqns:
+        ins = [
+            a.val if isinstance(a, F.jex_core.Literal) else env[a]
+            for a in eqn.invars
+        ]
+        out = eqn.primitive.bind(*ins, **eqn.params)
+        for var, o in zip(
+            eqn.outvars, out if eqn.primitive.multiple_results else [out]
+        ):
+            env[var] = o
+    op_by_op = float(np.asarray(env[closed.jaxpr.outvars[0]]))
+    assert op_by_op != eager, (
+        f"the op-by-op walk and the eager call now agree at {MEAN_X0!r} "
+        f"({eager!r}); this fixture no longer states the defect it was "
+        f"written for"
+    )
+
+    # and the probe: a violation at the TRACE's granularity, declined
+    found, report = attack(mean3_at_its_own_value(), semantics="ieee")
+    assert found is None, (
+        f"the probe raised 'stelling is UNSOUND' about an obligation the "
+        f"program SATISFIES at its only declared point, because it "
+        f"evaluated the program one equation at a time: "
+        f"{found and found.render()}"
+    )
+    counts = dict(report.skips)
+    assert counts.get("executed-float-depends-on-granularity", 0) > 0, (
+        f"the violation was not declined for the right reason: {counts}"
+    )
+    assert report.violations_seen > 0, (
+        "nothing violated at all; the fixture no longer reaches the branch"
+    )
+    assert dict(report.adjudications) == {
+        "declined-executed-routes-disagree": report.violations_seen
+    }, report.adjudications
+
+
+def test_the_whole_program_route_agrees_with_the_CALLERS_OWN_CALL():
+    """The second route is not just a second answer; it is the right one.
+
+    ``_granularity_stable`` only ever DECLINES, so it would be safe even
+    if its route were arbitrary — but a guard that declines for a reason
+    that is not the real one declines the wrong programs. On this fixture
+    the whole-program route computes what the caller's own eager call
+    computes, and the op-by-op walk does not, which is the whole content
+    of the claim that ``_execute`` reads at the wrong grain.
+    """
+    import stelling.falsify as F
+
+    harness = mean3_at_its_own_value()
+    census = F._census(harness)
+    point = [jnp.asarray(MEAN_X0, "float64")]
+    run = F._execute(census, point)
+    _, asserts = F._whole_program_route(census)(*point)
+
+    assert bool(np.all(run.asserts[0])) is False, (
+        "the op-by-op walk no longer violates the obligation here"
+    )
+    assert bool(np.all(np.asarray(asserts[0]))) is True, (
+        "the whole-program route no longer agrees with the caller's own "
+        "call; the fixture has stopped separating the two granularities"
+    )
+    assert F._granularity_stable(F._whole_program_route(census), point,
+                                 run, 0) is False
+
+
+def test_the_granularity_guard_costs_the_JIT_FIXTURE_NOTHING():
+    """The other fixture in this file goes through the new guard unchanged.
+
+    The ``a * b + c`` program is the one that refuses a DESCENDING
+    ``_execute``. Its call equation is handed whole to ``bind`` by both
+    routes, so they agree, and the guard must not decline it — a guard
+    that declined everything would pass the test above and be worthless.
+    """
+    import stelling.falsify as F
+
+    a0 = np.float32(1.9669843)
+    b0 = np.float32(1.3077438)
+    c0 = np.float32(-np.float32(a0 * b0))
+    box = (float(np.nextafter(a0, np.float32(-np.inf))), float(a0))
+    prod = jax.jit(lambda p, q, r: p * q + r)
+
+    def harness():
+        a = any_array((), "float32", box)
+        return assert_(prod(a, jnp.float32(b0), jnp.float32(c0)) != 0.0)
+
+    census = F._census(harness)
+    route = F._whole_program_route(census)
+    for endpoint in box:
+        point = [jnp.asarray(endpoint, "float32")]
+        run = F._execute(census, point)
+        assert F._granularity_stable(route, point, run, 0) is True, (
+            f"the two routes disagree at {endpoint!r} on a program whose "
+            f"only call equation both of them hand whole to `bind`"
+        )
+
+    found, report = attack(harness, semantics="ieee")
+    assert found is None, found and found.render()
+    assert "executed-float-depends-on-granularity" not in dict(report.skips), (
+        f"the guard declined a program it must not: {report.skips}"
+    )
+
+
+def test_a_violation_that_survives_BOTH_ROUTES_still_fires():
+    """The guard declines a moving reading and nothing else.
+
+    ``x + 1.0 > x`` over ``[0, 2**54]`` is FALSE in float64 above the
+    doubling point, and it is false at the same points however much of the
+    program XLA compiles together — there is nothing here to contract. So
+    the ``ieee`` firing this instrument is for must survive the guard.
+    """
+
+    def harness():
+        x = any_array((), "float64", (0.0, 2.0 ** 54))
+        return assert_(x + 1.0 > x)
+
+    found, report = attack(harness, semantics="ieee")
+    assert found is not None, (
+        f"the granularity guard swallowed a genuine `ieee` refutation: "
+        f"{report.stamp_line()}"
+    )
+    assert found.adjudication == "ieee-executed-float", found.adjudication
+
+
+def test_a_second_route_that_cannot_be_run_is_not_agreement(monkeypatch):
+    """``None`` is not ``True``, and the code must not read it as one.
+
+    No program is known that ``_execute`` can walk and that then fails to
+    stage under a single ``jit``, so the branch is driven with a route
+    that raises. It is the direction that matters: an unchecked
+    granularity declines under its own reason and never admits.
+    """
+    import stelling.falsify as F
+
+    def unavailable(census):
+        def raises(*_):
+            raise RuntimeError("no")
+
+        return raises
+
+    monkeypatch.setattr(F, "_whole_program_route", unavailable)
+
+    def harness():
+        x = any_array((), "float64", (0.0, 2.0 ** 54))
+        return assert_(x + 1.0 > x)
+
+    found, report = attack(harness, semantics="ieee")
+    assert found is None, (
+        f"a violation was admitted although the second route could not be "
+        f"run: {found.render()}"
+    )
+    assert dict(report.skips).get("whole-program-route-unavailable", 0) > 0, (
+        report.skips
+    )
+    assert dict(report.adjudications) == {
+        "declined-whole-program-route-unavailable": report.violations_seen
+    }, report.adjudications
+
+
+def test_the_granularity_guard_is_handed_THE_SAME_POINT(monkeypatch):
+    """Re-execution at a NEIGHBOURING point is the ulp proxy, respelled.
+
+    ``test_the_ulp_proxy_is_gone_from_the_fire_condition_entirely`` bans
+    re-execution from ``_confirm`` for exactly that reason. This guard
+    does re-execute, so the distinction it rests on is asserted rather
+    than described: the second route is handed the SAME point object the
+    executed run was handed, so it can only ever say that the two readings
+    of ONE point disagree — never that a neighbouring point behaves
+    differently, which is a fact about the neighbourhood and not about
+    this violation.
+    """
+    import stelling.falsify as F
+
+    seen = []
+    real = F._whole_program_route
+
+    def recording(census):
+        route = real(census)
+
+        def wrapped(*vals):
+            seen.append(tuple(float(np.asarray(v)) for v in vals))
+            return route(*vals)
+
+        return wrapped
+
+    monkeypatch.setattr(F, "_whole_program_route", recording)
+    monkeypatch.setattr(
+        F, "_execute",
+        lambda census, point, _f=F._execute: (
+            seen.append(tuple(float(np.asarray(v)) for v in point)) or None
+        ) or _f(census, point),
+    )
+
+    found, _ = attack(mean3_at_its_own_value(), semantics="ieee")
+    assert found is None
+    assert seen, "neither walker ran"
+    assert len(set(seen)) == 1, (
+        f"the two routes were run at different points {sorted(set(seen))}; "
+        f"a second execution at a NEIGHBOURING point is the ulp proxy "
+        f"under another name"
+    )
+
+
+# --------------- the evaluator's ARITHMETIC, which its name tables do not pin
+
+
+RATIONAL_READINGS_AGAINST_JAX = [
+    # (label, the exact-rational reading, the same computation in jax)
+    #
+    # Every jax result below is exactly representable, so "agrees with jax"
+    # is a statement about the READING and not about float error. Values
+    # are chosen to separate the readings from their near neighbours:
+    # truncation from rounding, an integer exponent from a fractional one,
+    # a perfect square from an irrational root.
+    (
+        "convert float->int32 at 7/4 truncates, and does NOT round",
+        lambda: _rat_convert(Fraction(7, 4), "f", np.dtype("int32")),
+        lambda: jnp.asarray(1.75, "float64").astype("int32"),
+    ),
+    (
+        "convert float->int32 at -7/4 truncates TOWARD ZERO",
+        lambda: _rat_convert(Fraction(-7, 4), "f", np.dtype("int32")),
+        lambda: jnp.asarray(-1.75, "float64").astype("int32"),
+    ),
+    (
+        "convert float->int32 at 3/2, where round() goes the other way",
+        lambda: _rat_convert(Fraction(3, 2), "f", np.dtype("int32")),
+        lambda: jnp.asarray(1.5, "float64").astype("int32"),
+    ),
+    (
+        "convert float->int64 at -1/3, where trunc and floor differ",
+        lambda: _rat_convert(Fraction(-1, 3), "f", np.dtype("int64")),
+        lambda: jnp.asarray(-1.0 / 3.0, "float64").astype("int64"),
+    ),
+    (
+        "convert float->float32 is the IDENTITY over R, not a rounding",
+        lambda: _rat_convert(Fraction(1, 3), "f", np.dtype("float32")),
+        None,  # jax rounds here; R has no such operation. See below.
+    ),
+    (
+        "integer exponent: 3 ** 2",
+        lambda: _rat_pow(Fraction(3), Fraction(2)),
+        lambda: jnp.power(jnp.asarray(3.0, "float64"), 2.0),
+    ),
+    (
+        "integer exponent, negative: 2 ** -3",
+        lambda: _rat_pow(Fraction(2), Fraction(-3)),
+        lambda: jnp.power(jnp.asarray(2.0, "float64"), -3.0),
+    ),
+    (
+        "FRACTIONAL exponent on a perfect square: 4 ** (1/2) is 2, not 4",
+        lambda: _rat_pow(Fraction(4), Fraction(1, 2)),
+        lambda: jnp.power(jnp.asarray(4.0, "float64"), 0.5),
+    ),
+    (
+        "FRACTIONAL exponent, cube root of a cube: 8 ** (1/3) is 2, not 8",
+        lambda: _rat_pow(Fraction(8), Fraction(1, 3)),
+        lambda: jnp.power(jnp.asarray(8.0, "float64"), 1.0 / 3.0),
+    ),
+    (
+        "sqrt of a perfect square: 4",
+        lambda: _rat_sqrt(Fraction(4)),
+        lambda: jnp.sqrt(jnp.asarray(4.0, "float64")),
+    ),
+    (
+        "sqrt of a perfect rational square: 9/4",
+        lambda: _rat_sqrt(Fraction(9, 4)),
+        lambda: jnp.sqrt(jnp.asarray(2.25, "float64")),
+    ),
+]
+
+
+def test_the_rational_readings_AGREE_WITH_JAX_where_jax_is_exact():
+    """THE TABLES' NAMES ARE PINNED TO A LIVE TRACE; THE READINGS WERE NOT.
+
+    ``_CALL_PRIMITIVES`` taught this module that a name list is worth what
+    checks it, and the answer was a test that traces live jax. The other
+    predicate a firing rests on — *"and it is false over ℚ"* — had no
+    such test at all: which primitive names the replay claims to read is
+    pinned, what it reads them AS is not.
+
+    That is the direction this evaluator's own comment names as the one
+    place it could INVENT a refutation — *"a name that matches with the
+    WRONG READING invents a refutation"* — and three one-token mutations
+    reach it with the whole falsify suite green: ``math.trunc`` to
+    ``round`` in ``_rat_convert``, dropping the integer-exponent guard in
+    ``_rat_pow``, and ``Fraction(math.sqrt(a))`` in ``_rat_sqrt``. Each
+    one raises *"stelling is UNSOUND at this query"* on an obligation that
+    is TRUE over ℝ; the ``_rat_pow`` one does it on a real ``VERIFIED``
+    through ``check(semantics="real")``, and the ``_rat_sqrt`` one
+    survives the entire repository.
+
+    So the readings are checked against jax's own arithmetic, at values
+    where jax's answer is exact and where the mutant's answer is not the
+    same number. **An abstention is always allowed** — it costs reach and
+    can never invent a firing — so what is asserted is the implication: if
+    a reading is produced, it is the number jax produces.
+    """
+    for label, reading, in_jax in RATIONAL_READINGS_AGAINST_JAX:
+        if in_jax is None:
+            continue
+        try:
+            got = reading()
+        except _Unreplayable:
+            continue
+        raw = np.asarray(in_jax())
+        want = Fraction(raw.item())
+        assert got == want, (
+            f"[{label}] the exact-rational replay reads this as {got!r} "
+            f"and jax computes {raw.item()!r}. A reading that is not what "
+            f"the program computes is how this evaluator INVENTS a "
+            f"refutation, which is the one direction it can be wrong in "
+            f"that costs more than reach."
+        )
+
+
+def test_the_rational_readings_obey_their_own_ALGEBRA():
+    """And the roots, where jax's own answer is NOT exact and cannot arbitrate.
+
+    ``jnp.sqrt(2.0)`` is a float, and ``Fraction`` of that float is a
+    perfectly good rational — just not one whose square is 2. So the
+    ``_rat_sqrt`` mutant agrees with jax to every bit jax has and is still
+    wrong, and only the algebra catches it: **whatever this evaluator
+    returns for a root must BE a root**, exactly, over ℚ. Same for a
+    power: ``v ** k.denominator == a ** k.numerator``, which is the
+    defining property and holds for the negative and fractional cases too.
+    """
+    for a in (Fraction(4), Fraction(9, 4), Fraction(1), Fraction(0),
+              Fraction(2), Fraction(3), Fraction(1, 3), Fraction(5, 7)):
+        try:
+            v = _rat_sqrt(a)
+        except _Unreplayable:
+            continue
+        assert v * v == a, (
+            f"_rat_sqrt({a}) returned {v}, whose square is {v * v}. An "
+            f"approximate root read as exact makes a TRUE obligation false "
+            f"over ℚ, which is a firing this instrument invented."
+        )
+
+    for a, k in ((Fraction(3), Fraction(2)), (Fraction(2), Fraction(-3)),
+                 (Fraction(4), Fraction(1, 2)), (Fraction(8), Fraction(1, 3)),
+                 (Fraction(9, 4), Fraction(3, 2)), (Fraction(5), Fraction(1)),
+                 (Fraction(-2), Fraction(3))):
+        try:
+            v = _rat_pow(a, k)
+        except _Unreplayable:
+            continue
+        assert v ** k.denominator == a ** k.numerator, (
+            f"_rat_pow({a}, {k}) returned {v}, and {v} ** {k.denominator} "
+            f"is not {a} ** {k.numerator}. A fractional exponent read as "
+            f"an integer one is the mutation that fires on "
+            f"`power(x, 0.5) ** 2 <= x` over [0, 4], where the obligation "
+            f"is true over ℝ at every point."
+        )
+
+
+@pytest.mark.parametrize("dtype", ["int8", "uint8", "int16", "int32"])
+def test_the_integer_range_guard_agrees_with_where_jax_WRAPS(dtype):
+    """``_int_ok`` is the other half: rational arithmetic does not wrap.
+
+    Its boundary is not a convention — jax's own arithmetic decides where
+    it is, and it is asserted here by making jax wrap rather than by
+    reading ``iinfo`` twice. Both halves of the guard are driven: a value
+    outside the dtype, and a value that is not an integer at all, which is
+    a value the program could not have produced in an integer register.
+    """
+    dt = np.dtype(dtype)
+    info = np.iinfo(dt)
+    lo, hi = int(info.min), int(info.max)
+
+    _int_ok([Fraction(lo), Fraction(0), Fraction(hi)], dt)
+
+    wrapped = int(np.asarray(jnp.asarray(hi, dtype) + jnp.asarray(1, dtype)))
+    assert wrapped != hi + 1, (
+        f"{dtype} no longer wraps at its maximum in this jax ({wrapped}); "
+        f"the guard's boundary is defined by what the program does there"
+    )
+    for outside in (Fraction(lo - 1), Fraction(hi + 1)):
+        with pytest.raises(_Unreplayable, match="left its dtype"):
+            _int_ok([outside], dt)
+    with pytest.raises(_Unreplayable, match="left its dtype"):
+        _int_ok([Fraction(1, 2)], dt)
+
+
+def test_the_float_to_float_reading_is_the_IDENTITY_and_says_why():
+    """The one entry above with no jax arbiter, asserted on its own terms.
+
+    ``convert_element_type`` from float64 to float32 ROUNDS, and ℝ has no
+    rounding — so under ``semantics="real"`` the exact reading is the
+    identity, and jax's float32 answer is exactly the thing the claim
+    under attack is not about. Pinned here rather than left implicit,
+    because "agrees with jax" is the rule everywhere else in this section
+    and this is the documented exception.
+    """
+    a = Fraction(1, 3)
+    assert _rat_convert(a, "f", np.dtype("float32")) == a
+    assert _rat_convert(a, "f", np.dtype("float64")) == a
+    assert _rat_convert(a, "f", np.dtype("float16")) == a
+    narrowed = Fraction(float(np.asarray(jnp.asarray(1.0, "float64") / 3.0,
+                                         dtype="float32")))
+    assert narrowed != a, (
+        "float32 no longer rounds 1/3, so this test no longer states the "
+        "distinction it exists for"
+    )

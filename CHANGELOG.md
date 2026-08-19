@@ -198,7 +198,58 @@ SPDX-License-Identifier: Apache-2.0
   computed different floats (5 disagreements over 22 one-line `jit`
   bodies, including sign disagreements) and raised "stelling is UNSOUND"
   on an obligation the real program satisfies. Each walker's reading is
-  therefore checked against the census instead.
+  therefore checked against the census instead. The second
+  reach-preserving alternative — keep the call compiled and thread the
+  body's intermediates out as extra outputs — was driven too and is **0
+  of 3 bitwise-identical** to the plain compiled call on the same
+  fixture, returning exactly `0.0` where the plain call returns the
+  rounding error of the product: exposing an intermediate is itself the
+  change, because the value that has to be materialised is the one XLA
+  was contracting away.
+
+  **And the executed float is at the TRACE's granularity, which is not
+  the program's.** `_execute` hands jax one equation at a time, so XLA
+  never sees two of them together — and `jax.make_jaxpr` INLINES the
+  `jit` that `jnp.mean` is built out of, so this is reached with no `jit`
+  written anywhere. `jnp.mean` and `jnp.average` disagree between the two
+  granularities on 70 and 72 of 200 random points (every other wrapper
+  surveyed: 0 of 200), and four lines fire on a correct VERIFIED under
+  `semantics="ieee"`, where *"the executed float IS the subject of the
+  claim"* is what admits:
+
+      X0    = 1.3102272059107631
+      mean3 = lambda x: jnp.mean(jnp.stack([x, x * 2.0, x * 3.0]))
+      C     = float(mean3(jnp.asarray(X0, "float64")))   # the program's OWN value
+      x     = any_array((), "float64", (X0, X0)); assert_(mean3(x) <= C)
+
+  So the granularity is measured the way the depth is: the same program
+  is run at the same point as ONE compiled region
+  (`_whole_program_route`), and an executed violation whose truth value
+  moves between the two routes declines
+  (`executed-float-depends-on-granularity`). The second route is
+  consulted only after a violation and can only ever decline. Reach
+  re-measured on 31 ordinary one-line `jnp` programs: identical, 31 of 31
+  firing under `ieee` and 17 of 31 under `real`, base and fixed.
+
+  **The exact-rational evaluator's ARITHMETIC is now pinned too.** Which
+  primitive names the replay claims to read is checked against a live
+  trace; what it reads them AS was checked by nothing, and that is the
+  one direction in which this evaluator can INVENT a refutation rather
+  than lose one. Three one-token mutations each raised "stelling is
+  UNSOUND" on an obligation TRUE over ℝ with the whole falsify suite
+  green — `math.trunc` → `round` in `_rat_convert`, dropping the
+  integer-exponent guard in `_rat_pow`, `Fraction(math.sqrt(a))` in
+  `_rat_sqrt` — and the `_rat_pow` one did it on a real `VERIFIED`
+  through the public door, while the `_rat_sqrt` one survived the entire
+  repository. The readings are now asserted against jax's own arithmetic
+  where jax's answer is exact, and against their own algebra where it is
+  not (`v * v == a` for a root, `v ** k.denominator == a ** k.numerator`
+  for a power), with `_int_ok`'s boundary asserted at the point where jax
+  actually wraps.
+
+  Each `_READINGS` guard is also bound to the `if` that takes it rather
+  than to the file: the table used to be satisfied by a new field
+  declaring any decline reason spelled anywhere in `falsify.py`.
 
   A point the exact replay places **outside** the assumed region is no
   longer counted under `points_admissible`, and is not reported as a

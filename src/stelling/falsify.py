@@ -40,8 +40,9 @@ this project exists to prevent exactly that.
 cannot sample — an unbounded declaration, a dtype it cannot construct, an
 integer box containing no integer, a point at which the program raises —
 and it declines on executed VIOLATIONS the fire condition will not stand
-behind. Every one of those is counted by reason in
-:attr:`ProbeReport.skips`, adjudicated in
+behind, including the ones where the violation is an artefact of how much
+of the program this probe handed to jax at once. Every one of those is
+counted by reason in :attr:`ProbeReport.skips`, adjudicated in
 :attr:`ProbeReport.adjudications`, and named in the stamp line. A probe
 that silently declined most of what it was pointed at would read as
 coverage while doing nothing, which is worse than no probe at all.
@@ -508,7 +509,18 @@ itself be partial and is guarded before any of this is consulted (see THE
 CLASS below):
 
 * **``ieee`` semantics: nothing decides.** The executed float IS the
-  subject of the claim and the violation stands as it is.
+  subject of the claim and the violation stands as it is — once WHICH
+  float was executed has been settled, which is the fifth defect and is
+  not settled by writing the walk one way rather than the other.
+  ``_execute`` binds one equation at a time, so it computes the float the
+  TRACE's granularity produces; ``jax.make_jaxpr`` inlines the ``jit``
+  inside ``jnp.mean``, so that differs from what the caller's own call
+  computes on programs that say ``jit`` nowhere. The same program is
+  therefore also run at the same point as ONE compiled region
+  (:func:`_whole_program_route`), and a violation whose truth value moves
+  between the two routes declines under
+  ``executed-float-depends-on-granularity``. That second route is
+  consulted only after a violation and can only ever decline.
 * **the PROGRAM integral throughout: exact integer arithmetic decides.**
   No rounding is involved and the violation stands. This branch MUST NOT
   become a rational replay — see the blind-spot note above: ℚ does not
@@ -532,13 +544,14 @@ CLASS below):
 
   First ulp-stability of the input stood in for *"not a rounding
   artefact"*; then a fall-back to that same proxy stood in for an exact
-  adjudication; then this. The rule the three share, and the one to reach
-  for if there is ever a fourth: **a predicate that licenses an exactness
-  claim is computed from the object the claim is about.** Here that is
-  every operand and every result dtype in the jaxpr, at every depth,
-  ``and``-ed with the declaration test — which is a second, different
-  fact, because the point handed to the executed run is built out of the
-  DECLARED dtypes. See :func:`_integral_program`.
+  adjudication; then this. There have since been a fourth and a fifth, and
+  the rule they share: **a predicate that licenses an exactness claim is
+  computed from the object the claim is about, from all of it, and at the
+  object's own granularity.** Here that is every operand and every result
+  dtype in the jaxpr, at every depth, ``and``-ed with a declaration test
+  that is redundant today and kept as the conjunct a reader checks by
+  hand. See :func:`_integral_program` and the comment in
+  :func:`_confirm`.
 * **otherwise: EXACT-RATIONAL REPLAY of the same traced jaxpr at the same
   point** (:func:`_replay`). Every finite float is a rational and
   ``Fraction(float)`` is exact, so the program can be re-evaluated over ℚ
@@ -630,10 +643,10 @@ The second list is where this instrument's reach is bought back, and
 nothing in it is bought by relaxing the first paragraph of this section.
 
 --------------------------------------------------------------------------
-THE CLASS: A PREDICATE COMPUTED FROM SOMETHING ELSE, FOUR TIMES
+THE CLASS: A PREDICATE COMPUTED FROM SOMETHING ELSE, FIVE TIMES
 --------------------------------------------------------------------------
 
-Four audits of this module have found four defects and they are the same
+Five audits of this module have found five defects and they are the same
 defect. **Every one is a predicate that licenses a claim about the
 PROGRAM while being computed from something else**, and every one let this
 probe raise the categorical *"stelling is UNSOUND at this query"* about a
@@ -667,8 +680,35 @@ with no mutation and no solver:
    ``semantics="ieee"``, on both supported jax series and through all
    three public doors.
 
-**PATCHING THE FOURTH IS NOT CLOSING THE CLASS**, so the fourth repair is
-a rule rather than a patch. The rule has two halves.
+5. **the OP-BY-OP executed float** standing in for *"the executed float IS
+   the subject of the claim"*, which is the sentence ``ieee`` semantics
+   fires on. ``_execute`` hands jax one equation at a time, so XLA never
+   sees two of them together; the user's own call compiles whole regions.
+   The two are not the same float, and the difference is not confined to
+   programs that say ``jit``: ``jax.make_jaxpr`` INLINES the ``jit``
+   ``jnp.mean`` is built out of, so the trace carries a bare
+   ``reduce_sum ; div`` where the caller's call compiled a region. Four
+   lines, no ``jit`` written anywhere, on both series::
+
+       X0    = 1.3102272059107631
+       mean3 = lambda x: jnp.mean(jnp.stack([x, x * 2.0, x * 3.0]))
+       C     = float(mean3(jnp.asarray(X0, "float64")))   # its OWN value
+       x     = any_array((), "float64", (X0, X0))
+       assert_(mean3(x) <= C)      # FIRED, margin -4.44e-16
+
+   The obligation holds at the only point declared, eagerly and under
+   ``jax.jit``. ``jnp.mean`` and ``jnp.average`` disagree between the two
+   routes on 70 and 72 of 200 random points; every other wrapper surveyed
+   agrees 200 of 200. **And this one was written INTO the sentence that
+   justified instance 4's repair** — *"what this loop reproduces is what
+   the user's own code does: their un-jitted top level op by op, their
+   ``jit`` compiled whole"* — which is why it is worth saying that the
+   class is a class and not a list: the fifth instance was sitting inside
+   the argument for the fourth.
+
+**PATCHING ONE INSTANCE IS NOT CLOSING THE CLASS**, so the repairs are a
+rule rather than a patch. The rule has three clauses, one per audit that
+added one.
 
 *First:* **a predicate that licenses a claim about the program is computed
 from the program** — the form recorded when instance 3 was fixed.
@@ -685,10 +725,23 @@ declares no inputs to vary"* (which catches zero, not partial), assumes
 had none. The table is ``_READINGS``, it covers every field of ``_Census``
 and of ``_Run``, and a test holds it to those two dataclasses
 field-for-field — a new quantity cannot arrive without either a guard or a
-written argument that it cannot license anything. **The class had to be
-closed against the fifth instance, not just the fourth.**
+written argument that it cannot license anything.
 
-**AND THE STRUCTURAL OBSERVATION UNDERNEATH ALL FOUR.** ``_execute`` and
+*Third, and this is what instance 5 added:* **a reading whose value
+depends on HOW it was taken is not a reading of the program at all.**
+Instance 5's predicate was computed from the program and from all of it;
+it was computed at a granularity the program does not have. Completeness
+was the wrong axis, which is why ``_READINGS`` — a table about
+partial-versus-total — did not and could not catch it. So the granularity
+is measured the way the depth is: the same program is run at the same
+point by a second route that compiles it whole
+(:func:`_whole_program_route`), and an executed violation whose truth
+value moves between the two routes declines
+(``executed-float-depends-on-granularity``). The second route can only
+ever DECLINE — it is consulted after a violation and never admits one —
+so it costs reach and cannot buy a firing.
+
+**AND THE STRUCTURAL OBSERVATION UNDERNEATH ALL FIVE.** ``_execute`` and
 ``_replay`` are two walkers with different depth behaviour, and the gap
 between them is where these defects live. The obvious reconciliation —
 make ``_execute`` descend the way ``_replay`` does — was DRIVEN, and it is
@@ -697,17 +750,37 @@ and XLA contracts across it, so walking the body op by op computes
 different floats. Over 22 one-line ``jit`` bodies on both jax series the
 two disagree on 5, including a SIGN disagreement on 3 of 3 attempts for
 ``a*b + c`` — and a sign is what an obligation reads. A descending
-``_execute``, written out in full, does repair all four false alarms above
-— and then raises *"stelling is UNSOUND at this query"*, under
+``_execute``, written out in full, does repair the first four false alarms
+above — and then raises *"stelling is UNSOUND at this query"*, under
 ``ieee-executed-float``, on ``jit(lambda p,q,r: p*q+r)(a, b0, c0) != 0.0``
 with ``c0 = -fl32(a0*b0)``, an obligation the real program satisfies at
 both of its declared points (it computes ``-9.49e-08`` and ``+6.10e-08``
-there). **That is instance 5, manufactured by the repair for instance 4**,
-and it is why the reach-preserving option was refused on a measurement
-rather than on a preference. The walkers are reconciled by MEASUREMENT
-instead: neither is trusted to be complete because of how it is written,
-and each one's reading is checked against the census. The argument in full
-is in :func:`_execute`.
+there). **That is instance 5 again — the same predicate, at a granularity
+the program does not have — reached by widening the walk instead of by
+leaving it narrow**, which is what settles that the axis is granularity
+and not depth: BOTH depth policies produce it, so no depth policy is the
+answer to it.
+
+**AND REACH PRESERVATION HAS NOW BEEN REFUSED ON DATA TWICE, NOT ONCE.**
+It is also why the reach-preserving option was refused on a measurement
+rather than on a preference — and the refusal now rests on two
+measurements. The second alternative keeps the call compiled and threads
+the body's intermediates out of it as extra outputs, so that a descending
+walk would not be needed to see them. It is **0 of 3 bitwise-identical**
+to the plain compiled call on the same ``a*b + c`` fixture, on both
+supported series, and it fails the same way the descending walk does: the
+threaded call returns exactly ``0.0`` where the plain one returns the
+rounding error of the product. Exposing the ``mul`` is itself a change to
+the program,
+because the value that has to be materialised is the one XLA was
+contracting away. There is no third option of that shape — an
+intermediate you can read is an intermediate XLA did not fuse.
+
+The walkers are reconciled by MEASUREMENT instead: neither is trusted to
+be complete because of how it is written, each one's reading is checked
+against the census, and the executed reading is checked against a second
+route that compiles the program whole. The argument in full is in
+:func:`_execute`.
 """
 
 from __future__ import annotations
@@ -773,6 +846,17 @@ STRATEGIES = ("endpoints", "exact", "uniform", "tight", "ulp")
 # but never reaches `run.assumes`, and the gate that reads *"admitted by
 # every assume"* off that list was vacuous exactly there. See `_READINGS`.
 #
+# `executed-float-depends-on-granularity` is the fifth defect's guard and
+# says its own quiet part: `_execute` hands jax ONE equation at a time, so
+# the float it computes is the one the TRACE's granularity produces and
+# not the one the caller's own call does -- and `jax.make_jaxpr` inlines
+# the `jit` inside `jnp.mean`, so this is reached by programs that say
+# `jit` nowhere.  The point declines when the same program, run at the
+# same point as one compiled region (`_whole_program_route`), reads the
+# obligation the other way.  `whole-program-route-unavailable` is the
+# other side of the same guard and is NOT the same finding: nothing has
+# been shown to move, the second reading simply could not be taken.
+#
 # `precision-ambiguous` is gone with the ulp proxy that emitted it, and
 # `no-exact-reading-of-this-program` is new and is the one to watch: it is
 # the reason every program this instrument cannot read exactly declines
@@ -801,6 +885,8 @@ DECLINE_REASONS = (
     "float-rounding-artefact",
     "assume-unsatisfied-over-the-rationals",
     "no-exact-reading-of-this-program",
+    "executed-float-depends-on-granularity",
+    "whole-program-route-unavailable",
     # the boundary phases had nothing to steer on
     "no-margin-no-boundary-search",
 )
@@ -1327,11 +1413,13 @@ class _Census:
     **EVERY FIELD HERE IS A READING OF THE PROGRAM, AND EVERY READING HAS
     A DEPTH.**  Some are taken at the top level of the jaxpr and some at
     every depth, and which one a field is decides what it may license.
-    That is not a stylistic distinction: four separate defects in this
+    That is not a stylistic distinction: five separate defects in this
     module have been one predicate licensing a claim about the PROGRAM
     while being computed from something else, and the fourth was a
     top-level reading of ``stelling_assume`` licensing *"a point the
-    analysis itself admitted"*.  The depths, the guards, and the reasons
+    analysis itself admitted"*.  (The fifth was not a DEPTH defect and no
+    field of this dataclass would have caught it -- see the note under
+    :data:`_READINGS`.)  The depths, the guards, and the reasons
     for the three fields that need no guard are in :data:`_READINGS`,
     which is checked field-by-field against this dataclass by
     ``tests/test_falsify_fire_condition.py::test_every_census_quantity_has_a_totality_guard``
@@ -1377,17 +1465,31 @@ class _Reading:
     ``guard`` names the decline a PARTIAL reading produces, and ``why`` is
     the argument that this particular reading cannot license anything and
     so needs none.
+
+    ``site`` IS THE OTHER HALF OF ``guard`` AND IT WAS MISSING.  A guard
+    name on its own says only that SOME line of this file emits that
+    string, and a table that says only that is satisfied by a new field
+    borrowing any decline reason already in the file -- driven: a new
+    ``_Census`` field declared with ``guard="bound-nan"`` passed both
+    tests that hold this table, and ``bound-nan`` is a ``_window``
+    decline about a NaN endpoint that has nothing to do with any field.
+    ``site`` is the SOURCE TEXT of the ``if`` that takes this field's
+    guard, so the pair names a line rather than a file, and
+    ``tests/test_falsify_fire_condition.py::test_the_guards_named_in_the_readings_table_are_LIVE_in_the_source``
+    checks it against the parsed module: the ``if`` must exist and the
+    guard must be emitted inside it.  Set exactly when ``guard`` is.
     """
 
     subject: str
     name: str
     depth: str
     guard: str | None = None
+    site: str = ""
     why: str = ""
 
 
 # THE RULE, IN A TABLE, BECAUSE FOUR AUDITS FOUND FOUR INSTANCES OF ONE
-# DEFECT AND A FIFTH WOULD HAVE BEEN A FIFTH FIELD.
+# DEFECT AND AN UNGUARDED NEW FIELD WOULD BE ANOTHER.
 #
 # Every one of the four was a predicate licensing a claim about the
 # PROGRAM while being computed from something else, and the fourth --
@@ -1406,9 +1508,19 @@ class _Reading:
 #
 # `tests/test_falsify_fire_condition.py::test_every_census_quantity_has_a_totality_guard`
 # holds this table to the two dataclasses field-for-field, so a new
-# quantity cannot arrive without either a guard or a written exemption.
-# Which is the whole point: the class had to be closed against the FIFTH
-# instance, not just the fourth.
+# quantity cannot arrive without either a guard or a written exemption,
+# and `site` binds each guard to the `if` that takes it, so the guard
+# cannot be a decline reason borrowed from somewhere else in this file.
+#
+# WHAT THIS TABLE DOES NOT CLOSE, SAID HERE RATHER THAN DISCOVERED AGAIN:
+# it is a table about PARTIAL versus TOTAL, and the fifth instance of the
+# class was not partial.  `_execute`'s reading of a float is total and is
+# still not a reading of the program, because it is taken at the TRACE's
+# granularity: `jax.make_jaxpr` inlines the `jit` inside `jnp.mean`, so
+# the loop walks op by op what the caller compiles whole.  That guard is
+# a second ROUTE rather than a second count (`_whole_program_route`), and
+# it lives in `probe.run_one` with these.  Completeness and granularity
+# are different axes and a table about one of them cannot close the other.
 _READINGS = (
     _Reading(
         "census", "closed", "the-program-itself",
@@ -1420,10 +1532,12 @@ _READINGS = (
     _Reading(
         "census", "declarations", "top-level",
         guard="the harness declares inputs the probe cannot see",
+        site="len(census.declarations) != census.declarations_in_program",
     ),
     _Reading(
         "census", "assert_positions", "top-level",
         guard="the harness states obligations the probe cannot see",
+        site="len(census.assert_positions) != census.obligations_in_program",
     ),
     _Reading(
         "census", "margins", "top-level",
@@ -1481,8 +1595,16 @@ _READINGS = (
             "against"
         ),
     ),
-    _Reading("run", "assumes", "top-level", guard="assume-not-fully-executed"),
-    _Reading("run", "asserts", "top-level", guard="obligation-count-changed"),
+    _Reading(
+        "run", "assumes", "top-level",
+        guard="assume-not-fully-executed",
+        site="len(run.assumes) != census.assumes_in_program",
+    ),
+    _Reading(
+        "run", "asserts", "top-level",
+        guard="obligation-count-changed",
+        site="len(run.asserts) != len(statuses)",
+    ),
     _Reading(
         "run", "margins", "top-level",
         why=(
@@ -1491,7 +1613,11 @@ _READINGS = (
             "message, and admits nothing"
         ),
     ),
-    _Reading("run", "raised", "top-level", guard="program-raised"),
+    _Reading(
+        "run", "raised", "top-level",
+        guard="program-raised",
+        site="run.raised is not None",
+    ),
 )
 
 # The guards above that stop the WHOLE probe with a `ProbeReport.declined`
@@ -1770,8 +1896,10 @@ def _execute(census: _Census, point) -> _Run:
     WHY THIS WALK DOES NOT DESCEND, AND :func:`_replay` DOES
     --------------------------------------------------------------------
 
-    **THE TWO WALKERS HAVE DIFFERENT DEPTH BEHAVIOUR ON PURPOSE, AND ALL
-    FOUR OF THIS MODULE'S DEFECTS HAVE LIVED IN THE GAP.**  A call
+    **THE TWO WALKERS HAVE DIFFERENT DEPTH BEHAVIOUR ON PURPOSE, AND
+    FOUR OF THIS MODULE'S FIVE DEFECTS HAVE LIVED IN THAT GAP.  THE FIFTH
+    LIVES IN A DIFFERENT ONE -- between this walk and the PROGRAM -- and
+    is the section after this one.**  A call
     equation goes whole to ``prim.bind`` here, while :func:`_replay`
     descends into its body (``_CALL_PRIMITIVES``).  The fourth defect was
     exactly that gap: a ``stelling_assume`` one ``jit`` deep executes and
@@ -1799,10 +1927,8 @@ def _execute(census: _Census, point) -> _Run:
     executed float IS the subject of the claim."*  If this walk un-jitted
     the body, the executed float would be one the user's program never
     computes, and the branch would be licensing a claim about the program
-    from something else -- **the fifth instance of the class, manufactured
-    by the repair for the fourth.**  What this loop reproduces today is
-    what the user's own code does: their un-jitted top level op by op,
-    their ``jit`` compiled whole.
+    from something else -- **an instance of the class, manufactured by the
+    repair for the fourth.**
 
     **AND THAT IS DRIVEN, NOT ARGUED.**  The descending version was
     written out in full and run.  It does repair the four false alarms
@@ -1828,6 +1954,76 @@ def _execute(census: _Census, point) -> _Run:
     ``tests/test_falsify_fire_condition.py::test_the_EXECUTED_walk_does_not_descend_into_call_bodies``,
     which drives the fixture as well as the sign disagreement and refuses
     the source change.
+
+    --------------------------------------------------------------------
+    AND NOT DESCENDING DOES NOT MAKE THIS LOOP THE USER'S PROGRAM EITHER
+    --------------------------------------------------------------------
+
+    **THE SENTENCE THAT USED TO STAND HERE WAS FALSE, AND IT WAS THE
+    SENTENCE THIS WHOLE DEPTH POLICY WAS JUSTIFIED BY.**  It read: *"what
+    this loop reproduces today is what the user's own code does: their
+    un-jitted top level op by op, their ``jit`` compiled whole."*  jax
+    does not divide the two that way.  ``jnp.mean`` is a compiled REGION
+    on the eager path and ``jax.make_jaxpr`` INLINES it, so the top level
+    of the traced jaxpr carries a bare ``reduce_sum ; div`` with no
+    ``jit`` equation anywhere -- and this loop then walks op by op exactly
+    what the caller's own call compiles whole::
+
+        jnp.mean(stack([x, 2x, 3x])) eager   2.620454411821526
+        the same jaxpr, op by op             2.6204544118215263
+
+    one ulp apart, bit-identical on both supported jax series.  Over 200
+    float64 points drawn uniformly from ``[0.5, 4.0]``, each reduced over
+    ``stack([t, 2t, 3t, t/2, 5t/4])`` with NO user-written ``jit``
+    anywhere, the two routes disagree on **70 of 200** for ``jnp.mean``
+    and **72 of 200** for ``jnp.average``; every other wrapper surveyed --
+    ``sum``, ``prod``, ``max``, ``var``, ``std``, ``linalg.norm``,
+    ``median``, ``cumsum``, ``dot``, a hand-rolled ``logsumexp``, a
+    ``softmax`` -- agrees on 200 of 200, either because it emits a
+    top-level ``jit`` equation this loop hands whole to ``bind`` or
+    because XLA has nothing to contract across.
+
+    Driven to a firing in four lines, on both series::
+
+        X0    = 1.3102272059107631
+        mean3 = lambda x: jnp.mean(jnp.stack([x, x * 2.0, x * 3.0]))
+        C     = float(mean3(jnp.asarray(X0, "float64")))  # its OWN value
+        x     = any_array((), "float64", (X0, X0))
+        assert_(mean3(x) <= C)
+        # BEFORE: FIRED, margin -4.44e-16, admitted by 'ieee-executed-float'
+
+    The obligation holds at its one declared point, eagerly and under
+    ``jax.jit``, because ``C`` is the value the program itself computes
+    there.  The probe called it UNSOUND because it evaluated the program
+    at the TRACE's granularity rather than at the program's, and
+    ``ieee-executed-float`` licenses *"the executed float IS the subject
+    of the claim"* -- which that float was not.  **That is the FIFTH
+    instance of the class, it needed no repair to manufacture it, and it
+    lived inside the sentence written to justify this function's central
+    decision.**
+
+    **SO THE GRANULARITY IS MEASURED TOO, ONE AXIS OVER FROM THE DEPTH.**
+    :func:`_whole_program_route` runs the SAME traced program at the SAME
+    point as ONE compiled region, and an executed violation whose truth
+    value differs between the two routes declines
+    (``executed-float-depends-on-granularity``, gated in
+    ``probe.run_one`` beside the other readings of the executed run).
+    Measured: the ``mean3`` fixture disagrees and now declines, and the
+    ``a * b + c`` fixture above agrees at both of its declared points and
+    is untouched.  **And the reach cost on ordinary code is zero**: over
+    31 one-line ``jnp`` programs -- ``sum``, ``mean``, ``average``,
+    ``var``, ``median``, ``dot``, a matmul, ``linalg.norm``, ``where``,
+    ``maximum``, ``clip``, ``mse``, ``softmax``, a hand-rolled
+    ``logsumexp``, ``tanh``, ``sqrt``, ``exp``, ``log1p``, ``power``,
+    ``/``, ``cumsum``, ``sort``, ``reshape``/``transpose``,
+    ``concatenate``, ``stack``, ``at[].set``, ``segment_sum``, a lerp, a
+    running variance, the Kahan shape and one hand-written ``jit`` -- the
+    firing counts are IDENTICAL with and without this guard: 31 of 31
+    under ``ieee`` and 17 of 31 under ``real``, adjudicator for
+    adjudicator.  What moves between the two routes is a HAIRLINE
+    violation, and a violation whose sign the compiler decides is not a
+    fact about the program.  A reading that changes when you change how
+    you take it is not a reading of the program.
 
     **SO THE WALKERS ARE RECONCILED BY MEASUREMENT AND NOT BY MERGING.**
     Each one's reading is checked against a census taken at EVERY depth
@@ -1898,6 +2094,114 @@ def _execute(census: _Census, point) -> _Run:
         # the program refuses.  Counted as a skip, never as a violation.
         run.raised = f"{type(exc).__name__}: {exc}"
     return run
+
+
+def _whole_program_route(census):
+    """The same traced program, at the same point, as ONE compiled region.
+
+    **THE SECOND ROUTE, AND WHY A SECOND ROUTE IS NEEDED AT ALL.**
+    :func:`_execute` hands every equation to ``Primitive.bind`` one at a
+    time, so each one is compiled and run on its own and XLA never sees
+    two of them together.  That is a granularity, and it is the TRACE's
+    granularity rather than the program's: ``jax.make_jaxpr`` INLINES the
+    ``jit`` that ``jnp.mean`` is built out of, so the top level of the
+    traced jaxpr carries a bare ``reduce_sum ; div`` for a call the user's
+    own program compiles whole, and the two give different floats.  The
+    argument is in :func:`_execute`, with the measurement.
+
+    This function is the other end of that axis: it interprets the SAME
+    jaxpr under a single :func:`jax.jit`, so every equation is staged into
+    one XLA module and contracts as far as XLA will contract it.  It
+    returns ``(assumes, asserts)`` -- the two lists the fire condition
+    reads -- and nothing else, because those are the quantities whose
+    granularity-dependence would license a firing.
+
+    **IT IS BUILT ONCE PER PROBE AND CALLED MANY TIMES**, so jax's own jit
+    cache keys on one function object and compiles one module rather than
+    one per point.
+
+    **IT CANNOT ADMIT ANYTHING.**  It is consulted only where
+    :func:`_execute` has already found a violation, and its only possible
+    effect is to turn that violation into a decline.  That is what keeps
+    it from being the ulp proxy in another spelling: the proxy re-executed
+    at a NEIGHBOURING point and could ADMIT; this runs at the SAME point
+    and can only DECLINE.
+    """
+    jaxpr = census.closed.jaxpr
+
+    def staged(*vals):
+        env: dict = {}
+
+        def read(atom):
+            if isinstance(atom, jex_core.Literal):
+                return atom.val
+            return env[atom]
+
+        for v, c in zip(jaxpr.constvars, census.closed.consts):
+            env[v] = c
+        assumes: list = []
+        asserts: list = []
+        decl_i = 0
+        for eqn in jaxpr.eqns:
+            prim = eqn.primitive
+            name = prim.name
+            if prim is _any_p or name == "stelling_any":
+                env[eqn.outvars[0]] = vals[decl_i]
+                decl_i += 1
+                continue
+            invals = [read(a) for a in eqn.invars]
+            if prim is _assume_p or name == "stelling_assume":
+                assumes.append(invals[0])
+                env[eqn.outvars[0]] = invals[0]
+                continue
+            if prim is _nonvacuity_p or name == "stelling_nonvacuity":
+                env[eqn.outvars[0]] = invals[0]
+                continue
+            if prim is _assert_p or name == "stelling_assert":
+                asserts.append(invals[0])
+                env[eqn.outvars[0]] = invals[0]
+                continue
+            out = prim.bind(*invals, **eqn.params)
+            if prim.multiple_results:
+                for var, o in zip(eqn.outvars, out):
+                    env[var] = o
+            else:
+                env[eqn.outvars[0]] = out
+        return assumes, asserts
+
+    return jax.jit(staged)
+
+
+def _granularity_stable(route, point, run, k):
+    """Did the two routes read this violation the same way?
+
+    ``True`` when the whole-program route agrees with the executed run on
+    the attacked obligation AND on every assume; ``False`` when they
+    disagree; ``None`` when the second route could not be run at all, in
+    which case nothing has been shown either way and the caller declines
+    on THAT.
+
+    The assumes are compared as well as the obligation because both
+    license the firing: the gate in ``probe.run_one`` reads *"admitted by
+    every assume"* off the executed run, and an assume whose truth moves
+    with the compilation granularity is no more a reading of the program
+    than an obligation whose truth does.
+    """
+    try:
+        assumes, asserts = route(*point)
+    except Exception:  # noqa: BLE001 - an unavailable route, never a firing
+        return None
+    if len(asserts) != len(run.asserts) or len(assumes) != len(run.assumes):
+        # The two routes walk the same equation list, so this cannot
+        # diverge today; a reading that came up short would be no reading,
+        # and no reading is not agreement.
+        return None
+    if bool(np.all(np.asarray(asserts[k]))) != bool(np.all(run.asserts[k])):
+        return False
+    for a, b in zip(assumes, run.assumes):
+        if bool(np.all(np.asarray(a))) != bool(np.all(b)):
+            return False
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -2255,6 +2559,13 @@ def probe(
         obligations=len(targets),
     )
 
+    # THE SECOND ROUTE, BUILT ONCE.  `jax.jit` here only wraps a closure;
+    # nothing is traced or compiled until it is first called, which is
+    # only where an executed violation has to be checked for granularity
+    # dependence.  Building it once rather than per point is what lets
+    # jax's own jit cache compile ONE module for the whole probe.
+    route = _whole_program_route(census)
+
     built = 0
     executed = 0
     admissible = 0
@@ -2319,6 +2630,51 @@ def probe(
             if bool(np.all(run.asserts[k])):
                 continue
             violations += 1
+            if semantics == "ieee":
+                # THE FIFTH INSTANCE OF THE CLASS, AND THE ONE GUARD IT
+                # NEEDED.  Under `ieee` the executed float is what admits:
+                # `_confirm` returns on *"the executed float IS the
+                # subject of the claim"* before any exact test runs.  But
+                # WHICH float `_execute` computes depends on how much of
+                # the program it hands to jax at once, and it hands it one
+                # equation at a time -- the TRACE's granularity, which is
+                # not the program's, because `jax.make_jaxpr` inlines the
+                # `jit` that `jnp.mean` is built out of.  Four lines with
+                # no user-written `jit` anywhere then fire on a correct
+                # VERIFIED; the reproduction and the measurement are in
+                # `_execute`.
+                #
+                # So the granularity is MEASURED, exactly as the depth is:
+                # the same program is run at the SAME point as one
+                # compiled region, and a violation whose truth value moves
+                # between the two routes is not a reading of the program
+                # and licenses nothing.  This can only ever DECLINE.
+                #
+                # UNDER `real` THERE IS NOTHING HERE TO GUARD, and that is
+                # an argument rather than an omission.  Neither admitting
+                # test there reads an executed float: exact integer
+                # arithmetic and the rational replay both re-evaluate the
+                # jaxpr, and ℚ has no granularity to be at.  The executed
+                # run is only the search that FINDS a candidate point, and
+                # a wrong candidate costs a decline.  The assume gate is
+                # the one executed reading `real` does lean on, and
+                # `_confirm` already re-reads every assume over ℚ and
+                # declines when the two disagree
+                # (`assume-unsatisfied-over-the-rationals`).
+                stable = _granularity_stable(route, jpoint, run, k)
+                if stable is False:
+                    skips.add("executed-float-depends-on-granularity")
+                    adjudged.add("declined-executed-routes-disagree")
+                    point_declined = True
+                    continue
+                if stable is None:
+                    # NOT the same finding.  Nothing has been shown to
+                    # move; the second reading could not be taken, and an
+                    # unchecked granularity is not a checked one.
+                    skips.add("whole-program-route-unavailable")
+                    adjudged.add("declined-whole-program-route-unavailable")
+                    point_declined = True
+                    continue
             detail, why, how, unread = _confirm(
                 census, statuses, point, k, semantics
             )
@@ -3502,15 +3858,35 @@ def _confirm(census, statuses, point, k, semantics):
     consulted, so nothing downstream re-checks. It was reading a list
     ``_execute`` fills at the TOP LEVEL only, so an assume one ``jit`` deep
     left it empty and the gate admitted everything — the fourth of this
-    module's four defects, see the module docstring. The gate now declines
+    module's five defects, see the module docstring. The gate now declines
     (``assume-not-fully-executed``) unless the executed run saw every
     assume the program contains at every depth, which is what makes the
     two early returns below safe.
+
+    **AND THE ``ieee`` RETURN HAS A SECOND SUCH PRECONDITION, FOR THE SAME
+    REASON ONE LEVEL DOWN.** That gate is a reading of WHETHER the
+    executed run saw everything; this one is a reading of WHICH float it
+    saw, and it is in ``probe.run_one`` beside it. See the ``ieee`` bullet
+    below.
 
     THE THREE TESTS THAT MAY ADMIT, in the order they are consulted:
 
     * **``ieee`` semantics.** The executed float IS the subject of the
       claim, so the violation stands exactly as executed.
+
+      **AND WHICH FLOAT WAS EXECUTED IS ITSELF A CHOICE, WHICH IS THE
+      FIFTH INSTANCE OF THE CLASS.** ``_execute`` binds one equation at a
+      time, so XLA never sees two of them together, while the caller's own
+      call compiles whole regions — and ``jax.make_jaxpr`` inlines the
+      ``jit`` that ``jnp.mean`` is built out of, so this is reached with no
+      ``jit`` written anywhere. The sentence above then licensed a firing
+      about a float the program does not compute, on a correct VERIFIED,
+      in four lines. The precondition is in ``probe.run_one`` with the
+      other readings of the executed run: the same program is run at the
+      same point as ONE compiled region, and a violation whose truth value
+      moves between the two routes declines
+      (``executed-float-depends-on-granularity``). See :func:`_execute`
+      for the measurement and :func:`_whole_program_route` for the route.
     * **an all-integral PROGRAM.** The arithmetic is exact as executed
       and no rounding is involved.  This branch MUST NOT become a rational
       replay: rational arithmetic does not wrap, so replaying an ``int8``
@@ -3556,13 +3932,20 @@ def _confirm(census, statuses, point, k, semantics):
     )
     if semantics == "ieee":
         return detail, None, "ieee-executed-float", None
-    # BOTH CONJUNCTS, AND THEY ARE DIFFERENT FACTS.  `census.integral` is
-    # read off the PROGRAM -- every operand and result dtype at every
+    # BOTH CONJUNCTS, AND THE SECOND IS REDUNDANT TODAY.  `census.integral`
+    # is read off the PROGRAM -- every operand and result dtype at every
     # depth (:func:`_integral_program`) -- and is what licenses the
-    # sentence below.  The declaration test guards the other side: the
-    # POINT handed to the executed run is built out of `Declaration.dtype`
-    # by `_window`/`_clean`, so a declaration that is not integral is an
-    # integral value entering the program by a float door.
+    # sentence below.  The declaration test was written as a second,
+    # different fact: the POINT handed to the executed run is built out of
+    # `Declaration.dtype` by `_window`/`_clean`, so a declaration that is
+    # not integral would be an integral value entering by a float door.
+    # It cannot be: the `stelling_any` outvar's aval dtype IS
+    # `Declaration.dtype` -- the same param the equation carries -- checked
+    # across ten dtypes, so `census.integral` already IMPLIES this
+    # conjunct.  Kept because it costs nothing and is the conjunct a reader
+    # checks by hand, and DESCRIBED accurately because a comment claiming
+    # two independent facts where there is one is how a guard gets deleted
+    # by someone who finds the other one.
     integral = census.integral and all(
         np.dtype(d.dtype).kind in "iub" for d in census.declarations
     )
@@ -3587,8 +3970,8 @@ def _confirm(census, statuses, point, k, semantics):
             # DEFENCE IN DEPTH, and the same check as `run_one`'s applied
             # to the OTHER walker.  `_replay` descends `_CALL_PRIMITIVES`
             # where `_execute` binds them, so the two walkers read the
-            # program at different depths -- which is the gap all four of
-            # this module's defects have lived in.  Neither reading is
+            # program at different depths -- which is the gap four of
+            # this module's five defects have lived in.  Neither reading is
             # trusted to be complete because of how it is written; each is
             # checked against `census.assumes_in_program`, which is counted
             # at every depth there is.
