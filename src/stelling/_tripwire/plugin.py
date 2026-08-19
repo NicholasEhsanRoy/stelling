@@ -226,15 +226,19 @@ def pytest_configure(config):
             )
 
     if state.eager_mode == "error":
-        # ARMED SECOND, AND THAT ORDER IS NOT ARBITRARY. `_tripwire.arm()`'s
-        # self-check TRACES a program that narrows a constant, which the eager
-        # detector would raise on if it were already live -- the tripwire
-        # would then report `unexpected:EagerTruncationError` and disable
-        # itself, on a perfectly healthy pair of hooks. Arming the report
-        # before the rule keeps each instrument's self-check outside the
-        # other's jurisdiction. (The eager self-check has the mirror problem
-        # and does not have it: it drives the live wrapper with the observer
-        # swapped out, so it never reaches the policy that raises.)
+        # ARMED SECOND, AND THE REASON IS THE DENOMINATOR AND NOT A CRASH.
+        # This used to say that `_tripwire.arm()`'s self-check traces a
+        # program the eager detector would RAISE on, so arming in the other
+        # order would disable the tripwire on a healthy pair of hooks. Driven,
+        # both ways: both report `armed` either way. What the reversed order
+        # actually costs is measurable and smaller -- the tripwire's
+        # self-check reaches the eager hook with 2 IN-RANGE conversions, so
+        # arming the rule first starts every session's eager denominator at 2
+        # instead of 0, and those two are stelling's own traffic rather than
+        # the suite's. The order stands; the reason is this one. (The eager
+        # self-check has the mirror problem and does not have it: it drives
+        # the live wrapper with the observer swapped out, so it never reaches
+        # the policy that raises.)
         state.eager_status = _tripwire.arm_eager()
         if not state.eager_status.armed and state.role == "single":
             raise pytest.UsageError(
@@ -319,6 +323,16 @@ def _capture_eager(state) -> None:
     """
     if state.eager_mode == "off":
         return
+    if state.role == "controller":
+        # THE CONTROLLER NEVER ARMS, so its own counters are zeros -- and by
+        # the time this runs, ``pytest_testnodedown`` has already merged every
+        # worker's snapshot into ``state.eager_snapshot``. Reading the local
+        # module here overwrote that merge with the zeros: measured, a `-n 2`
+        # session whose workers reported `conversions: 5, truncations: 1` and
+        # one declaration printed `0 scalar integer conversion(s)` and no
+        # declarations at all. That is the beautiful zero this section's
+        # docstring exists to prevent, produced by the section itself.
+        return
     from stelling import _tripwire
     from stelling._tripwire import eager
 
@@ -395,21 +409,21 @@ def pytest_sessionfinish(session, exitstatus):
         config.workeroutput[WORKER_KEY] = payload
         return
 
-    if state.recorder is None:
-        return
-
-    if state.mode == "require":
-        status = _controller_status(state) if state.role == "controller" else state.status
-        if status is not None and not status.armed and session.exitstatus == 0:
-            session.exitstatus = REQUIRE_EXITSTATUS
-
-    # THE EAGER DETECTOR'S ESCALATION, and it needs its own because a
+    # THE EAGER DETECTOR'S ESCALATION COMES FIRST, AND ABOVE THE RECORDER
+    # GUARD, because the two instruments are two dials and this one does not
+    # depend on the other having been switched on. It used to sit below `if
+    # state.recorder is None: return` -- and `state.recorder` is None exactly
+    # when `--stelling-overflow=off`, which is the spelling the docs recommend
+    # for running the eager detector alone. Measured with the hook displaced
+    # mid-session: `--stelling-eager-truncation=error` alone exited 0, `...
+    # --stelling-overflow=off` exited 0, and only `... --stelling-overflow=
+    # auto` exited 1. A rule that fails to attach and exits 0 is the false
+    # assurance the instrument exists to remove.
+    #
+    # It needs its own escalation, separate from `require`'s, because a
     # CONTROLLER cannot raise `UsageError`: it is not the process that arms,
     # so the `pytest_configure` refusal that covers a single process never
-    # runs there. Without this, `-n auto --stelling-eager-truncation=error`
-    # against a jax that moved the site would exit 0 with the rule silently
-    # not applied on any worker -- the exact false assurance the instrument
-    # exists to remove, wearing a distribution flag.
+    # runs there.
     if state.eager_mode == "error":
         eager_status = (
             _eager_controller_status(state)
@@ -421,6 +435,14 @@ def pytest_sessionfinish(session, exitstatus):
             and not eager_status.armed
             and session.exitstatus == 0
         ):
+            session.exitstatus = REQUIRE_EXITSTATUS
+
+    if state.recorder is None:
+        return
+
+    if state.mode == "require":
+        status = _controller_status(state) if state.role == "controller" else state.status
+        if status is not None and not status.armed and session.exitstatus == 0:
             session.exitstatus = REQUIRE_EXITSTATUS
 
 
@@ -444,9 +466,18 @@ def pytest_testnodeready(node):
 
 @pytest.hookimpl(optionalhook=True)
 def pytest_testnodedown(node, error):
-    """Absorb a worker's payload on the controller."""
+    """Absorb a worker's payload on the controller.
+
+    THE TWO INSTRUMENTS ARE ABSORBED SEPARATELY, and the gate at the top used
+    to be `state.mode == "off" or state.recorder is None` -- the tripwire's
+    condition -- so a session running the eager detector ALONE dropped every
+    worker's eager payload on the floor. Measured: `-n 2
+    --stelling-overflow=off --stelling-eager-truncation=error` on a fully
+    green suite reported `NOT ARMED [no-worker-reported]` and exited 1, having
+    been told the answer by both workers.
+    """
     state = _state(node.config)
-    if state.mode == "off" or state.recorder is None:
+    if state.mode == "off" and state.eager_mode == "off":
         return
     payload = (getattr(node, "workeroutput", None) or {}).get(WORKER_KEY)
     if payload is None:
@@ -454,8 +485,9 @@ def pytest_testnodedown(node, error):
     state.workers_reported += 1
     gateway = getattr(node, "gateway", None)
     worker_id = getattr(gateway, "id", None) or f"w{state.workers_reported}"
-    state.worker_statuses[worker_id] = payload.get("status_code", "?")
-    state.recorder.absorb(payload)
+    if state.mode != "off" and state.recorder is not None:
+        state.worker_statuses[worker_id] = payload.get("status_code", "?")
+        state.recorder.absorb(payload)
     eager_code = payload.get("eager_status_code")
     if eager_code is not None and eager_code != "off":
         state.eager_worker_statuses[worker_id] = eager_code
@@ -480,11 +512,17 @@ def _merge_eager(into: dict | None, payload: dict) -> dict:
     merged = dict(into or {})
     merged["conversions"] = merged.get("conversions", 0) + payload.get("conversions", 0)
     merged["truncations"] = merged.get("truncations", 0) + payload.get("truncations", 0)
+    merged["suppressed_jax"] = merged.get("suppressed_jax", 0) + payload.get(
+        "suppressed_jax", 0
+    )
+    merged["inconclusive"] = merged.get("inconclusive", 0) + payload.get(
+        "inconclusive", 0
+    )
     merged["internal_errors"] = merged.get("internal_errors", 0) + payload.get(
         "internal_errors", 0
     )
     merged["resets"] = merged.get("resets", 0) + payload.get("resets", 0)
-    for key in ("declared", "permitted"):
+    for key in ("declared", "permitted", "suppressed"):
         rows = dict(merged.get(key) or {})
         for site, row in (payload.get(key) or {}).items():
             existing = rows.get(site)

@@ -292,24 +292,41 @@ list:
 
 * **it is exact**, because you assert it rather than the tool inferring it;
 * **it cannot license a different site** — it is a value, not a mode;
-* **it cannot license a different dtype**. The dtype is half the declaration:
-  `intentional_wrap(0xFF, "int8")` is `-1`, which `uint8` cannot hold, so a
-  declaration that drifted from its use fires rather than passing.
+* **it cannot hide a truncation at a different dtype**. The dtype is half the
+  declaration, and sometimes a declaration that drifted from its use fires:
+  `intentional_wrap(0xFF, "int8")` is `-1`, which `uint8` cannot hold. Often
+  it does not: `intentional_wrap(300, "int8")` is `44`, which every other
+  integer dtype holds — 53 of 98 measured (declaration, misuse) pairs pass
+  silently. What is guaranteed is narrower and is the part that matters: in
+  every silent case the declared value is *in range* at the new dtype, so
+  nothing is narrowed there and no truncation is hidden. Writing the wrong
+  constant is a bug; it is not one this detector claims to catch.
 
 **There is no value-based exemption, and there will not be one.**
 `jnp.full((4,), 0xFF, jnp.int8)` and `jnp.full((4,), 255, jnp.int8)` produce
 *identical* observations at the hook — same written value, same dtype, same
-result, same frame — and differ only in source text, which is not available
-where the decision has to be made. Two candidate heuristics were driven over a
+result, same frame — and differ only in source text, which a variable, an
+imported constant or a computed value does not carry at all, so a rule that
+read the line would work for literals and abstain for exactly the mask idiom
+it was meant to recognise. Two candidate heuristics were driven over a
 corpus of real narrowings: "a negative into an unsigned dtype is deliberate"
 hard-errors correct code 7 times and lets a real bug through once; "an all-ones
 result is deliberate" is 5 and 2. Both are wrong in both directions.
 
 For code whose *subject* is the truncation — a test that demonstrates a door
 narrows in silence, a reproducer in a disclosure — there is
-`stelling._tripwire.eager.expected_truncation(reason)`, a lexically scoped,
-thread-local context manager taking a mandatory reason. Everything it permits
-is counted and printed with that reason. It is deliberately the awkward one.
+`stelling._tripwire.eager.expected_truncation(reason)`, a context manager
+taking a mandatory reason. Everything it permits is counted and printed with
+that reason. It is deliberately the awkward one.
+
+It is **dynamically scoped**, not lexically bounded: the region is open from
+`__enter__` to `__exit__`, in whatever code runs between them. Another thread
+is not licensed, and neither is another `asyncio` task on the same loop — the
+region stack is a `contextvars.ContextVar`. A **generator** suspended inside a
+region is the exception and it is not fixable: a plain generator shares its
+caller's context, so a region it entered and has not left is open in the code
+that resumed it. Prefer `intentional_wrap`, which has no scope beyond the
+expression it is written in.
 
 ### What it closes, and what it does not
 
@@ -348,7 +365,23 @@ detector does NOT close, each re-measured with it armed:
 * **`x % N`, `x // N`, `jnp.searchsorted`** — same mechanism, same answer.
 
 Those are `report.UNCOVERED`'s bullets 1, 2 and 3, and they stay open. What
-closes is bullet 4 except its numpy clause, and bullet 5 outright.
+closes is bullet 4 except its numpy clause, and bullet 5's scoped
+`disable_jit` door.
+
+**With `jit` off, jax narrows its OWN constants eagerly**, and this detector
+sits where that happens. Its threefry PRNG mask is `4294967295 -> -1` at
+`int32`, and a rule that raised on it would stop every test that touches
+`jax.random` under `jax.disable_jit()`, `JAX_DISABLE_JIT=1` or
+`chex.fake_jit()` — and would ask you to declare a constant you never wrote,
+sometimes at a line inside a library you cannot edit. So the detector asks
+where the constant came from: **it raises only on a value that crossed from
+your code into jax as an argument of the call you made.** Everything else is
+attributed to jax, counted, and printed with the site of your call and the jax
+function underneath it. Two edges are disclosed in the section's own coverage
+list: a constant reaching jax inside a custom object is attributed to jax and
+does not raise, and a constant jax wrote that happens to equal something you
+passed at the same call is attributed to you and does — measured,
+`jax.random.PRNGKey(2**32 - 1)`.
 
 ### It fails closed
 

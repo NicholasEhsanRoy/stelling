@@ -23,6 +23,15 @@ verdict that is replayed before it is reported.
 often the writer and sometimes only the *caller* of a jax function that wrote
 the constant itself — jax's own PRNG mask is exactly that shape. Measured
 stacks for both are in :func:`attribute`'s docstring.
+
+**And the same question has two answers, because it is asked at two sites.**
+:func:`attribute` answers it from the FRAMES, which is what the const-fold
+site affords: a trace boundary separates the traced function from its caller.
+The eager construction site has no trace boundary and, measured, no frame
+shape that separates the two cases at all, so :func:`carries` answers it from
+the DATA instead — did this integer cross the call the user made? Both are
+the one question *"did the user write this constant, or did jax?"*, and
+neither depends on the other's evidence.
 """
 
 from __future__ import annotations
@@ -228,6 +237,120 @@ def attribute(
     # report THAT rather than the fold site, so the suppression names
     # something a reader can go and look at.
     return (entry + 1 if entry + 1 < len(frames) else None), ORIGIN_JAX
+
+
+#: How far into a container :func:`carries` looks, how many members of one
+#: container it reads, and how many objects it may touch before it gives up.
+#: A scan that hits any of these limits returns ``None`` rather than
+#: ``False``: "I looked everywhere and it is not there" and "I stopped
+#: looking" are different answers, and only the first one licenses a
+#: suppression.
+CARRY_DEPTH = 4
+CARRY_BREADTH = 1024
+CARRY_BUDGET = 8192
+
+
+def written_int(value) -> int | None:
+    """``value`` as a written Python integer, or None if it is not one.
+
+    The same test the eager hook applies to the operand it sees, applied to
+    the arguments of a call instead: a Python ``int`` (never a ``bool``,
+    which is an ``int`` and is not an integer constant anybody writes into a
+    narrow dtype), or a 0-d NumPy scalar. NumPy is identified by ITS OWN
+    module name and never imported, so this module keeps working in an
+    interpreter that has neither jax nor numpy.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return int(value)
+    if type(value).__module__.split(".")[0] != "numpy":
+        return None
+    if getattr(value, "shape", None) != () or getattr(value, "dtype", None) is None:
+        return None
+    try:
+        return int(value)
+    except Exception:  # noqa: BLE001 - a probe may not raise
+        return None
+
+
+def carries(values, written: int) -> bool | None:
+    """Does the data handed across a call boundary contain ``written``?
+
+    THE DATA HALF OF THE ORIGIN QUESTION :func:`attribute` ANSWERS FROM
+    FRAMES, and it exists because at an EAGER narrowing the frames cannot
+    answer it. Measured, jax 0.11.0, the two stacks side by side::
+
+        jnp.full((), 256, jnp.int8)          jax.random.key(0), disable_jit
+        --------------------------------     --------------------------------
+        USER  yours.py:33                    USER  yours.py:37
+        JAX   array_creation.py:256:full     JAX   random/core.py:258:key
+        JAX   lax.py:3628:full               JAX   ... 8 more jax frames ...
+        (the site)                           JAX   threefry2x32.py:73
+                                             (the site)
+
+    They are the SAME SHAPE — a user frame, then only jax frames — so no rule
+    over frame positions separates them, and "innermost non-jax frame" gets
+    the second one wrong in exactly the way :func:`attribute`'s docstring
+    already records. What separates them is the data: ``256`` crossed out of
+    the user's frame as an argument of the call they made, and ``4294967295``
+    was manufactured nine frames below that call and appears nowhere in what
+    they handed over. So the question asked here is about one call's
+    arguments, and a call boundary exists whether or not a trace is in
+    progress — which is why this answer does not depend on ``jit``.
+
+    Returns **True** if ``written`` is there, **False** only after a COMPLETE
+    scan found it absent, and **None** if the scan hit :data:`CARRY_DEPTH`,
+    :data:`CARRY_BREADTH` or :data:`CARRY_BUDGET` and therefore proves
+    nothing. The caller must treat ``None`` as "not established": suppressing
+    a real narrowing is silent and over-reporting one is visible, which is
+    the same direction :func:`attribute`'s fallback leans and for the same
+    reason.
+
+    ONLY THE STANDARD CONTAINERS ARE OPENED — tuple, list, set, frozenset,
+    dict. A constant reaching jax inside a custom object is not found, is
+    therefore not established as the user's, and is a disclosed residue
+    (``report.EAGER_UNCOVERED``).
+    """
+    budget = CARRY_BUDGET
+    frontier = [(value, 0) for value in values]
+    cut_short = False
+    while frontier:
+        value, depth = frontier.pop()
+        budget -= 1
+        if budget < 0:
+            return None
+        number = written_int(value)
+        if number is not None:
+            if number == written:
+                return True
+            continue
+        members = _members(value)
+        if members is None:
+            continue
+        if depth >= CARRY_DEPTH:
+            cut_short = True
+            continue
+        if len(members) > CARRY_BREADTH:
+            cut_short = True
+            members = members[:CARRY_BREADTH]
+        frontier.extend((member, depth + 1) for member in members)
+    return None if cut_short else False
+
+
+def _members(value) -> list | None:
+    """The members of a container this scan opens, or None for anything else."""
+    if isinstance(value, (tuple, list, set, frozenset)):
+        try:
+            return list(value)
+        except Exception:  # noqa: BLE001 - a probe may not raise
+            return None
+    if isinstance(value, dict):
+        try:
+            return list(value.keys()) + list(value.values())
+        except Exception:  # noqa: BLE001 - a probe may not raise
+            return None
+    return None
 
 
 def trace_entry_index(

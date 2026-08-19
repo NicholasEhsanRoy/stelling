@@ -151,6 +151,31 @@ SPDX-License-Identifier: Apache-2.0
   residue. `EAGER_COVERAGE`, beside `GATE_COVERAGE`, is the measured
   inventory and a test holds the residue to exactly those two.
 
+  **It carries an ORIGIN FILTER, and the first version of this entry said it
+  needed none.** With `jit` on, jax's own threefry PRNG mask reaches the
+  const-fold site and not this one, which is what that claim was measured on.
+  With `jit` OFF — `jax.disable_jit()`, `JAX_DISABLE_JIT=1`, and the public
+  `chex.fake_jit()` / `chex.fake_pmap_and_jit()` that install it — jax
+  evaluates the mask eagerly and it arrives here as a written scalar, and the
+  detector raised `4294967295 -> -1 (int32)` **inside jax's own PRNG**,
+  naming a line the user never wrote a constant on. Measured on jax 0.11.0
+  and 0.10.2, `JAX_DISABLE_JIT=1` over a 33-workload census across 24
+  third-party packages: **9 fires before (8 of them jax's own: `jax.random`,
+  flax linen, flax nnx, equinox, diffrax, jax_md, e3nn_jax) and 2 after**, one
+  of which is the control that must fire and the other the disclosed
+  coincidence below. With `jit` on the count is 1 before and 1 after, and it
+  is that control both times. Over chex's own installed `fake_test.py`: **2 failed / 32 passed
+  before, 34 passed after.**
+
+  `eager._origin` answers the question `record.attribute` answers for the
+  other hook — *did the user write this constant, or did jax?* — from the
+  DATA rather than the frames, because at an eager narrowing the two cases
+  have the same frame shape: *is the narrowed integer among the arguments of
+  the call that crossed out of non-jax code into jax?* A call boundary exists
+  whether or not a trace is in progress, which is why the answer does not
+  depend on `jit`, and a test drives the same programs both ways and requires
+  the same verdict. Suppressions are counted and printed with their sites.
+
   **Off by default, and NOT turned on by `--stelling-overflow`.** Two dials,
   because the tripwire is a report over a session and this is a rule: a
   session it is armed on either contains no undeclared truncation or does not
@@ -163,16 +188,28 @@ SPDX-License-Identifier: Apache-2.0
   value that reaches jax is the value jax would have produced anyway, and a
   declared program is byte-identical to an undeclared one. It needs no jax
   and no numpy, and every declaration is recorded and printed with its site.
-  The dtype is half the declaration: a declaration used at a different width
-  fires rather than passing.
+  The dtype is half the declaration, and what that buys is narrower than
+  "a declaration used at a different width fires": measured over 98
+  (declaration, misuse) pairs, 45 fire and 53 pass silently — but in every
+  silent case the declared value is IN RANGE at the other dtype, so no
+  narrowing happens there and no truncation is hidden. Writing the wrong
+  constant is a bug this instrument does not claim to catch.
 
   **The exception inherits directly from `BaseException`**, so an ordinary
   `except Exception:` cannot swallow a soundness alarm — the handler shape
   that is everywhere in numerical Python. "Uncatchable" is not achievable and
   is not claimed; `design/eager-truncation-detector.md` carries the argument,
-  the measured blast radius (0 fires across 21 third-party packages) and the
-  cost (cleanup written in `except Exception:` rather than `finally:` will
-  not run).
+  the measured blast radius and the cost (cleanup written in
+  `except Exception:` rather than `finally:` will not run). The radius, with
+  the configuration it was measured in now stated: 122 module imports (174
+  scalar integer conversions, 0 truncations) and 33 real workloads across 24
+  third-party packages (264 conversions, 1 truncation — a control of this
+  project's own that must fire and does) give **0 fires in any third-party
+  workload with `jit` on**, every figure identical on jax 0.11.0 and 0.10.2. With `JAX_DISABLE_JIT=1` the same 33 workloads see 1225 conversions
+  and 14 truncations, of which 12 are jax's own and are attributed and counted
+  rather than raised on; the one remaining fire is `jax.random.PRNGKey(2**32 -
+  1)`, where jax's mask and the seed are the same integer, and it is the
+  disclosed lenient edge of the origin filter.
 
   **There is no value-based carve-out and there will not be one.**
   `jnp.full((4,), 0xFF, jnp.int8)` and `jnp.full((4,), 255, jnp.int8)`
@@ -184,6 +221,39 @@ SPDX-License-Identifier: Apache-2.0
   the scores: `0xFF` and `255` into `int8` are the same `(value, dtype)` pair
   with opposite intent, so the class of value-based rules is empty rather than
   merely badly-scoring.
+
+- **The dial reaches the exit code and the report on its own.** The eager
+  detector's session escalation sat below the tripwire's `state.recorder is
+  None` guard, so with `--stelling-overflow=off` — the spelling the docs
+  recommend for running this detector alone — a rule that could not stay
+  attached exited **0**. Under xdist, `pytest_testnodedown` returned on the
+  tripwire's condition and dropped every worker's eager payload (`-n 2` on a
+  fully green suite reported `NOT ARMED [no-worker-reported]` and exited 1),
+  and `_capture_eager` then overwrote the merged worker snapshot with the
+  controller's own zeros. All three are fixed and driven; a controller now
+  prints its workers' figures and a single process's figures identically.
+
+  **The first thing the reachable escalation caught was in this repository's
+  own suite.** A canary test stubbed the tripwire's half of the canary and not
+  the eager one, so `canary.main()` called the real `disarm_eager()`: a
+  session run with `--stelling-eager-truncation=error` lost its detector at
+  that test and ran every later file unwatched, printing `NOT ARMED
+  [detached]` and exiting **0**. It now stubs both, and both files that drive
+  the canary assert the process's arm state is what they found it.
+
+- **`expected_truncation` is dynamically scoped, and now says so.** It was
+  described as "lexically bounded" in four places. A `with` block looks
+  lexical and no context manager can be: a region held across an `await`
+  licensed a truncation in a SECOND asyncio task on the same loop. The region
+  stack is now a `contextvars.ContextVar`, which isolates asyncio tasks as
+  well as threads; a generator suspended inside a region still licenses its
+  resumer, which nothing in Python fixes, and that residue is disclosed and
+  driven rather than claimed away.
+
+- **`_tripwire.arm()` on an already-armed process returns the recorder that
+  is actually recording.** It returned a fresh, disconnected `Recorder`, so
+  any assertion written against it under `-p stelling.overflow` was false by
+  construction rather than by measurement.
 
 - **It fails closed on drift.** It patches a private jax function, so arming
   verifies the module and attribute, checks `inspect.signature`'s first two

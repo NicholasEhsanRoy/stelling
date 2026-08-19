@@ -88,6 +88,18 @@ diffrax, lineax, chex, equinox, jraph, e3nn_jax, maddening, scipy (+
 h5py, jaxlib, jaxfluids, and five jax subpackages: **29 scalar integer
 conversions, 0 truncations, 0 fires.**
 
+**Every figure in this section was taken with `jit` on**, which is the default
+and is not the only configuration users run; the section below on the origin
+filter is what happens with it off, and is the reason that qualifier is now
+written down instead of assumed.
+
+*Re-measured for the origin filter, on jax 0.11.0 and 0.10.2, and this is the census the
+table below refers to:* **122 module imports** covering 64 third-party
+top-level packages — 174 scalar integer conversions, 0 truncations, 0 fires —
+and **33 real workloads** across 24 of those packages — 264 conversions and
+exactly 1 truncation, which is a control of this repository's own that must
+fire and does. Every one of those figures is identical on 0.10.2.
+
 *Execution, which is the stronger half and which the spike did not do.*
 Eleven real workloads across eight of those libraries — an optax Adam step, a
 flax `nn.Dense` init-and-apply, a diffrax `diffeqsolve`, an equinox MLP under
@@ -107,24 +119,91 @@ code.
 So the radius in which the choice matters at all is small, and every site
 inside it is one this repository owns.
 
-**IT NEEDS NO ORIGIN FILTER.** The const-fold tripwire fires on jax's OWN
-constants — `jax.random.key(0)` folds `4294967295 -> -1` inside
-`threefry2x32.py` — and carries `record.attribute`, an `ORIGIN_JAX` bucket and
-a suppressed-findings report to keep that out of a user's results. The eager
-detector never sees it: measured, the same program gives 2 scalar conversions
-and 0 truncations. That is a property of where the two hooks sit — jax's
-internals build their masks as arrays or as in-range scalars, not as
-out-of-range Python integers handed to a constructor — and it is what makes an
-alarm that STOPS the program affordable at all. An instrument that raised
-inside jax's own PRNG would be unusable at any blast radius.
+**IT NEEDS AN ORIGIN FILTER, AND THIS PARAGRAPH SAID IT DID NOT.** What stood
+here was: the const-fold tripwire fires on jax's OWN constants —
+`jax.random.key(0)` folds `4294967295 -> -1` inside `threefry2x32.py` — and
+carries `record.attribute`, an `ORIGIN_JAX` bucket and a suppressed-findings
+report for it, while the eager detector never sees it and therefore needs none
+of that; *"an instrument that raised inside jax's own PRNG would be unusable at
+any blast radius."*
+
+**The premise is true with `jit` on and false in a mode users deliberately turn
+on**, and every measurement above was taken with `jit` on. Under
+`jax.disable_jit()` jax evaluates `jnp.bitwise_and(seed, np.uint32(0xFFFFFFFF))`
+eagerly; the mask reaches this hook as a written scalar; and the version without
+a filter raised `EagerTruncationError(4294967295 -> -1, int32)` **inside jax's
+own PRNG**. Measured on jax 0.11.0 and 0.10.2:
+
+| configuration | fires, 33-workload census | what fired |
+| --- | --- | --- |
+| `jit` on, before and after | 1 | the control that must fire |
+| `JAX_DISABLE_JIT=1`, before | 9 | the control, plus **8 in jax's PRNG**: `jax.random`, flax linen, flax nnx, equinox, diffrax, jax_md, e3nn_jax |
+| `JAX_DISABLE_JIT=1`, after | 2 | the control, plus the one disclosed coincidence below |
+
+`jax.disable_jit()` is jax's own documented debugging workflow and is what the
+public `chex.fake_jit()` and `chex.fake_pmap_and_jit()` install: chex's own
+installed suite went from **2 failed, 32 passed** to **34 passed** with the
+detector armed over `chex/_src/fake_test.py`. And the message prescribed an
+impossible remedy — the user never wrote `4294967295`, for flax nnx the line it
+named was inside `flax/nnx/rnglib.py`, and `except Exception:` could not
+contain it. The only escapes were wrapping every `jax.random` call in
+`expected_truncation`, or not arming.
+
+The two instruments were behaving OPPOSITELY in the same environment: with
+`JAX_DISABLE_JIT=1` and both armed, the const-fold tripwire reports `NOT ARMED
+[not-invoked]` and disables itself, while the eager detector reported `armed`
+and failed every test that touched `jax.random`. The older instrument failed
+safe there; the newer one fired on jax.
+
+**The fix is the origin question, not a `disable_jit` special case.**
+`record.attribute` already answers *"did the user write this constant, or did
+jax?"*, and its docstring already records that "innermost non-jax frame" — which
+is exactly what `eager._writer_frame` is — *"would print the user's
+`jax.random.key(0)` line and claim they wrote `4294967295`"*. What it cannot
+lend is its implementation: it keys on the trace boundary, and there is no trace
+here. Measured, there is no frame shape to key on either — `jnp.full((), 256,
+jnp.int8)` and `jax.random.key(0)` both present as a user frame with nothing but
+jax frames beneath it.
+
+So `eager._origin` asks the same question of the DATA:
+
+> is the narrowed integer among the arguments of the call that crossed out of
+> non-jax code into jax?
+
+`256` crossed as `full`'s `fill_value`; `4294967295` was manufactured nine
+frames below `random.key` and is in nothing the caller handed over. **A call
+boundary exists whether or not a trace is in progress, which is why this answer
+does not depend on `jit`** — driven as an equality in
+`test_the_origin_answer_does_not_depend_on_a_trace_being_in_progress`, which
+runs the same four programs with `jit` on and off and requires the same verdict.
+
+Suppression requires POSITIVE evidence — a jax boundary, and a scan of its
+arguments (`record.carries`) that COMPLETED and found nothing. A scan cut short
+by its own limits returns `None`, is counted in `eager.INCONCLUSIVE`, and is
+attributed to the user: over-reporting is visible to a reader holding the quoted
+line and a suppression is not, which is the direction `record.attribute`'s own
+fallback leans. Everything suppressed is counted in `eager.SUPPRESSED` and
+printed with its site, exactly as the tripwire's `suppressed_jax` is.
+
+**Its two edges lean opposite ways and both are disclosed.** A constant that
+reaches jax inside a custom object rather than a plain value, tuple, list or
+dict is not found by the scan, so it is attributed to jax and does NOT raise —
+the one missed narrowing this rule can produce. And a constant jax wrote that
+happens to EQUAL something passed at the same call IS attributed to the caller
+and raises: measured in the census, `jax.random.PRNGKey(2**32 - 1)`, where jax's
+threefry mask and the seed are both 4294967295. That one is the remaining fire
+in the table above; the remedy for it is `expected_truncation`, not
+`intentional_wrap`, because the declared value would change the program.
 
 **The cost, stated rather than discovered.** `finally:` blocks still run and
 context managers still exit, so ordinary cleanup is unaffected. Cleanup written
 as `except Exception: release()` does NOT run, so a caller who releases a
 resource there and not in a `finally:` will leak it. pytest reports a
-`BaseException` from a test body as an ERROR rather than a FAILURE, which is
-the right shape: a truncated constant is not a failed assertion, it is a
-program that cannot be measured.
+`BaseException` raised in a test BODY as a **FAILURE** — measured, `1 failed`,
+not `1 error`; this said ERROR and reasoned from it, and `eager.py`'s docstring
+had it right. One raised during COLLECTION or in a fixture is an error, which is
+the handling any other exception gets there. The `BaseException` choice changes
+what can SWALLOW the alarm, not how pytest files it.
 
 **One consequence worth naming, because it was met while building this.**
 `tests/test_tripwire_arm.py::_rejected_under_strict` classifies exceptions with
@@ -141,11 +220,18 @@ cannot be done, and the spike proved it rather than asserting it.
 
 `jnp.full((4,), 0xFF, jnp.int8)` and `jnp.full((4,), 255, jnp.int8)` produce
 **identical observations at the hook**: the same written value, the same target
-dtype, the same result, the same frame. They differ only in source TEXT, which
-is not available at the point the decision has to be made, and which a
-variable, a computed value or a constant defined in another module does not
-carry at all. Intent is therefore not a function of `(value, dtype, result)`,
-and no rule over that data can be sound.
+dtype, the same result, the same frame. They differ only in source TEXT.
+
+**And the text IS reachable** — `record.source_line(file, line)` returns it and
+`eager._message` calls it three statements later, so "not available at the point
+the decision has to be made" was false about this repository's own code and is
+withdrawn. The ruling stands on its other leg, which cannot be argued away: a
+variable, an imported constant, a computed value and a constant defined in
+another module carry no text at the site at all, so a rule that reads the line
+works for literals and abstains for everything else — and `jnp.full(shape, MASK,
+jnp.int8)` with `MASK = 0xFF` one module over is the mask idiom the rule was
+supposed to recognise. Intent is not a function of `(value, dtype, result)`, and
+not a function of the line either.
 
 Two candidate rules, driven over a corpus of real narrowings:
 
@@ -191,9 +277,19 @@ suppression list or a decorator:
 * **cannot license a different site**: it is a value, not a mode, so it changes
   what happens at the one expression it is written in and nothing else, in any
   other thread or one line later;
-* **cannot license a different dtype**: the dtype is half the declaration.
-  `intentional_wrap(0xFF, "int8")` is `-1`, out of range for `uint8`, so a
-  declaration that drifted from its use fires rather than passing.
+* **cannot HIDE A TRUNCATION at a different dtype** — which is narrower than
+  the claim that stood here, *"cannot license a different dtype"*, and is the
+  one that survives measurement. Sometimes the drift fires:
+  `intentional_wrap(0xFF, "int8")` is `-1`, out of range for `uint8`. Often it
+  does not: `intentional_wrap(300, "int8")` is `44`, which every other integer
+  dtype holds. Over this project's own `WRAP_GRID` against the seven other
+  dtypes — 98 (declaration, misuse) pairs — **53 (54%) pass silently** and 45
+  fire. What survives is the safety property: in every silent case the value
+  written at the new site is in range there, so the site performs no narrowing
+  and there is no truncation for the declaration to have hidden. What a drifted
+  declaration can still do is write the wrong constant — `44` where `300` was
+  meant — and that is a bug this instrument does not claim to catch, in either
+  direction.
 
 A declaration is **recorded** — site, count and the arithmetic — and printed in
 the session report. A premise nobody can see is indistinguishable from the
@@ -210,10 +306,29 @@ it. For the fence it cannot serve at all: the reproducer is read out of
 `SOUNDNESS.md` and executed verbatim, so there is no source to edit, and
 editing it would be editing the defect out of the disclosure.
 
-It is deliberately the awkward one: mandatory reason, lexically bounded,
-thread-local, and **every truncation it permits is counted and printed with its
-site and its reason**. An opt-out that hid what it suppressed would reintroduce
-the same silence one level up. It lives in `stelling._tripwire.eager` and not
+It is deliberately the awkward one: mandatory reason, and **every truncation it
+permits is counted and printed with its site and its reason**. An opt-out that
+hid what it suppressed would reintroduce the same silence one level up.
+
+**It is dynamically scoped to one context's region stack and it is NOT
+lexically bounded**, which is what this section and `eager.py` used to say in
+three places. A `with` block looks lexical; no context manager can be. Measured,
+in the three directions it matters:
+
+* **threads: isolated** — a region on one thread licenses nothing on another;
+* **asyncio tasks: isolated**, because the stack is a `contextvars.ContextVar`
+  and every task runs in its own copy of the context. A `threading.local` — the
+  first implementation — licensed a truncation in a SECOND task on the same
+  loop, since one thread runs them all;
+* **generators: NOT isolated, and this is the residue.** A plain generator
+  shares its caller's context (PEP 550/568 was never implemented), so a region
+  it entered and has not left is open in whatever code resumes it, until the
+  generator runs to completion, is closed, or is collected. Nothing in Python
+  fixes this. It is disclosed in `report.EAGER_UNCOVERED`, driven in
+  `test_a_region_is_DYNAMICALLY_scoped_and_says_so_in_all_three_directions`,
+  and it is one more reason this is the awkward declaration and
+  `intentional_wrap` — which has no scope at all beyond the expression it is
+  written in — is the primary. It lives in `stelling._tripwire.eager` and not
 in the public namespace, because it is not the answer to "the detector is noisy
 in my code".
 
@@ -290,7 +405,17 @@ two so a third cannot join them quietly.
 **Also not closed:** eager execution of the INLINE door (`a + 256` outside
 `jit`, 0 conversions seen at this site), `jnp.where`/`jnp.clip`/`jnp.pad`, and
 `x % N` / `x // N` / `searchsorted`. Those reach neither hook; they are
-`report.UNCOVERED`'s bullets 1, 2 and 3 and they stay open.
+`report.UNCOVERED`'s bullets 1, 2 and 3 and they stay open. (Inside a
+`jax.disable_jit()` block they DO reach this hook, which is what the scoped
+`disable_jit` bullet above is about; outside one, jax traces them and the
+constant never arrives here as a written integer.)
+
+**And the origin filter's own two edges**, which are new with it and lean
+opposite ways: a constant reaching jax inside a custom object is attributed to
+jax and does not raise (the only missed narrowing this rule produces), and a
+constant jax wrote that equals something passed at the same call is attributed
+to the caller and does raise (`jax.random.PRNGKey(2**32 - 1)`). Both are in
+`report.EAGER_UNCOVERED` and both are driven.
 
 ## The numpy fence, abandoned by ruling
 

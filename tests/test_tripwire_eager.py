@@ -33,6 +33,7 @@ FOUR THINGS THIS FILE IS FOR, and they are four different failures:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import subprocess
 import sys
@@ -318,19 +319,56 @@ def test_a_declaration_licenses_ONE_site_and_not_the_next_one(armed):
         jnp.full((), 300, jnp.int8)
 
 
-def test_a_declaration_cannot_license_a_DIFFERENT_DTYPE(armed):
-    """The dtype is half the declaration, and drifting from it fires.
+def test_a_declaration_at_a_DIFFERENT_DTYPE_is_CAUGHT_or_SILENT_and_both_happen(armed):
+    """The claim used to be "it cannot license a different dtype". Measured.
 
-    ``intentional_wrap(0xFF, "int8")`` is ``-1``, which ``uint8`` cannot hold
-    — so a declaration copied to a site whose dtype has changed is caught by
-    the detector rather than honoured. A declaration that carried only the
-    value could not do this.
+    Sometimes the drifted declaration is caught: ``intentional_wrap(0xFF,
+    "int8")`` is ``-1``, which ``uint8`` cannot hold, so the detector fires
+    on the declared value. Often it is not: ``intentional_wrap(300, "int8")``
+    is ``44``, which every other integer dtype holds.
+
+    WHAT SURVIVES IS THE SAFETY PROPERTY AND NOT THE DETECTION, and the third
+    assertion is the one that matters: in every silent case the value written
+    at the new site is IN RANGE there, so no narrowing happens and there is no
+    truncation for the declaration to have hidden. What a drifted declaration
+    can still do is write the wrong constant, which this instrument does not
+    claim to catch.
     """
-    declared = stelling.intentional_wrap(0xFF, "int8")
-    assert declared == -1
+    caught_case = stelling.intentional_wrap(0xFF, "int8")
+    assert caught_case == -1
     with pytest.raises(stelling.EagerTruncationError) as caught:
-        jnp.full((), declared, jnp.uint8)
+        jnp.full((), caught_case, jnp.uint8)
     assert caught.value.written == -1 and caught.value.to_dtype == "uint8"
+
+    silent_case = stelling.intentional_wrap(300, "int8")
+    assert silent_case == 44
+    # The 64-bit names are left out of the CONSTRUCTION half and only of that
+    # half: under the default `jax_enable_x64=False` jax canonicalises them to
+    # 32 bits and warns, which is jax telling the truth about a different
+    # thing and not what this test is measuring. The arithmetic below covers
+    # all eight.
+    for other in ("int16", "int32", "uint8", "uint16", "uint32"):
+        assert int(jnp.full((), silent_case, jnp.dtype(other))) == 44, other
+
+    # ...and the ratio, over this file's own grid against the seven other
+    # dtypes, so that a change to either half shows up as a number.
+    silent = sum(
+        1
+        for value, dtype in WRAP_GRID
+        for other in record.INT_DTYPES
+        if other != dtype and record.in_range(record.narrow(value, dtype), other)
+    )
+    pairs = len(WRAP_GRID) * (len(record.INT_DTYPES) - 1)
+    assert (pairs, silent) == (98, 53), (
+        f"{silent} of {pairs} (declaration, misuse) pairs pass silently; "
+        "eager.py's docstring quotes these two numbers"
+    )
+    assert all(
+        record.in_range(record.narrow(value, dtype), other)
+        for value, dtype in WRAP_GRID
+        for other in record.INT_DTYPES
+        if other != dtype and record.in_range(record.narrow(value, dtype), other)
+    ), "a silent case that is nevertheless out of range at the new dtype"
 
 
 def test_a_declaration_produces_the_same_program_as_no_declaration_at_all(unarmed):
@@ -607,12 +645,99 @@ def test_a_region_requires_a_reason():
             expected_truncation(bad)
 
 
-def test_a_region_is_lexically_bounded(armed):
-    """It licenses the block and the next line is on its own again."""
+def test_a_region_ends_where_the_block_ends_in_straight_line_code(armed):
+    """It licenses the block and the next line is on its own again.
+
+    THE STRAIGHT-LINE CASE ONLY, and it used to be called
+    ``test_a_region_is_lexically_bounded`` while the module said "lexically
+    bounded" in three places. It is not lexically bounded and no context
+    manager can be; the test below is the one that measures what it is.
+    """
     with expected_truncation("driving the region's boundary"):
         assert int(jnp.full((), 300, jnp.int8)) == 44
     with pytest.raises(stelling.EagerTruncationError):
         jnp.full((), 300, jnp.int8)
+
+
+def test_a_region_is_DYNAMICALLY_scoped_and_says_so_in_all_three_directions(armed):
+    """What "lexically bounded" was claiming, measured in the three ways it fails.
+
+    A ``with`` block LOOKS lexical and a context manager is dynamic: the
+    region is open from ``__enter__`` to ``__exit__`` in whatever code runs
+    between them. Threads and asyncio tasks are isolated because the stack is
+    a :mod:`contextvars` variable; generators are not isolated by anything
+    Python offers, so that one is disclosed rather than claimed away.
+    """
+    seen = {}
+
+    def wraps(label):
+        try:
+            jnp.full((), 300, jnp.int8)
+            seen[label] = "licensed"
+        except stelling.EagerTruncationError:
+            seen[label] = "raised"
+
+    # 1. A GENERATOR SUSPENDED INSIDE A REGION licenses its resumer. This is
+    #    the residue: a plain generator shares its caller's context, so the
+    #    region it entered is open in the code that called `next()`.
+    def suspends():
+        with expected_truncation("a region a generator opens and does not close"):
+            yield 1
+            yield 2
+
+    generator = suspends()
+    next(generator)
+    wraps("caller while a generator holds the region")
+    for _ in generator:
+        pass
+    wraps("after the generator ran to completion")
+    assert seen["caller while a generator holds the region"] == "licensed", (
+        "the generator residue has gone away -- if a Python release fixed "
+        "this, the disclosure in eager.py and report.EAGER_UNCOVERED should "
+        "go with it"
+    )
+    assert seen["after the generator ran to completion"] == "raised"
+
+    # 2. ANOTHER THREAD is not licensed. A `threading.local` got this right
+    #    and a `contextvars.ContextVar` still does: a new thread starts in a
+    #    fresh context.
+    with expected_truncation("this thread is demonstrating the truncation"):
+        thread = threading.Thread(target=wraps, args=("another thread",))
+        thread.start()
+        thread.join()
+    assert seen["another thread"] == "raised", (
+        "a region on one thread licensed a truncation on another"
+    )
+
+    # 3. ANOTHER ASYNCIO TASK on the same loop is not licensed -- and this is
+    #    the half a `threading.local` got WRONG: one thread runs every task,
+    #    so a thread-local region held across an `await` licensed all of them.
+    async def holder():
+        with expected_truncation("a region held across an await"):
+            await asyncio.sleep(0.02)
+
+    async def bystander():
+        await asyncio.sleep(0.005)
+        wraps("another task on the same loop")
+
+    async def both():
+        await asyncio.gather(holder(), bystander())
+
+    asyncio.run(both())
+    assert seen["another task on the same loop"] == "raised", (
+        "a region held by one asyncio task licensed a truncation in another"
+    )
+
+    # 4. AND ONE INSTANCE RE-ENTERED pops what it pushed. The list-and-pop
+    #    this replaced handled that; a single reset token would lose the outer
+    #    one on the inner `__enter__` and leave the outer entry open forever.
+    reused = expected_truncation("one instance, entered twice")
+    with reused:
+        with reused:
+            jnp.full((), 300, jnp.int8)
+        jnp.full((), 301, jnp.int8)
+    with pytest.raises(stelling.EagerTruncationError):
+        jnp.full((), 302, jnp.int8)
 
 
 def test_a_region_nests_and_the_inner_one_ends_where_it_says(armed):
@@ -966,37 +1091,191 @@ def test_real_work_does_not_fire(armed, capsys):
     )
 
 
-def test_the_detector_needs_no_origin_filter_and_the_tripwire_does(armed):
-    """The asymmetry that makes an alarm this loud affordable at all.
+#: Every ``jax.random`` entry point the U1 counterexample reaches, as a
+#: callable of a key. Driven with ``jit`` on AND off, because the claim this
+#: replaces was measured only with it on -- which is the one configuration
+#: where it holds.
+PRNG_ENTRY_POINTS = {
+    "key": lambda: jax.random.key(3),
+    "PRNGKey": lambda: jax.random.PRNGKey(3),
+    "split": lambda: jax.random.split(jax.random.key(3), 3),
+    "randint": lambda: jax.random.randint(jax.random.key(3), (4,), 0, 255),
+    "bits": lambda: jax.random.bits(jax.random.key(3), (4,)),
+    "uniform": lambda: jax.random.uniform(jax.random.key(3), (4,)),
+    "normal": lambda: jax.random.normal(jax.random.key(3), (4,)),
+    "permutation": lambda: jax.random.permutation(jax.random.key(3), 8),
+    "choice": lambda: jax.random.choice(jax.random.key(3), 8, (2,)),
+    "categorical": lambda: jax.random.categorical(jax.random.key(3), jnp.zeros(3)),
+    "fold_in": lambda: jax.random.fold_in(jax.random.key(3), 7),
+    "gumbel": lambda: jax.random.gumbel(jax.random.key(3), (4,)),
+}
 
-    The const-fold tripwire fires on JAX'S OWN constants —
-    ``jax.random.key(0)`` folds ``4294967295 -> -1`` inside ``threefry2x32``
-    — and carries ``record.attribute``, an ``ORIGIN_JAX`` bucket and a
-    suppressed-findings section to keep that out of a user's results. This
-    detector never sees it, so it needs none of that: an instrument that
-    RAISED inside jax's own PRNG would be unusable at any blast radius.
 
-    Both halves are driven, because the interesting claim is the contrast. If
-    the tripwire ever stops firing there, this test says so rather than
-    quietly becoming a statement about nothing.
+@pytest.mark.parametrize("jit_on", [True, False], ids=["jit-on", "disable_jit"])
+def test_the_origin_filter_keeps_JAX_S_OWN_constants_out_of_the_alarm(armed, jit_on):
+    """U1. The alarm must not raise inside jax's own PRNG, jit on OR off.
+
+    THIS TEST USED TO DRIVE ONLY THE FIRST HALF OF THIS PARAMETRISATION, and
+    it was called ``test_the_detector_needs_no_origin_filter_and_the_tripwire
+    _does``. With ``jit`` on, the threefry mask reaches the const-fold site as
+    a traced constant and never reaches this one, so "0 truncations" was true
+    and the conclusion drawn from it -- that this hook needs no origin filter
+    at all -- was not.
+
+    Under ``jax.disable_jit()`` jax evaluates ``bitwise_and(seed,
+    uint32(0xFFFFFFFF))`` eagerly and the mask arrives here as a written
+    scalar. Before ``eager._origin`` existed, every entry point below raised
+    ``EagerTruncationError(4294967295 -> -1, int32)`` at the user's own
+    ``jax.random`` line, telling them to declare a constant they never wrote;
+    for flax nnx the line was inside ``flax/nnx/rnglib.py``, which they cannot
+    edit. ``jax.disable_jit()`` is jax's own documented debugging workflow and
+    is what ``chex.fake_jit()`` and ``chex.fake_pmap_and_jit()`` install.
+
+    What the filter does with them is COUNT them, which the second half
+    asserts: a suppression nobody can see is the silence this module exists to
+    end, one level up.
     """
     eager.reset_counters()
-    # EVICT FIRST, both halves. `jax.random.key` is jitted, so on a warm cache
-    # it is replayed and neither hook is reached -- which is B15's finding
-    # applied to a test rather than to a verdict, and would make BOTH halves
-    # of this test vacuous in the same direction.
+    # EVICT FIRST. `jax.random.key` is jitted, so on a warm cache it is
+    # replayed and the hook is not reached -- B15's finding applied to a test,
+    # and it would make this vacuous in the direction that passes.
     assert _tripwire.evict_trace_caches() == "evicted"
-    for i in range(1, 6):
-        key = jax.random.key(i)
-        jax.random.split(key, 3)
-        jax.random.randint(key, (4,), 0, 255)
-        jax.random.bits(key, (4,))
-    assert eager.TRUNCATIONS == 0, "the eager detector fired inside jax's PRNG"
-    assert eager.CONVERSIONS > 0, "it saw nothing at all, so it proves nothing"
+    with contextlib.nullcontext() if jit_on else jax.disable_jit():
+        for name, entry in PRNG_ENTRY_POINTS.items():
+            try:
+                entry()
+            except stelling.EagerTruncationError as exc:  # pragma: no cover
+                pytest.fail(
+                    f"jax.random.{name} raised inside jax's own PRNG: "
+                    f"{exc.written} -> {exc.became} ({exc.to_dtype}) attributed "
+                    f"to {exc.file}:{exc.line}, which is not a line that wrote it"
+                )
+    assert eager.CONVERSIONS > 0, "the hook saw nothing at all, so this proves nothing"
+    if not jit_on:
+        assert eager.SUPPRESSED_JAX > 0, (
+            "with jit off jax narrows its own threefry mask eagerly and this "
+            "hook must SEE it -- 0 suppressions here means the measurement "
+            "stopped happening, not that the problem went away"
+        )
+        assert eager.snapshot()["suppressed"], "suppressed but not sited"
+        lines = " ".join(
+            report.render_eager(_tripwire.Status(code="armed"), eager.snapshot())
+        )
+        assert "written BY JAX ITSELF" in lines
+        assert "4294967295 -> -1 (int32)" in lines
 
-    # ...and the control, which is the other instrument on the same program
+
+def test_the_origin_answer_does_not_depend_on_a_trace_being_in_progress(armed):
+    """The property the fix is built on, driven as an equality.
+
+    ``record.attribute`` keys the origin question on the trace boundary. There
+    is no trace boundary here, so ``eager._origin`` keys it on the data: did
+    this integer cross the call the user made? A call boundary exists either
+    way -- so the same program must get the same verdict with ``jit`` on and
+    with it off, for jax's constants AND for the user's.
+    """
+    def verdicts():
+        out = {}
+        for name, body in (
+            ("jax's own: jax.random.key", lambda: jax.random.key(11)),
+            ("yours: jnp.full 300 int8", lambda: jnp.full((2,), 300, jnp.int8)),
+            ("yours: fill_value=-1 uint8", lambda: jnp.full((2,), -1, jnp.uint8)),
+            ("in range: jnp.full 44 int8", lambda: jnp.full((2,), 44, jnp.int8)),
+        ):
+            assert _tripwire.evict_trace_caches() == "evicted"
+            try:
+                body()
+                out[name] = "no alarm"
+            except stelling.EagerTruncationError as exc:
+                out[name] = f"raised {exc.written} -> {exc.became}"
+        return out
+
+    with_jit = verdicts()
+    with jax.disable_jit():
+        without_jit = verdicts()
+    assert with_jit == without_jit, (
+        f"the origin decision changed when jit went away: {with_jit} vs "
+        f"{without_jit}"
+    )
+    assert with_jit["jax's own: jax.random.key"] == "no alarm"
+    assert with_jit["yours: jnp.full 300 int8"] == "raised 300 -> 44"
+
+
+def test_the_user_s_own_constants_still_fire_with_jit_OFF(armed):
+    """The other direction of U1: the filter must not have bought silence.
+
+    Every route the detector claims, driven inside ``jax.disable_jit()``,
+    where the version that raised on jax's PRNG at least raised on these too.
+    ``a + 200`` is here because it is the door ``report.UNCOVERED`` says this
+    detector closes for a scoped ``disable_jit`` block, and that claim is now
+    the only thing standing between that bullet and a false one.
+    """
+    fired = {}
+    with jax.disable_jit():
+        for name, route in ROUTES.items():
+            try:
+                route(300)
+                fired[name] = "SILENT"
+            except stelling.EagerTruncationError as exc:
+                fired[name] = (exc.written, exc.became)
+        try:
+            jnp.zeros((3,), jnp.int8) + 200
+            fired["a + 200"] = "SILENT"
+        except stelling.EagerTruncationError as exc:
+            fired["a + 200"] = (exc.written, exc.became)
+    assert fired["a + 200"] == (200, -56)
+    assert all(value != "SILENT" for value in fired.values()), fired
+
+
+#: Four narrowings a user really can write, spelled the way they write them,
+#: and NONE of them is in ROUTES: `jnp.arange` and `.at[].get` reach the site
+#: by their own paths, and the two huge-integer ones are narrowed by x64
+#: canonicalisation rather than by a dtype the caller named. They are here as
+#: the positive control on the origin filter -- a filter that suppressed these
+#: would be a filter that had turned the detector off.
+TRUE_POSITIVES = {
+    "jnp.full((2,), 2**40)": (lambda: jnp.full((2,), 2**40), 2**40),
+    "jnp.arange(2**40, 2**40 + 3)": (lambda: jnp.arange(2**40, 2**40 + 3), 2**40),
+    "jnp.full((3,), -1, uint32)": (lambda: jnp.full((3,), -1, jnp.uint32), -1),
+    "x.at[9].get(fill_value=-1) on uint8": (
+        lambda: jnp.arange(10, dtype=jnp.uint8).at[9].get(mode="fill", fill_value=-1),
+        -1,
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(TRUE_POSITIVES))
+@pytest.mark.parametrize("jit_on", [True, False], ids=["jit-on", "disable_jit"])
+def test_a_constant_the_user_really_wrote_fires_with_jit_ON_or_OFF(armed, name, jit_on):
+    """The origin filter must not have been bought with a missed narrowing."""
+    body, written = TRUE_POSITIVES[name]
+    with contextlib.nullcontext() if jit_on else jax.disable_jit():
+        with pytest.raises(stelling.EagerTruncationError) as caught:
+            body()
+    assert caught.value.written == written
+    assert caught.value.file == __file__, (
+        f"attributed to {caught.value.file}:{caught.value.line} rather than "
+        "to the line in this file that wrote it"
+    )
+
+
+def test_the_const_fold_tripwire_still_needs_ITS_origin_filter(armed):
+    """The control, and it is the other instrument on the same program.
+
+    The const-fold tripwire fires on jax's own PRNG mask at TRACE time and
+    carries ``record.attribute`` and an ``ORIGIN_JAX`` bucket for it. That is
+    the fact that makes the eager hook's own filter the same rule rather than
+    a special case, so if it ever stops being true this says so.
+
+    IT RESTORES RATHER THAN DISARMS. This file is meant to be runnable under
+    ``-p stelling.overflow``, which arms the tripwire for the whole session;
+    a ``finally: disarm()`` here took the session's tripwire out at this test
+    and left every later file unwatched. Same argument as the ``armed``
+    fixture, one instrument over.
+    """
     from stelling._tripwire import record as _record
 
+    was_armed = _tripwire.is_armed()
     fold_status, recorder = _tripwire.arm()
     if not fold_status.armed:  # pragma: no cover - environment
         pytest.skip(fold_status.code)
@@ -1013,7 +1292,90 @@ def test_the_detector_needs_no_origin_filter_and_the_tripwire_does(armed):
         assert suppressed.origin == _record.ORIGIN_JAX
         assert (suppressed.written, suppressed.became) == (4294967295, -1)
     finally:
-        _tripwire.disarm()
+        if not was_armed:
+            _tripwire.disarm()
+
+
+def test_the_arming_ORDER_costs_a_denominator_and_not_a_crash(unarmed):
+    """The plugin arms the report before the rule. The reason is measured here.
+
+    The comment on that line used to say that arming in the other order would
+    make the tripwire's self-check RAISE, disabling the tripwire on a healthy
+    pair of hooks. Driven both ways in fresh interpreters: both report
+    ``armed`` either way. What the reversed order actually costs is that the
+    tripwire's self-check reaches the eager hook with two IN-RANGE
+    conversions, so the session's eager denominator starts at 2 instead of 0 —
+    stelling's own traffic in the user's numerator's denominator, which is
+    small and is not nothing.
+    """
+    program = textwrap.dedent(
+        """
+        from stelling import _tripwire
+        from stelling._tripwire import eager
+
+        if {eager_first}:
+            eager_status = _tripwire.arm_eager()
+            fold_status, _ = _tripwire.arm()
+        else:
+            fold_status, _ = _tripwire.arm()
+            eager_status = _tripwire.arm_eager()
+        print(fold_status.code, eager_status.code, eager.CONVERSIONS,
+              eager.TRUNCATIONS)
+        """
+    )
+    results = {}
+    for label, eager_first in (("report first", False), ("rule first", True)):
+        run = subprocess.run(
+            [sys.executable, "-c", program.format(eager_first=eager_first)],
+            capture_output=True,
+            text=True,
+        )
+        assert run.returncode == 0, run.stderr[-2000:]
+        results[label] = run.stdout.split()
+    if results["report first"][0] != "armed":  # pragma: no cover - environment
+        pytest.skip(f"the tripwire could not arm: {results['report first'][0]}")
+
+    assert [row[:2] for row in results.values()] == [["armed", "armed"]] * 2, (
+        f"arming in one order disabled an instrument: {results}"
+    )
+    assert results["report first"][2:] == ["0", "0"], results
+    assert results["rule first"][2:] == ["2", "0"], (
+        "the reversed order no longer costs the eager denominator the "
+        f"tripwire's own self-check: {results}"
+    )
+
+
+def test_arming_twice_hands_back_the_recorder_that_is_ACTUALLY_recording(armed):
+    """A second ``arm()`` must not return a recorder connected to nothing.
+
+    ``install()`` returns ``already-armed`` without re-wrapping, which is
+    right; ``arm()`` then handed back the fresh ``Recorder()`` it had built on
+    the way in, which is connected to nothing and stays at zero however much
+    the caller traces. Any assertion written against it is false by
+    construction rather than by measurement -- which is exactly how the test
+    above failed under ``-p stelling.overflow``, the mode this project's own
+    docs recommend.
+    """
+    was_armed = _tripwire.is_armed()
+    first_status, first = _tripwire.arm()
+    if not first_status.armed:  # pragma: no cover - environment
+        pytest.skip(first_status.code)
+    try:
+        second_status, second = _tripwire.arm()
+        assert second_status.armed
+        assert second is first, (
+            "the second arm() returned a different recorder from the one the "
+            "live wrapper writes to"
+        )
+        assert _tripwire.evict_trace_caches() == "evicted"
+        before = second.invocations
+        jax.make_jaxpr(lambda x: x + 300)(jnp.zeros((2,), jnp.int8))
+        assert second.invocations > before, (
+            "the recorder arm() handed back saw nothing while the hook fired"
+        )
+    finally:
+        if not was_armed:
+            _tripwire.disarm()
 
 
 # ---------------------------------------------------------------------------

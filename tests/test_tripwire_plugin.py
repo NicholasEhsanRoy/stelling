@@ -770,6 +770,66 @@ def test_a_session_that_asked_for_the_rule_and_cannot_get_it_FAILS(
     assert "signature-drift" not in control.stdout.str()
 
 
+EAGER_DETACHES_MIDWAY = """
+    import jax.numpy as jnp
+
+    def test_1_before():
+        assert int(jnp.full((2,), 5, jnp.int8).sum()) == 10
+
+    def test_2_displace_the_hook():
+        from stelling._tripwire import _adapter_jax as adapter
+        module = adapter._eager_module()
+        setattr(module, adapter.EAGER_ATTR, adapter._eager_installed["original"])
+
+    def test_3_after_and_unwatched():
+        assert int(jnp.full((2,), 300, jnp.int8).sum()) == 88
+"""
+
+
+@pytest.mark.parametrize(
+    "overflow",
+    [(), ("--stelling-overflow=off",), ("--stelling-overflow=auto",)],
+    ids=["eager-alone", "overflow-off", "overflow-auto"],
+)
+def test_the_eager_ESCALATION_does_not_depend_on_the_OTHER_dial(pytester, overflow):
+    """A rule that could not stay attached must fail the session, in every
+    spelling of "the eager detector on".
+
+    THE ESCALATION USED TO SIT BELOW ``if state.recorder is None: return``,
+    which is the tripwire's guard, and ``state.recorder`` is None exactly when
+    ``--stelling-overflow=off`` -- the spelling ``docs/overflow-tripwire.md``
+    recommends for running this detector alone. Measured, with the hook
+    displaced mid-session: eager-alone exited 0, ``--stelling-overflow=off``
+    exited 0, and only ``--stelling-overflow=auto`` exited 1. The two
+    instruments are two dials and neither may need the other switched on.
+    """
+    pytester.makepyfile(EAGER_DETACHES_MIDWAY)
+    result = _run(pytester, "--stelling-eager-truncation=error", *overflow)
+    out = result.stdout.str()
+    assert result.ret != 0, (
+        "the eager detector was displaced mid-session and the session passed:"
+        f"\n{out[-3000:]}"
+    )
+    assert "foreign-patch" in out or "detached" in out, out[-3000:]
+
+
+def test_the_same_session_with_the_eager_hook_LEFT_ALONE_is_green(pytester):
+    """The control. A check that failed every session would satisfy the test
+    above, so the same three tests without the displacement must pass."""
+    pytester.makepyfile(
+        EAGER_DETACHES_MIDWAY.replace(
+            'setattr(module, adapter.EAGER_ATTR, adapter._eager_installed["original"])',
+            "assert module is not None",
+        ).replace("jnp.full((2,), 300, jnp.int8).sum()) == 88",
+                  "jnp.full((2,), 3, jnp.int8).sum()) == 6")
+    )
+    result = _run(
+        pytester, "--stelling-eager-truncation=error", "--stelling-overflow=off"
+    )
+    assert result.ret == 0, result.stdout.str()[-3000:]
+    assert "NOT ARMED" not in result.stdout.str()
+
+
 # --- the eager detector's xdist aggregation, without xdist --------------------
 #
 # `tests/test_tripwire_xdist.py` drives a real worker split and SKIPS in every
@@ -792,14 +852,18 @@ def test_two_workers_eager_snapshots_are_summed_and_their_sites_kept():
 
     a = {
         "conversions": 10, "truncations": 2, "internal_errors": 1,
+        "suppressed_jax": 1, "inconclusive": 0,
         "declared": {"f.py:1": [1, "300 -> 44 (int8)"]},
         "permitted": {"g.py:9": [2, "because"]},
+        "suppressed": {"y.py:3": [1, "4294967295 -> -1 (int32)"]},
     }
     b = {
         "conversions": 5, "truncations": 1, "internal_errors": 0,
+        "suppressed_jax": 2, "inconclusive": 1,
         "declared": {"f.py:1": [3, "300 -> 44 (int8)"],
                      "h.py:7": [1, "255 -> -1 (int8)"]},
         "permitted": {},
+        "suppressed": {"y.py:3": [2, "4294967295 -> -1 (int32)"]},
     }
     merged = _merge_eager(_merge_eager(None, a), b)
     assert merged["conversions"] == 15
@@ -808,6 +872,19 @@ def test_two_workers_eager_snapshots_are_summed_and_their_sites_kept():
     assert merged["declared"]["f.py:1"][0] == 4, "the same site did not sum"
     assert merged["declared"]["h.py:7"][0] == 1
     assert merged["permitted"]["g.py:9"] == [2, "because"]
+    # EVERY KEY THE SNAPSHOT CARRIES HAS TO BE IN THE MERGE, or a worker's
+    # figure is silently dropped on the controller. Asserted against the
+    # snapshot itself rather than against a list typed here.
+    assert merged["suppressed_jax"] == 3
+    assert merged["inconclusive"] == 1
+    assert merged["suppressed"]["y.py:3"][0] == 3
+    from stelling._tripwire import eager as _eager
+
+    dropped = set(_eager.snapshot()) - set(merged)
+    assert not dropped, (
+        f"the merge drops {sorted(dropped)}, so an xdist controller prints a "
+        "total that is missing a worker's figure"
+    )
 
 
 def test_the_controller_reports_its_workers_agreement_and_says_so_when_there_is_none():

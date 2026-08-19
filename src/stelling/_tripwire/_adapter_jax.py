@@ -761,6 +761,17 @@ def install(recorder: record.Recorder) -> str:
     return "installed"
 
 
+def installed_recorder():
+    """The :class:`record.Recorder` the LIVE wrapper writes to, or None.
+
+    Exists so that :func:`_tripwire.arm` can hand back the recorder that is
+    actually connected when it finds the process already armed, instead of the
+    fresh one it built on the way in. A ``Recorder`` is strings, ints and
+    tuples, so nothing jax-shaped crosses this boundary by returning it.
+    """
+    return _installed.get("recorder")
+
+
 def restore() -> str:
     """Put the original rule back, **by identity**.
 

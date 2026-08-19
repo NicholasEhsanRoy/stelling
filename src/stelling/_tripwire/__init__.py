@@ -98,19 +98,26 @@ _EXPLAIN = {
         "this jax is older than the version whose const-fold rule this tool "
         "was written against."
     ),
+    # THESE TWO CODES ARE RAISED BY BOTH INSTRUMENTS, so they name both
+    # attachment points. They used to say "in the registry", which is the
+    # const-fold tripwire's; the eager detector attaches to a module
+    # ATTRIBUTE, and a user reading `foreign-patch` off the eager section was
+    # sent to look at a registry that has nothing to do with it.
     "foreign-patch": (
-        "the tripwire armed and something else replaced its wrapper in the "
-        "registry before the session ended, so an unmeasured part of this run "
-        "ran uninstrumented. Whatever replaced it is left in place rather "
-        "than clobbered."
+        "the instrument armed and something else replaced its wrapper -- the "
+        "tripwire's entry in the const-fold registry, or the eager "
+        "detector's module attribute -- before the session ended, so an "
+        "unmeasured part of this run ran uninstrumented. Whatever replaced it "
+        "is left in place rather than clobbered."
     ),
     "detached": (
-        "the tripwire armed and was taken back out of the registry before the "
-        "session ended -- a mid-run `disarm()`, or a nested pytest session "
-        "that enabled the tripwire and restored the original when it "
-        "finished. An unmeasured part of this run therefore ran "
-        "uninstrumented, and anything reported below covers only the part "
-        "that did not."
+        "the instrument armed and its wrapper was taken back out -- of the "
+        "const-fold registry for the tripwire, or off the module attribute "
+        "for the eager detector -- before the session ended: a mid-run "
+        "`disarm()`, or a nested pytest session that enabled it and restored "
+        "the original when it finished. An unmeasured part of this run "
+        "therefore ran uninstrumented, and anything reported below covers "
+        "only the part that did not."
     ),
     # The two codes an xdist CONTROLLER can carry. It never arms -- with `-n
     # auto` it runs no tests -- so its status is its workers' agreement, and
@@ -287,6 +294,21 @@ def arm(recorder=None):
         installed = adapter.install(rec)
         if installed not in ("installed", "already-armed"):
             return status(installed), rec
+        if installed == "already-armed":
+            # THE RECORDER THIS RETURNS MUST BE THE ONE THE LIVE WRAPPER
+            # WRITES TO. Arming twice does not re-wrap -- correctly -- but the
+            # fresh `Recorder()` above was then handed back to a caller who
+            # had no way to know it was connected to nothing. Measured: under
+            # `-p stelling.overflow`, which arms the tripwire for the whole
+            # session, a test that called `arm()` again got a recorder whose
+            # counters stayed at zero however much it traced, so an assertion
+            # about what the tripwire saw was false BY CONSTRUCTION rather
+            # than by measurement. A caller that passed its own recorder gets
+            # the live one back instead: "here is what is actually recording"
+            # is the only honest answer this function has.
+            live = adapter.installed_recorder()
+            if live is not None:
+                rec = live
 
         probe = adapter.selfcheck()
         if probe != "armed":

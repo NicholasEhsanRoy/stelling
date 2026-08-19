@@ -23,11 +23,14 @@ six of the seven unwatched ones narrow at that one line.
 
 THE TWO MODES, AND THIS IS THE SECOND. Mode 1 would record the eager narrowing
 and refuse the verdict from inside ``preconditions.check()``'s trace gate, which
-needs ATTRIBUTION: some way to decide that the constant destroyed at 11:04 is
-the constant the trace at 11:05 is standing on. That is not built here. Mode 2
-needs no attribution at all, because it never has to connect two events: it
-raises **at the construction site**, in the frame that wrote the constant,
-while that frame is still on the stack.
+needs ATTRIBUTION ACROSS TIME: some way to decide that the constant destroyed
+at 11:04 is the constant the trace at 11:05 is standing on. That is not built
+here, and Mode 2 needs none of it, because it never has to connect two events:
+it raises **at the construction site**, while the frame that made the call is
+still on the stack. What it does need, and what the first version of it did
+not have, is attribution of ORIGIN at that one moment — whether the constant
+came out of that frame or out of jax. :func:`_origin` is that, and the
+paragraph below is why it is not optional.
 
 **IT IS OPT-IN AND OFF BY DEFAULT.** Nothing here is armed by importing
 ``stelling``, by importing this module, or by running pytest with the tripwire
@@ -62,20 +65,45 @@ program's errors to handle.
 it.** ``except BaseException:``, a bare ``except:``, and
 ``contextlib.suppress(BaseException)`` all still catch this, and
 ``sys.excepthook`` still runs. The claim is narrow and is exactly this: the
-COMMON swallow does not catch it. A census with this armed -- 25 module
-imports, then eleven real workloads across eight of those libraries -- gives
-**0 fires over 94 scalar integer conversions**, so the radius in which the
-choice matters at all is small. The census is in
-``design/eager-truncation-detector.md`` and is driven by
-``tests/test_tripwire_eager.py``.
+COMMON swallow does not catch it. A census with this armed -- 122 module
+imports covering 64 third-party top-level packages, then 33 real workloads
+across 24 of them -- gives **0 fires in any third-party workload with ``jit``
+on**: 174 scalar integer conversions and 0 truncations over the imports, then
+264 conversions and exactly 1 truncation over the workloads, and that one is a
+control of this project's own that must fire and does. Every one of those
+figures is identical on jax 0.11.0 and 0.10.2. So the radius in which the
+choice matters
+at all is small. **THAT FIGURE IS FOR ``jit`` ON AND THAT QUALIFIER IS
+LOAD-BEARING**, which the paragraph below is about: with ``JAX_DISABLE_JIT=1``
+the same 33 workloads see 1225 conversions and 14 truncations, twelve of them
+jax's own. The census is in ``design/eager-truncation-detector.md`` and is
+driven by ``tests/test_tripwire_eager.py``.
 
-**IT NEEDS NO ORIGIN FILTER, and that is measured rather than hoped.** The
-const-fold tripwire fires on JAX'S OWN constants -- ``jax.random.key(0)``
-folds ``4294967295 -> -1`` inside ``threefry2x32.py`` -- and carries a whole
-attribution machinery to keep that out of a user's findings. This never sees
-it: the same program gives 2 scalar conversions and 0 truncations here. That
-is a property of WHERE the two hooks sit rather than of anything clever, and
-it is what makes an alarm that stops the program affordable at all.
+**IT NEEDS AN ORIGIN FILTER, AND THE FIRST VERSION OF THIS PARAGRAPH SAID IT
+DID NOT.** What it said was that the const-fold tripwire fires on JAX'S OWN
+constants -- ``jax.random.key(0)`` folds ``4294967295 -> -1`` inside
+``threefry2x32.py`` -- and that this hook never sees it, so it needs none of
+that machinery. **That is true with ``jit`` on and false in a mode users
+deliberately turn on.** Under ``jax.disable_jit()`` jax evaluates the
+threefry mask eagerly, it reaches this site as a written scalar, and the
+version without a filter raised ``EagerTruncationError(4294967295 -> -1,
+int32)`` inside jax's own PRNG. Measured on jax 0.11.0 and 0.10.2: every
+``jax.random.*`` entry point, and EIGHT of the thirty-three workloads in this
+project's census under ``JAX_DISABLE_JIT=1`` -- the roster and the numbers are
+in ``design/eager-truncation-detector.md``, and they include one library's
+whole test suite, reached through a public API that installs
+``jax.disable_jit()`` for the duration of a test. The message then asked the
+user to declare a constant they never wrote, at a line inside a third-party
+library they cannot edit, and ``except Exception:`` could not contain it.
+
+So :func:`_origin` answers the origin question here, and it answers it from
+the DATA rather than from the frames, because at this site the frames cannot:
+``jnp.full((), 256, jnp.int8)`` and ``jax.random.key(0)`` present the same
+stack shape. The rule is *"is the narrowed integer among the arguments of the
+call that crossed out of non-jax code into jax?"*, it is the same question
+``record.attribute`` asks at the other hook, and it does not depend on a trace
+being in progress. Suppressions are counted in :data:`SUPPRESSED` and printed
+with their sites; a filter nobody can see is the same defect as a silence.
 
 **WHAT IT COSTS, said plainly.** ``finally:`` blocks still run and context
 managers' ``__exit__`` still runs, so ordinary resource cleanup is unaffected.
@@ -99,10 +127,19 @@ It cannot be done, and this was measured rather than asserted.
 ``jnp.full((4,), 0xFF, jnp.int8)`` and ``jnp.full((4,), 255, jnp.int8)``
 produce **identical observations at the hook**: the same written value, the
 same target dtype, the same result, the same frame. They differ only in the
-source TEXT, which is not available as data at the point the decision has to be
-made and which a variable, a computed value or a constant defined in another
-module does not carry at all. Intent is therefore not a function of
-``(value, dtype, result)``, and no rule over that data can be sound.
+source TEXT.
+
+**And the source text IS reachable** -- ``record.source_line(file, line)``
+returns it and :func:`_message` calls it three statements later, so the
+sentence this paragraph used to carry ("not available as data at the point the
+decision has to be made") was false about this module's own code. The ruling
+stands on its other leg, which is the one that cannot be argued away: a
+variable, an imported constant, a computed value and a constant defined in
+another module carry NO text at the site at all, so a rule that reads the line
+is a rule that works for literals and abstains for everything else -- and
+``jnp.full(shape, MASK, jnp.int8)`` with ``MASK = 0xFF`` one module over is
+the mask idiom the rule was supposed to recognise. Intent is therefore not a
+function of ``(value, dtype, result)``, and not a function of the line either.
 
 Two candidate rules were driven over a corpus of real narrowings:
 
@@ -136,11 +173,21 @@ shape was chosen over a flag, a suppression list, or a decorator:
 * **It cannot license a different site.** It is a value, not a mode: it changes
   what happens at the one expression it is written in and has no effect
   anywhere else, in any other thread, or one line later.
-* **It cannot license a different dtype.** The dtype is half the declaration.
-  ``intentional_wrap(0xFF, "int8")`` used where a ``uint8`` is wanted yields
-  ``-1``, which is out of range for ``uint8``, so the detector fires on the
-  declared value. A declaration that drifted from its use is caught, not
-  honoured.
+* **It cannot hide a truncation at a different dtype** -- which is a
+  narrower claim than the one that used to stand here, *"it cannot license a
+  different dtype"*, and the narrower one is the true one. Sometimes the
+  drifted declaration is caught: ``intentional_wrap(0xFF, "int8")`` is ``-1``,
+  which ``uint8`` cannot hold, so the detector fires on the declared value.
+  Often it is not: ``intentional_wrap(300, "int8")`` is ``44``, which every
+  other integer dtype holds comfortably. Measured over this project's own
+  ``WRAP_GRID`` against the seven other dtypes -- 98 (declaration, misuse)
+  pairs -- **53 of them (54%) pass silently** and 45 fire. What survives is
+  the safety property rather than the detection: in every silent case the
+  value written at the new site is IN RANGE there, so the site performs no
+  narrowing at all and there is no truncation for the declaration to have
+  hidden. What a drifted declaration can still do is write the wrong constant
+  -- ``44`` where ``300`` was meant -- and that is a bug this instrument does
+  not claim to catch, in either direction, and says so.
 
 :func:`expected_truncation` is the second, and it exists for one narrow case:
 code whose SUBJECT is the truncation. This repository has several — the doors
@@ -149,17 +196,19 @@ narrow in silence, and ``SOUNDNESS.md``'s reproducer exists to be executed and
 observed wrapping. Rewriting those with :func:`intentional_wrap` would delete
 the demonstration: the point of the line is that ``300`` becomes ``44``, and a
 line that writes ``44`` no longer shows it. So a region declaration exists, and
-it is deliberately awkward — it takes a mandatory reason, it is a context
-manager and therefore lexically bounded, it is thread-local, and **every
+it is deliberately awkward — it takes a mandatory reason, and **every
 truncation it permits is counted and named in the report**. An opt-out that
 hid what it suppressed would be the same silence this module exists to end.
+It is DYNAMICALLY scoped — this said "a context manager and therefore
+lexically bounded", which a context manager cannot be; the class docstring
+carries the three measured directions and the one residue.
 """
 
 from __future__ import annotations
 
+import contextvars
 import os
 import sys
-import threading
 
 from stelling._tripwire import record
 
@@ -243,8 +292,31 @@ def dtype_name(dtype) -> str:
 DECLARED: dict[tuple[str, int], list] = {}
 
 #: The same, for truncations permitted by an :func:`expected_truncation`
-#: region: ``(file, line)`` -> ``[count, reason]``.
+#: region: ``(file, line)`` -> ``[count, reason]``. When two regions permit
+#: at one site the reasons are JOINED rather than overwritten: a row that kept
+#: only the last one answered "why was this permitted?" with one of the
+#: answers and no sign that there had been another.
 PERMITTED: dict[tuple[str, int], list] = {}
+
+#: ``(file, line)`` -> ``[count, text]`` for every narrowing :func:`_origin`
+#: attributed to JAX ITSELF rather than to the code that called it. The site
+#: is the user's own call, because that is the line a reader recognises; the
+#: text names the jax function underneath it.
+#:
+#: DISCLOSED, EXACTLY AS THE CONST-FOLD TRIPWIRE'S ``suppressed_jax`` IS.
+#: A filter that only ever speaks up when it catches nothing is
+#: indistinguishable from no filter; one that suppresses silently is
+#: indistinguishable from a hook that went blind.
+SUPPRESSED: dict[tuple[str, int], list] = {}
+
+#: How many out-of-range narrowings :func:`_origin` attributed to jax.
+SUPPRESSED_JAX = 0
+
+#: How many origin decisions were made on an INCOMPLETE scan of the boundary
+#: call's arguments and therefore fell back to "the user's" (``record.carries``
+#: returning None). Printed when non-zero: it is the count of alarms this
+#: instrument raised without having established the thing it says.
+INCONCLUSIVE = 0
 
 #: How many scalar integer->integer conversions the hook has seen, in total.
 #: THE DENOMINATOR, and it is printed whether or not anything fired: "0
@@ -304,26 +376,39 @@ def intentional_wrap(value, dtype):
     file, line, func = _writer_frame(1)
     entry = DECLARED.setdefault((file, line), [0, ""])
     entry[0] += 1
-    entry[1] = f"{value} -> {wrapped} ({name}), in {func}()"
+    # A DECLARATION OF A VALUE THAT DOES NOT WRAP IS STILL RECORDED, AND SAYS
+    # SO. `intentional_wrap(44, "int8")` is 44: the author declared a wrap
+    # that is not there, which is worth seeing -- a stale declaration left
+    # behind after the value or the dtype changed looks exactly like this --
+    # and dropping the row would report it as no declaration at all.
+    entry[1] = _join_reason(
+        entry[1],
+        f"{value} -> {wrapped} ({name}), in {func}()"
+        if wrapped != value
+        else f"{value} ({name}), in {func}() -- NO WRAP: already in range",
+    )
     return wrapped
 
 
-class _Regions(threading.local):
-    """Per-thread :func:`expected_truncation` nesting.
-
-    THREAD-LOCAL, and that is the same discipline the trace gate's fire counter
-    already uses. A region is a statement about the code inside a ``with``
-    block on one thread; making it process-global would let one thread's
-    demonstration license another thread's accident, which is precisely the
-    "silently license a different site" failure the declaration design is
-    built to avoid.
-    """
-
-    def __init__(self):
-        self.stack: list[tuple[str, str, int]] = []
-
-
-_REGIONS = _Regions()
+#: The :func:`expected_truncation` nesting, as a CONTEXT VARIABLE holding an
+#: immutable tuple of ``(reason, file, line)``, outermost first.
+#:
+#: A ``threading.local`` was the first implementation and it was wrong in one
+#: measured direction: a ``contextvars.ContextVar`` is per-thread AND per
+#: asyncio task, and a ``threading.local`` is only the first. Measured on
+#: CPython 3.12, a region held open by one task across an ``await``:
+#: thread-local licensed a truncation in a SECOND task on the same loop;
+#: context variable does not, because ``asyncio`` runs every task in a copy of
+#: the context it was created in. Threads are correct under both.
+#:
+#: **What no dynamic mechanism can fix, and is therefore disclosed rather than
+#: claimed away:** a plain generator does NOT get a context of its own — PEP
+#: 550/568 was never implemented — so a region entered inside a generator that
+#: then yields is still open in whatever code resumes it. That is measured in
+#: ``tests/test_tripwire_eager.py`` and named in the class docstring.
+_REGIONS: contextvars.ContextVar = contextvars.ContextVar(
+    "stelling_expected_truncation", default=()
+)
 
 
 class expected_truncation:  # noqa: N801 - a context manager reads as a verb
@@ -340,18 +425,43 @@ class expected_truncation:  # noqa: N801 - a context manager reads as a verb
     :func:`intentional_wrap` cannot serve those: writing the wrapped value
     deletes the very thing being demonstrated.
 
-    IT IS DELIBERATELY THE AWKWARD ONE. The reason is mandatory; the region is
-    lexically bounded and thread-local; nesting is honoured; and every
-    truncation it permits is counted in :data:`PERMITTED`, printed in the
-    report with its site and its reason, and included in the numerator. An
-    opt-out that hid what it suppressed would reintroduce the silence this
-    module exists to end, one level up.
+    IT IS DELIBERATELY THE AWKWARD ONE. The reason is mandatory; nesting is
+    honoured; and every truncation it permits is counted in
+    :data:`PERMITTED`, printed in the report with its site and its reason,
+    and included in the numerator. An opt-out that hid what it suppressed
+    would reintroduce the silence this module exists to end, one level up.
+
+    IT IS DYNAMICALLY SCOPED TO ONE CONTEXT'S REGION STACK, AND *NOT*
+    LEXICALLY BOUNDED. That sentence used to read "lexically bounded", which
+    is what the ``with`` statement looks like and not what any context manager
+    can deliver. What it actually is, measured in
+    ``tests/test_tripwire_eager.py``:
+
+    * **Threads: isolated.** A region on one thread licenses nothing on
+      another.
+    * **asyncio tasks: isolated**, because the stack is a
+      :mod:`contextvars` variable and every task runs in its own copy of the
+      context. A ``threading.local`` licensed a second task on the same loop;
+      this does not.
+    * **Generators: NOT isolated, and this is the residue.** A plain
+      generator shares its caller's context, so a region entered inside one
+      that then yields stays open in whatever code resumes it, until
+      the generator is resumed to completion, closed, or collected. Python
+      offers no mechanism that fixes this; it is disclosed here, driven in
+      the suite, and it is another reason this declaration is the awkward one
+      and :func:`intentional_wrap` is the primary.
 
     It is NOT the answer to "the detector is noisy in my code" — that answer is
     :func:`intentional_wrap` at the site, or not arming the detector at all.
     """
 
-    __slots__ = ("_reason", "_frame")
+    #: The reset tokens for the entries this OBJECT has pushed, a stack and
+    #: not one token, so that re-entering the same instance -- ``region =
+    #: expected_truncation(...)`` used twice, nested -- pops what it pushed.
+    #: A single slot lost the outer token on the inner ``__enter__`` and left
+    #: the outer entry on the stack forever; the list-and-pop it replaced
+    #: handled that case and this must not be a regression from it.
+    __slots__ = ("_reason", "_frame", "_tokens")
 
     def __init__(self, reason: str):
         if not isinstance(reason, str) or not reason.strip():
@@ -362,16 +472,31 @@ class expected_truncation:  # noqa: N801 - a context manager reads as a verb
             )
         self._reason = reason.strip()
         self._frame = None
+        self._tokens = []
 
     def __enter__(self):
         file, line, func = _writer_frame(1)
         self._frame = (file, line)
-        _REGIONS.stack.append((self._reason, file, line))
+        self._tokens.append(
+            _REGIONS.set(_REGIONS.get() + ((self._reason, file, line),))
+        )
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if _REGIONS.stack:
-            _REGIONS.stack.pop()
+        if not self._tokens:  # pragma: no cover - defensive
+            return False
+        token = self._tokens.pop()
+        try:
+            _REGIONS.reset(token)
+        except ValueError:
+            # The token was created in a different context -- a ``with`` block
+            # entered in one task and exited in another. Popping one entry is
+            # the graceful degradation; clearing the stack would retire an
+            # ENCLOSING region that is still open, which is the one direction
+            # a failure here must not take.
+            stack = _REGIONS.get()
+            if stack:
+                _REGIONS.set(stack[:-1])
         return False
 
 
@@ -389,37 +514,140 @@ _STELLING_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + o
 _JAX_ROOT = ""
 
 
-def _writer_frame(skip: int) -> tuple[str, int, str]:
-    """The innermost frame outside jax and outside stelling: the writer.
+def _in_jax(name: str) -> bool:
+    absolute = os.path.abspath(name) if os.path.sep in name else name
+    return bool(_JAX_ROOT) and absolute.startswith(_JAX_ROOT)
 
-    Same rule as ``record.attribute`` and stated in the same words in the
-    report — *the innermost frame OUTSIDE JAX, your own code or a library you
-    called that is not jax*. It is a filter and not a lookup, and it can be
-    wrong in the one direction the report already discloses: a constant written
-    inside a third-party library is attributed to that library's line, which is
-    correct and is not "your own code".
 
-    Falls back to the outermost frame rather than to nothing: an alarm that
-    cannot say where is still an alarm, and ``<unknown>:0`` in a message is a
-    defect a reader can report.
+def _in_stelling(name: str) -> bool:
+    absolute = os.path.abspath(name) if os.path.sep in name else name
+    return absolute.startswith(_STELLING_ROOT)
+
+
+def _walk(skip: int):
+    """One walk out from the hook: ``(writer, boundary)``.
+
+    ``writer`` is ``(file, line, func)`` for the innermost frame outside jax
+    and outside stelling — *the innermost frame OUTSIDE JAX, your own code or
+    a library you called that is not jax*, in the same words the report uses.
+    It is a filter and not a lookup, and it can be wrong in the one direction
+    the report already discloses: a constant written inside a third-party
+    library is attributed to that library's line, which is correct and is not
+    "your own code". It falls back to the outermost frame rather than to
+    nothing: an alarm that cannot say where is still an alarm, and
+    ``<unknown>:0`` in a message is a defect a reader can report.
+
+    ``boundary`` is the **outermost jax frame inside that writer** — the jax
+    function the writer actually called — or None if there is no jax frame
+    between the hook and the writer at all, which is what a direct call to
+    :func:`observe` looks like. It is a frame OBJECT and it does not leave
+    this module: :func:`_origin` reads its arguments, decides, and drops it.
     """
     try:
         frame = sys._getframe(skip + 1)
     except ValueError:  # pragma: no cover - defensive
-        return "<unknown>", 0, "?"
+        return ("<unknown>", 0, "?"), None
     last = ("<unknown>", 0, "?")
+    boundary = None
     while frame is not None:
         name = frame.f_code.co_filename
         last = (name, frame.f_lineno, frame.f_code.co_name)
-        absolute = os.path.abspath(name) if os.path.sep in name else name
-        if absolute.startswith(_STELLING_ROOT):
+        if _in_stelling(name):
             frame = frame.f_back
             continue
-        if _JAX_ROOT and absolute.startswith(_JAX_ROOT):
+        if _in_jax(name):
+            boundary = frame
             frame = frame.f_back
             continue
-        return name, frame.f_lineno, frame.f_code.co_name
-    return last
+        return (name, frame.f_lineno, frame.f_code.co_name), boundary
+    return last, boundary
+
+
+def _writer_frame(skip: int) -> tuple[str, int, str]:
+    """The innermost frame outside jax and outside stelling: the writer."""
+    return _walk(skip + 1)[0]
+
+
+def _argument_values(frame) -> list:
+    """Exactly the values the caller handed this frame: its parameters.
+
+    Parameters and not ``f_locals``, which by the time the hook runs also
+    holds whatever the function has computed since — including, in a jax
+    entry point, constants of jax's own. What crossed the boundary is the
+    argument list, so the argument list is what is read.
+    """
+    code = frame.f_code
+    count = code.co_argcount + code.co_kwonlyargcount
+    names = list(code.co_varnames[:count])
+    index = count
+    if code.co_flags & 0x04:  # CO_VARARGS
+        names.append(code.co_varnames[index])
+        index += 1
+    if code.co_flags & 0x08:  # CO_VARKEYWORDS
+        names.append(code.co_varnames[index])
+    local = frame.f_locals
+    return [local[name] for name in names if name in local]
+
+
+def _origin(written: int, skip: int):
+    """Did the USER write this constant, or did jax? ``(origin, writer, where, scan)``.
+
+    THE QUESTION ``record.attribute`` ANSWERS FOR THE OTHER HOOK, ASKED WHERE
+    ITS EVIDENCE DOES NOT EXIST. ``attribute`` keys on the trace boundary: the
+    frame immediately inside the innermost trace entry is the function being
+    traced, and if that function is jax's own then jax wrote the constant.
+    Its docstring records what happens without that signal — *"innermost
+    non-jax frame ... would print the user's ``jax.random.key(0)`` line and
+    claim they wrote ``4294967295``"* — and ``_writer_frame`` above IS
+    "innermost non-jax frame".
+
+    At an EAGER narrowing there is no trace boundary to key on, and measured
+    (jax 0.11.0, ``jax.disable_jit()``) there is no frame shape to key on
+    either: ``jnp.full((), 256, jnp.int8)`` and ``jax.random.key(0)`` both
+    present as a user frame with nothing but jax frames beneath it. The two
+    stacks are printed side by side in ``record.carries``.
+
+    So the evidence is the DATA. ``256`` crossed out of the user's frame as an
+    argument of the call they made; ``4294967295`` was manufactured nine
+    frames below that call and is in nothing they handed over. The question
+    asked here is therefore:
+
+        is the narrowed integer among the arguments of the call that crossed
+        out of non-jax code into jax?
+
+    and a call boundary exists whether or not a trace is in progress, which is
+    exactly why this answer **does not depend on ``jit``**. Under ``jit`` the
+    same test gives the same answers on the same programs; under
+    ``jax.disable_jit()``, ``JAX_DISABLE_JIT=1``, ``chex.fake_jit()`` and
+    ``chex.fake_pmap_and_jit()`` it keeps giving them, which the version this
+    replaces did not: it raised inside jax's own PRNG in eight of the
+    workloads in this project's census.
+
+    ``ORIGIN_JAX`` — the suppression — requires POSITIVE evidence: a jax
+    boundary, and a scan of its arguments that COMPLETED and found nothing.
+    Everything else is ``ORIGIN_USER``, including a scan that ran out of
+    budget (``scan is None``, counted in :data:`INCONCLUSIVE`) and the case
+    with no jax frame at all. Over-reporting is visible to a reader who has
+    the quoted line; a suppressed narrowing is not — the same direction
+    ``record.attribute``'s own fallback leans, for the same stated reason.
+
+    THE RESIDUE, AND IT IS THE PRICE OF A VALUE TEST: a constant jax wrote
+    that happens to EQUAL something you passed at that call is attributed to
+    you. Measured: ``jax.random.PRNGKey(4294967295)`` fires, because jax's
+    threefry mask is 4294967295 and so is the seed. That is the lenient
+    direction and it is disclosed in ``report.EAGER_UNCOVERED``.
+    """
+    writer, boundary = _walk(skip + 1)
+    if boundary is None:
+        return record.ORIGIN_USER, writer, "", True
+    where = (
+        f"{boundary.f_code.co_filename}:{boundary.f_lineno}"
+        f", in {boundary.f_code.co_name}()"
+    )
+    scan = record.carries(_argument_values(boundary), written)
+    if scan is False:
+        return record.ORIGIN_JAX, writer, where, scan
+    return record.ORIGIN_USER, writer, where, scan
 
 
 def observe(written: int, to_dtype: str) -> None:
@@ -430,24 +658,45 @@ def observe(written: int, to_dtype: str) -> None:
     ``tests/test_tripwire_eager.py`` does for the branches that do not need a
     trace.
 
-    Raises :class:`EagerTruncationError` when the value does not fit and no
-    declaration covers it. Returns ``None`` in every other case, including
-    when a declaration DOES cover it: a permitted truncation is counted and
-    recorded, never silently dropped.
+    THE ORDER IS ORIGIN, THEN REGION, THEN RAISE, and it is that order because
+    they are three different kinds of statement. :func:`_origin` is an
+    ATTRIBUTION — jax's own constant is not the user's to declare, and a
+    region that happened to be open around it did not permit it. A region is a
+    PERMISSION over the user's own truncations. Only what is the user's and
+    unpermitted reaches the raise.
+
+    Raises :class:`EagerTruncationError` when the value does not fit, is the
+    user's, and no declaration covers it. Returns ``None`` in every other
+    case, including when a declaration or the origin filter covers it: nothing
+    is silently dropped, and every bucket is counted and printed.
     """
-    global CONVERSIONS, TRUNCATIONS
+    global CONVERSIONS, TRUNCATIONS, SUPPRESSED_JAX, INCONCLUSIVE
 
     CONVERSIONS += 1
     if record.in_range(written, to_dtype):
         return
     TRUNCATIONS += 1
 
-    file, line, func = _writer_frame(1)
-    if _REGIONS.stack:
-        reason = _REGIONS.stack[-1][0]
+    origin, (file, line, func), where, scan = _origin(written, 1)
+    if scan is None:
+        INCONCLUSIVE += 1
+    if origin == record.ORIGIN_JAX:
+        SUPPRESSED_JAX += 1
+        entry = SUPPRESSED.setdefault((file, line), [0, ""])
+        entry[0] += 1
+        entry[1] = _join_reason(
+            entry[1],
+            f"{written} -> {record.narrow(written, to_dtype)} ({to_dtype}), "
+            f"written by jax below your call to {where}",
+        )
+        return
+
+    stack = _REGIONS.get()
+    if stack:
+        reason = stack[-1][0]
         entry = PERMITTED.setdefault((file, line), [0, reason])
         entry[0] += 1
-        entry[1] = reason
+        entry[1] = _join_reason(entry[1], reason)
         return
 
     became = record.narrow(written, to_dtype)
@@ -460,6 +709,23 @@ def observe(written: int, to_dtype: str) -> None:
         line=line,
         func=func,
     )
+
+
+#: How many distinct reasons one PERMITTED row keeps before it stops adding.
+#: A row is a line in a report, not a log.
+MAX_REASONS = 4
+
+
+def _join_reason(existing: str, reason: str) -> str:
+    """Accumulate the reasons at one site, in first-seen order, without repeats."""
+    if not existing:
+        return reason
+    reasons = [part for part in existing.split(" | ") if part != "..."]
+    if reason in reasons:
+        return existing
+    if len(reasons) >= MAX_REASONS:
+        return " | ".join(reasons + ["..."])
+    return " | ".join(reasons + [reason])
 
 
 def _message(written, to_dtype, became, file, line, func) -> str:
@@ -526,12 +792,15 @@ def reset_counters() -> None:
     can say its figures are partial rather than quietly presenting a fragment
     as a total.
     """
-    global CONVERSIONS, TRUNCATIONS, RESETS
+    global CONVERSIONS, TRUNCATIONS, RESETS, SUPPRESSED_JAX, INCONCLUSIVE
     CONVERSIONS = 0
     TRUNCATIONS = 0
+    SUPPRESSED_JAX = 0
+    INCONCLUSIVE = 0
     RESETS += 1
     DECLARED.clear()
     PERMITTED.clear()
+    SUPPRESSED.clear()
 
 
 def internal_errors() -> int:
@@ -555,6 +824,8 @@ def snapshot() -> dict:
     return {
         "conversions": CONVERSIONS,
         "truncations": TRUNCATIONS,
+        "suppressed_jax": SUPPRESSED_JAX,
+        "inconclusive": INCONCLUSIVE,
         "resets": RESETS,
         "internal_errors": internal_errors(),
         "declared": {
@@ -564,6 +835,10 @@ def snapshot() -> dict:
         "permitted": {
             f"{file}:{line}": [count, reason]
             for (file, line), (count, reason) in sorted(PERMITTED.items())
+        },
+        "suppressed": {
+            f"{file}:{line}": [count, text]
+            for (file, line), (count, text) in sorted(SUPPRESSED.items())
         },
     }
 

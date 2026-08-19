@@ -23,6 +23,49 @@ import pytest
 from stelling._tripwire import record, report
 
 
+@pytest.fixture(autouse=True)
+def _neither_instrument_is_left_in_a_different_state():
+    """Every test in this file leaves the process's hooks as it found them.
+
+    THIS FILE IS PURE PYTHON AND STILL DRIVES THE CANARY, which arms and
+    disarms both instruments for real. One test here stubbed the tripwire's
+    half and not the eager one, so ``canary.main()`` called the real
+    ``disarm_eager()`` and a session running with
+    ``--stelling-eager-truncation=error`` lost its detector at this file and
+    ran every later file unwatched -- silently, because the escalation that
+    would have said so was unreachable. The rule is the same one
+    ``tests/test_tripwire_eager.py`` applies to itself, and it is asserted
+    rather than trusted because "silently" is the whole problem.
+
+    It reads the state through a helper that answers ``False`` with no jax
+    installed, so it costs the zero-dependency lane nothing.
+    """
+    from stelling._tripwire import eager as _eager
+
+    def state():
+        try:
+            return _eager.is_armed(), _tripwire_is_armed()
+        except Exception:  # noqa: BLE001 - a guard may not break the suite
+            return None
+
+    def _tripwire_is_armed():
+        try:
+            from stelling import _tripwire
+
+            return _tripwire.is_armed()
+        except Exception:  # noqa: BLE001
+            return None
+
+    before = state()
+    yield
+    assert state() == before, (
+        "a test in this file changed the process's arm state: it was "
+        f"{before} and is now {state()}. A test that takes an instrument out "
+        "must put it back -- a session armed session-wide runs every later "
+        "file unwatched otherwise."
+    )
+
+
 def test_record_and_report_pull_in_no_jax():
     """The boundary claim, measured in a fresh interpreter.
 
@@ -207,6 +250,94 @@ def test_an_all_jax_stack_with_no_frames_inside_the_entry_is_unattributed():
     index, origin = record.attribute(stack, JAXROOT)
     assert (index, origin) == (None, record.ORIGIN_JAX)
     assert record.attribute((), JAXROOT) == (None, record.ORIGIN_UNKNOWN)
+
+
+# --- the same question, asked of the data -----------------------------------
+#
+# `attribute` answers "who wrote this constant?" from the FRAMES, using the
+# trace boundary. At an EAGER narrowing there is no trace boundary, and the
+# two stacks above collapse to the same shape -- a user frame with nothing but
+# jax frames beneath it -- so `carries` answers it from the arguments of the
+# call the user made instead. These are the pure-Python half; the jax half is
+# `tests/test_tripwire_eager.py`.
+
+
+def test_a_value_that_crossed_the_boundary_is_found_however_it_was_wrapped():
+    assert record.carries([256, "shape"], 256) is True
+    assert record.carries([(2, 3), 256], 256) is True
+    assert record.carries([{"fill_value": 256}], 256) is True
+    assert record.carries([((), [{"k": (256,)}])], 256) is True
+
+
+def test_a_value_that_did_NOT_cross_is_a_COMPLETE_no_and_not_a_shrug():
+    """False is what licenses a suppression, so it has to mean "I looked"."""
+    assert record.carries([0, None, "int32"], 4294967295) is False
+    assert record.carries([], 4294967295) is False
+
+
+def test_a_scan_that_ran_out_of_budget_says_None_rather_than_False():
+    """The distinction the whole filter rests on. "Not there" licenses a
+    suppression; "I stopped looking" must not, because a suppressed narrowing
+    is silent and an over-report is visible."""
+    too_deep = [[[[[[300]]]]]]
+    assert record.carries(too_deep, 300) is None
+    too_wide = [list(range(record.CARRY_BREADTH + 10))]
+    assert record.carries(too_wide, -1) is None
+    over_budget = [[list(range(500)) for _ in range(record.CARRY_BUDGET)]]
+    assert record.carries(over_budget, -1) is None
+
+
+def test_the_scan_reads_a_written_integer_in_every_spelling_that_reaches_the_hook():
+    """The same test the hook applies to the operand, applied to arguments.
+
+    ``bool`` is an ``int`` and is not an integer constant anybody writes into
+    a narrow dtype; a 0-d numpy scalar is one and reaches the narrowing with
+    its value intact, so it has to be matched by VALUE or a declaration
+    written as ``np.int64(300)`` would be attributed to jax.
+    """
+    assert record.written_int(300) == 300
+    assert record.written_int(True) is None
+    assert record.written_int(1.0) is None
+    assert record.written_int("300") is None
+    assert record.carries([True], 1) is False
+
+    # THE NUMPY SCALAR IS SPELLED RATHER THAN IMPORTED, because this file runs
+    # in the zero-dependency lane where numpy is not installed either, and a
+    # `importorskip("numpy")` here would turn a test of a duck type into a
+    # test that does not run. What `written_int` actually asks is what the
+    # adapter asks: the object's own module name, its shape and its dtype.
+    # `tests/test_tripwire_eager.py` drives the real `np.int64` through the
+    # real hook.
+    class NumpyScalar:
+        __module__ = "numpy"
+
+        def __init__(self, value, shape=()):
+            self.value, self.shape, self.dtype = value, shape, "int64"
+
+        def __int__(self):
+            return self.value
+
+    assert record.written_int(NumpyScalar(300)) == 300
+    assert record.written_int(NumpyScalar(300, shape=(1,))) is None
+    assert record.carries([NumpyScalar(300)], 300) is True
+
+
+def test_a_constant_inside_a_CUSTOM_OBJECT_is_the_disclosed_residue():
+    """Only the standard containers are opened, and the cost is named.
+
+    A value the scan cannot reach is not established as the user's, so it is
+    attributed to jax and does not raise. That is the one missed-narrowing
+    this rule can produce and `report.EAGER_UNCOVERED` says so.
+    """
+
+    class Holder:
+        def __init__(self, value):
+            self.value = value
+
+    assert record.carries([Holder(300)], 300) is False
+    assert any(
+        "CUSTOM OBJECT" in item.upper() for item in report.EAGER_UNCOVERED
+    ), "the residue this test measures is not disclosed anywhere"
 
 
 def test_the_user_chain_is_the_traced_region_not_the_whole_stack():
@@ -1302,6 +1433,18 @@ def test_the_canarys_live_control_row_reports_the_recorder_and_not_a_constant(
         stack = pytest.MonkeyPatch.context()
         monkeypatch = stack.__enter__()
         _stub_jax(monkeypatch, "runs")
+        # THE EAGER HALF IS STUBBED TOO, and it is not decoration: without
+        # this, `canary.main()` calls the REAL `arm_eager()` and then the REAL
+        # `disarm_eager()`, which restores jax's own attribute and clears the
+        # installation record -- so a session running with
+        # `--stelling-eager-truncation=error` had its detector taken out HERE
+        # and every later file ran unwatched. Measured before the escalation
+        # in `plugin.py` was made reachable: the session-wide armed run
+        # printed `NOT ARMED [detached]` and exited 0. Same defect as the
+        # `finally: disarm()` in `tests/test_tripwire_eager.py`, one file
+        # over: a test that takes an instrument out must put it back, and the
+        # cheapest way to put it back is never to touch it.
+        _stub_eager(monkeypatch, "clean")
 
         from stelling import _tripwire
         from stelling._tripwire import Status
