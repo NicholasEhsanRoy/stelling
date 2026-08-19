@@ -16,10 +16,19 @@
 #      re-implementation: `stelling._tripwire.arm()`, the same call
 #      `pytest_configure` makes. A canary exercising a different probe is
 #      testing nothing about the thing that ships.
-#   2. IT HAS A CONTROL — the identical probe against the PINNED series, in
-#      the same workflow, on the same runner. Without it a red run cannot
-#      distinguish "upstream broke us" from "we broke ourselves", and the
-#      first thing anyone would do is re-run it to find out.
+#   2. IT HAS A CONTROL — the identical probe against the newest RELEASED
+#      jax, in the same workflow, on the same runner. Without it a red run
+#      cannot distinguish "upstream broke us" from "we broke ourselves", and
+#      the first thing anyone would do is re-run it to find out. NEITHER LEG
+#      IS PINNED TO A SERIES, and this file used to say the control was: the
+#      `control` job below installs `.[jax]` with no version constraint, so
+#      it resolves to whatever jax is newest on the day it runs. What the
+#      control gives is a SECOND jax, not a fixed one — enough to tell a
+#      nightly-only fault from one common to both legs, and not enough, when
+#      both are red, to say whether the released jax regressed or this
+#      repository did. `tripwire_canary.py`'s `_TWO_LEGS` says the same thing
+#      to whoever meets the red run, and a test checks both against the
+#      install steps below.
 #   3. INFRASTRUCTURE FAILURE MUST NOT PAGE. The nightly index URL below is
 #      NOT verified current; jax's nightly hosting has moved before and may
 #      move again. An install that cannot reach it is infra, not signal, and
@@ -48,10 +57,10 @@ concurrency:
 
 jobs:
   # PROPERTY 2. The control runs first and it is the one that may not be
-  # yellow: if the pinned series cannot arm the tripwire, the problem is in
-  # this repository and the nightly result below is uninterpretable.
+  # yellow: if the newest released jax cannot arm the tripwire, the problem
+  # is in this repository and the nightly result below is uninterpretable.
   control:
-    name: control — the pinned series
+    name: control — the newest released jax
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

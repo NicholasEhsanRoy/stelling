@@ -696,22 +696,47 @@ def restore() -> str:
         rather than silently clobbering it — §4.
     ``restored``
         done.
+
+    A PENDING :func:`detach` IS FIXED UP FIRST, and that is not tidying. The
+    pair ``detach``/``reattach`` saves whatever the registry held and puts it
+    back, and what it held may be THIS WRAPPER. Retiring the wrapper makes
+    that saved entry stale: a later ``reattach()`` would then reinstall a
+    probe no ``_installed`` record owns, so ``is_armed()`` says no, ``rule_hash``
+    and ``rule_name`` read *stelling's own wrapper* as if it were jax's rule,
+    the next ``arm()`` wraps the wrapper, and the state persists for the life
+    of the interpreter. That is not hypothetical: ``detach("bypass")`` ->
+    ``disarm()`` -> ``reattach()`` is exactly the sequence the §4 foreign-patch
+    test drives, and it left every later ``arm()`` in the process reporting
+    ``hash_state == "changed"`` against a jax whose rule had not moved.
+
+    ``restore`` is the operation that invalidates the saved entry, so it is
+    the operation that must correct it: once the wrapper is gone, the value
+    that stands in its place is the original this record was holding. Doing
+    it here rather than in ``reattach`` keeps the fix at the point where the
+    fact changes; ``reattach`` cannot tell a stale entry from a live one.
     """
     if not _installed:
         return "not-armed"
     registry = _installed["registry"]
     primitive = _installed["primitive"]
+    wrapper = _installed["wrapper"]
+    original = _installed["original"]
+    if _detached and _detached.get("entry") is wrapper:
+        _detached["entry"] = original
     current = registry.get(primitive)
-    if current is not _installed["wrapper"]:
+    if current is not wrapper:
         _installed.clear()
         return "foreign-patch"
-    registry[primitive] = _installed["original"]
+    registry[primitive] = original
     _installed.clear()
     return "restored"
 
 
 #: Saved state for :func:`detach`. Separate from ``_installed`` because
 #: detaching is deliberately something that happens *to* an armed tripwire.
+#: :func:`restore` reads it -- it rewrites a saved ``entry`` that is the
+#: wrapper it is retiring, so that ``detach`` -> ``disarm`` -> ``reattach``
+#: cannot leave an orphaned probe as the live rule.
 _detached: dict = {}
 
 

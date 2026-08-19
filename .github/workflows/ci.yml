@@ -1071,29 +1071,58 @@ jobs:
   #       -> 1 failed, 15 deselected     [XPASS(strict)]
   #
   # THE MECHANISM, measured rather than guessed. hypothesis mixes a pool of
-  # integer constants harvested from every LOCAL non-test module in
-  # `sys.modules` into generation (`hypothesis.internal.conjecture.providers.
-  # _get_local_constants`, cached under `.hypothesis/constants/`).
-  # `tests/test_sqrt_row.py` contributes nothing itself -- test files are
-  # excluded -- but importing it pulls in `src/stelling/obligation.py`, which
-  # is full of them. Pool size when the constants are first drawn, with the
-  # ORDERING as the content and the absolute figures explicitly not:
+  # CONSTANTS -- integers, floats, bytes and strings, all four buckets, and
+  # `Constants.__len__` is their sum -- harvested from every LOCAL non-test
+  # module in `sys.modules` into generation
+  # (`hypothesis.internal.conjecture.providers._get_local_constants`, cached
+  # under `.hypothesis/constants/`). `tests/test_sqrt_row.py` contributes
+  # nothing itself -- test files are excluded -- but importing it pulls in
+  # `src/stelling/obligation.py`, which contributes 136.
   #
-  #     oracle alone                           small  -> XFAIL
-  #     oracle + `import stelling.obligation`  middle -> XPASS(strict)
-  #     whole `tests/` collected, -k oracle    large  -> XFAIL
+  # POOL SIZE AT THE INSTANT IT IS FIRST DRAWN FROM, measured with the
+  # instrument named below, at 5d3281b, jax 0.11.0 + hypothesis 6.165.3 +
+  # python 3.12.3. Two columns because there is exactly ONE variable, and it
+  # is stateable -- see the paragraph after the table:
   #
-  # THE INTEGERS ARE INSTRUMENT-DEPENDENT AND ARE NOT RECORDED HERE, which
-  # is a correction: this block first carried the triple 2 / 274 / 633, and
-  # a second measurement taken independently got 58 / 312 / 650 for the same
-  # three sessions. Neither is wrong. The pool is reached through a
-  # `cached_property` computed only when `_maybe_draw_constant` first wins a
-  # `p=0.05` roll, so "at the first generated input" is not a well-defined
-  # instant, and any plugin the instrument itself loads adds modules of its
-  # own. The ordering, the direction and the inference reproduced exactly in
-  # both. Recording a number two careful measurements disagree about would
-  # be the kind of figure this repository keeps having to withdraw -- see
-  # `obligation.py`'s sweep, which says the same of its seconds.
+  #                                            no entry point   entry point
+  #     oracle alone                  -> XFAIL      0 (0 int)     57 (1 int)
+  #     oracle + tests/test_sqrt_row.py            274 (7 int)   313 (8 int)
+  #       (deselected)                -> XPASS
+  #     whole `tests/` collected, -k  -> XFAIL    632 (12 int)   649 (12 int)
+  #
+  # Every figure repeated byte-identical across runs; `ci` forces
+  # `derandomize=True` (`tests/property/_profiles.py`, `_DERANDOMIZE["ci"]`,
+  # the default profile), so they are deterministic, and deleting
+  # `.hypothesis/` changes none of them.
+  #
+  # THE ONE VARIABLE IS WHETHER `pyproject.toml`'s `pytest11` ENTRY POINT
+  # LOADS. `stelling_overflow = "stelling._tripwire.plugin"` is registered by
+  # any INSTALLED stelling, so pytest imports `stelling`, `stelling._optional`,
+  # `stelling._tripwire` and `stelling._tripwire.plugin` before collection and
+  # hypothesis harvests all four; a tree reached through `PYTHONPATH` alone,
+  # or a session run with `-p no:stelling_overflow`, has none of them. That is
+  # the whole gap. It is also the correction this block owes: it first carried
+  # the triple 2 / 274 / 633, a second measurement got 58 / 312 / 650, and the
+  # block then withdrew both on the ground that the instant is ill-defined.
+  # It is not. The first triple is the left column +2 / +0 / +1; the second is
+  # the right column +1 / -1 / +1; each residue is that instrument's own
+  # constants, which is a property of the instrument and not of the instant.
+  # The LABEL was wrong too: these are TOTAL constants, not integer ones --
+  # 274 is 265 strings, 7 integers and 2 floats -- and `obligation.py`,
+  # described here as "full of them", contributes 3 integers out of its 136
+  # (132 of them strings). Its neighbour `stelling/ir.py` contributes 141
+  # constants and not one integer.
+  #
+  # AND THE INSTRUMENT'S OWN NAME MATTERS, which is the trap worth recording:
+  # `is_local_module_file` excludes a path with a `test`/`tests` component or
+  # a stem that starts `test_` or ends `_test`, and treats everything else as
+  # LOCAL -- including a file in /tmp. So a probe module called `poolprobe.py`
+  # is harvested and inflates every figure by its own constants, and the same
+  # bytes called `test_poolprobe.py` are invisible. Being inside or outside
+  # the repository tree makes no difference at all. The figures above are from
+  # the invisible spelling: a plugin loaded with `-p test_spotpool`, wrapping
+  # `providers._get_local_constants` and recording `len(pool)` and
+  # `len(pool.integers)` on its first call.
   #
   # so a BIGGER pool is not a better search, which is exactly why whole-tree
   # collection does not flip it and one module does -- and why the old

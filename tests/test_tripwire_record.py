@@ -665,7 +665,7 @@ def _canary():
     return module
 
 
-def test_the_canary_reads_the_version_to_hash_map_in_three_states():
+def test_the_canary_reads_the_version_to_hash_map_in_five_states():
     """§5 decides ARMING and not this script's exit code, so the exit code is
     decided here and the argument is in ``_hash_row``'s docstring.
 
@@ -680,6 +680,14 @@ def test_the_canary_reads_the_version_to_hash_map_in_three_states():
     upstream: a RELEASE contradicting its own row. Wheels are immutable, so
     either the row is wrong or the environment is not the jax it claims, and
     both make the rest of the page unverified.
+
+    AND THE FIFTH, which is a correction. ``Status.hash_state`` has four
+    values and this function's fallback swallowed anything else as NON-fatal,
+    while ``_control_reasons`` treats an unrecognised state as fatal on a
+    stated principle. Two decisions in one file answering the same question
+    two ways is one of them being wrong. ``unreadable`` is now handled by
+    name — it has an argument for exiting 0, namely that nothing was compared
+    — and a fifth string has no argument and pages.
     """
     canary = _canary()
 
@@ -688,24 +696,40 @@ def test_the_canary_reads_the_version_to_hash_map_in_three_states():
     moved = _Status(rule_hash="abc", known_hash="xyz", jax_version="0.11.0")
     unreadable = _Status(rule_hash=None, known_hash="abc", jax_version="0.11.0")
 
-    note, fatal = canary._hash_row(matched)
-    assert (note, fatal) == ("as tested", False)
+    note, reason = canary._hash_row(matched)
+    assert (note, reason) == ("as tested", None)
 
-    note, fatal = canary._hash_row(unread)
-    assert fatal is False, "a release with no row must not page the nightly"
+    note, reason = canary._hash_row(unread)
+    assert reason is None, "a release with no row must not page the nightly"
     assert "NEVER BEEN READ" in note and "0.99.0" in note
     assert "nightly" in note, "the note must say why this is not a failure"
 
-    note, fatal = canary._hash_row(moved)
-    assert fatal is True, "a release contradicting its own row is fatal"
+    note, reason = canary._hash_row(moved)
+    assert reason is not None, "a release contradicting its own row is fatal"
+    assert reason[0] == "hash:contradicted"
     assert "CONTRADICTS" in note and "xyz" in note and "0.11.0" in note
 
-    note, fatal = canary._hash_row(unreadable)
-    assert fatal is False, "an unreadable rule source claims nothing either way"
+    note, reason = canary._hash_row(unreadable)
+    assert reason is None, "an unreadable rule source claims nothing either way"
 
     # and the two loud states are not each other's words
     assert "CONTRADICTS" not in canary._hash_row(unread)[0]
     assert "NEVER BEEN READ" not in canary._hash_row(moved)[0]
+
+    # THE FALLBACK PAGES. Driven through `main()` as well, in the table
+    # below, because a fallback tested only here is a fallback whose caller
+    # can quietly stop consulting it.
+    class _FifthState(type(matched)):
+        @property
+        def hash_state(self):
+            return "wedged"
+
+    note, reason = canary._hash_row(_FifthState(code="armed"))
+    assert reason is not None and reason[0] == "hash:unknown-state", (
+        "an unrecognised hash state was swallowed as non-fatal, which is the "
+        "answer the other decision in this file rejects"
+    )
+    assert "wedged" in reason[1], "the page must name the state it cannot read"
 
 
 def test_every_failure_code_is_explained_and_documented():
@@ -771,141 +795,664 @@ def test_every_failure_code_is_explained_and_documented():
     assert "Static checking is unaffected" in fallback
 
 
-def test_the_canary_control_verdict_fails_closed_in_every_broken_state():
-    """A control that could not COMPLETE must page, not pass.
+# --- the canary's exit code, driven ------------------------------------------
+#
+# `.github/scripts/tripwire_canary.py` is the alarm. Everything below drives
+# its `main()` and reads what a CI job reads: the exit status, the reason
+# codes on stderr, and the rows on stdout. Nothing here re-implements the
+# decision, and nothing here asserts the SHAPE of the code -- an earlier
+# version of this battery walked the AST for the name of a local variable and
+# went red on a rename while a deleted alarm went green.
+#
+# THIS FILE'S COPY RUNS WITHOUT JAX, which is the lane `tests/
+# test_tripwire_arm.py` is `importorskip`'d out of and the lane that runs on
+# every PR. The probe is a stub here: `main()` reaches jax only through
+# `stelling._jax_compat`, and in a jax-less environment importing that module
+# raises, so every armed state would collapse to `raised` and the table would
+# measure one row six times. `tests/test_tripwire_arm.py` drives the same
+# states through the REAL jax, the real `arm()` and a real subprocess; this
+# file drives the decision. Neither is the other's substitute.
 
-    The predecessor decided this with ``"DID NOT FIRE" in control`` — a
-    substring test against a line written for a human — so the one state in
-    which the probe NEVER RAN was the one state that reported success: a
-    raised control renders as ``raised RuntimeError: …``, which does not
-    contain that substring, so the canary printed the exception, reported
-    ``status: armed`` and exited 0 even under ``--require``.
 
-    THIS TEST PINS THE SENTENCES, NOT THE EXIT CODES. The exit codes are
-    driven against `main()` itself in ``tests/test_tripwire_arm.py`` — an
-    audit showed that a verdict function tested in isolation, plus an
-    assertion about the shape of its call site, pinned nothing at all:
-    three mutations restoring the defect passed both. Read the two files
-    together or neither means much.
+class _MovedNarrowings(record.Recorder):
+    """A recorder whose ``int_narrowings`` has moved out from under the
+    canary -- the shape change the ``unrenderable`` state exists for."""
+
+    @property
+    def int_narrowings(self):
+        raise AttributeError("`int_narrowings` moved off Recorder")
+
+    @int_narrowings.setter
+    def int_narrowings(self, value):
+        pass
+
+
+class _MovedFindingField:
+    """A finding whose fields have moved. Attribute access is the failure."""
+
+    def __getattr__(self, name):
+        raise AttributeError(f"finding field {name!r} moved")
+
+
+def _a_finding(**kw):
+    fields = dict(
+        file="probe.py", line=36, func="over", written=256,
+        from_dtype="int32", to_dtype="int8", became=0, origin="literal",
+    )
+    fields.update(kw)
+    return record.Finding(**fields)
+
+
+def _stub_jax(monkeypatch, probe):
+    """Give `main()` a jax boundary in a lane that has no jax.
+
+    ``make_jaxpr`` really calls the shipped ``_probe.over``, so the probe is
+    the program it is everywhere else; only the tracer is a stand-in.
+    """
+    import sys
+    import types
+
+    import stelling
+    from stelling._tripwire import _probe
+
+    class _Array:
+        def __add__(self, other):
+            return self
+
+        __radd__ = __add__
+
+    fake = types.ModuleType("stelling._jax_compat")
+    fake.jax = types.SimpleNamespace(make_jaxpr=lambda fn: lambda *a, **k: fn(*a, **k))
+    fake.jnp = types.SimpleNamespace(zeros=lambda shape, dtype: _Array(), int8="int8")
+    monkeypatch.setitem(sys.modules, "stelling._jax_compat", fake)
+    monkeypatch.setattr(stelling, "_jax_compat", fake, raising=False)
+
+    if probe == "raises":
+        def _boom(a):
+            raise RuntimeError("FORCED: the probe could not execute")
+
+        monkeypatch.setattr(_probe, "over", _boom)
+
+
+class _Run:
+    """One driven run of the canary, as its consumers see it."""
+
+    def __init__(self, code, out, err, summary):
+        import re
+
+        self.code = code
+        self.out = out
+        self.err = err
+        self.summary = summary
+        self.rows = {}
+        for line in out.splitlines():
+            name, sep, value = line.partition(": ")
+            if sep:
+                self.rows.setdefault(name, value)
+        self.reasons = re.findall(r"^canary \[([a-z:-]+)\]:", err, re.M)
+        self.sentences = dict(
+            re.findall(r"^canary \[([a-z:-]+)\]: (.*)$", err, re.M)
+        )
+
+    def __repr__(self):
+        return (
+            f"<exit {self.code} reasons={self.reasons} "
+            f"control={self.rows.get('control state')!r}/"
+            f"{self.rows.get('control report')!r}>"
+        )
+
+
+def _drive_canary(
+    capsys, tmp_path, *,
+    require=False, armed=True, hash_state="as-tested",
+    probe="runs", findings="one", narrowings="readable",
+    summary="writable",
+):
+    """Run `main()` once with every input chosen, and collect what it emitted.
+
+    THE INPUTS ARE FORCED, NOT THE DECISION. ``arm()`` is replaced by one
+    that hands back a real :class:`Status` and a real :class:`Recorder` --
+    the shipped ``Status.hash_state`` still computes the hash verdict from
+    the two hashes given to it -- and the recorder's contents are chosen. No
+    branch of the canary, and no verdict function, is stubbed or bypassed.
+
+    ITS OWN MONKEYPATCH CONTEXT, undone before it returns. The table below
+    is one test driving eighteen rows, and the ``monkeypatch`` FIXTURE is
+    torn down once at the end of the test -- so the row that makes the probe
+    raise left it raising for every row after it, and four rows that named
+    the recorder were measuring a broken probe. That is the same class of
+    defect as the one this whole battery exists to close, met while building
+    it, and a per-row context is the fix.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        return _drive_canary_once(
+            mp, capsys, tmp_path, require=require, armed=armed,
+            hash_state=hash_state, probe=probe, findings=findings,
+            narrowings=narrowings, summary=summary,
+        )
+
+
+def _drive_canary_once(
+    monkeypatch, capsys, tmp_path, *,
+    require, armed, hash_state, probe, findings, narrowings, summary,
+):
+    import sys
+
+    from stelling import _tripwire
+    from stelling._tripwire import Status
+
+    canary = _canary()
+    _stub_jax(monkeypatch, probe)
+
+    hashes = {
+        "as-tested": ("abc", "abc"),
+        "changed": ("abc", "xyz"),
+        "never-read": ("abc", None),
+        "unreadable": (None, "abc"),
+    }
+    rule_hash, known_hash = hashes[hash_state]
+    base = Status(
+        code="armed" if armed else "no-entry",
+        jax_version="0.11.0",
+        rule_name="_convert_elt_type_folding_rule",
+        rule_hash=rule_hash,
+        known_hash=known_hash,
+        registry_size=3,
+    )
+    assert base.hash_state == hash_state, (
+        f"the shipped Status computed {base.hash_state!r} from the hashes "
+        f"this row chose, not {hash_state!r}: the table is describing "
+        "something other than what it drives"
+    )
+
+    rec = _MovedNarrowings() if narrowings == "moved" else record.Recorder()
+    if findings == "one":
+        monkeypatch.setattr(rec, "sorted_findings", lambda: [_a_finding()])
+    elif findings == "field-moved":
+        monkeypatch.setattr(rec, "sorted_findings", lambda: [_MovedFindingField()])
+    elif findings == "unreadable":
+        def _boom():
+            raise AttributeError("`sorted_findings` moved off Recorder")
+
+        monkeypatch.setattr(rec, "sorted_findings", _boom)
+    else:
+        assert findings == "none"
+
+    monkeypatch.setattr(_tripwire, "arm", lambda *a, **k: (base, rec))
+    monkeypatch.setattr(
+        sys, "argv", ["tripwire_canary.py"] + (["--require"] if require else [])
+    )
+
+    _drive_canary_once.calls = getattr(_drive_canary_once, "calls", 0) + 1
+    stem = f"step-{_drive_canary_once.calls}"
+    path = (
+        tmp_path / "no-such-directory" / stem
+        if summary == "unwritable"
+        else tmp_path / stem
+    )
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(path))
+
+    capsys.readouterr()
+    code = canary.main()
+    out = capsys.readouterr()
+    written = path.read_text(encoding="utf-8") if path.exists() else ""
+    return _Run(code, out.out, out.err, written)
+
+
+#: (row id, kwargs, expected exit, expected reason codes, control state,
+#: control report). ONE TABLE, because the canary's contract IS a table and
+#: six assertions scattered over three files is how it came to have two
+#: unnamed exits and a battery that measured an unrelated branch.
+#:
+#: Every row names its reasons EXACTLY. That is what makes the battery
+#: independent of every other fatal source: an assertion that `main()`
+#: returned 1 is satisfied by any reason at all -- which is how the previous
+#: version of this battery came to be satisfied, in six cells, by a
+#: contradicted hash row that a polluted process had manufactured, while the
+#: branch it named was never reached. A set equality cannot be satisfied by
+#: the wrong branch, and it cannot be masked by an extra one either: a run
+#: with a second live fault fails here, loudly, instead of passing quietly.
+_CANARY_TABLE = [
+    ("clean", {}, 0, [], "fired", "rendered"),
+    ("clean+require", {"require": True}, 0, [], "fired", "rendered"),
+    # a release nobody has read is LOUD and not fatal -- the state a nightly
+    # is in by construction, and the state the control leg enters the day jax
+    # ships a release
+    ("never-read", {"hash_state": "never-read", "require": True}, 0, [],
+     "fired", "rendered"),
+    ("hash-unreadable", {"hash_state": "unreadable", "require": True}, 0, [],
+     "fired", "rendered"),
+    ("hash-contradicted", {"hash_state": "changed"}, 1, ["hash:contradicted"],
+     "fired", "rendered"),
+    ("hash-contradicted+require", {"hash_state": "changed", "require": True}, 1,
+     ["hash:contradicted"], "fired", "rendered"),
+    # THE DEAD HOOK. `--require` must not matter: `arm()` said the hook is
+    # attached and the control says nothing reached it, so the armed status
+    # is unverified either way. Gating this on `--require` is the exact
+    # defect this branch exists to close.
+    ("dead-hook", {"findings": "none"}, 1, ["control:did-not-fire"],
+     "did-not-fire", "rendered"),
+    ("dead-hook+require", {"findings": "none", "require": True}, 1,
+     ["control:did-not-fire"], "did-not-fire", "rendered"),
+    # THE PROBE NEVER RAN. Used to exit 0, because the check was a substring
+    # test for "DID NOT FIRE" against a line a raised control does not
+    # contain.
+    ("probe-raised", {"probe": "raises"}, 1, ["control:raised"],
+     "raised", "not-run"),
+    ("probe-raised+require", {"probe": "raises", "require": True}, 1,
+     ["control:raised"], "raised", "not-run"),
+    # THE RECORDER MOVED, three ways, and none of them may report `raised`:
+    # the probe RAN in all three, and an operator sent upstream to look for a
+    # broken jax when the defect is in this repository has been sent to the
+    # wrong place.
+    ("findings-unreadable", {"findings": "unreadable"}, 1,
+     ["control:indeterminate"], "ran", "not-run"),
+    ("narrowings-moved", {"narrowings": "moved"}, 1, ["control:unrenderable"],
+     "fired", "unrenderable"),
+    ("finding-field-moved", {"findings": "field-moved"}, 1,
+     ["control:unrenderable"], "fired", "unrenderable"),
+    # BOTH AT ONCE, and both must be said. This is the case the previous
+    # split lost: `unrenderable` overwrote `did-not-fire`, so the page told
+    # the operator the probe completing "is not in doubt" and never mentioned
+    # that the hook was dead.
+    ("dead-hook+narrowings-moved", {"findings": "none", "narrowings": "moved"},
+     1, ["control:did-not-fire", "control:unrenderable"],
+     "did-not-fire", "unrenderable"),
+    # NOT ARMED is `--require`'s question and nobody else's, and the control
+    # never ran, so it is not a finding.
+    ("not-armed", {"armed": False}, 0, [], "not-run", "not-run"),
+    ("not-armed+require", {"armed": False, "require": True}, 1, ["not-armed"],
+     "not-run", "not-run"),
+    ("not-armed+require+hash", {"armed": False, "require": True,
+                                "hash_state": "changed"}, 1,
+     ["not-armed", "hash:contradicted"], "not-run", "not-run"),
+    # INFRASTRUCTURE MUST NOT PAGE -- Property 3 of the workflow. An
+    # unwritable `$GITHUB_STEP_SUMMARY` used to raise `FileNotFoundError`
+    # straight out of `main()`: a traceback and a 1, with no `canary:`
+    # sentence, in the script that argues against exactly that.
+    ("summary-unwritable", {"summary": "unwritable"}, 0, [], "fired", "rendered"),
+]
+
+
+def test_the_canary_pages_for_the_reasons_it_measured_and_no_others(
+    capsys, tmp_path
+):
+    """The whole contract, driven: exit status AND which reason produced it.
+
+    WHY THE REASON CODE AND NOT JUST THE NUMBER. Two audits have now found
+    this battery vacuous, both times because ``main() == 1`` is satisfied by
+    any of six branches. The second time, an unrelated test had left
+    stelling's own wrapper as jax's live const-fold rule for the rest of the
+    process, so every run reported a contradicted hash row; six cells that
+    named the live control were all satisfied by the hash branch and the
+    branch they named was never entered. Gating the control on ``--require``
+    -- the original defect's shape -- kept the whole file green.
+
+    So the assertion is the SET of reason codes, exactly. It cannot be
+    satisfied by the wrong branch and it cannot be masked by an extra one.
+
+    WHY NOT THE SENTENCES. Because a synonym is not a defect. Rewording any
+    message here changes nothing a CI job reads; deleting a reason changes
+    everything. The sentences are checked once, further down, for the two
+    properties that are not wording: that the four fatal control findings do
+    not read as each other, and that the leg guidance agrees with the
+    workflow it describes.
+    """
+    failures = []
+    seen = set()
+    for name, kw, expect_code, expect_reasons, control, report in _CANARY_TABLE:
+        run = _drive_canary(capsys, tmp_path, **kw)
+        seen.update(run.reasons)
+        got = (run.code, sorted(run.reasons), run.rows.get("control state"),
+               run.rows.get("control report"))
+        want = (expect_code, sorted(expect_reasons), control, report)
+        if got != want:
+            failures.append(f"  {name}: got {got}, contract {want}\n    {run.err}")
+    assert not failures, (
+        "the canary's exit code, its reasons, or the state it says it was in "
+        "are not what the contract says:\n" + "\n".join(failures)
+    )
+
+    # EVERY DECLARED STATE IS REACHABLE. A state named in `CONTROL_STATES`
+    # that no input can produce is a claim, not a state, and the exhaustive
+    # `_control_reasons` above it would be exhaustive over a set nobody
+    # drives.
+    canary = _canary()
+    reached = {row[4] for row in _CANARY_TABLE}
+    assert reached == set(canary.CONTROL_STATES), (
+        f"declared control states {sorted(canary.CONTROL_STATES)} but the "
+        f"table can only reach {sorted(reached)}"
+    )
+    reported = {row[5] for row in _CANARY_TABLE}
+    assert reported == set(canary.RENDER_STATES), (
+        f"declared report states {sorted(canary.RENDER_STATES)} but the "
+        f"table can only reach {sorted(reported)}"
+    )
+
+
+def test_the_canary_page_carries_every_reason_the_exit_code_was_built_from(
+    capsys, tmp_path
+):
+    """The summary page is the other consumer, and it gets the same verdict.
+
+    The workflow's header says a failure must be diagnosable from
+    ``$GITHUB_STEP_SUMMARY`` without re-running anything. A table of facts
+    with the verdict left on stderr is not that: the stderr of a failed step
+    is in the log, and the log is the thing the summary page exists to save
+    somebody from reading.
+    """
+    run = _drive_canary(
+        capsys, tmp_path,
+        findings="none", narrowings="moved", hash_state="changed", require=True,
+    )
+    assert run.code == 1
+    for code in run.reasons:
+        assert f"`{code}`" in run.summary, (
+            f"the page exited 1 for {code!r} and its summary does not say so"
+        )
+    assert "**exit 1**" in run.summary
+
+    clean = _drive_canary(capsys, tmp_path)
+    assert clean.code == 0
+    assert "**exit 0**" in clean.summary
+    assert "**exit 1**" not in clean.summary
+
+
+def test_the_canarys_live_control_row_reports_the_recorder_and_not_a_constant(
+    capsys,
+):
+    """The human line is a function of what the recorder holds.
+
+    Not a wording test -- a differential one. Two runs whose ONLY difference
+    is the recorder's contents must produce two different PAGES, and each
+    must carry that run's own figures. It reads the whole page rather than a
+    row by name: the row that carries these figures is the human one, which
+    the script's output contract says nothing re-parses, so a test that keyed
+    on its label would forbid renaming a label that means nothing. A line
+    hardcoded to ``0 narrowing(s)``,
+    or to one canned finding, reads exactly like a live one on a healthy run
+    and exactly like a live one on a dead hook; it is the shape of instrument
+    this repository keeps having to withdraw.
+    """
+    import re
+    import sys
+
+    seen = []
+    for narrowings, written, became, dtype in (
+        (1, 256, 0, "int8"),
+        (4, 70000, 4464, "int16"),
+    ):
+        canary = _canary()
+        stack = pytest.MonkeyPatch.context()
+        monkeypatch = stack.__enter__()
+        _stub_jax(monkeypatch, "runs")
+
+        from stelling import _tripwire
+        from stelling._tripwire import Status
+
+        rec = record.Recorder()
+        rec.int_narrowings = narrowings
+        finding = _a_finding(written=written, became=became, to_dtype=dtype)
+        monkeypatch.setattr(rec, "sorted_findings", lambda f=finding: [f])
+        status = Status(code="armed", jax_version="0.11.0",
+                        rule_hash="abc", known_hash="abc")
+        monkeypatch.setattr(_tripwire, "arm", lambda *a, **k: (status, rec))
+        monkeypatch.setattr(sys, "argv", ["tripwire_canary.py"])
+        capsys.readouterr()
+        assert canary.main() == 0
+        page = capsys.readouterr().out
+        seen.append(page)
+        assert re.search(rf"\b{narrowings} narrowing\(s\)", page), (
+            f"the recorder held {narrowings} narrowings and the page says "
+            f"{page!r}"
+        )
+        assert f"{written} -> {became} ({dtype})" in page, page
+        stack.__exit__(None, None, None)
+
+    assert seen[0] != seen[1], (
+        "two runs with different recorders produced the same page, so the "
+        "page is not reporting the recorder"
+    )
+
+
+def test_an_unrecognised_control_state_pages_rather_than_passing():
+    """The one reason `main()` cannot be driven into, and why it exists.
+
+    ``control_state`` is assigned from literals inside `main()`, so a sixth
+    one cannot be produced without editing the script -- which is exactly the
+    event this reason is for. The decision is therefore driven directly, and
+    the exit-code list at the top of the script says the state is unreachable
+    rather than leaving a reader to wonder why they have never seen it.
     """
     canary = _canary()
 
-    for clean in ("fired", "not-run"):
-        note, fatal = canary._control_verdict(clean, "rendered")
-        assert note is None and fatal is False, (
-            f"state {clean!r} is not a finding and must not page"
-        )
+    assert canary._control_reasons("fired", "rendered", "x") == []
+    assert canary._control_reasons("not-run", "not-run", "x") == []
 
-    dead, dead_fatal = canary._control_verdict("did-not-fire", "0 finding")
-    raised, raised_fatal = canary._control_verdict(
-        "raised", "raised RuntimeError: the probe exploded"
-    )
-    moved, moved_fatal = canary._control_verdict(
-        "unrenderable", "1 finding(s), and rendering them raised AttributeError: x"
-    )
-    unknown, unknown_fatal = canary._control_verdict("wedged", "?")
+    wedged = canary._control_reasons("wedged", "not-run", "x")
+    assert [c for c, _ in wedged] == ["control:unknown-state"]
+    assert "wedged" in wedged[0][1], "the page must name the state it cannot read"
 
-    assert dead_fatal and raised_fatal and moved_fatal and unknown_fatal, (
-        "a broken instrument reported success again"
+    wedged_report = canary._control_reasons("fired", "sideways", "x")
+    assert [c for c, _ in wedged_report] == ["control:unknown-state"]
+
+
+def test_the_four_fatal_control_findings_do_not_read_as_each_other(
+    capsys, tmp_path
+):
+    """The remedies differ, so the sentences must.
+
+    `did-not-fire` sends a reader to a dead hook, `raised` to an environment
+    where the probe could not run, `indeterminate` and `unrenderable` to THIS
+    repository's own recorder. This is the one place the sentences are read,
+    and it reads their OPENINGS rather than forbidding each other's words --
+    the `raised` sentence deliberately NAMES `did not fire` in order to say
+    it is not that, and a test forbidding the mention would forbid the
+    distinction it exists to protect.
+
+    READ OFF THE DRIVEN RUNS, not off the verdict function. A sentence this
+    file composes by calling the decision directly is a sentence nobody has
+    shown a real run prints; these are the four that four real runs printed.
+    """
+    import re
+
+    sentences = {}
+    for kw in (
+        {"findings": "none"},
+        {"probe": "raises"},
+        {"findings": "unreadable"},
+        {"findings": "field-moved"},
+    ):
+        sentences.update(_drive_canary(capsys, tmp_path, **kw).sentences)
+
+    assert set(sentences) == {
+        "control:did-not-fire", "control:raised",
+        "control:indeterminate", "control:unrenderable",
+    }, sorted(sentences)
+
+    # TEN WORDS, CASE AND PUNCTUATION FOLDED AWAY. A character slice let a
+    # mutation past: rewording `raised` to open "its LIVE CONTROL DID NOT
+    # FIRE" -- the other finding's headline, in the sentence that goes on to
+    # say it is a DIFFERENT finding -- still differed in the sixtieth
+    # character. Words are what a reader takes from an opening, and the four
+    # real openings need all ten to separate: `did not fire` and `did not
+    # complete` agree on the first nine.
+    def _opening(sentence):
+        words = re.findall(r"[a-z0-9]+", sentence.lower())
+        return tuple(words[:10])
+
+    openings = {code: _opening(s) for code, s in sentences.items()}
+    assert len(set(openings.values())) == 4, (
+        f"two fatal findings open with the same ten words, so a reader who "
+        f"stops at the first line cannot tell them apart: {openings}"
     )
 
-    # THE FOUR FATAL STATES MUST NOT READ AS EACH OTHER: the remedies differ.
-    # `did-not-fire` sends a reader to a dead hook, `raised` to an
-    # environment where the probe could not run, `unrenderable` to THIS
-    # repository's recorder, and the last to this script. Asserted on the
-    # OPENING CLAIM rather than on absence of the others' words — the
-    # `raised` sentence deliberately NAMES `did not fire` in order to say it
-    # is not that, and a test forbidding the mention would forbid the
-    # distinction it exists to protect.
-    openings = {
-        dead[:60], raised[:60], moved[:60], unknown[:60],
-    }
-    assert len(openings) == 4, f"two fatal states open the same way: {openings}"
-    assert dead.startswith("the tripwire armed and its live control did not fire")
-    assert raised.startswith(
-        "the tripwire armed and its LIVE CONTROL DID NOT COMPLETE"
-    )
-    assert moved.startswith("the tripwire armed, its live control RAN")
-    assert "does not recognise" in unknown
-
-    # `unrenderable` must NOT send anyone upstream: the probe completed and
-    # what moved is this repository's own recorder.
-    assert "not upstream" in moved
+    # neither of the two "this repository" findings may send anyone upstream
+    for code in ("control:indeterminate", "control:unrenderable"):
+        assert "not upstream" in sentences[code], code
 
     # the operator must not read "RAISED -- raised RuntimeError", which is
-    # exactly what the first version of this sentence produced: it opened
-    # with the word and then embedded a row that already began with it. The
-    # opening is a different phrase now, so the row can be quoted whole.
-    assert "RAISED -- raised" not in raised
-
-    # and the reason the predecessor missed the state entirely, pinned so it
-    # cannot come back by way of a reworded message
-    assert "DID NOT FIRE" not in "raised RuntimeError: the probe exploded"
+    # what the first version of this sentence produced: it opened with the
+    # word and then embedded a row that already began with it
+    assert "RAISED -- raised" not in sentences["control:raised"]
 
 
-def test_the_canary_records_a_control_state_rather_than_reparsing_its_message():
-    """Every state ``main`` can record is one the decision has an answer for.
+def test_the_canarys_documented_exit_codes_are_exactly_the_ones_it_produces():
+    """The list at the top of the script, checked in BOTH directions.
 
-    READ FROM THE AST, not from a regex over the source text. The first
-    version of this test harvested string literals with
-    ``re.findall`` line by line, and an audit broke it in one move: assign
-    the state from a module constant rather than a literal
-    (``control_state = _WEDGED``) and the regex sees nothing, the expected
-    set still matches, and the test passes while a fifth state exists that
-    the decision was never taught. Walking the tree instead makes the
-    non-literal itself the failure, which is the property the docstring
-    claims.
-
-    This test deliberately does NOT assert the spelling of the call site's
-    local variables. It used to, and a pure rename — behaviour identical,
-    exit codes identical — turned it red. Behaviour is pinned where
-    behaviour belongs: against ``main()`` in ``tests/test_tripwire_arm.py``.
+    That paragraph has been wrong three times: once naming two of three
+    exits, once counting ``return`` statements instead of reasons, and once
+    claiming to be complete while two exits went unnamed. Prose that
+    describes an exit code is the first thing an operator reads and the last
+    thing anyone checks, so it is checked here against what the script can
+    actually be driven to do.
     """
-    import ast
+    import re
 
     source = (
         _pathlib_for_canary() / ".github" / "scripts" / "tripwire_canary.py"
     ).read_text(encoding="utf-8")
+    listed = source.split("EXIT CODES, ALL OF THEM", 1)[1].split('"""', 1)[0]
+    documented = set(re.findall(r"^  1  `([a-z:-]+)`", listed, re.M))
 
-    recorded, nonliteral = set(), []
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Assign):
-            continue
-        if not any(
-            isinstance(tgt, ast.Name) and tgt.id == "control_state"
-            for tgt in node.targets
-        ):
-            continue
-        value = node.value
-        branches = (
-            [value.body, value.orelse] if isinstance(value, ast.IfExp) else [value]
+    produced = set()
+    for _, kw, _, reasons, _, _ in _CANARY_TABLE:
+        produced.update(reasons)
+    # the two the table cannot reach, driven directly above
+    canary = _canary()
+    produced.update(c for c, _ in canary._control_reasons("wedged", "not-run", "x"))
+
+    from stelling._tripwire import Status
+
+    class _FifthState(Status):
+        @property
+        def hash_state(self):
+            return "wedged"
+
+    produced.add(canary._hash_row(_FifthState(code="armed"))[1][0])
+
+    assert documented == produced, (
+        f"the exit-code list documents {sorted(documented)} and the script "
+        f"can be driven to produce {sorted(produced)}. Undocumented: "
+        f"{sorted(produced - documented)}. Documented but unproducible: "
+        f"{sorted(documented - produced)}."
+    )
+    assert "  2  " in listed, (
+        "the list no longer names argparse's exit 2, which a reader meets by "
+        "mistyping `--require` and which this list twice claimed not to exist"
+    )
+
+
+def test_the_canary_and_the_workflow_agree_about_the_two_legs():
+    """The guidance a red run prints is a claim about a workflow. Check it.
+
+    ONE CONSTANT, TWO MESSAGES. This paragraph used to be typed out twice,
+    190 lines apart, and the two copies said different and both-wrong things:
+    that the control leg runs a PINNED series (it installs ``.[jax]``, so it
+    resolves to whatever is newest released) and that "the jax versions on
+    the two pages tell apart" a released-jax regression from a broken
+    stelling (they do not -- both legs run this repository's code).
+
+    WHAT IS CHECKED IS THE FACT, NOT THE WORDING. The workflow is read and
+    the install step of each leg is compared against what the guidance says
+    that leg installs. The one lexical clause -- that neither leg may be
+    described as pinned -- is CONDITIONAL on the measurement: it is in force
+    only while the install steps carry no version constraint, and the day
+    somebody pins a leg it stops applying on its own. It is here because this
+    exact claim has been wrong in five places across three commits, and
+    because a reader who believes it goes looking for a jax regression that
+    the run cannot have distinguished.
+    """
+    import re
+
+    canary = _canary()
+    workflow = (
+        _pathlib_for_canary() / ".github" / "workflows" / "nightly-jax-canary.yml"
+    ).read_text(encoding="utf-8")
+
+    jobs = dict(re.findall(r"\n  ([a-z-]+):\n    name: (.*)", workflow))
+    assert set(jobs) == {"control", "nightly"}, (
+        f"the guidance names two legs and the workflow has jobs {sorted(jobs)}"
+    )
+
+    installs = re.findall(r"uv pip install[^\n]*(?:\n[^\n]*\\\n[^\n]*)*", workflow)
+    control_installs = [i for i in installs if '".[jax]"' in i]
+    assert control_installs, (
+        "the `control` leg no longer installs `.[jax]`, which is the fact the "
+        "guidance rests on"
+    )
+    assert "us-python.pkg.dev" in workflow, (
+        "the `nightly` leg no longer installs from a nightly index"
+    )
+
+    # THE MEASUREMENT: does either leg constrain the jax version?
+    constrained = re.findall(r"jax[a-z]*\s*(?:[=<>~!]=|[<>])\s*[0-9]", workflow)
+    assert not constrained, (
+        f"a leg now constrains its jax version ({constrained}); the guidance "
+        "in `tripwire_canary.py` and the job names in this workflow both say "
+        "no leg does, and one of the three is now wrong"
+    )
+
+    # ...so nothing may say one is
+    for where, text in (
+        ("_TWO_LEGS", canary._TWO_LEGS),
+        ("the job names", " ".join(jobs.values())),
+    ):
+        claims = [
+            m for m in re.finditer(r"\bpinn?ed\b", text, re.I)
+            if not re.search(r"\b(neither|not|no)\b[^.]{0,40}$", text[:m.start()], re.I)
+        ]
+        assert not claims, (
+            f"{where} describes a leg as pinned and no leg pins its jax "
+            f"version: {[m.group(0) for m in claims]}"
         )
-        for branch in branches:
-            if isinstance(branch, ast.Constant) and isinstance(branch.value, str):
-                recorded.add(branch.value)
-            else:
-                nonliteral.append(ast.dump(branch)[:100])
 
-    assert not nonliteral, (
-        f"`control_state` is assigned something that is not a string literal "
-        f"({nonliteral}), so this test can no longer enumerate the states and "
-        "the decision function cannot be checked for exhaustiveness. Assign a "
-        "literal, or teach this test to follow the indirection."
-    )
-    assert recorded == {"not-run", "fired", "did-not-fire", "raised", "unrenderable"}, (
-        f"the states `main` can record moved to {sorted(recorded)}; teach "
-        "`_control_verdict` about the new one and pin it here"
-    )
-    for state in recorded:
-        note, fatal = canary_verdict = _canary()._control_verdict(state, "rendered")
-        assert isinstance(fatal, bool)
-        assert (note is None) == (not fatal), (
-            f"state {state!r} returned a note and a fatality that disagree: "
-            f"{canary_verdict!r}"
+
+def test_every_message_about_the_two_legs_carries_the_SAME_guidance(
+    capsys, tmp_path
+):
+    """One constant, and the sentences that need it quote it whole.
+
+    This paragraph was typed out twice, 190 lines apart, and the two copies
+    drifted into saying different and both-wrong things -- one of them the
+    withdrawn claim that the control leg runs a pinned series. Counting
+    occurrences of the constant's NAME does not stop that: replacing one use
+    with an inlined copy leaves the count high enough. So the runs are driven
+    and each sentence is required to CONTAIN the constant, which an inlined
+    reword cannot do and a rewording of the constant itself cannot break.
+
+    THE THREE THAT NEED IT are the findings a reader answers by looking at
+    the other leg: the tripwire would not arm, the hook is dead, the probe
+    could not run. The `indeterminate` and `unrenderable` findings
+    deliberately do NOT carry it -- they say the defect is in this repository
+    and send nobody to compare anything.
+    """
+    canary = _canary()
+    carries = {
+        "not-armed": {"armed": False, "require": True},
+        "control:did-not-fire": {"findings": "none"},
+        "control:raised": {"probe": "raises"},
+    }
+    for code, kw in carries.items():
+        run = _drive_canary(capsys, tmp_path, **kw)
+        assert canary._TWO_LEGS in run.sentences.get(code, ""), (
+            f"the {code!r} sentence gives leg guidance of its own instead of "
+            "the shared constant, which is how the two copies of it came to "
+            f"disagree:\n{run.sentences.get(code)}"
+        )
+
+    for code, kw in (
+        ("control:indeterminate", {"findings": "unreadable"}),
+        ("control:unrenderable", {"findings": "field-moved"}),
+    ):
+        run = _drive_canary(capsys, tmp_path, **kw)
+        assert canary._TWO_LEGS not in run.sentences.get(code, ""), (
+            f"{code!r} says the defect is in this repository and then sends "
+            "the reader to compare the two legs anyway"
         )
 
 
 def _pathlib_for_canary():
     import pathlib as _pathlib
 
-    return _pathlib.Path(__file__).resolve().parent.parent
+    return _pathlib.Path(__file__).resolve().parents[1]

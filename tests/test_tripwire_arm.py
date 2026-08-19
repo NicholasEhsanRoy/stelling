@@ -244,6 +244,51 @@ def test_disarm_restores_by_identity_and_reports_a_foreign_patch(disarmed):
     assert _tripwire.disarm() in ("not-armed", "restored")
 
 
+def test_undoing_a_detach_after_disarming_leaves_JAXS_rule_live(disarmed):
+    """The sequence above, and what the registry holds when it is over.
+
+    ``detach("bypass")`` -> ``disarm()`` -> ``reattach()`` is what the test
+    above drives, and it used to be irreversible: ``restore()`` cleared the
+    installation record and reported ``foreign-patch``, and ``reattach()``
+    then put back the entry it had saved -- which was OUR WRAPPER. Nobody
+    owned it, so ``is_armed()`` said no while stelling's own probe sat in
+    jax's const-fold registry for the rest of the interpreter's life. Every
+    later ``arm()`` read that wrapper as jax's rule: ``rule_name`` became
+    ``stelling_const_fold_probe``, ``hash_state`` became ``changed`` against
+    a jax whose rule had not moved, and the next wrapper wrapped the wrapper.
+
+    THIS IS MEASURED THROUGH THE STATUS THE TOOL PUBLISHES, not through the
+    registry -- rule 2 bans naming the private module here, and the status is
+    what ``report.render_status`` and the canary read anyway. A run before and
+    a run after must say the same things about jax's rule, because nothing
+    that happened in between was about jax's rule.
+    """
+    before, _ = _tripwire.arm()
+    assert before.armed and _tripwire.disarm() == "restored"
+
+    status, _ = _tripwire.arm()
+    assert status.armed
+    assert adapter.detach("bypass") == "detached"
+    assert _tripwire.disarm() == "foreign-patch"
+    assert adapter.reattach() == "reattached"
+    _tripwire.disarm()
+
+    after, _ = _tripwire.arm()
+    try:
+        assert (after.rule_name, after.rule_hash, after.hash_state) == (
+            before.rule_name, before.rule_hash, before.hash_state
+        ), (
+            "undoing the detach left something other than jax's rule in the "
+            f"registry: the tool now reports {after.rule_name!r} / "
+            f"{after.rule_hash} / {after.hash_state!r} where it reported "
+            f"{before.rule_name!r} / {before.rule_hash} / "
+            f"{before.hash_state!r} before any of this ran"
+        )
+        assert after.rule_name == adapter._KNOWN_RULE
+    finally:
+        _tripwire.disarm()
+
+
 def test_disarming_twice_is_quiet(disarmed):
     _tripwire.arm()
     assert _tripwire.disarm() == "restored"
@@ -991,183 +1036,315 @@ def test_hoisting_the_constant_really_does_raise(armed):
     # in range, so it is the VALUE being rejected and not the spelling
     assert int(jnp.array(127, jnp.int8)) == 127
 
+# --- the canary, as a process ------------------------------------------------
+#
+# `.github/scripts/tripwire_canary.py` is the alarm the nightly workflow runs,
+# and its EXIT STATUS is the whole of what CI reads. Everything below runs the
+# real script in a FRESH INTERPRETER against the real `arm()`, the real jax and
+# the real probe, and reads back the number the shell got and the reason codes
+# the script printed for it.
+#
+# WHY A SUBPROCESS FOR ALL OF IT, and not just for the clean case.
+#
+#   * INDEPENDENCE. The previous version of this battery drove `main()` in
+#     process and asserted `== 1`. By the time it ran, another test in this
+#     file had left stelling's own wrapper installed as jax's live const-fold
+#     rule, so every `arm()` in the process reported a CONTRADICTED hash row --
+#     and all six of its cells were satisfied by the hash branch while the
+#     control branch they named was never entered. Gating the control on
+#     `--require`, which is the defect this batch closed, left the file green.
+#     A fresh interpreter cannot inherit that, and the reason codes below say
+#     which branch answered rather than only that something answered.
+#   * THE TRACE CACHE. jax's is process-wide, so by the time an in-process test
+#     runs, shape `(7,)` -- which the canary hardcodes -- may already have been
+#     traced; the const-fold site is then reached zero times and a perfectly
+#     live hook reports `0 finding`. `fired` only means what it says in a fresh
+#     interpreter. (Found by asserting it in process first and watching a
+#     healthy canary exit 1.)
+#   * IT IS CHEAP. About 0.7 s a cell, measured.
+#
+# EACH SHIM FORCES ONE INPUT AND NOTHING ELSE, through shipped API wherever
+# there is one: `detach("bypass")` for a dead hook is the failure a jax version
+# bump actually produces, and a row written into `_KNOWN_HASHES` is the real
+# contradiction rather than a stubbed verdict. Only the two `unrenderable`
+# rows have to reach into the recorder, because "this repository's own shape
+# moved" has no other spelling.
+#
+# AND EVERY SHIM RUNS AFTER `arm()` RETURNS. `arm()`'s own `selfcheck()` traces
+# the SAME probe and reads the SAME recorder, so a shim that takes effect at
+# import time breaks ARMING, the run never reaches the control, and the cell
+# measures `not-armed` while claiming to measure the control. That is not a
+# hypothetical -- it is what the first draft of the `int_narrowings` shim did,
+# and the set-equality assertion below is what caught it.
 
-def _canary_module():
-    """`.github/scripts/tripwire_canary.py`, imported by path.
+_PIN_STELLING = """
+import os
+import pathlib
 
-    Imported rather than re-implemented for the reason the script itself
-    calls the shipped ``arm()``: a test that re-states the decision measures
-    the re-statement.
-    """
-    import importlib.util
-    import pathlib
+import stelling
 
-    path = (
-        pathlib.Path(__file__).resolve().parent.parent
-        / ".github" / "scripts" / "tripwire_canary.py"
+_want = pathlib.Path(os.environ["CANARY_PARENT_STELLING"]).resolve()
+_got = pathlib.Path(stelling.__file__).resolve()
+if _want != _got:
+    raise SystemExit(
+        "the child imported %s and the test process is running %s"
+        % (_got, _want)
     )
-    spec = importlib.util.spec_from_file_location("_canary_e2e", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+"""
+
+_SHIM_DEAD_HOOK = """
+import stelling._tripwire as tw
+from stelling._tripwire import _adapter_jax as ad
+
+_real = tw.arm
+def _arm(*a, **k):
+    s, r = _real(*a, **k)
+    ad.detach("bypass")          # attached, and never invoked again
+    return s, r
+tw.arm = _arm
+"""
+
+_SHIM_PROBE_RAISES = """
+import stelling._tripwire as tw
+import stelling._tripwire._probe as p
+
+_real_over, _live = p.over, {"yes": False}
+def _gated(*a, **k):
+    if _live["yes"]:
+        raise RuntimeError("FORCED: the probe could not execute")
+    return _real_over(*a, **k)
+p.over = _gated
+
+_real = tw.arm
+def _arm(*a, **k):
+    s, r = _real(*a, **k)
+    _live["yes"] = True
+    return s, r
+tw.arm = _arm
+"""
+
+_SHIM_FINDINGS_UNREADABLE = """
+import stelling._tripwire as tw
+from stelling._tripwire import record
+
+def _moved(self):
+    raise AttributeError("`sorted_findings` moved off Recorder")
+
+_real = tw.arm
+def _arm(*a, **k):
+    s, r = _real(*a, **k)
+    record.Recorder.sorted_findings = _moved
+    return s, r
+tw.arm = _arm
+"""
+
+_SHIM_FINDING_SHAPE_MOVED = """
+import stelling._tripwire as tw
+from stelling._tripwire import record
+
+class _Moved:
+    def __getattr__(self, name):
+        raise AttributeError("finding field %r moved" % name)
+
+_real = tw.arm
+def _arm(*a, **k):
+    s, r = _real(*a, **k)
+    record.Recorder.sorted_findings = lambda self: [_Moved()]
+    return s, r
+tw.arm = _arm
+"""
+
+_SHIM_DEAD_HOOK_AND_UNRENDERABLE = """
+import stelling._tripwire as tw
+from stelling._tripwire import _adapter_jax as ad
+from stelling._tripwire import record
+
+def _moved(self):
+    raise AttributeError("`int_narrowings` moved off Recorder")
+
+_real = tw.arm
+def _arm(*a, **k):
+    s, r = _real(*a, **k)
+    ad.detach("bypass")
+    record.Recorder.int_narrowings = property(_moved, lambda self, v: None)
+    return s, r
+tw.arm = _arm
+"""
+
+_SHIM_HASH_CONTRADICTED = """
+import stelling._tripwire._adapter_jax as ad
+import jax
+
+ad._KNOWN_HASHES[jax.__version__] = "000000000000"
+"""
+
+_SHIM_NEVER_READ = """
+import stelling._tripwire._adapter_jax as ad
+
+ad._KNOWN_HASHES.clear()
+"""
+
+_SHIM_BELOW_FLOOR = """
+import stelling._tripwire._adapter_jax as ad
+
+ad._FLOOR = (999, 0, 0)
+"""
+
+#: ``(id, shim, argv, expected exit, expected reason codes, control state,
+#: control report)``. ``summary`` says where ``$GITHUB_STEP_SUMMARY`` points.
+_CANARY_PROCESS_TABLE = [
+    ("clean", "", ["--require"], 0, [], "fired", "rendered"),
+    ("clean-no-require", "", [], 0, [], "fired", "rendered"),
+    ("dead-hook", _SHIM_DEAD_HOOK, ["--require"], 1,
+     ["control:did-not-fire"], "did-not-fire", "rendered"),
+    # `--require` MUST NOT MATTER here. `arm()` says the hook is attached and
+    # the control says nothing reached it, so the armed status is unverified
+    # either way -- and gating this on `--require` is the shape of the defect
+    # this batch closed.
+    ("dead-hook-no-require", _SHIM_DEAD_HOOK, [], 1,
+     ["control:did-not-fire"], "did-not-fire", "rendered"),
+    ("probe-raised", _SHIM_PROBE_RAISES, ["--require"], 1,
+     ["control:raised"], "raised", "not-run"),
+    ("probe-raised-no-require", _SHIM_PROBE_RAISES, [], 1,
+     ["control:raised"], "raised", "not-run"),
+    ("findings-unreadable", _SHIM_FINDINGS_UNREADABLE, ["--require"], 1,
+     ["control:indeterminate"], "ran", "not-run"),
+    ("finding-shape-moved", _SHIM_FINDING_SHAPE_MOVED, ["--require"], 1,
+     ["control:unrenderable"], "fired", "unrenderable"),
+    ("dead-hook-and-unrenderable", _SHIM_DEAD_HOOK_AND_UNRENDERABLE,
+     ["--require"], 1,
+     ["control:did-not-fire", "control:unrenderable"],
+     "did-not-fire", "unrenderable"),
+    ("hash-contradicted", _SHIM_HASH_CONTRADICTED, ["--require"], 1,
+     ["hash:contradicted"], "fired", "rendered"),
+    ("hash-contradicted-no-require", _SHIM_HASH_CONTRADICTED, [], 1,
+     ["hash:contradicted"], "fired", "rendered"),
+    ("never-read", _SHIM_NEVER_READ, ["--require"], 0, [], "fired", "rendered"),
+    ("not-armed", _SHIM_BELOW_FLOOR, [], 0, [], "not-run", "not-run"),
+    ("not-armed-require", _SHIM_BELOW_FLOOR, ["--require"], 1,
+     ["not-armed"], "not-run", "not-run"),
+]
 
 
-def _force_control(monkeypatch, mode):
-    """Make the live control take ``mode``, leaving ``arm()`` itself real.
+def _run_canary(tmp_path, shim, argv, summary="writable"):
+    import re
+    import subprocess
 
-    THE GATE IS THE POINT. ``arm()``'s own ``selfcheck()`` traces the SAME
-    probe the control does, so a probe broken from the start breaks arming
-    and the run never reaches the control at all — which is a different
-    finding, tested elsewhere. The probe therefore has to work during
-    arming and fail after it, which is what the flag below arranges.
-    """
-    from stelling import _tripwire as tw
-    from stelling._tripwire import _probe
+    import stelling
 
-    armed = {"yes": False}
-    real_over = _probe.over
+    (tmp_path / "sitecustomize.py").write_text(
+        _PIN_STELLING + shim, encoding="utf-8"
+    )
+    root = pathlib.Path(__file__).resolve().parent.parent
+    env = dict(os.environ)
+    # The child must import the SAME stelling this test process is running.
+    # THAT IS ALL THIS GUARANTEES -- agreement, not that either is a
+    # particular checkout; the shim asserts the agreement and fails loudly
+    # rather than measuring some other tree quietly. Which tree the PARENT is
+    # running is a question for whoever built the venv.
+    env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), *sys.path])
+    env["CANARY_PARENT_STELLING"] = stelling.__file__
+    env["JAX_PLATFORMS"] = "cpu"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    page = tmp_path / ("nowhere" if summary == "unwritable" else "") / "summary.md"
+    env["GITHUB_STEP_SUMMARY"] = str(page)
 
-    def gated(*args, **kwargs):
-        if armed["yes"] and mode == "raised":
-            raise RuntimeError("FORCED: the probe could not execute")
-        return real_over(*args, **kwargs)
-
-    monkeypatch.setattr(_probe, "over", gated)
-
-    real_arm = tw.arm
-
-    def arm_then_break():
-        status, recorder = real_arm()
-        armed["yes"] = True
-        if mode == "did-not-fire":
-            monkeypatch.setattr(recorder, "sorted_findings", lambda: [])
-        elif mode == "unrenderable":
-            class _Moved:
-                def __getattr__(self, name):
-                    raise AttributeError(f"finding field {name!r} moved")
-
-            monkeypatch.setattr(recorder, "sorted_findings", lambda: [_Moved()])
-        return status, recorder
-
-    monkeypatch.setattr(tw, "arm", arm_then_break)
+    result = subprocess.run(
+        [sys.executable, str(root / ".github" / "scripts" / "tripwire_canary.py")]
+        + argv,
+        env=env, capture_output=True, text=True, timeout=300,
+    )
+    rows = {}
+    for line in result.stdout.splitlines():
+        name, sep, value = line.partition(": ")
+        if sep:
+            rows.setdefault(name, value)
+    reasons = re.findall(r"^canary \[([a-z:-]+)\]:", result.stderr, re.M)
+    return result, rows, reasons, page
 
 
-@pytest.mark.parametrize("require", [False, True])
 @pytest.mark.parametrize(
-    "mode, expected",
-    [("did-not-fire", 1), ("raised", 1), ("unrenderable", 1)],
+    "shim, argv, expected, reasons, control, report",
+    [row[1:] for row in _CANARY_PROCESS_TABLE],
+    ids=[row[0] for row in _CANARY_PROCESS_TABLE],
 )
-def test_the_canary_exit_code_is_the_thing_that_is_pinned(
-    monkeypatch, capsys, mode, expected, require
+def test_the_canary_process_exits_for_the_reason_it_measured(
+    tmp_path, shim, argv, expected, reasons, control, report
 ):
-    """`main()` is DRIVEN, and its return value is the exit code.
+    """The alarm, end to end, in the only place its answer means anything.
 
-    THE REASON THIS TEST EXISTS. The verdict function was already unit
-    tested and the file already asserted the shape of the call site, and
-    an audit showed that combination pinned nothing: three separate
-    mutations that fully restore the defect this batch closed — returning
-    0 after computing the verdict, clearing the fatality on the next line,
-    hardcoding the state to `fired` at the call site — all passed every
-    test in the suite. Meanwhile a pure refactor that INLINED the verdict
-    function, changing no behaviour at all, went red. Behaviour destroyed
-    passed, behaviour preserved failed: exactly backwards for an
-    instrument whose whole subject is an exit code.
-
-    So the assertion is on the number `main()` returns, for every state the
-    control can reach, with and without `--require` — because `--require`
-    is not supposed to matter here and a test that only ever passes it
-    would not notice if it started to.
+    THE ASSERTION IS THE SET OF REASON CODES, not the number alone. `main()`
+    has eight ways to reach 1; an assertion that it reached 1 is satisfied by
+    any of them, which is how two audits in a row found this battery vacuous.
+    A set equality cannot be satisfied by the wrong branch, and an extra live
+    fault makes the cell RED rather than quietly satisfying it -- which is the
+    behaviour that was missing when a polluted process silently answered six
+    cells with a hash contradiction nobody had asked for.
     """
-    canary = _canary_module()
-    _force_control(monkeypatch, mode)
-    monkeypatch.setattr(
-        sys, "argv", ["tripwire_canary.py"] + (["--require"] if require else [])
+    result, rows, got, page = _run_canary(tmp_path, shim, argv)
+    context = (
+        f"\n--- argv {argv} ---\n--- stdout ---\n{result.stdout}"
+        f"\n--- stderr ---\n{result.stderr}"
     )
-
-    # ONCE. `main()` arms, and calling it a second time to build an assertion
-    # message would arm again inside a run that has already disarmed —
-    # measuring the second call, not the first. (Written this way after doing
-    # exactly that.)
-    code = canary.main()
-    assert code == expected, (
-        f"a live control in state {mode!r} exited {code!r} and the contract "
-        f"is {expected!r} (--require={require})"
+    assert rows.get("status") in ("armed", "below-floor"), (
+        "the child did not get as far as a status row, so this cell is "
+        "measuring the environment and not the canary" + context
     )
+    assert (result.returncode, sorted(got)) == (expected, sorted(reasons)), context
+    assert (rows.get("control state"), rows.get("control report")) == (
+        control, report
+    ), context
+    # the page a human reads carries the same verdict as the exit status
+    summary = page.read_text(encoding="utf-8")
+    for code in got:
+        assert f"`{code}`" in summary, f"{code} is not on the summary page"
+    assert ("**exit 1**" if expected else "**exit 0**") in summary, context
 
-    out = capsys.readouterr()
-    if expected:
-        assert "canary:" in out.err, "a fatal state printed no sentence"
-    # the run must leave the interpreter as it found it, or the next test
-    # in this module inherits a patched jax
-    assert not _tripwire.is_armed()
+
+def test_a_canary_that_cannot_write_its_summary_page_does_not_page(tmp_path):
+    """Property 3 of the workflow: INFRASTRUCTURE MUST NOT PAGE.
+
+    ``$GITHUB_STEP_SUMMARY`` is a convenience channel for whoever reads the
+    run page. It is not the measurement, and a runner that hands the script an
+    unwritable path is not a statement about the tripwire. It used to raise
+    ``FileNotFoundError`` straight out of `main()`: a traceback and an exit 1,
+    with no ``canary:`` sentence at all, in the script whose own `_hash_row`
+    invokes "infrastructure must not page" as an argument.
+    """
+    result, rows, reasons, _ = _run_canary(
+        tmp_path, "", ["--require"], summary="unwritable"
+    )
+    assert result.returncode == 0, result.stderr
+    assert reasons == [], result.stderr
+    assert "canary note:" in result.stderr, (
+        "the summary silently went missing; a channel that vanishes without "
+        "saying so is the beautiful zero this project keeps finding"
+    )
+    assert rows.get("control state") == "fired", result.stdout
 
 
-@pytest.mark.parametrize(
-    "shimmed, expected", [(True, 1), (False, 0)], ids=["control-raises", "clean"]
-)
-def test_the_canary_script_wires_its_exit_code_to_the_process(
-    tmp_path, shimmed, expected
-):
-    """`main()`'s return really does become the process's exit status.
+def test_a_mistyped_flag_is_argparses_exit_and_the_list_says_so(tmp_path):
+    """The exit code the exit-code list twice claimed did not exist.
 
-    The parametrised test above pins what `main()` RETURNS; this pins that
-    the return reaches the shell, which is the only thing a CI job reads.
-
-    THE CLEAN CASE IS ONLY DRIVABLE HERE, and the reason is the one this
-    file already documents for `_probe_seq`: jax's trace cache is
-    process-wide, so by the time the tests above run, shape `(7,)` — which
-    the canary hardcodes — may already have been traced, and the const-fold
-    site is then reached zero times and a perfectly live hook reports `0
-    finding`. A fresh interpreter is the only place `fired` means what it
-    says. (Found by asserting it in-process first and watching a healthy
-    canary exit 1.)
+    Not this script's decision -- argparse's -- and in the list anyway,
+    because an exit status a reader can meet is one the list owes them. The
+    list is checked against the reasons the script produces in
+    ``tests/test_tripwire_record.py``; this is the one entry in it that no
+    reason can produce, so it is driven here.
     """
     import subprocess
 
-    shim = tmp_path / "sitecustomize.py"
-    shim.write_text("" if not shimmed else 
-        "import stelling._tripwire as tw\n"
-        "import stelling._tripwire._probe as p\n"
-        "_real_over, _armed = p.over, {'yes': False}\n"
-        "def _gated(*a, **k):\n"
-        "    if _armed['yes']:\n"
-        "        raise RuntimeError('FORCED: the probe could not execute')\n"
-        "    return _real_over(*a, **k)\n"
-        "p.over = _gated\n"
-        "_real_arm = tw.arm\n"
-        "def _arm():\n"
-        "    s, r = _real_arm()\n"
-        "    _armed['yes'] = True\n"
-        "    return s, r\n"
-        "tw.arm = _arm\n",
-        encoding="utf-8",
-    )
-
+    (tmp_path / "sitecustomize.py").write_text("", encoding="utf-8")
     root = pathlib.Path(__file__).resolve().parent.parent
-    script = root / ".github" / "scripts" / "tripwire_canary.py"
     env = dict(os.environ)
-    # the child must import the SAME stelling this test is running against,
-    # not whatever an editable install elsewhere points at
     env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), *sys.path])
-    env["JAX_PLATFORMS"] = "cpu"
-
     result = subprocess.run(
-        [sys.executable, str(script), "--require"],
+        [sys.executable,
+         str(root / ".github" / "scripts" / "tripwire_canary.py"), "--requrie"],
         env=env, capture_output=True, text=True, timeout=300,
     )
-    assert result.returncode == expected, (
-        f"the script exited {result.returncode}, contract {expected} "
-        f"(shimmed={shimmed})\n--- stdout ---\n{result.stdout}\n"
-        f"--- stderr ---\n{result.stderr}"
+    assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+    assert "canary [" not in result.stderr, (
+        "argparse's rejection is not one of this script's reasons and must "
+        "not be dressed as one"
     )
-    assert "status: armed" in result.stdout, (
-        "the control was supposed to fail AFTER arming; if arming itself "
-        "broke, this test is measuring the wrong thing"
-    )
-    if shimmed:
-        assert "DID NOT COMPLETE" in result.stderr
-    else:
-        assert "canary:" not in result.stderr
-        assert "THE CONTROL DID NOT FIRE" not in result.stdout, (
-            "a fresh interpreter traced the probe and the hook saw nothing"
-        )
