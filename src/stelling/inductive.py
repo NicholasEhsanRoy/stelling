@@ -81,6 +81,7 @@ def check_inductive_step(
     solver=None,
     refine=None,
     strict=False,
+    falsify=None,
 ):
     """Verify the inductive step: one iteration of ``body`` preserves bounds.
 
@@ -120,6 +121,15 @@ def check_inductive_step(
         ``None`` or ``"affine"``.  See :func:`stelling.preconditions.check`.
     strict : bool
         If True, raise on transcription errors instead of declining.
+    falsify : str or None
+        ``None`` (the default — off, and :mod:`stelling.falsify` is not
+        imported) or ``"sample"``.  See
+        :func:`stelling.preconditions.check`.  Accepted here because this
+        door mints VERIFIEDs through the same pipeline, and a probe whose
+        reach depended on which of the three public doors happened to
+        carry the keyword would be an instrument bounded by an accident.
+        May RAISE :class:`stelling.falsify.VerifiedFalsified` instead of
+        returning a verdict.
 
     Returns
     -------
@@ -253,6 +263,7 @@ def check_inductive_step(
         solver=solver,
         refine=refine,
         strict=strict,
+        falsify=falsify,
     )
 
     # -- Annotate the verdict with inductive-step context ------------------------

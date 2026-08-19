@@ -131,6 +131,143 @@ SPDX-License-Identifier: Apache-2.0
 
 ### Verification pipeline
 
+- **`check(..., falsify="sample")` — the falsification probe, DEFAULT-OFF
+  and UNRELEASED.** A new keyword on `stelling.preconditions.check`,
+  `stelling.contracts.check_contract` and
+  `stelling.inductive.check_inductive_step`. With the default `None`
+  nothing changes: `stelling.falsify` is never imported and the verdict
+  is byte-identical. Set to `"sample"` it runs, after a VERIFIED, the
+  check this library has never had — it executes the real program at
+  concrete points inside the declared set and tries to find one that
+  violates a discharged obligation. `stelling` replays a REFUTED's
+  witness through the real program; an `unsat` is a universal claim with
+  no witness to replay, so a false VERIFIED had nothing downstream at
+  all.
+
+  Two properties are enforced rather than described. It **can only
+  refute**: the note it appends is a sentence about work done and carries
+  its own disclaimer, so a probed VERIFIED never reads as a better
+  VERIFIED. And when it finds a violation it **raises**
+  `stelling.falsify.VerifiedFalsified` instead of returning a status,
+  because a discharged obligation the program violates is a defect in
+  *stelling*, not a finding about the caller's code.
+
+  Under `semantics="real"` a violation is admitted **only** by an exact
+  test: exact **rational replay of the same traced jaxpr** at the same
+  point (stdlib `fractions`; the probe imports no analysis module), or —
+  where the *program* is integral throughout, meaning every operand and
+  result dtype in the jaxpr at every depth and not merely the declared
+  ones — exact integer arithmetic, which keeps its own branch because
+  rational arithmetic does not wrap and routing it through the replay
+  would suppress the runtime-wrap catch.
+  **Everything else declines**, under `no-exact-reading-of-this-program`,
+  with the reason the exact reading was unavailable counted by primitive
+  in `ProbeReport.abstentions` and repeated in the stamp line. There is no
+  fall-back: an alarm whose message is "stelling is UNSOUND" must not be
+  admitted by a heuristic, and the ulp-stability proxy that used to sit
+  behind the replay is gone from the firing path.
+
+  That is a deliberate reach cost and it is measured rather than implied.
+  A program with one step the replay cannot read cannot be fired on,
+  however false its obligation is — irrational steps (`exp`, `log`,
+  trigonometry, a fractional `pow`, a non-square `sqrt`) inherently, and
+  `dot_general`, `sort`, `cumsum`, `stack`, `rem`, `scatter` and
+  `scatter-add` because this module's tables have no reading for them
+  yet. Three of the six live
+  fixtures in `tests/test_falsify_probe.py` are `scatter` and now decline;
+  they are listed there with the primitive that costs each one.
+
+  Every admission is also downstream of the point being **admitted by
+  every assume**, and that gate is a reading of the program that can be
+  PARTIAL. The executed walk hands a call equation whole to jax, so a
+  `stelling_assume` inside a `jit` or a `remat2` body executes without
+  ever reaching the list the gate reads — and `propagate` narrows on that
+  assume, so the probe was attacking points the analysis had claimed
+  nothing about. The gate now declines (`assume-not-fully-executed`)
+  unless the executed run saw every assume the program contains at every
+  depth. Generalised rather than patched: every quantity the probe reads
+  off the program is checked against a census taken at every depth before
+  it may license anything, a declaration or an obligation the probe cannot
+  see declines the whole probe by name, and a table (`_READINGS`) is held
+  to the two dataclasses field-for-field so a new quantity cannot arrive
+  without either a guard or a written argument that it needs none.
+
+  The two walkers stay at **different depths on purpose**, and that is
+  measured: `Primitive.bind` on a call equation compiles the whole body
+  and XLA contracts across it, so a version that walked the body op by op
+  computed different floats (5 disagreements over 22 one-line `jit`
+  bodies, including sign disagreements) and raised "stelling is UNSOUND"
+  on an obligation the real program satisfies. Each walker's reading is
+  therefore checked against the census instead. The second
+  reach-preserving alternative — keep the call compiled and thread the
+  body's intermediates out as extra outputs — was driven too and is **0
+  of 3 bitwise-identical** to the plain compiled call on the same
+  fixture, returning exactly `0.0` where the plain call returns the
+  rounding error of the product: exposing an intermediate is itself the
+  change, because the value that has to be materialised is the one XLA
+  was contracting away.
+
+  **And the executed float is at the TRACE's granularity, which is not
+  the program's.** `_execute` hands jax one equation at a time, so XLA
+  never sees two of them together — and `jax.make_jaxpr` INLINES the
+  `jit` that `jnp.mean` is built out of, so this is reached with no `jit`
+  written anywhere. `jnp.mean` and `jnp.average` disagree between the two
+  granularities on 70 and 72 of 200 random points (every other wrapper
+  surveyed: 0 of 200), and four lines fire on a correct VERIFIED under
+  `semantics="ieee"`, where *"the executed float IS the subject of the
+  claim"* is what admits:
+
+      X0    = 1.3102272059107631
+      mean3 = lambda x: jnp.mean(jnp.stack([x, x * 2.0, x * 3.0]))
+      C     = float(mean3(jnp.asarray(X0, "float64")))   # the program's OWN value
+      x     = any_array((), "float64", (X0, X0)); assert_(mean3(x) <= C)
+
+  So the granularity is measured the way the depth is: the same program
+  is run at the same point as ONE compiled region
+  (`_whole_program_route`), and an executed violation whose truth value
+  moves between the two routes declines
+  (`executed-float-depends-on-granularity`). The second route is
+  consulted only after a violation and can only ever decline. Reach
+  re-measured on 31 ordinary one-line `jnp` programs: identical, 31 of 31
+  firing under `ieee` and 17 of 31 under `real`, base and fixed.
+
+  **The exact-rational evaluator's ARITHMETIC is now pinned too.** Which
+  primitive names the replay claims to read is checked against a live
+  trace; what it reads them AS was checked by nothing, and that is the
+  one direction in which this evaluator can INVENT a refutation rather
+  than lose one. Three one-token mutations each raised "stelling is
+  UNSOUND" on an obligation TRUE over ℝ with the whole falsify suite
+  green — `math.trunc` → `round` in `_rat_convert`, dropping the
+  integer-exponent guard in `_rat_pow`, `Fraction(math.sqrt(a))` in
+  `_rat_sqrt` — and the `_rat_pow` one did it on a real `VERIFIED`
+  through the public door, while the `_rat_sqrt` one survived the entire
+  repository. The readings are now asserted against jax's own arithmetic
+  where jax's answer is exact, and against their own algebra where it is
+  not (`v * v == a` for a root, `v ** k.denominator == a ** k.numerator`
+  for a power), with `_int_ok`'s boundary asserted at the point where jax
+  actually wraps.
+
+  Each `_READINGS` guard is also bound to the `if` that takes it rather
+  than to the file: the table used to be satisfied by a new field
+  declaring any decline reason spelled anywhere in `falsify.py`.
+
+  A point the exact replay places **outside** the assumed region is no
+  longer counted under `points_admissible`, and is not reported as a
+  declined violation either. The stamp line could say "74 point(s)
+  executed, 65 inside the declared set and admitted by every assume …
+  declined 39 assume-unsatisfied-over-the-rationals" — a count that reads
+  as coverage for 39 points no assume admitted.
+
+  Blind spots, disclosed rather than discovered: the probe cannot see the
+  `jnp.full((), 256, jnp.int8)` narrowing (there is no executable form of
+  that program, traced or eager, in which `256` survives), it declines
+  `bfloat16` and the `float8_*` formats outright, and its 5-second
+  wall-clock backstop is thin enough — the deterministic element and
+  width budgets already permit about 4.75 seconds — that **whether it
+  fires on a given program can depend on the machine**. That bound can
+  only decline, never admit, so what varies with the hardware is reach
+  and never soundness.
+
 - **Reachability conjunct**: a backward walk from the jaxpr's outputs
   identifies variables that flow to an output. Violated obligations on
   "dead" variables (computed but never observed by the caller) are

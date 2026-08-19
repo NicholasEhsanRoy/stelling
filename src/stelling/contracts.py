@@ -949,7 +949,8 @@ def coefficient_contrast(
 # -- the checker --------------------------------------------------------------
 
 
-def check_contract(contract, *, vacuity_mode, solver_timeout_ms=None, refine=None):
+def check_contract(contract, *, vacuity_mode, solver_timeout_ms=None,
+                   refine=None, falsify=None):
     """Check a contract's requires face through the standard pipeline and
     return the :class:`ContractVerdict` carrying both faces.
 
@@ -980,6 +981,19 @@ def check_contract(contract, *, vacuity_mode, solver_timeout_ms=None, refine=Non
 
     The ensures face itself is carried through UNCHANGED — this function
     cannot mint, upgrade, or drop one.
+
+    ``falsify`` is :func:`stelling.preconditions.check`'s falsification
+    dial, and it is accepted HERE for the reason it is accepted there: this
+    door mints VERIFIEDs through the same ``_pipeline``, so a VERIFIED
+    reached through a contract is exactly as much in need of a downstream
+    check as one reached through ``check()``. It was reachable from only
+    one of the three public doors when it landed, which made the probe's
+    reach an accident of which function got the keyword rather than a
+    decision; the decision is that every door that can mint a VERIFIED can
+    ask for it. Default ``None`` — off, and the probe module is not even
+    imported. It may RAISE
+    :class:`stelling.falsify.VerifiedFalsified` rather than returning a
+    verdict; see that module's docstring for why that is a raise.
     """
     import dataclasses
 
@@ -990,6 +1004,7 @@ def check_contract(contract, *, vacuity_mode, solver_timeout_ms=None, refine=Non
         vacuity_mode=vacuity_mode,
         solver_timeout_ms=solver_timeout_ms,
         refine=refine,
+        falsify=falsify,
     )
     if contract.ensures is not None:
         ensures_line = (
