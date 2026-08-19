@@ -111,6 +111,15 @@ enumerated door by door, and measured rather than asserted, in
 [the tripwire's coverage table](overflow-tripwire.md#what-it-does-not-find);
 read it before you rely on a VERIFIED as a statement about your source.
 
+There is a second, stricter dial for that unwatched set:
+`pytest --stelling-eager-truncation=error` makes `jnp.full(shape, N, dt)` and
+its relatives **raise** at the line that wrote the constant instead of
+narrowing it silently, so a session either contains no undeclared truncation
+or does not finish. It is off by default, `-p stelling.overflow` does not turn
+it on, and `stelling.intentional_wrap(value, dtype)` is how you say a wrap is
+deliberate. It closes six of the seven unwatched routes; the two it cannot
+close are numpy's and are named on that page.
+
 ## 2. The three judgments
 
 Save as `statuses.py`:

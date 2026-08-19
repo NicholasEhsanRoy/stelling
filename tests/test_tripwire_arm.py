@@ -30,6 +30,7 @@ jnp = pytest.importorskip("jax.numpy")
 np = pytest.importorskip("numpy")
 
 from stelling import _tripwire  # noqa: E402
+from stelling._tripwire.eager import expected_truncation  # noqa: E402
 from stelling._tripwire import _adapter_jax as adapter  # noqa: E402
 from stelling._tripwire import record  # noqa: E402
 
@@ -404,7 +405,22 @@ def test_a_hook_that_records_everything_is_caught_as_cries_wolf(disarmed, monkey
     status, rec = _tripwire.arm()
     assert status.armed, "the positive control did not arm"
     monkeypatch.setattr(record, "in_range", lambda value, dtype: False)
-    assert adapter.selfcheck() == "cries-wolf"
+    # THE TWO INSTRUMENTS SHARE THIS ARITHMETIC, deliberately and by
+    # construction: `record.in_range` is the single implementation the
+    # const-fold tripwire and the eager detector both range-check against, so
+    # a value the one calls out of range is a value the other calls out of
+    # range. That is the property this repository wants -- one arithmetic
+    # cannot disagree with itself -- and the visible cost of it is right here:
+    # breaking it to drive ONE instrument's self-check makes the OTHER refuse
+    # every construction it sees. So this region is not permitting a
+    # truncation, it is permitting an alarm this test manufactured, and it
+    # says so where a reader of the eager report will meet it.
+    with expected_truncation(
+        "record.in_range is deliberately broken here to drive the const-fold "
+        "self-check; the eager detector reads the same arithmetic, so every "
+        "in-range construction inside this block reads as out of range"
+    ):
+        assert adapter.selfcheck() == "cries-wolf"
 
 
 def test_a_hook_that_records_nothing_is_caught_as_not_invoked(disarmed, monkeypatch):
@@ -737,7 +753,19 @@ def test_the_silent_doors_are_NAMED_and_each_one_is_measured(armed, label):
     x = jnp.zeros(5, jnp.int8)
 
     fires, invocations = rec.fires, rec.invocations
-    out = jax.jit(door)(x)
+    # THE SUBJECT OF THIS TEST IS THE TRUNCATION, which is why the region
+    # declaration and not `stelling.intentional_wrap` is the right tool here.
+    # These doors are driven precisely to show that 300 becomes 44 in silence;
+    # writing 44 instead would delete the demonstration and leave a test that
+    # asserts a door does nothing. The region is inert unless
+    # `--stelling-eager-truncation=error` is on, and when it is, this
+    # truncation is COUNTED and NAMED with this reason in the session report
+    # rather than disappearing.
+    with expected_truncation(
+        "the subject of this test IS the silent narrowing; 300 -> 44 is what "
+        "is being demonstrated"
+    ):
+        out = jax.jit(door)(x)
     d_fires = rec.fires - fires
     d_invocations = rec.invocations - invocations
 
@@ -793,7 +821,16 @@ def test_a_SCOPED_disable_jit_swallows_a_door_that_is_otherwise_COVERED(armed):
     jaxpr_out = str(jax.make_jaxpr(outside)(x))
     assert rec.fires == before + 1, "the control did not fire outside the block"
 
-    with jax.disable_jit():
+    # The same argument as the pre-narrowed doors above, and this door is the
+    # sharper case: the EAGER detector closes it outright (measured, 200 ->
+    # -56 raised at the line that writes it), so with that detector armed this
+    # block is exactly a demonstration of something now caught. It still has
+    # to run, because what it demonstrates is that the CONST-FOLD tripwire
+    # cannot see it.
+    with expected_truncation(
+        "the subject of this test IS the scoped disable_jit block swallowing "
+        "the narrowing; 200 -> -56 is what is being demonstrated"
+    ), jax.disable_jit():
         before = rec.fires
         jaxpr_in = str(jax.make_jaxpr(inside)(x))
         assert rec.fires == before, (
@@ -893,7 +930,25 @@ ELEVEN_DOORS = {**CONSTRUCTION_DOORS, **PROMOTING_DOORS}
 def _rejected_under_strict(operand_factory) -> set[str]:
     """Which of the eleven raise ``TypePromotionError`` under strict promotion."""
     rejected = set()
-    with jax.numpy_dtype_promotion("strict"):
+    # A REGION DECLARATION, because five of the eleven doors are construction
+    # doors that narrow the operand in silence -- which is the finding this
+    # helper's caller exists to measure. `stelling.intentional_wrap` is the
+    # wrong tool for it: it would hand each door a value that fits, and the
+    # thing being measured is what happens to one that does not. The
+    # truncations this permits are counted and named with this reason in the
+    # eager detector's session report.
+    #
+    # NOTE THE `except Exception` THREE LINES DOWN. It is why the alarm this
+    # region suppresses inherits from BaseException: without that, an
+    # `EagerTruncationError` raised inside a construction door would be caught
+    # here, classified as "not a TypePromotionError", and dropped -- and this
+    # helper would go on returning a confident answer about a door it never
+    # drove. The region is the declaration; BaseException is what makes the
+    # absence of one visible.
+    with expected_truncation(
+        "the subject of this measurement IS which doors narrow in silence, so "
+        "the construction doors are driven with an operand that does not fit"
+    ), jax.numpy_dtype_promotion("strict"):
         x = jnp.zeros(3, jnp.int8)
         operand = operand_factory()
         for name, door in ELEVEN_DOORS.items():
@@ -939,7 +994,10 @@ def test_strict_promotion_is_a_DTYPE_check_measured_over_the_WHOLE_door_set():
     # (1) six of eleven, and WHICH six, for the NumPy-scalar spelling
     assert _rejected_under_strict(lambda: np.int64(256)) == set(PROMOTING_DOORS)
     for name, door in CONSTRUCTION_DOORS.items():
-        with jax.numpy_dtype_promotion("strict"):
+        with expected_truncation(
+            "measuring that a construction door narrows 256 to 0 under strict "
+            "promotion instead of raising"
+        ), jax.numpy_dtype_promotion("strict"):
             got = int(np.asarray(door(jnp.zeros(3, jnp.int8), np.int64(256))).ravel()[0])
         assert got == 0, (
             f"{name} under strict promotion returned {got}. 'strict raises "
@@ -952,9 +1010,12 @@ def test_strict_promotion_is_a_DTYPE_check_measured_over_the_WHOLE_door_set():
     # the value would have survived
     assert _rejected_under_strict(lambda: np.int64(3)) == set(PROMOTING_DOORS)
     assert _rejected_under_strict(lambda: np.int8(3)) == set()
-    wrapped = int(
-        np.asarray(jnp.zeros(3, jnp.int8).at[0].set(np.int64(256))).ravel()[0]
-    )
+    with expected_truncation(
+        "measuring that a door strict REJECTS would have wrapped anyway"
+    ):
+        wrapped = int(
+            np.asarray(jnp.zeros(3, jnp.int8).at[0].set(np.int64(256))).ravel()[0]
+        )
     assert wrapped == 0, (
         "x.at[0].set(np.int64(256)) kept its value, which would make 'every "
         "operand strict rejects would have kept its value' true after all"
@@ -974,8 +1035,12 @@ def test_strict_promotion_is_a_DTYPE_check_measured_over_the_WHOLE_door_set():
     # ...and the control for all of it: without strict, none of the eleven
     # raises, so the sets above are about the SETTING and not about the doors
     x = jnp.zeros(3, jnp.int8)
-    for name, door in ELEVEN_DOORS.items():
-        door(x, np.int64(256))
+    with expected_truncation(
+        "the control: all eleven doors driven with an operand that does not "
+        "fit, to show the sets above are about the SETTING and not the doors"
+    ):
+        for name, door in ELEVEN_DOORS.items():
+            door(x, np.int64(256))
 
 
 def test_the_report_states_the_measured_strict_promotion_result(armed):
@@ -1224,14 +1289,22 @@ ad._FLOOR = (999, 0, 0)
 _CANARY_PROCESS_TABLE = [
     ("clean", "", ["--require"], 0, [], "fired", "rendered"),
     ("clean-no-require", "", [], 0, [], "fired", "rendered"),
+    # TWO REASONS, AND BOTH ARE TRUE. `detach("bypass")` puts jax's own rule
+    # back over stelling's wrapper, so the hook is attached-but-blind
+    # (`control:did-not-fire`) AND stelling's wrapper is no longer the live
+    # registry entry (`hooks:displaced`). B16 added the second: the canary now
+    # asks `_tripwire.displaced()` once, before either disarm and while both
+    # hooks are live, and a bypass is exactly what that question is for. Before
+    # it, this run printed `disarm(): foreign-patch` on stdout and paged for
+    # the control alone.
     ("dead-hook", _SHIM_DEAD_HOOK, ["--require"], 1,
-     ["control:did-not-fire"], "did-not-fire", "rendered"),
+     ["control:did-not-fire", "hooks:displaced"], "did-not-fire", "rendered"),
     # `--require` MUST NOT MATTER here. `arm()` says the hook is attached and
     # the control says nothing reached it, so the armed status is unverified
     # either way -- and gating this on `--require` is the shape of the defect
     # this batch closed.
     ("dead-hook-no-require", _SHIM_DEAD_HOOK, [], 1,
-     ["control:did-not-fire"], "did-not-fire", "rendered"),
+     ["control:did-not-fire", "hooks:displaced"], "did-not-fire", "rendered"),
     ("probe-raised", _SHIM_PROBE_RAISES, ["--require"], 1,
      ["control:raised"], "raised", "not-run"),
     ("probe-raised-no-require", _SHIM_PROBE_RAISES, [], 1,
@@ -1242,7 +1315,7 @@ _CANARY_PROCESS_TABLE = [
      ["control:unrenderable"], "fired", "unrenderable"),
     ("dead-hook-and-unrenderable", _SHIM_DEAD_HOOK_AND_UNRENDERABLE,
      ["--require"], 1,
-     ["control:did-not-fire", "control:unrenderable"],
+     ["control:did-not-fire", "control:unrenderable", "hooks:displaced"],
      "did-not-fire", "unrenderable"),
     ("hash-contradicted", _SHIM_HASH_CONTRADICTED, ["--require"], 1,
      ["hash:contradicted"], "fired", "rendered"),

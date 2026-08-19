@@ -19,18 +19,18 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                47
-      marked illustrative — not run                 17
+    ```python blocks                                49
+      marked illustrative — not run                 19
       EXECUTED (exit 0 required)                    30
         marked run-only — output not compared        3
         OUTPUT COMPARED against a fence             27
-    plain ``` fences                                66
+    plain ``` fences                                67
       consumed as an example's claimed output       27
-      HAND-WRITTEN, compared to nothing             39
+      HAND-WRITTEN, compared to nothing             40
 
 So the claim this file earns is: *every runnable example runs, and 27 of
 the 30 have their stdout compared byte for byte after a narrow
-normalisation.* The 39 unattached fences — a render pasted into prose, a
+normalisation.* The 40 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
 
@@ -155,8 +155,14 @@ SRC = REPO / "src"
 # The inventory the docstring states. A change here is a change to what
 # this file promises, so it must be made deliberately and in both places.
 EXPECTED_INVENTORY = {
-    "python_blocks": 47,
-    "illustrative": 17,
+    # B16 added two, both illustrative: `docs/overflow-tripwire.md`'s eager
+    # section shows the defect (`jnp.full((), 256, jnp.int8)` is 0) and the
+    # declaration that answers it. The first CANNOT be executed here — with
+    # the eager detector armed it raises by design, and with it off it prints
+    # nothing, so there is no output to compare either way; it is a record of
+    # what jax does, which is what `illustrative` means.
+    "python_blocks": 49,
+    "illustrative": 19,
     "executed": 30,
     "run_only": 3,
     "compared": 27,
@@ -167,8 +173,11 @@ EXPECTED_INVENTORY = {
     # `preconditions._pipeline` composes, not example output, so they are
     # unattached by construction; `tests/test_tripwire_gate.py` is what holds
     # the real sentences down.
-    "plain_fences": 66,
-    "plain_unattached": 39,
+    # B16 added one: the eager detector's alarm, quoted so a reader can see
+    # what it says before switching it on. Hand-written and attached to
+    # nothing, like every other rendered excerpt on that page.
+    "plain_fences": 67,
+    "plain_unattached": 40,
 }
 
 _MARKER = re.compile(r"<!--\s*doc-example:\s*(illustrative|run-only)\s*-->")

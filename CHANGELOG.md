@@ -129,6 +129,71 @@ SPDX-License-Identifier: Apache-2.0
   import when they disagree in either direction, and the runtime arm
   declines as a second guard.
 
+### The eager construction-site detector (Mode 2), DEFAULT-OFF
+
+- **`--stelling-eager-truncation=error` — an out-of-range integer constant
+  narrowed at array construction now RAISES at the line that wrote it.**
+  `jnp.full((), 256, jnp.int8)` is `0`: the 256 is destroyed before any
+  primitive is bound, so the overflow tripwire — which watches jax's
+  const-fold rule — never sees it, and no verdict downstream can tell that
+  the `0` it certified was written as a `256`. `SOUNDNESS.md`'s
+  integer-literal wrap entry is that defect and its cost is a wrong VERIFIED.
+
+  Six of the seven `unwatched` routes in
+  `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` narrow at one line
+  inside jax, and this attaches there: `jnp.full`, `jnp.full_like`,
+  `lax.full`, `lax.full_like`, `lax.convert_element_type` and
+  `jnp.stack`-of-`full`, plus `lax.select`-of-`full`, `jnp.take`'s
+  `fill_value`, and a scoped `with jax.disable_jit():`. Two numpy routes
+  remain and are named: `np.asarray(N).astype(dt)` is permanently unhookable
+  (`np.ndarray.astype` is an immutable type attribute) and
+  `jnp.asarray(np.array(N), dtype=dt)` is a second spelling into the same
+  residue. `EAGER_COVERAGE`, beside `GATE_COVERAGE`, is the measured
+  inventory and a test holds the residue to exactly those two.
+
+  **Off by default, and NOT turned on by `--stelling-overflow`.** Two dials,
+  because the tripwire is a report over a session and this is a rule: a
+  session it is armed on either contains no undeclared truncation or does not
+  finish. With it off, nothing is patched, no jax is imported for it, and
+  every program is byte-identical.
+
+- **`stelling.intentional_wrap(value, dtype)` and
+  `stelling.EagerTruncationError`, both public.** `intentional_wrap` returns
+  the wrapped integer — `intentional_wrap(0xFF, "int8")` is `-1` — so the
+  value that reaches jax is the value jax would have produced anyway, and a
+  declared program is byte-identical to an undeclared one. It needs no jax
+  and no numpy, and every declaration is recorded and printed with its site.
+  The dtype is half the declaration: a declaration used at a different width
+  fires rather than passing.
+
+  **The exception inherits directly from `BaseException`**, so an ordinary
+  `except Exception:` cannot swallow a soundness alarm — the handler shape
+  that is everywhere in numerical Python. "Uncatchable" is not achievable and
+  is not claimed; `design/eager-truncation-detector.md` carries the argument,
+  the measured blast radius (0 fires across 21 third-party packages) and the
+  cost (cleanup written in `except Exception:` rather than `finally:` will
+  not run).
+
+  **There is no value-based carve-out and there will not be one.**
+  `jnp.full((4,), 0xFF, jnp.int8)` and `jnp.full((4,), 255, jnp.int8)`
+  produce identical observations at the hook, so intent is not a function of
+  `(value, dtype, result)`. Two heuristics were driven over a corpus of real
+  narrowings: "a value below the dtype's minimum is deliberate" hard-errors
+  correct code 7 times and misses a real bug once; "an all-ones result is
+  deliberate" is 5 and 2. And the corpus carries the PROOF rather than only
+  the scores: `0xFF` and `255` into `int8` are the same `(value, dtype)` pair
+  with opposite intent, so the class of value-based rules is empty rather than
+  merely badly-scoring.
+
+- **It fails closed on drift.** It patches a private jax function, so arming
+  verifies the module and attribute, checks `inspect.signature`'s first two
+  parameters, and then drives EVERY construction route it claims in both
+  directions. A route that stops reaching the site — the silent failure a jax
+  release actually produces — is `route-blind:<route>` and it refuses to
+  attach. Four new failure codes: `no-site-module`, `no-site`,
+  `signature-drift`, `route-blind`. The nightly jax canary arms it, drives a
+  live control both ways, and checks its own per-release source-hash map.
+
 ### Verification pipeline
 
 - **`check(..., falsify="sample")` — the falsification probe, DEFAULT-OFF
@@ -341,6 +406,19 @@ SPDX-License-Identifier: Apache-2.0
   returns NaN for `pow(negative, fractional)`).
 
 ### Soundness fixes
+
+- **The trace gate now consults the tripwire's displacement check.**
+  `live_check() == "foreign-patch"` was a fourth way the gate's watch went
+  partial and the gate consulted none of it: rebinding jax's const-fold
+  registry entry over stelling's wrapper after arming leaves the recorder's
+  identity unchanged and `fires_count()` unchanged, so both of the gate's
+  existing partiality tests pass, the fire counter stays at zero because the
+  wrapper is never called, and `check()` returned **VERIFIED on a route
+  `GATE_COVERAGE` calls `watched`**. It now returns `UNKNOWN — trace NOT
+  FULLY OBSERVED`, naming the displaced hook. One instrument,
+  `_tripwire.displaced()`, answers for both hooks — the const-fold rule and
+  the eager construction site — because two of them would be two chances to
+  teach one caller about one hook and forget the other.
 
 **Batch B15 — the trace gate observed part of a program and claimed all of
 it** (`fix/B15-trace-gate-observation`). Branched from `a759809`.

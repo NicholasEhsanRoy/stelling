@@ -38,6 +38,12 @@ from stelling._tripwire import record
 
 HEADER = "stelling overflow tripwire"
 
+#: The eager detector's own section header. A SEPARATE section and not extra
+#: lines under the tripwire's, because the two instruments arm separately,
+#: fail separately and are switched on separately -- a reader who ran only one
+#: of them must not have to work out which half of one banner applies.
+EAGER_HEADER = "stelling eager truncation detector"
+
 #: How many frames of the call chain to print per finding. The chain is
 #: already narrowed to the traced region; this bounds a deeply recursive one
 #: without ever hiding the writer, which is the innermost frame and therefore
@@ -95,7 +101,21 @@ UNCOVERED = (
     "VALUE STILL WRAPS and nothing here can tell. THE SET IS ENUMERATED AND "
     "MEASURED, route by route, in "
     "`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` -- a door that "
-    "moves bucket goes red there rather than going quiet here.",
+    "moves bucket goes red there rather than going quiet here. "
+    "THE OPT-IN EAGER DETECTOR CLOSES MOST OF THIS GROUP AND IS NOT ON BY "
+    "DEFAULT: run with `--stelling-eager-truncation=error` and every route "
+    "above whose constant is still a written integer when it reaches jax "
+    "RAISES at the line that wrote it instead of narrowing. What it does NOT "
+    "close is the part where numpy has already finished before jax is "
+    "reached, and there are exactly two named routes into that residue: "
+    "`np.asarray(N).astype(dt)`, which is PERMANENTLY unhookable -- "
+    "`np.ndarray.astype` is an immutable type attribute, and numpy emits no "
+    "warning for it even under `simplefilter(\'error\')` -- and "
+    "`jnp.asarray(np.array(N), dtype=dt)`, a second spelling into the same "
+    "residue, where numpy builds the array at its own default width and jax "
+    "is handed a value that was destroyed before it arrived. Both measured "
+    "on jax 0.11.0 and 0.10.2: 0 fires with the detector armed, and the "
+    "value still wraps.",
     "anything inside a scoped `with jax.disable_jit():`, which swallows a "
     "door that is otherwise COVERED: `a + 200` on `int8` inside the block "
     "produces a jaxpr BYTE-IDENTICAL to the one that fires outside it and 0 "
@@ -103,7 +123,14 @@ UNCOVERED = (
     "handed -56 instead of 200. Process-wide `JAX_DISABLE_JIT=1` is a "
     "different case and is handled: `arm()` reports `not-invoked` and the "
     "tool disables itself rather than reporting a quiet zero. Inside the "
-    "scoped block THE VALUE STILL WRAPS.",
+    "scoped block THE VALUE STILL WRAPS. "
+    "THE OPT-IN EAGER DETECTOR CLOSES THIS ONE OUTRIGHT, and it is the "
+    "clearest case of why: the reason the rule is handed -56 is that the "
+    "constant was narrowed at `lax._convert_element_type` on the way in, "
+    "which is exactly where the eager detector sits. Measured on jax 0.11.0 "
+    "with `--stelling-eager-truncation=error`: `a + 200` inside the block "
+    "raises `EagerTruncationError` naming 200 -> -56 at the line that wrote "
+    "it.",
     "anything replayed from a WARM TRACE CACHE instead of being traced: "
     "jax's cache is keyed on the jitted callable and its avals, so a "
     "`@jax.jit` function any earlier trace already reached -- before this "
@@ -140,6 +167,22 @@ UNCOVERED = (
     "consts it returns. All three: VERIFIED, 0 fires, and the program jax "
     "executes returns [-25536, -25436] where the program as written returns "
     "[40000, 40100]. THE VALUE STILL WRAPS.",
+    # B16, and it is the honest half of a hole B15's audit found and this
+    # batch closed. The gate now asks whether stelling's wrapper is still the
+    # live registry entry; what it cannot ask is whether it was the live
+    # entry for every instant in between.
+    "anything traced while stelling's HOOK IS DISPLACED and put back inside "
+    "one call. The trace gate now asks `_tripwire.displaced()` after the "
+    "trace it watches, so a rebind that pre-dates the trace or is still in "
+    "place at the end of it makes the verdict UNKNOWN and names the hook -- "
+    "before B16 that case returned VERIFIED on a WATCHED route, because "
+    "rebinding the registry entry leaves the recorder's identity and the "
+    "fire count untouched while the wrapper is never called (measured, and "
+    "byte-identical on the tree before this batch). A patch INSTALLED AND "
+    "REMOVED inside that window is invisible to the check, exactly as a "
+    "competing thread's re-warmed jit body is: the question asked is 'is "
+    "our wrapper live now', and 'was it live throughout' is not answerable "
+    "from here.",
     "anything traced while ANOTHER THREAD is also tracing: jax's trace cache "
     "is process-global and this gate's fire counter is per-thread, so the "
     "window between the eviction and the trace it protects is NOT ATOMIC -- "
@@ -562,4 +605,130 @@ def render(status, rec: record.Recorder, notes: tuple[str, ...] = ()) -> list[st
         "either of them, its caches are being emptied and the sentence "
         "above about arm order does not describe what they see."
     )
+    return lines
+
+
+#: What the EAGER detector provably does not see. Printed in its own section
+#: on every run it is armed for, findings or not, for the reason
+#: :data:`UNCOVERED` is: "no undeclared truncation" is true and "your constants
+#: are safe" is the false-clearance error this project has had to withdraw
+#: twice. Every item is measured on jax 0.11.0 and 0.10.2.
+EAGER_UNCOVERED = (
+    "VALUES NUMPY HAS ALREADY DESTROYED before jax is reached. The detector "
+    "sits inside jax, so a constant that never arrives as a written integer "
+    "cannot be seen. Two named routes: `np.asarray(N).astype(dt)`, which is "
+    "PERMANENTLY unhookable -- `np.ndarray.astype` is an immutable type "
+    "attribute, so there is nothing to patch, and numpy emits no warning for "
+    "it even under `warnings.simplefilter('error')` -- and "
+    "`jnp.asarray(np.array(N), dtype=dt)`, a second spelling into the same "
+    "residue. Measured: 0 fires with the detector armed, and the value still "
+    "wraps.",
+    "ARRAYS, as opposed to scalar constants. The detector fires on a written "
+    "scalar integer and never on a non-scalar operand, because a whole array "
+    "reaching `.astype` is a program CONVERTING DATA rather than an author "
+    "writing a constant, and firing on it would make the rule unusable on any "
+    "real program. A wide array of out-of-range values narrowed by an "
+    "`.astype` is not reported here and is not claimed to be.",
+    "VALUES THE PROGRAM COMPUTES. A `convert_element_type` over a jax "
+    "`Array` or a tracer is a narrowing the program performs at RUN time on a "
+    "value that depends on its inputs -- the `deferred` bucket in "
+    "`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE`. It is not a "
+    "transcription loss and this instrument says nothing about it; "
+    "`stelling.preconditions.check` does, by declining the form.",
+    "THE INLINE DOOR, `x + 256` on an `int8` array, which is the OTHER "
+    "instrument's: the constant survives into the trace and dies in jax's "
+    "const-fold rule for `convert_element_type`, which is where "
+    "`stelling._tripwire.arm()` watches. The two detectors are complementary "
+    "and neither subsumes the other -- measured, with both armed, on the "
+    "eight routes each claims.",
+    "COUNTS TAKEN WHILE ANOTHER THREAD IS CONSTRUCTING. The RULE is "
+    "thread-safe -- the decision is per call and the region stack is "
+    "thread-local, so no truncation escapes because of a race -- but the two "
+    "counters above are plain module integers and a concurrent increment can "
+    "be lost. The denominator is therefore a floor under threads. stelling "
+    "makes no thread-safety claim anywhere; this is the one place where the "
+    "consequence is a number rather than a verdict.",
+    "A REBIND PERFORMED AND UNDONE INSIDE ONE CALL. The displacement check "
+    "asks whether stelling's wrapper is the live attribute at the end of a "
+    "region; a patch installed and removed inside that region is invisible "
+    "to it, exactly as it is to the trace gate.",
+)
+
+
+def render_eager(status, snapshot) -> list[str]:
+    """The eager detector's section, as lines. **No jax; primitives in, text out.**
+
+    Takes the status and a :func:`eager.snapshot` dict rather than the module's
+    live globals, because under xdist the numbers printed are a SUM of several
+    processes' and none of them is this one's. Same discipline as
+    :func:`render`: what is printed is what was carried back, not what happens
+    to be in memory here.
+    """
+    if status is None and not snapshot:
+        return []
+    lines: list[str] = []
+    lines.extend(render_status(status) if status is not None else ["status unknown"])
+    snapshot = snapshot or {}
+    conversions = snapshot.get("conversions", 0)
+    truncations = snapshot.get("truncations", 0)
+    declared = snapshot.get("declared") or {}
+    permitted = snapshot.get("permitted") or {}
+
+    # THE DENOMINATOR, FIRST AND ALWAYS. This detector's success case is that
+    # nothing happened, and "0 truncations" is also what a hook that was never
+    # called reports. The conversion count is what tells those apart.
+    lines.append(
+        f"    {conversions} scalar integer conversion(s) observed at jax's "
+        f"construction site; {truncations} of them were out of range"
+    )
+    # PERMITTED IS THE ONLY THING THAT SUBTRACTS FROM THE NUMERATOR, and
+    # `declared` is not: `intentional_wrap` returns a value that is already in
+    # range, so a declaration never reaches the hook and never appears in
+    # `truncations` at all. An earlier version wrote `not (declared or
+    # permitted)` and therefore said nothing about a session that carried one
+    # declaration and one raise.
+    resets = snapshot.get("resets", 0)
+    if resets:
+        lines.append(
+            f"    ...and these figures are PARTIAL: the counters were reset "
+            f"{resets} time(s) during this session, so they cover only the "
+            f"period since the last reset. Nothing in the shipped path resets "
+            f"them; a suite that tests this detector does."
+        )
+    permitted_total = sum(row[0] for row in permitted.values())
+    if truncations > permitted_total:
+        lines.append(
+            f"    {truncations - permitted_total} of those was/were neither "
+            "declared nor inside an expected_truncation region, which means "
+            "it RAISED: this session did not finish normally. (A truncation "
+            "that neither raised nor was permitted would be a defect in this "
+            "instrument -- please report one if you see this line on a green "
+            "run.)"
+        )
+    if declared:
+        lines.append(
+            f"    {sum(row[0] for row in declared.values())} wrap(s) DECLARED "
+            f"with stelling.intentional_wrap, at {len(declared)} site(s):"
+        )
+        for site, (count, text) in sorted(declared.items()):
+            lines.append(f"      {site}  x{count}  {text}")
+    if permitted:
+        lines.append(
+            f"    {sum(row[0] for row in permitted.values())} truncation(s) "
+            f"PERMITTED by an expected_truncation region, at "
+            f"{len(permitted)} site(s). A region permits ANY truncation "
+            f"inside it, so each is named here with the reason its author "
+            f"gave:"
+        )
+        for site, (count, reason) in sorted(permitted.items()):
+            lines.append(f"      {site}  x{count}  {reason}")
+    internal = snapshot.get("internal_errors", 0)
+    if internal:
+        lines.append(
+            f"    {internal} internal error(s) inside the hook were caught and "
+            f"counted rather than raised into your program. Findings from this "
+            f"run may be incomplete; please report this."
+        )
+    lines.append("    what this detector does NOT see:")
+    lines.extend(f"      - {item}" for item in EAGER_UNCOVERED)
     return lines

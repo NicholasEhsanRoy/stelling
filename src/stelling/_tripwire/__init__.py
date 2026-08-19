@@ -10,6 +10,14 @@ warning. There is no supported mechanism that catches this — six were measured
 and all leave it silent. This package attaches to the one site where the value
 actually dies and reports it.
 
+TWO INSTRUMENTS, TWO DOORS, AND NEITHER SUBSUMES THE OTHER. The one above is
+the INLINE door and it REPORTS. ``eager.py`` is the second: ``jnp.full((), 256,
+jnp.int8)`` is ``0`` before any primitive is bound, so nothing above ever sees
+it, and that detector RAISES at the line that wrote the constant. It is
+opt-in, arms separately, fails separately, and is not switched on by anything
+that switches this one on. ``design/eager-truncation-detector.md`` is the
+argument for its shape.
+
 THE RULE THIS PACKAGE EXISTS INSIDE. Only ``_adapter_jax.py`` may name a
 private jax module, and it is the only file in the repository that may.
 ``design/private-jax-boundary.md`` is why, and
@@ -40,6 +48,14 @@ FAILURE_CODES = (
     "detached",
     "no-worker-reported",
     "mixed",
+    # The eager construction-site detector's own codes (Mode 2). They are in
+    # THIS tuple and not a second one because the tuple is advertised as the
+    # complete list of "not armed, and here is why" and a user greps it; a
+    # second list somewhere else is a second thing to find.
+    "no-site-module",
+    "no-site",
+    "signature-drift",
+    "route-blind",
 )
 
 _WHAT_STILL_WORKS = (
@@ -112,6 +128,30 @@ _EXPLAIN = {
         "armed and some did not, so anything below covers only part of the "
         "run. The per-worker codes are on the status line."
     ),
+    # --- the eager construction-site detector (Mode 2) ---
+    "no-site-module": (
+        "jax is installed and the module carrying the eager narrowing did "
+        "not import. A jax release moved it, and a tool keyed on a private "
+        "surface refuses rather than guessing."
+    ),
+    "no-site": (
+        "the module is there and no longer carries the function that narrows "
+        "an out-of-range integer during array construction. The narrowing "
+        "this detector watches may now happen somewhere else entirely."
+    ),
+    "signature-drift": (
+        "the eager narrowing site is there and its first two parameters are "
+        "not the ones this hook reads. A hook that read the wrong argument "
+        "would raise about a truncation that did not happen, at a line that "
+        "did not write it, so it refuses to attach at all."
+    ),
+    "route-blind": (
+        "the eager detector attached and one of the construction routes it "
+        "claims to watch no longer reaches it. Attached-but-blind on ONE "
+        "route is what a jax release actually produces; keeping the other "
+        "routes and losing this one quietly is not a trade this tool makes "
+        "on your behalf, so it disables itself and names the route."
+    ),
 }
 
 
@@ -183,8 +223,14 @@ class Status:
         """
         if self.armed:
             return self.detail
+        # SPLIT ON THE COLON FIRST. Two codes carry a payload --
+        # ``unexpected:<ExcType>`` and ``route-blind:<route>`` -- and a lookup
+        # on the whole string finds neither, so the one thing a reader most
+        # needs (which route went blind) used to arrive with the generic "an
+        # error it does not have a name for" beside it.
         return _EXPLAIN.get(
-            self.code, "the tripwire hit an error it does not have a name for."
+            self.code.split(":", 1)[0],
+            "the tripwire hit an error it does not have a name for.",
         )
 
     @property
@@ -372,3 +418,76 @@ def _safe(fn):
         return fn()
     except Exception:  # noqa: BLE001
         return None
+
+
+# ---------------------------------------------------------------------------
+# Mode 2: the eager construction-site detector.
+#
+# A SECOND, INDEPENDENT INSTRUMENT, and the independence is deliberate. The
+# tripwire above watches a const-fold rule and REPORTS; this raises at the
+# construction site and stops the program. They arm separately, fail
+# separately and are switched on separately, because they answer different
+# questions and a user may want either without the other:
+#
+#   * the tripwire is a REPORT over a session, and can be armed on a suite
+#     that has undeclared truncations in it -- it says so and carries on;
+#   * the eager detector is a RULE, and a session it is armed on either has no
+#     undeclared truncation in it or does not finish.
+#
+# Everything about the rule, the exception, the two declarations, and why
+# there is no value-based carve-out lives in ``eager.py``. These four are the
+# same lazy-import façade the tripwire's own entry points are, for the same
+# reason: importing this package must not import jax.
+# ---------------------------------------------------------------------------
+
+
+def arm_eager():
+    """Arm the eager construction-site detector. Returns a :class:`Status`.
+
+    Never raises -- the same fail-closed contract :func:`arm` has, and the same
+    reason: the caller decides whether a non-armed status is fatal. For THIS
+    instrument the caller almost always should, because there is no degraded
+    mode: a detector that could not attach is not watching, and the whole
+    value of Mode 2 is that a program either contains no undeclared truncation
+    or does not run.
+    """
+    from stelling._tripwire import eager
+
+    return eager.arm()
+
+
+def disarm_eager() -> str:
+    """Restore jax's own constructor by identity. A code, never an exception."""
+    from stelling._tripwire import eager
+
+    return eager.disarm()
+
+
+def eager_live_check() -> str:
+    """``armed``, ``detached`` or ``foreign-patch`` for the eager hook."""
+    from stelling._tripwire import eager
+
+    return eager.live_check()
+
+
+def displaced() -> tuple[str, ...]:
+    """The armed hooks that are no longer live. ``()`` when none are.
+
+    ONE INSTRUMENT, BOTH HOOKS, and B15's audit is why it exists at all:
+    ``live_check() == "foreign-patch"`` is a fourth way the trace gate's watch
+    goes partial, and the gate consulted none of it. Rebinding the const-fold
+    registry entry after arming leaves the recorder's identity unchanged and
+    ``fires_count()`` unchanged -- so both of the gate's partiality tests pass,
+    the fire counter stays at zero because our wrapper is no longer called, and
+    ``check()`` returns VERIFIED on a route the inventory calls ``watched``.
+    Pre-existing, and byte-identical on ``main`` before this batch.
+
+    See :func:`_adapter_jax.displacement_check` for the per-hook detail and for
+    why one instrument covers both.
+    """
+    try:
+        from stelling._tripwire import _adapter_jax as adapter
+
+        return adapter.displaced()
+    except Exception:  # noqa: BLE001
+        return ()

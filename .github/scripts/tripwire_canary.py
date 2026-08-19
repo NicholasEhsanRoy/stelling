@@ -83,6 +83,35 @@ those runs really printed are still read, now as a control on the parse.
      Unreachable without editing this repository; fatal for the same reason
      as `control:unknown-state`, and see `_hash_row` for why that is the
      answer here too.
+  1  `eager:not-armed` — ``--require`` was passed and the EAGER
+     construction-site detector (Mode 2) could not attach. Its own arm-time
+     self-check drives every construction route it claims and refuses on any
+     one of them going blind, so this code covers a moved module, a moved
+     signature and a route jax stopped sending through the site alike; the
+     sentence names which.
+  1  `eager:did-not-fire` — the eager detector attached and its live control
+     DID NOT RAISE, ``--require`` or not. `arm_eager()` says the hook is
+     attached and a construction that must be refused was allowed. Every
+     figure beside it is unverified, exactly as for the tripwire's control.
+  1  `eager:cries-wolf` — the eager detector attached and refused an
+     IN-RANGE construction. Every alarm it would raise this run is noise, so
+     it pages rather than being trusted.
+  1  `eager:raised` — the eager detector's live control DID NOT COMPLETE:
+     something other than `EagerTruncationError` came out of it, so whether
+     the hook works has not been established. A control that could not run is
+     not a control that passed.
+  1  `hooks:displaced` — a hook this script armed was displaced before it
+     disarmed: something else in this environment is bound over stelling's
+     wrapper. ONE question covering BOTH hooks, asked while both are live.
+     Same finding the trace gate's displacement check makes, in the one
+     process where nothing else should be running.
+  1  `eager:hash-contradicted` — the eager narrowing site's source hash
+     CONTRADICTS the row recorded for this exact release. Same argument as
+     `hash:contradicted`, about the other site: a released wheel is
+     immutable, so either the row is wrong or this is not the jax it claims.
+  1  `eager:unknown-state` — the eager control, or its hash, reported a state
+     this script has no answer for. Unreachable without editing this
+     repository, and fatal for the reason `control:unknown-state` is.
   0  anything else. That includes NOT ARMED without ``--require`` — the shape
      a human wants when running this by hand to see what a given jax does —
      a release with NO ROW in the version -> hash map, which is loud on
@@ -130,6 +159,19 @@ CONTROL_STATES = ("not-run", "raised", "ran", "did-not-fire", "fired")
 #: the probe did not run -- get reported for a probe that ran fine and a
 #: recorder field that had moved.
 RENDER_STATES = ("not-run", "rendered", "unrenderable")
+
+#: The states the EAGER detector's live control can be recorded in. Declared
+#: for the same reason ``CONTROL_STATES`` is: so that ``_eager_reasons`` can
+#: recognise a state it was never taught rather than passing it.
+#:
+#: FOUR STATES AND NOT FIVE, and the missing one is the tell. The tripwire's
+#: control has an ``indeterminate`` state because reading its answer means
+#: reading a RECORDER, which can move. This control's answer is whether an
+#: exception came out of one line, so there is no second read to fail: the
+#: probe raised the right exception (`fired`), raised nothing (`did-not-fire`),
+#: raised something else (`raised`), or refused an in-range value
+#: (`cries-wolf`).
+EAGER_CONTROL_STATES = ("not-run", "raised", "did-not-fire", "cries-wolf", "fired")
 
 
 def _control_reasons(
@@ -242,6 +284,143 @@ def _control_reasons(
         ))
 
     return reasons
+
+
+def _eager_reasons(status, control_state, control, displaced, require):
+    """Every ``(reason code, sentence)`` the eager half owes, plus the shared
+    displacement question, possibly none.
+
+    THE SAME SHAPE AS :func:`_control_reasons`, DELIBERATELY, and not a
+    generalisation of it. The two instruments' states are not the same states
+    -- this one has no ``indeterminate`` and gains ``cries-wolf`` -- and a
+    shared function would have had to grow a mode switch, which is how one
+    decision becomes two decisions that can disagree. What IS shared is the
+    principle: the caller records what happened, this reads the record, an
+    unrecognised state pages, and a list of reasons cannot contradict itself
+    the way a ``(sentence, fatal)`` pair can.
+
+    ARMING IS ``--require``'s QUESTION and the control's is not, exactly as
+    above. A human running this by hand against a jax that moved the site
+    wants to SEE that and not to be paged by it; a CI job that depends on the
+    detector passes ``--require``. But a detector that armed and then failed
+    its own control is a broken instrument in either mode, so those page
+    regardless.
+    """
+    reasons = []
+    if require and not status.armed:
+        reasons.append((
+            "eager:not-armed",
+            f"the eager construction-site detector could not attach "
+            f"[{status.code}] -- {status.explanation} " + _TWO_LEGS,
+        ))
+
+    if control_state == "did-not-fire":
+        reasons.append((
+            "eager:did-not-fire",
+            "the eager detector attached and its live control DID NOT RAISE: "
+            "a construction this tool must refuse was allowed through. "
+            "`arm_eager()` says the hook is attached and the control says "
+            "nothing reached it. " + _TWO_LEGS,
+        ))
+    elif control_state == "cries-wolf":
+        reasons.append((
+            "eager:cries-wolf",
+            f"the eager detector refused an IN-RANGE construction -- "
+            f"{control}. Every alarm it would raise this run is noise, so it "
+            "is reported as broken rather than trusted. This is a DIFFERENT "
+            "finding from `did not fire`: the hook is alive and its range "
+            "arithmetic disagrees with jax's.",
+        ))
+    elif control_state == "raised":
+        reasons.append((
+            "eager:raised",
+            f"the eager detector's LIVE CONTROL DID NOT COMPLETE -- {control}. "
+            "Something other than the exception this tool raises came out of "
+            "the probe, so nothing about whether the hook works has been "
+            "established. Read the exception, then " + _TWO_LEGS,
+        ))
+    elif control_state not in EAGER_CONTROL_STATES:
+        reasons.append((
+            "eager:unknown-state",
+            f"the eager control reported a state this script does not "
+            f"recognise ({control_state!r}). That is a bug in this script, "
+            "not a measurement, and it pages because an instrument that "
+            "cannot say what happened has not said that nothing happened.",
+        ))
+
+    if displaced:
+        reasons.append((
+            "hooks:displaced",
+            f"a hook this script armed was DISPLACED before it disarmed: "
+            f"{', '.join(displaced)}. Something else in this environment is "
+            "binding over the same private jax surface, so an unmeasured part "
+            "of this run was not watched by the instrument named. THE "
+            "QUESTION COVERS BOTH HOOKS -- it is asked once, while both are "
+            "live -- because a displaced const-fold rule and a displaced "
+            "construction site are the same failure at two sites and used to "
+            "have one detector between them and none. Nothing was clobbered: "
+            "whatever replaced it is left in place.",
+        ))
+    return reasons
+
+
+def _eager_hash_row(status) -> tuple[str, tuple[str, str] | None]:
+    """``(what to print beside the sha1, the reason to exit 1 or None)``.
+
+    THE SAME FOUR STATES AND THE SAME VERDICTS as :func:`_hash_row`, computed
+    by the same ``Status.hash_state``, about the OTHER site. A separate
+    function and not a parameterised one because every sentence it emits names
+    a different thing -- the eager narrowing site rather than the const-fold
+    rule -- and a shared function would have had to take the prose as an
+    argument, which is a template, not a decision.
+
+    The four hash states move on DIFFERENT releases for the two sites, which
+    is the concrete reason each has its own map and its own row here: 0.10.2
+    and 0.11.0 are byte-identical at the const-fold rule and differ at this
+    one, and 0.11.0 and 0.11.1 are the other way round.
+    """
+    state = status.hash_state
+    if state == "as-tested":
+        return "as tested", None
+    if state == "unreadable":
+        return "not read -- the site's source could not be read", None
+    if state == "never-read":
+        return (
+            f"jax {status.jax_version or '?'} HAS NEVER BEEN READ at the eager "
+            "narrowing site -- no row in `_adapter_jax._KNOWN_EAGER_HASHES`. "
+            "Read the function, diff it against the nearest row, and add an "
+            "entry naming what changed. Not a failure: this is what a nightly "
+            "looks like, and what any jax released since the last row was "
+            "written looks like",
+            None,
+        )
+    if state == "changed":
+        return (
+            f"CONTRADICTS the eager row for jax {status.jax_version or '?'}, "
+            f"which records {status.known_hash}",
+            (
+                "eager:hash-contradicted",
+                f"the EAGER narrowing site's source hash CONTRADICTS the row "
+                f"for jax {status.jax_version or '?'}, which records "
+                f"{status.known_hash}. A released wheel does not change, so "
+                "either the row in `_adapter_jax._KNOWN_EAGER_HASHES` is "
+                "wrong for this release or this environment is not running "
+                "the jax it reports. Nothing about ARMING is gated on this "
+                "hash -- the detector armed or did not arm above without "
+                "consulting it -- so read the function before believing "
+                "anything else on this page.",
+            ),
+        )
+    return (
+        f"UNKNOWN HASH STATE {state!r}",
+        (
+            "eager:unknown-state",
+            f"`Status.hash_state` reported {state!r} for the eager narrowing "
+            "site, which this script has no answer for. A bug in this "
+            "repository, not a measurement, and it pages for the reason an "
+            "unrecognised control state does.",
+        ),
+    )
 
 
 def _hash_row(status) -> tuple[str, tuple[str, str] | None]:
@@ -416,9 +595,76 @@ def main() -> int:
                         f"{type(exc).__name__}: {exc}"
                     )
 
+    # ---------------------------------------------------------------------
+    # THE SECOND HOOK. Mode 2 patches a private jax FUNCTION rather than a
+    # registry entry, and the failure that matters is not the function
+    # disappearing -- that is loud -- but the function surviving while jax
+    # stops routing a construction route through it, which is silent. That is
+    # upstream release drift, which is what this workflow exists for, so it is
+    # watched here rather than in a second job: two canaries on two schedules
+    # is two pages to read and one of them eventually stops being read.
+    #
+    # ARMED AFTER the tripwire has armed AND run its control, deliberately.
+    # `arm()`'s own self-check TRACES a program that narrows a constant; with
+    # the eager detector already live that trace would raise, and the tripwire
+    # would report `unexpected:EagerTruncationError` on a perfectly healthy
+    # pair of hooks. Sequential arming, so neither instrument's self-check
+    # runs inside the other's jurisdiction -- and the tripwire is NOT disarmed
+    # first, so that the one displacement question below is asked while both
+    # hooks are live and therefore answers for both.
+    eager_status = _tripwire.arm_eager()
+    eager_control_state = "not-run"
+    eager_control = "not run"
+    if eager_status.armed:
+        try:
+            from stelling import EagerTruncationError
+            from stelling._jax_compat import jnp as _jnp
+            from stelling._tripwire import _probe
+
+            try:
+                _probe.construct_over(_jnp)
+            except EagerTruncationError as exc:
+                eager_control_state = "fired"
+                eager_control = (
+                    f"refused {exc.written} -> {exc.became} ({exc.to_dtype})"
+                )
+            else:
+                eager_control_state = "did-not-fire"
+                eager_control = (
+                    f"{_probe.EAGER_OVER} into {_probe.EAGER_DTYPE} was "
+                    "ALLOWED THROUGH -- THE CONTROL DID NOT FIRE"
+                )
+            if eager_control_state == "fired":
+                # ...and the negative direction, because a hook replaced by
+                # "refuse everything" passes the positive one.
+                try:
+                    _probe.construct_under(_jnp)
+                except EagerTruncationError as exc:
+                    eager_control_state = "cries-wolf"
+                    eager_control = (
+                        f"an IN-RANGE {exc.written} into {exc.to_dtype} was "
+                        "refused"
+                    )
+                else:
+                    eager_control += (
+                        f"; and allowed the in-range {_probe.EAGER_UNDER}"
+                    )
+        except Exception as exc:  # noqa: BLE001
+            eager_control_state = "raised"
+            eager_control = f"raised {type(exc).__name__}: {exc}"
+
+    # ONE QUESTION, BOTH HOOKS, and it is asked BEFORE either disarm because
+    # disarming empties the record the question is asked of: afterwards there
+    # is no armed hook left to be displaced. `_tripwire.displaced()` reports
+    # only hooks THIS PROCESS ARMED, so with both live it answers for both --
+    # which is the whole reason B15's finding and this hook share one
+    # instrument rather than getting one each.
+    displaced = _tripwire.displaced()
     disarmed = _tripwire.disarm()
+    eager_disarmed = _tripwire.disarm_eager()
 
     hash_note, hash_reason = _hash_row(status)
+    eager_hash_note, eager_hash_reason = _eager_hash_row(eager_status)
 
     # EVERY REASON TO EXIT 1, IN ONE LIST, BUILT BEFORE ANYTHING IS PRINTED.
     # The exit status is `1 if reasons else 0` and there is no other route
@@ -442,6 +688,14 @@ def main() -> int:
     reasons.extend(_control_reasons(control_state, render_state, control))
     if hash_reason is not None:
         reasons.append(hash_reason)
+    reasons.extend(
+        _eager_reasons(
+            eager_status, eager_control_state, eager_control,
+            displaced, args.require,
+        )
+    )
+    if eager_hash_reason is not None:
+        reasons.append(eager_hash_reason)
 
     rows = [
         ("status", status.code),
@@ -460,6 +714,15 @@ def main() -> int:
         ("live control", control),
         ("disarm()", disarmed),
         ("detail", status.explanation),
+        # --- the eager construction-site detector, same three-part shape ---
+        ("eager status", eager_status.code),
+        ("eager site", eager_status.rule_name or "?"),
+        ("eager site sha1", f"{eager_status.rule_hash or '?'} ({eager_hash_note})"),
+        ("eager control state", eager_control_state),
+        ("eager live control", eager_control),
+        ("displaced hooks", ", ".join(displaced) or "none"),
+        ("disarm_eager()", eager_disarmed),
+        ("eager detail", eager_status.explanation),
     ]
 
     for name, value in rows:

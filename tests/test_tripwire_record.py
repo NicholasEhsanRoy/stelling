@@ -863,7 +863,10 @@ def _stub_jax(monkeypatch, probe):
 
     fake = types.ModuleType("stelling._jax_compat")
     fake.jax = types.SimpleNamespace(make_jaxpr=lambda fn: lambda *a, **k: fn(*a, **k))
-    fake.jnp = types.SimpleNamespace(zeros=lambda shape, dtype: _Array(), int8="int8")
+    fake.jnp = types.SimpleNamespace(
+        zeros=lambda shape, dtype: _Array(), int8="int8",
+        full=lambda shape, value, dtype: _Array(),
+    )
     monkeypatch.setitem(sys.modules, "stelling._jax_compat", fake)
     monkeypatch.setattr(stelling, "_jax_compat", fake, raising=False)
 
@@ -872,6 +875,68 @@ def _stub_jax(monkeypatch, probe):
             raise RuntimeError("FORCED: the probe could not execute")
 
         monkeypatch.setattr(_probe, "over", _boom)
+
+
+#: The eager detector's states this battery can put the canary in, and what
+#: each one does to the two things `main()` reads: the status `arm_eager()`
+#: hands back, and what the live control does.
+#:
+#: STUBBED AT THE INSTRUMENT AND NOT AT THE DECISION, exactly as the tripwire's
+#: half is: `_eager_reasons` and `_eager_hash_row` are the shipped functions
+#: and are never replaced. What is chosen is what they are given.
+#:
+#: THE STUB IS NEEDED AT ALL because this file's copy runs WITHOUT jax -- the
+#: lane that runs on every PR -- and `arm_eager()` there would collapse every
+#: row to one state, which is the shape of table that measures one thing six
+#: times. `tests/test_tripwire_eager.py` drives the real detector against the
+#: real jax; this drives the decision.
+_EAGER_STATES = {
+    "clean": ("armed", "raise-truncation", "allow", ("abc", "abc"), ()),
+    "not-armed": ("no-site", "raise-truncation", "allow", ("abc", "abc"), ()),
+    "did-not-fire": ("armed", "allow", "allow", ("abc", "abc"), ()),
+    "cries-wolf": ("armed", "raise-truncation", "raise-truncation",
+                   ("abc", "abc"), ()),
+    "raised": ("armed", "raise-other", "allow", ("abc", "abc"), ()),
+    "displaced": ("armed", "raise-truncation", "allow", ("abc", "abc"),
+                  ("eager",)),
+    "hash-changed": ("armed", "raise-truncation", "allow", ("abc", "xyz"), ()),
+}
+
+
+def _stub_eager(monkeypatch, choice):
+    """Force the eager half of the canary into one of :data:`_EAGER_STATES`."""
+    from stelling import EagerTruncationError, _tripwire
+    from stelling._tripwire import Status, _probe
+
+    code, over, under, (rule_hash, known_hash), displaced = _EAGER_STATES[choice]
+    status = Status(
+        code=code,
+        jax_version="0.11.0",
+        rule_name="_convert_element_type",
+        rule_hash=rule_hash,
+        known_hash=known_hash,
+    )
+
+    def _behave(kind):
+        def probe(jnp):
+            if kind == "raise-truncation":
+                raise EagerTruncationError(
+                    "stelling: 256 was TRUNCATED to 0",
+                    written=256, to_dtype="int8", became=0,
+                    file="probe.py", line=1, func="construct",
+                )
+            if kind == "raise-other":
+                raise RuntimeError("FORCED: the eager control could not run")
+            return None
+
+        return probe
+
+    monkeypatch.setattr(_tripwire, "arm_eager", lambda: status)
+    monkeypatch.setattr(_tripwire, "disarm_eager", lambda: "restored")
+    monkeypatch.setattr(_tripwire, "displaced", lambda: displaced)
+    monkeypatch.setattr(_probe, "construct_over", _behave(over))
+    monkeypatch.setattr(_probe, "construct_under", _behave(under))
+    return status
 
 
 class _Run:
@@ -906,7 +971,7 @@ def _drive_canary(
     capsys, tmp_path, *,
     require=False, armed=True, hash_state="as-tested",
     probe="runs", findings="one", narrowings="readable",
-    summary="writable",
+    summary="writable", eager="clean",
 ):
     """Run `main()` once with every input chosen, and collect what it emitted.
 
@@ -928,13 +993,14 @@ def _drive_canary(
         return _drive_canary_once(
             mp, capsys, tmp_path, require=require, armed=armed,
             hash_state=hash_state, probe=probe, findings=findings,
-            narrowings=narrowings, summary=summary,
+            narrowings=narrowings, summary=summary, eager=eager,
         )
 
 
 def _drive_canary_once(
     monkeypatch, capsys, tmp_path, *,
     require, armed, hash_state, probe, findings, narrowings, summary,
+    eager="clean",
 ):
     import sys
 
@@ -943,6 +1009,7 @@ def _drive_canary_once(
 
     canary = _canary()
     _stub_jax(monkeypatch, probe)
+    _stub_eager(monkeypatch, eager)
 
     hashes = {
         "as-tested": ("abc", "abc"),
@@ -1013,64 +1080,100 @@ def _drive_canary_once(
 #: the wrong branch, and it cannot be masked by an extra one either: a run
 #: with a second live fault fails here, loudly, instead of passing quietly.
 _CANARY_TABLE = [
-    ("clean", {}, 0, [], "fired", "rendered"),
-    ("clean+require", {"require": True}, 0, [], "fired", "rendered"),
+    ("clean", {}, 0, [], "fired", "rendered", "fired"),
+    ("clean+require", {"require": True}, 0, [], "fired", "rendered", "fired"),
     # a release nobody has read is LOUD and not fatal -- the state a nightly
     # is in by construction, and the state the control leg enters the day jax
     # ships a release
     ("never-read", {"hash_state": "never-read", "require": True}, 0, [],
-     "fired", "rendered"),
+     "fired", "rendered", "fired"),
     ("hash-unreadable", {"hash_state": "unreadable", "require": True}, 0, [],
-     "fired", "rendered"),
+     "fired", "rendered", "fired"),
     ("hash-contradicted", {"hash_state": "changed"}, 1, ["hash:contradicted"],
-     "fired", "rendered"),
+     "fired", "rendered", "fired"),
     ("hash-contradicted+require", {"hash_state": "changed", "require": True}, 1,
-     ["hash:contradicted"], "fired", "rendered"),
+     ["hash:contradicted"], "fired", "rendered", "fired"),
     # THE DEAD HOOK. `--require` must not matter: `arm()` said the hook is
     # attached and the control says nothing reached it, so the armed status
     # is unverified either way. Gating this on `--require` is the exact
     # defect this branch exists to close.
     ("dead-hook", {"findings": "none"}, 1, ["control:did-not-fire"],
-     "did-not-fire", "rendered"),
+     "did-not-fire", "rendered", "fired"),
     ("dead-hook+require", {"findings": "none", "require": True}, 1,
-     ["control:did-not-fire"], "did-not-fire", "rendered"),
+     ["control:did-not-fire"], "did-not-fire", "rendered", "fired"),
     # THE PROBE NEVER RAN. Used to exit 0, because the check was a substring
     # test for "DID NOT FIRE" against a line a raised control does not
     # contain.
     ("probe-raised", {"probe": "raises"}, 1, ["control:raised"],
-     "raised", "not-run"),
+     "raised", "not-run", "fired"),
     ("probe-raised+require", {"probe": "raises", "require": True}, 1,
-     ["control:raised"], "raised", "not-run"),
+     ["control:raised"], "raised", "not-run", "fired"),
     # THE RECORDER MOVED, three ways, and none of them may report `raised`:
     # the probe RAN in all three, and an operator sent upstream to look for a
     # broken jax when the defect is in this repository has been sent to the
     # wrong place.
     ("findings-unreadable", {"findings": "unreadable"}, 1,
-     ["control:indeterminate"], "ran", "not-run"),
+     ["control:indeterminate"], "ran", "not-run", "fired"),
     ("narrowings-moved", {"narrowings": "moved"}, 1, ["control:unrenderable"],
-     "fired", "unrenderable"),
+     "fired", "unrenderable", "fired"),
     ("finding-field-moved", {"findings": "field-moved"}, 1,
-     ["control:unrenderable"], "fired", "unrenderable"),
+     ["control:unrenderable"], "fired", "unrenderable", "fired"),
     # BOTH AT ONCE, and both must be said. This is the case the previous
     # split lost: `unrenderable` overwrote `did-not-fire`, so the page told
     # the operator the probe completing "is not in doubt" and never mentioned
     # that the hook was dead.
     ("dead-hook+narrowings-moved", {"findings": "none", "narrowings": "moved"},
      1, ["control:did-not-fire", "control:unrenderable"],
-     "did-not-fire", "unrenderable"),
+     "did-not-fire", "unrenderable", "fired"),
     # NOT ARMED is `--require`'s question and nobody else's, and the control
     # never ran, so it is not a finding.
-    ("not-armed", {"armed": False}, 0, [], "not-run", "not-run"),
+    ("not-armed", {"armed": False}, 0, [], "not-run", "not-run", "fired"),
     ("not-armed+require", {"armed": False, "require": True}, 1, ["not-armed"],
-     "not-run", "not-run"),
+     "not-run", "not-run", "fired"),
     ("not-armed+require+hash", {"armed": False, "require": True,
                                 "hash_state": "changed"}, 1,
-     ["not-armed", "hash:contradicted"], "not-run", "not-run"),
+     ["not-armed", "hash:contradicted"], "not-run", "not-run", "fired"),
     # INFRASTRUCTURE MUST NOT PAGE -- Property 3 of the workflow. An
     # unwritable `$GITHUB_STEP_SUMMARY` used to raise `FileNotFoundError`
     # straight out of `main()`: a traceback and a 1, with no `canary:`
     # sentence, in the script that argues against exactly that.
-    ("summary-unwritable", {"summary": "unwritable"}, 0, [], "fired", "rendered"),
+    ("summary-unwritable", {"summary": "unwritable"}, 0, [], "fired", "rendered", "fired"),
+    # --- the EAGER half. Same three questions, one instrument over: did it
+    # attach, did its live control behave in BOTH directions, and is its own
+    # hash row contradicted. The states are stubbed at the instrument
+    # (`_EAGER_STATES`) and every decision below them is the shipped one.
+    #
+    # ARMING IS `--require`'s QUESTION AND THE CONTROL'S IS NOT, exactly as
+    # for the tripwire: a human running this by hand against a jax that moved
+    # the site wants to see it, not be paged by it. A detector that attached
+    # and then failed its own control is broken in either mode.
+    ("eager-not-armed", {"eager": "not-armed"}, 0, [], "fired", "rendered",
+     "not-run"),
+    ("eager-not-armed+require", {"eager": "not-armed", "require": True}, 1,
+     ["eager:not-armed"], "fired", "rendered", "not-run"),
+    # THE DEAD DETECTOR: it attached and allowed a construction it must
+    # refuse. `--require` must not matter.
+    ("eager-dead", {"eager": "did-not-fire"}, 1, ["eager:did-not-fire"],
+     "fired", "rendered", "did-not-fire"),
+    # ...and the other direction, which is why the control has two: a hook
+    # replaced by "refuse everything" passes the positive probe.
+    ("eager-cries-wolf", {"eager": "cries-wolf"}, 1, ["eager:cries-wolf"],
+     "fired", "rendered", "cries-wolf"),
+    ("eager-probe-raised", {"eager": "raised"}, 1, ["eager:raised"],
+     "fired", "rendered", "raised"),
+    # THE DISPLACEMENT, which is the one instrument B15's finding and this
+    # hook share: something is bound over stelling's wrapper.
+    ("hooks-displaced", {"eager": "displaced"}, 1, ["hooks:displaced"],
+     "fired", "rendered", "fired"),
+    ("eager-hash-contradicted", {"eager": "hash-changed"}, 1,
+     ["eager:hash-contradicted"], "fired", "rendered", "fired"),
+    # BOTH HALVES BROKEN AT ONCE, and both must be said -- the same lesson
+    # the `dead-hook+narrowings-moved` row above records, across the two
+    # instruments this time.
+    ("both-dead+require", {"findings": "none", "eager": "did-not-fire",
+                           "require": True}, 1,
+     ["control:did-not-fire", "eager:did-not-fire"], "did-not-fire",
+     "rendered", "did-not-fire"),
 ]
 
 
@@ -1100,12 +1203,15 @@ def test_the_canary_pages_for_the_reasons_it_measured_and_no_others(
     """
     failures = []
     seen = set()
-    for name, kw, expect_code, expect_reasons, control, report in _CANARY_TABLE:
+    for name, kw, expect_code, expect_reasons, control, report, eager in (
+        _CANARY_TABLE
+    ):
         run = _drive_canary(capsys, tmp_path, **kw)
         seen.update(run.reasons)
         got = (run.code, sorted(run.reasons), run.rows.get("control state"),
-               run.rows.get("control report"))
-        want = (expect_code, sorted(expect_reasons), control, report)
+               run.rows.get("control report"),
+               run.rows.get("eager control state"))
+        want = (expect_code, sorted(expect_reasons), control, report, eager)
         if got != want:
             failures.append(f"  {name}: got {got}, contract {want}\n    {run.err}")
     assert not failures, (
@@ -1127,6 +1233,16 @@ def test_the_canary_pages_for_the_reasons_it_measured_and_no_others(
     assert reported == set(canary.RENDER_STATES), (
         f"declared report states {sorted(canary.RENDER_STATES)} but the "
         f"table can only reach {sorted(reported)}"
+    )
+    # The same claim for the eager control's states, and it is not a copy of
+    # the one above: the two instruments' state sets are DIFFERENT sets --
+    # this one has no `indeterminate` (there is no recorder to read; the
+    # answer is whether one line raised) and gains `cries-wolf`.
+    eager_reached = {row[6] for row in _CANARY_TABLE}
+    assert eager_reached == set(canary.EAGER_CONTROL_STATES), (
+        f"declared eager control states "
+        f"{sorted(canary.EAGER_CONTROL_STATES)} but the table can only "
+        f"reach {sorted(eager_reached)}"
     )
 
 
@@ -1360,7 +1476,7 @@ def test_the_canarys_documented_exit_codes_are_exactly_the_ones_it_produces():
     # match: every code a real driven run printed must be in it. That is the
     # table, and the two codes no input can drive, which their own tests
     # above call directly.
-    driven = {code for _, _, _, reasons, _, _ in _CANARY_TABLE for code in reasons}
+    driven = {code for row in _CANARY_TABLE for code in row[3]}
     driven |= {"control:unknown-state", "hash:unknown-state"}
     assert driven <= produced, (
         f"runs of this script printed {sorted(driven - produced)}, which the "
