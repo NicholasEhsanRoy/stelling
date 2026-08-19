@@ -319,6 +319,31 @@ def _pop_gate() -> int:
     return 0
 
 
+def evict_trace_caches() -> str:
+    """Empty jax's trace caches. ``evicted``, or a code saying why not.
+
+    The gate in :func:`stelling.preconditions.check` calls this immediately
+    before the trace it watches. jax's trace cache is keyed on the jitted
+    callable and its avals, not on the harness, so without this a
+    ``@jax.jit`` helper some earlier trace already warmed is replayed from
+    cache: the fold rule never runs over its body, and the gate's zero means
+    "I saw nothing" rather than "there was nothing". Emptying the cache makes
+    the observation complete by construction.
+
+    A code other than ``evicted`` is not a warning to be logged and dropped:
+    it means the next trace's observation may be PARTIAL, and the gate's
+    third state exists to say exactly that. See
+    :func:`_adapter_jax.evict_trace_caches` for the codes, for why this is
+    eviction rather than detection, and for what it costs.
+    """
+    try:
+        from stelling._tripwire import _adapter_jax as adapter
+
+        return adapter.evict_trace_caches()
+    except Exception as exc:  # noqa: BLE001
+        return f"unexpected:{type(exc).__name__}"
+
+
 def live_check() -> str:
     """``armed``, ``detached`` or ``foreign-patch``. Never raises.
 

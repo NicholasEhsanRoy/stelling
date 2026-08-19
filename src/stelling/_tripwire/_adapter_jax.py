@@ -572,6 +572,59 @@ def _gate_fire_stack() -> list[int]:
         return _gate_fire_local.stack
 
 
+def evict_trace_caches() -> str:
+    """Empty jax's trace caches so the NEXT trace observes the whole program.
+
+    ``evicted``
+        the caches are gone; every jit body the next trace enters will be
+        traced again, under the instrument.
+    ``no-module``
+        jax is not importable, so there is nothing to instrument anyway.
+    ``no-clear-caches``
+        this jax has no ``clear_caches``. Nothing was evicted, so a caller
+        that needs COMPLETE observation has not got it and must say so.
+    ``unexpected:<ExcType>``
+        it raised. Same conclusion.
+
+    WHY EVICTION AND NOT DETECTION, in the one paragraph a reader needs before
+    the cost. jax's trace cache is keyed on the jitted callable and its avals,
+    so a ``@jax.jit`` helper that some earlier trace already warmed is REPLAYED
+    rather than traced: the const-fold rule never runs over its body and the
+    gate sees a clean zero for a region it did not watch. Detecting that from
+    the outside was measured and does not work -- ``jax.jit(f, inline=True)``
+    hides the replay and leaves NO nested jaxpr in the enclosing jaxpr to
+    detect it by, and jax publishes no per-jit trace counter on a public
+    surface (``_cache_size``/``_clear_cache`` are private; ``clear_cache()`` is
+    public but clears rather than reports and cannot be enumerated;
+    ``jax.explain_cache_misses`` logs MISSES, and the state that matters here
+    is a HIT). Emptying the cache makes the observation complete by
+    construction instead, and needs no detector to be right.
+
+    WHAT IT COSTS, because it is a process-global side effect and the caller
+    is entitled to know. ``jax.clear_caches()`` also drops the CALLER's
+    compiled functions: measured on jax 0.11.0, the call itself is 58us on an
+    empty cache and 1.4-3.5ms on a populated one, but the next call to a
+    jitted function the caller still wanted pays its whole trace-and-compile
+    again -- 18ms for a trivial one, 330ms for a 200-primitive chain. This
+    runs only when the tripwire is ARMED, which is opt-in, and
+    ``docs/overflow-tripwire.md`` prices it there.
+
+    Nothing jax-shaped leaves this function: it returns a string.
+    """
+    try:
+        from stelling._jax_compat import jax as _jax  # public jax, via the boundary
+    except Exception:  # noqa: BLE001
+        return "no-module"
+    clear = getattr(_jax, "clear_caches", None)
+    if clear is None:
+        return "no-clear-caches"
+    try:
+        clear()
+    except Exception as exc:  # noqa: BLE001
+        return f"unexpected:{type(exc).__name__}"
+    return "evicted"
+
+
 def _make_wrapper(original, recorder: record.Recorder, jaxroot: str):
     """Build the recording wrapper. Nothing in here may raise into a trace.
 

@@ -176,3 +176,296 @@ def test_gate_inactive_when_tripwire_not_armed():
 
     # Re-arm for fixture cleanup
     _tripwire.arm()
+
+
+# ---------------------------------------------------------------------------
+# B15: the gate observed PART of a program and claimed all of it.
+#
+# The armed branch traced through a fresh closure, which defeats
+# ``jax.make_jaxpr``'s identity cache and so guarantees the OUTER trace is
+# re-run. It guarantees nothing about an inner ``@jax.jit`` helper, whose
+# trace cache is keyed on the jitted callable and its avals: a helper some
+# earlier trace already warmed is REPLAYED, the fold rule never runs over its
+# body, and the gate's zero means "I observed no narrowing" and not "no
+# narrowing occurred". Every test below is measured on the fix; the numbers in
+# the docstrings are what MAIN produced before it.
+# ---------------------------------------------------------------------------
+
+#: The narrowing lives inside a `@jax.jit` helper, so it is the helper's trace
+#: cache — not the harness — that decides whether the gate ever sees it.
+_JITTED_HELPERS: dict = {}
+
+
+def _jit_narrowing_harness(tag, dtype, value, bound, *, inline=False):
+    """A harness whose narrowing happens inside a jit helper shared by tag.
+
+    Two harnesses built with the same tag share ONE jitted helper, which is
+    the shape that produced the wrong VERIFIED: the first check() traces the
+    helper cold and refuses, the second finds it warm and certifies.
+    """
+    helper = _JITTED_HELPERS.get(tag)
+    if helper is None:
+        helper = jax.jit(lambda z: z + value, inline=inline)
+        _JITTED_HELPERS[tag] = helper
+
+    def harness():
+        x = any_array((2,), dtype, (0, 100))
+        assert_(helper(x) < bound)
+
+    return harness
+
+
+def test_a_warm_jit_cache_no_longer_hides_a_narrowing_from_the_gate():
+    """The reported reproducer, both halves.
+
+    On main: the same harness four times gave ``UNKNOWN, VERIFIED, VERIFIED,
+    VERIFIED``, and two DIFFERENT harnesses sharing one jitted helper gave
+    ``UNKNOWN`` and then a **wrong VERIFIED** — wrong about a program whose
+    written 40000 had been destroyed to -25536 before the verifier ever saw
+    it. Both halves are here because they fail for the same reason and a fix
+    that only addressed repetition would pass the first alone.
+    """
+    _JITTED_HELPERS.pop("repeat", None)
+    same = _jit_narrowing_harness("repeat", jnp.int16, 40000, 200)
+    statuses = [check(same, vacuity_mode="inputs-only").status for _ in range(4)]
+    assert statuses == ["UNKNOWN"] * 4, statuses
+
+    _JITTED_HELPERS.pop("shared", None)
+    first = _jit_narrowing_harness("shared", jnp.int16, 40000, 200)
+    second = _jit_narrowing_harness("shared", jnp.int16, 40000, 300)
+    v1 = check(first, vacuity_mode="inputs-only")
+    v2 = check(second, vacuity_mode="inputs-only")
+    assert (v1.status, v2.status) == ("UNKNOWN", "UNKNOWN")
+    assert "trace unfaithful" in v2.notes[0]
+
+
+def test_the_eviction_is_why_and_a_structural_detector_would_not_have_worked():
+    """The measurement behind detect-vs-force, kept where the choice is made.
+
+    The cheap fix would have been to DETECT incomplete observation — look at
+    the traced jaxpr, see a ``pjit`` equation, and refuse because its body may
+    have been replayed. ``jax.jit(f, inline=True)`` is the counterexample that
+    kills it: the body is inlined, so the enclosing jaxpr carries NO nested
+    jaxpr to detect anything by, and the trace cache still replays it. A
+    detector keyed on structure would have called this trace fully observed
+    and certified the program whose constant was destroyed.
+
+    So this test is not "inline jits also work". It is the reason the gate
+    empties the cache instead of inspecting the jaxpr, and it goes red if that
+    reason ever stops being true.
+    """
+    _JITTED_HELPERS.pop("inline", None)
+    h = _jit_narrowing_harness("inline", jnp.int16, 40000, 200, inline=True)
+
+    # the structural signal a detector would have used, read off jax's own
+    # jaxpr: on the very program that hides a narrowing, there is none.
+    inline = jax.jit(lambda z: z + 40000, inline=True)
+    plain = jax.jit(lambda z: z + 40000)
+    x = jnp.zeros((2,), jnp.int16)
+
+    def nested_jaxprs(fn):
+        jx = jax.make_jaxpr(lambda z: fn(z))(x)
+        return sum(
+            any(
+                hasattr(p, "jaxpr")
+                or (isinstance(p, (tuple, list))
+                    and any(hasattr(q, "jaxpr") for q in p))
+                for p in eqn.params.values()
+            )
+            for eqn in jx.jaxpr.eqns
+        )
+
+    assert nested_jaxprs(plain) > 0, (
+        "even a PLAIN jit no longer leaves a nested jaxpr, so this control "
+        "cannot tell a detector's blind spot from its whole domain"
+    )
+    assert nested_jaxprs(inline) == 0, (
+        "an inline jit now leaves a nested jaxpr in the enclosing one, so a "
+        "structural detector is no longer refuted by this case — re-argue "
+        "detect-vs-force before relying on the comment that cites it"
+    )
+
+    # ... and the trace cache still replays it, which is the other half: no
+    # structure to detect, and something real to miss.
+    from stelling._tripwire import _adapter_jax as adapter
+
+    rec = adapter._installed["recorder"]
+    jax.clear_caches()
+    before = rec.fires
+    jax.make_jaxpr(lambda z: inline(z))(x)
+    cold = rec.fires - before
+    before = rec.fires
+    jax.make_jaxpr(lambda z: inline(z))(x)       # fresh closure, warm helper
+    warm = rec.fires - before
+    assert (cold, warm) == (1, 0), (
+        f"the inline-jit replay this argument rests on did not happen "
+        f"(cold={cold}, warm={warm})"
+    )
+
+    statuses = [check(h, vacuity_mode="inputs-only").status for _ in range(3)]
+    assert statuses == ["UNKNOWN"] * 3, statuses
+
+
+def test_the_gate_has_three_states_and_the_third_one_has_its_OWN_words():
+    """observed-clean / observed-narrowed / NOT-OBSERVED, and they read apart.
+
+    The third state is the one this batch added and the one a reader is most
+    likely to be misled by, so its sentence must not be the narrowed one's.
+    "No narrowing was seen" and "no narrowing occurred" are different claims;
+    a reader sent to hunt a narrowed constant when the real answer is that
+    nobody looked has been sent to the wrong place.
+    """
+    def clean():
+        x = any_array((2,), jnp.float32, (0.0, 1.0))
+        assert_(x + 2.0 > 1.5)
+
+    def narrowed():
+        x = any_array((2,), jnp.int16, (0, 100))
+        assert_(x + 40000 < 200)
+
+    observed_clean = check(clean, vacuity_mode="inputs-only")
+    observed_narrowed = check(narrowed, vacuity_mode="inputs-only")
+
+    import stelling._tripwire as tw
+
+    real = tw.evict_trace_caches
+    tw.evict_trace_caches = lambda: "no-clear-caches"
+    try:
+        not_observed = check(clean, vacuity_mode="inputs-only")
+    finally:
+        tw.evict_trace_caches = real
+
+    assert observed_clean.status == "VERIFIED"
+    assert observed_narrowed.status == "UNKNOWN"
+    assert not_observed.status == "UNKNOWN"
+
+    narrowed_note = observed_narrowed.notes[0]
+    unobserved_note = not_observed.notes[0]
+    assert "trace unfaithful" in narrowed_note
+    assert "narrowing(s) detected" in narrowed_note
+
+    assert "NOT FULLY OBSERVED" in unobserved_note
+    assert "narrowing(s) detected" not in unobserved_note, (
+        "the third state is wearing the narrowed state's sentence: it reports "
+        "a narrowing that was never observed"
+    )
+    assert "no-clear-caches" in unobserved_note, (
+        "the third state does not say WHICH way the observation was lost, so "
+        "a reader cannot tell a broken instrument from a disarmed one"
+    )
+
+
+def test_the_gate_fails_CLOSED_when_the_observation_cannot_be_made_complete():
+    """A gate that refuses more is safe; one that refuses less is not.
+
+    Every route by which the eviction can fail must land in the third state,
+    including the ones that come back as an unrecognised code, because the
+    question the gate answers is "was the watch complete", and any answer
+    other than yes is no.
+    """
+    def clean():
+        x = any_array((2,), jnp.float32, (0.0, 1.0))
+        assert_(x + 2.0 > 1.5)
+
+    assert check(clean, vacuity_mode="inputs-only").status == "VERIFIED"
+
+    import stelling._tripwire as tw
+
+    real = tw.evict_trace_caches
+    for code in ("no-module", "no-clear-caches", "unexpected:RuntimeError",
+                 "a code nobody has invented yet"):
+        tw.evict_trace_caches = lambda code=code: code
+        try:
+            v = check(clean, vacuity_mode="inputs-only")
+        finally:
+            tw.evict_trace_caches = real
+        assert v.status == "UNKNOWN", f"{code!r} certified anyway"
+        assert "NOT FULLY OBSERVED" in v.notes[0], code
+
+
+def test_a_clean_trace_that_STOPPED_being_watched_is_not_called_a_narrowing():
+    """The mis-worded third state that was already in the code (B14).
+
+    Disarming mid-trace made the gate set ``narrowings = max(narrowings, 1)``
+    and print "1 integer narrowing(s) detected" — about a trace in which
+    nothing whatever was observed to narrow. The refusal was right and the
+    sentence was wrong, which is the failure this batch's third state exists
+    to stop.
+    """
+    def clean_but_goes_dark():
+        x = any_array((2,), jnp.float32, (0.0, 1.0))
+        _tripwire.disarm()
+        assert_(x + 2.0 > 1.5)
+
+    v = check(clean_but_goes_dark, vacuity_mode="inputs-only")
+    _tripwire.arm()
+
+    assert v.status == "UNKNOWN"
+    assert "NOT FULLY OBSERVED" in v.notes[0]
+    assert "narrowing(s) detected" not in v.notes[0]
+    assert "stopped watching" in v.notes[0]
+
+
+def test_a_narrowing_seen_while_the_watch_was_partial_says_so_as_a_FLOOR():
+    """Both states at once: the count is real, and it is a lower bound.
+
+    A reader who fixes the one narrowing this names must not read the next
+    clean run as proof there was only one, so the count is published as a
+    floor whenever part of the trace went unwatched.
+    """
+    def narrows_then_goes_dark():
+        x = any_array((2,), jnp.int16, (0, 100))
+        y = x + 40000
+        _tripwire.disarm()
+        assert_(y < 200)
+
+    v = check(narrows_then_goes_dark, vacuity_mode="inputs-only")
+    _tripwire.arm()
+
+    assert v.status == "UNKNOWN"
+    assert "trace unfaithful" in v.notes[0]
+    assert "LOWER BOUND" in v.notes[0]
+    assert "stopped watching" in v.notes[0]
+
+
+def test_the_eviction_primitive_reports_rather_than_raises():
+    """``evict_trace_caches`` is a guardrail, so it returns codes.
+
+    Non-vacuity matters more than usual here: a function that returned
+    ``"evicted"`` unconditionally would make every test above pass while
+    evicting nothing, so the failure directions are driven too.
+    """
+    from stelling._tripwire import _adapter_jax as adapter
+
+    assert _tripwire.evict_trace_caches() == "evicted"
+
+    real = jax.clear_caches
+    try:
+        def boom():
+            raise RuntimeError("no")
+
+        jax.clear_caches = boom
+        assert adapter.evict_trace_caches() == "unexpected:RuntimeError"
+        del jax.clear_caches
+        assert adapter.evict_trace_caches() == "no-clear-caches"
+    finally:
+        jax.clear_caches = real
+    assert _tripwire.evict_trace_caches() == "evicted"
+
+
+def test_the_gate_still_certifies_a_clean_program_after_all_of_that():
+    """The cost side of a fail-closed change, held down.
+
+    A gate that refuses everything is trivially sound and useless. Measured
+    over this repository's suite and `corpus/` at a759809: 1475 armed gated
+    traces, 88 of them not fully observed, 0 of those actually narrowed, and
+    312 VERIFIEDs before and 312 after — the eviction adds observation, not
+    refusals.
+    """
+    def clean():
+        x = any_array((3,), jnp.float32, (0.0, 1.0))
+        assert_(x * 2.0 < 3.0)
+
+    assert [check(clean, vacuity_mode="inputs-only").status for _ in range(3)] == [
+        "VERIFIED", "VERIFIED", "VERIFIED",
+    ]
