@@ -16,10 +16,24 @@
 #      re-implementation: `stelling._tripwire.arm()`, the same call
 #      `pytest_configure` makes. A canary exercising a different probe is
 #      testing nothing about the thing that ships.
-#   2. IT HAS A CONTROL — the identical probe against the PINNED series, in
-#      the same workflow, on the same runner. Without it a red run cannot
-#      distinguish "upstream broke us" from "we broke ourselves", and the
-#      first thing anyone would do is re-run it to find out.
+#   2. IT HAS A CONTROL — the identical probe against the newest RELEASED
+#      jax, in the same workflow, on the same runner. Without it a red run
+#      cannot distinguish "upstream broke us" from "we broke ourselves", and
+#      the first thing anyone would do is re-run it to find out. NEITHER LEG
+#      IS PINNED TO A SERIES, and this file used to say the control was: the
+#      `control` job below installs `.[jax]` with no version constraint, so
+#      it resolves to whatever jax is newest on the day it runs. What the
+#      control gives is a SECOND jax, not a fixed one — enough to tell a
+#      nightly-only fault from one common to both legs, and not enough, when
+#      both are red, to say whether the released jax regressed or this
+#      repository did. `tripwire_canary.py`'s `_TWO_LEGS` says the same thing
+#      to whoever meets the red run. A TEST READS THE INSTALL STEPS BELOW and
+#      checks THAT CONSTANT AND THE JOB NAMES against them; it also checks
+#      that each leg runs the script with `--require` and that neither job
+#      `needs:` the other. IT DOES NOT READ THIS PARAGRAPH — no test does,
+#      the previous version of this sentence said otherwise, and header prose
+#      in this file has now been wrong twice. Where it disagrees with
+#      `_TWO_LEGS`, `_TWO_LEGS` is the checked one.
 #   3. INFRASTRUCTURE FAILURE MUST NOT PAGE. The nightly index URL below is
 #      NOT verified current; jax's nightly hosting has moved before and may
 #      move again. An install that cannot reach it is infra, not signal, and
@@ -47,11 +61,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # PROPERTY 2. The control runs first and it is the one that may not be
-  # yellow: if the pinned series cannot arm the tripwire, the problem is in
-  # this repository and the nightly result below is uninterpretable.
+  # PROPERTY 2. The control is the leg that may not come back YELLOW: it has
+  # no `continue-on-error` and no infra carve-out, so it answers red or green.
+  #
+  # IT DOES NOT RUN FIRST. There is no `needs:` anywhere in this file and
+  # there deliberately is not one — the two jobs run concurrently. Sequencing
+  # them would make GitHub SKIP the `nightly` leg whenever the control failed,
+  # and the run that most needs both answers is exactly the run that would
+  # come back with one. This comment claimed the ordering for one commit while
+  # no `needs:` existed; the claim is withdrawn rather than implemented, and a
+  # test now fails if a `needs:` appears without this paragraph changing.
+  #
+  # A RED CONTROL NAMES NOBODY. If the newest RELEASED jax cannot arm the
+  # tripwire, either that release regressed or this repository did, and
+  # nothing on these two pages separates them — both legs run this
+  # repository's code, which is the whole of what `_TWO_LEGS` says. What it
+  # does establish is that the fault is not the nightly's jax alone, and that
+  # is what a red control costs: the comparison the `nightly` result below is
+  # read through stops discriminating, so both legs red is one finding and not
+  # two.
   control:
-    name: control — the pinned series
+    name: control — the newest released jax
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

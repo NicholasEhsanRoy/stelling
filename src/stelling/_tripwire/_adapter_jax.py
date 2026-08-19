@@ -663,7 +663,13 @@ def install(recorder: record.Recorder) -> str:
     """Wrap the rule. Returns a status code; never raises, never leaks a jax object.
 
     ``already-armed`` if this process already installed one — arming twice must
-    not double-wrap, and a double wrapper would double every count.
+    not double-wrap. A second wrapper over the first sees every invocation the
+    first does, so the gate counter, which is module state and belongs to no
+    recorder, counts each fire twice whoever owns the wrappers; a RECORDER
+    counts twice only when both wrappers were handed the same one, which is
+    what a re-arm would do and is not what the orphaned probe in
+    :func:`restore` produced. Both cases are measured in
+    ``tests/test_tripwire_arm.py``.
     """
     code = locate()
     if code != "located":
@@ -696,22 +702,64 @@ def restore() -> str:
         rather than silently clobbering it — §4.
     ``restored``
         done.
+
+    A PENDING :func:`detach` IS FIXED UP FIRST, and that is not tidying. The
+    pair ``detach``/``reattach`` saves whatever the registry held and puts it
+    back, and what it held may be THIS WRAPPER. Retiring the wrapper makes
+    that saved entry stale: a later ``reattach()`` would then reinstall a
+    probe no ``_installed`` record owns, so ``is_armed()`` says no, ``rule_hash``
+    and ``rule_name`` read *stelling's own wrapper* as if it were jax's rule,
+    the next ``arm()`` wraps the wrapper, and the state persists for the life
+    of the interpreter. That is not hypothetical: ``detach("bypass")`` ->
+    ``disarm()`` -> ``reattach()`` is exactly the sequence the §4 foreign-patch
+    test drives, and it left every later ``arm()`` in the process reporting
+    ``hash_state == "changed"`` against a jax whose rule had not moved.
+
+    WHAT THE SECOND WRAPPER COSTS, MEASURED, because the first account of this
+    said it doubled the counts and it does not. The wrap is real: with an
+    orphan left behind, the live registry entry is stelling's wrapper around
+    stelling's wrapper around jax's rule -- depth 2, measured. But each
+    wrapper closes over the recorder it was installed WITH, so the orphan
+    writes into a dead one: on jax 0.11.0 the live recorder reported the same
+    ``int_narrowings``, ``fires`` and finding count on a polluted process as
+    on a clean one, and ``selfcheck()`` passed either way. What doubles is the
+    GATE counter, which is thread-local module state no recorder owns and
+    which both wrappers increment: ``_pop_gate()`` returns 2 where it should
+    return 1, and that is the N in ``preconditions.check()``'s ``trace
+    unfaithful: N integer narrowing(s)``. Measured clean 1 / polluted 2 before
+    this fix, 1 / 1 after. The refusal does not turn on the magnitude -- a
+    wrapper that fired twice fired at least once -- so what the doubling
+    corrupted is a number an operator reads, beside a ``rule_name`` and a
+    ``hash_state`` that describe stelling's own probe as jax's rule.
+
+    ``restore`` is the operation that invalidates the saved entry, so it is
+    the operation that must correct it: once the wrapper is gone, the value
+    that stands in its place is the original this record was holding. Doing
+    it here rather than in ``reattach`` keeps the fix at the point where the
+    fact changes; ``reattach`` cannot tell a stale entry from a live one.
     """
     if not _installed:
         return "not-armed"
     registry = _installed["registry"]
     primitive = _installed["primitive"]
+    wrapper = _installed["wrapper"]
+    original = _installed["original"]
+    if _detached and _detached.get("entry") is wrapper:
+        _detached["entry"] = original
     current = registry.get(primitive)
-    if current is not _installed["wrapper"]:
+    if current is not wrapper:
         _installed.clear()
         return "foreign-patch"
-    registry[primitive] = _installed["original"]
+    registry[primitive] = original
     _installed.clear()
     return "restored"
 
 
 #: Saved state for :func:`detach`. Separate from ``_installed`` because
 #: detaching is deliberately something that happens *to* an armed tripwire.
+#: :func:`restore` reads it -- it rewrites a saved ``entry`` that is the
+#: wrapper it is retiring, so that ``detach`` -> ``disarm`` -> ``reattach``
+#: cannot leave an orphaned probe as the live rule.
 _detached: dict = {}
 
 
