@@ -83,12 +83,19 @@ UNCOVERED = (
     "receives something IN RANGE and does not fire -- AND THE VISIT IS "
     "COUNTED IN THE DENOMINATOR ABOVE, which is why a large denominator is "
     "not evidence of coverage: `jnp.full(shape, N, dt)`, "
-    "`jnp.full_like(x, N)`, `lax.convert_element_type(N, dt)`, "
+    "`jnp.full_like(x, N)`, `lax.full(shape, N, dt)`, "
+    "`lax.convert_element_type(N, dt)`, "
     "`lax.select(p, jnp.full(shape, N, dt), x)`, "
-    "`jnp.take(x, i, mode='fill', fill_value=N)`, and an operand that was "
-    "already an array (the rule declines to fold non-scalars). numpy "
+    "`jnp.stack([x, jnp.full(shape, N, dt)])` and anything else built on "
+    "`full`, `jnp.take(x, i, mode='fill', fill_value=N)`, "
+    "`np.asarray(N).astype(dt)` and every other value numpy narrows before "
+    "it reaches jax at all, and an operand that was already an array (the "
+    "rule declines to fold non-scalars). numpy "
     "truncates on the way in and the rule sees the wrapped value, so THE "
-    "VALUE STILL WRAPS and nothing here can tell.",
+    "VALUE STILL WRAPS and nothing here can tell. THE SET IS ENUMERATED AND "
+    "MEASURED, route by route, in "
+    "`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` -- a door that "
+    "moves bucket goes red there rather than going quiet here.",
     "anything inside a scoped `with jax.disable_jit():`, which swallows a "
     "door that is otherwise COVERED: `a + 200` on `int8` inside the block "
     "produces a jaxpr BYTE-IDENTICAL to the one that fires outside it and 0 "
@@ -97,8 +104,18 @@ UNCOVERED = (
     "different case and is handled: `arm()` reports `not-invoked` and the "
     "tool disables itself rather than reporting a quiet zero. Inside the "
     "scoped block THE VALUE STILL WRAPS.",
-    "anything traced BEFORE the tripwire was armed -- jit caches mean a "
-    "function traced earlier in the process is never re-traced",
+    "anything replayed from a WARM TRACE CACHE instead of being traced: "
+    "jax's cache is keyed on the jitted callable and its avals, so a "
+    "`@jax.jit` function any earlier trace already reached -- before this "
+    "tripwire armed OR after it, in an earlier test -- is never traced again "
+    "and the rule never runs over its body. `jax.jit(f, inline=True)` does "
+    "this while leaving NO nested jaxpr behind to notice it by. THE GATE IN "
+    "`preconditions.check()` IS THE ONE PLACE THIS IS CLOSED: it empties "
+    "jax's trace caches before the trace it watches, so a verdict's "
+    "observation is complete by construction (B15). This session report has "
+    "no such moment -- it watches whatever your suite happens to trace -- so "
+    "the door stays open for the findings below and is closed only for the "
+    "verdicts.",
 )
 
 

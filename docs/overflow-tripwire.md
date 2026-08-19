@@ -145,11 +145,13 @@ and **the value wraps in every UNCOVERED row**.
 | **`jnp.pad(x, k, constant_values=N)`** | **UNCOVERED** | 0 invocations |
 | **`jnp.take(x, i, mode='fill', fill_value=N)`** | **UNCOVERED** | 0 fires (3 in-range visits counted) |
 | **`jnp.full(shape, N, dt)`**, **`jnp.full_like(x, N)`** | **UNCOVERED** | 0 fires; the rule sees the already-wrapped value and **counts it in the denominator** |
+| **`lax.full(shape, N, dt)`** | **UNCOVERED** | as above |
 | **`lax.convert_element_type(N, dt)`** | **UNCOVERED** | as above |
-| **`lax.select(p, jnp.full(shape, N, dt), x)`** | **UNCOVERED** | as above |
+| **`lax.select(p, jnp.full(shape, N, dt), x)`**, **`jnp.stack([x, jnp.full(shape, N, dt)])`** and anything else built on `full` | **UNCOVERED** | as above |
+| **`np.asarray(N).astype(dt)`** — numpy narrows it before jax sees it | **UNCOVERED** | 0 invocations |
 | an operand that was already an array | **UNCOVERED** | the fold declines non-scalars, so the wrap already happened |
 | **inside `with jax.disable_jit():`** | **UNCOVERED** | 0 fires on a jaxpr *byte-identical* to one that fires outside the block |
-| anything traced **before** the plugin armed | **UNCOVERED** | jit caches; it is never re-traced |
+| anything replayed from a **warm trace cache** — a `@jax.jit` function any earlier trace already reached, whether before this tripwire armed or after it | **UNCOVERED here, COVERED inside `check()`** | jax's cache is keyed on the jitted callable and its avals, so the body is never traced again and the rule never runs over it. `jax.jit(f, inline=True)` does this leaving no `pjit` in the jaxpr to notice it by. `preconditions.check()` empties jax's trace caches before the trace it gates, so a **verdict**'s observation is complete; this **session report** has no such moment and watches whatever your suite happens to trace |
 
 There are two distinct causes, and the second is the one worth knowing about.
 
@@ -159,7 +161,8 @@ and the `convert_element_type` inside the sub-jaxpr operates on a **variable**.
 Other mechanisms may reach these; none is built.
 
 **The value is already narrowed before the site.** `jnp.full`, `jnp.full_like`,
-`lax.convert_element_type`, `lax.select` and a scoped `jax.disable_jit()` all
+`lax.full`, `lax.convert_element_type`, `lax.select`, anything built on `full`,
+and a scoped `jax.disable_jit()` all
 truncate through numpy first, so the rule is handed a value that is *in range*
 and does not fire — **and that visit is counted in the printed denominator.**
 So a large denominator is not evidence of coverage. Measured: `x + 300` on
@@ -174,6 +177,26 @@ zero. Only the scoped block is silently blind.
 Eager execution is uncatchable from Python at all: warm dispatch is eleven
 frames of C++ fast path, the constant arrives as a `pjit` argument, and XLA
 truncates it.
+
+**The route is never traced at all.** A `@jax.jit` helper whose trace cache is
+already warm is replayed, not traced, so nothing runs over its body. This is
+the one row above with two different answers, because it has two different
+answers: the gate in `preconditions.check()` closes it by emptying jax's trace
+caches first, and the session report cannot, because it has no single moment
+that owns the whole program.
+
+**The enumerated version of this table.** The prose above is a floor and says
+so. `tests/test_tripwire_gate_coverage.py` carries the same claim as a
+`GATE_COVERAGE` dict — one bucket per construction route — that the suite
+*measures* by driving every route through `check()` twice and comparing. A
+route that changes bucket goes red there. Two of its buckets are not in this
+table at all and are worth knowing: **`loud`**, where jax itself raises rather
+than wrapping (`jnp.array(N, dtype=dt)`, `jnp.asarray(N, dtype=dt)`,
+`jnp.int16(N)` — note that `jnp.full(shape, N, dt)`, three rows up, silently
+wraps the same value), and **`deferred`**, where the written constant reaches
+the jaxpr intact and the narrowing is a run-time `convert_element_type` (`x //
+N`, `x % N`, `where`, `clip`, `pad`) — the trace gate has nothing to see there,
+and the propagation's convert transfer declines the form instead.
 
 ## Reading the report
 
@@ -285,13 +308,54 @@ your trace — if its own bookkeeping fails it counts the failure, discloses it
 in the report, and carries on, because an instrument that breaks the suite it
 is measuring is worse than no instrument.
 
+**One real side effect, and it is on your jit caches.** While the tripwire is
+armed, every `preconditions.check()` calls `jax.clear_caches()` before the
+trace it gates — that is what makes the observation complete rather than
+partial (see the warm-trace-cache row above). `clear_caches` is process-global,
+so it also drops *your* compiled functions, and the next call to one of them
+pays its trace and compile again. Measured on jax 0.11.0: the call itself is
+58 µs on an empty cache and 1.4–3.5 ms on a populated one; the re-compile a
+caller then pays is 18 ms for a trivial jitted function, 45 ms for a 32-step
+`scan`, and 330 ms for a 200-primitive chain. On this repository's own suite
+and `corpus/` — 1475 gated traces — it was not measurable above the noise
+(522.0 s → 519.7 s). If your suite interleaves `check()` with an expensive
+jitted model, budget one full re-compile of that model per `check()`, and note
+that none of this happens unless the tripwire is armed.
+
 ## What it does to your verdicts
 
-When the tripwire is armed and a narrowing fires during a `stelling.harness.
-trace()` call, the verdict is **UNKNOWN** — the pipeline refuses to propagate
-or judge a jaxpr that does not represent the program as written. The note says
-how many narrowings were detected and directs you to the tripwire report for
-details.
+The gate has **three** states, and the third one is not a shade of the first.
+
+**Observed, clean.** Nothing narrowed and the whole trace was watched, so the
+pipeline proceeds and the verdict is whatever the analysis finds.
+
+**Observed, narrowed.** A narrowing fired during a `stelling.harness.trace()`
+call, so the verdict is **UNKNOWN** — the pipeline refuses to propagate or
+judge a jaxpr that does not represent the program as written. The note says how
+many narrowings were detected and directs you to the tripwire report for
+details:
+
+```
+trace unfaithful: 1 integer narrowing(s) detected during tracing — ...
+```
+
+**Not fully observed.** The tripwire could not watch all of the trace, so the
+run has no evidence *either way* about the part it did not watch. The verdict
+is **UNKNOWN** and says so in its own words, because "no narrowing was seen"
+and "no narrowing occurred" are different claims and sending you to hunt a
+narrowed constant that nobody looked for wastes your afternoon:
+
+```
+trace NOT FULLY OBSERVED: the overflow tripwire could not watch all of this
+trace, so this run has no evidence either way about the part it did not watch.
+THIS IS NOT A REPORT THAT A CONSTANT WAS NARROWED — ...
+```
+
+It is reached when jax's trace caches could not be emptied, or when the
+tripwire was disarmed or re-armed while a harness was being traced. When both
+the second and the third state apply at once, the count is published as a
+**lower bound**: fixing the narrowing it names is not evidence that it was the
+only one.
 
 When the tripwire is NOT armed (the default), this gate is inactive and
 verdicts are unaffected. The gate is a function of the tripwire's state at

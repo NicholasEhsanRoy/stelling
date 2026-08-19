@@ -117,6 +117,15 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     found one), or ``UNKNOWN`` — never guessed; anything the analysis
     could not decide says so, with the reason quoted in the notes.
 
+    **With the overflow tripwire armed** (``pytest -p stelling.overflow``)
+    this call also runs the trace gate, which refuses to judge a jaxpr that
+    does not represent the program as written — and refuses, separately and
+    in different words, when it could not watch the whole trace. Making the
+    watch complete costs one ``jax.clear_caches()`` per call, which is
+    process-global and drops the caller's own compiled functions;
+    ``docs/overflow-tripwire.md`` prices it. Nothing of this happens when
+    the tripwire is not armed, which is the default.
+
     ``vacuity_mode`` is **required** (no default — the two registered
     procedures answer different questions, and a silently-picked mode
     would let a caller run the wrong one without saying so; see
@@ -224,6 +233,17 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     solver escalation, stamped verdict assembly, and the VERIFIED widen
     re-check at the same pipeline depth (refined iff the original
     refined, escalated iff the original escalated).
+
+    THE TRACE GATE, when the overflow tripwire is armed, has THREE states
+    and not two: observed-and-clean proceeds, observed-and-narrowed refuses
+    with ``trace unfaithful``, and NOT-FULLY-OBSERVED refuses in its own
+    words. The third exists because the gate's silence is evidence of
+    nothing when part of the trace was replayed from a cache or the
+    instrument stopped watching, and reporting that as "0 narrowings
+    detected" — or, as B14 left it, as "1 narrowing detected" — describes a
+    measurement nobody made. Observation is made complete by EVICTING jax's
+    trace caches, not by detecting incompleteness; the comment at the gate
+    carries the measurement that decides between those.
 
     Returns ``(verdict, closed)``: exactly the verdict :func:`check`
     returns (behavior-identical extraction — check() is this helper with

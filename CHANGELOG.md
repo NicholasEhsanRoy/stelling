@@ -205,6 +205,74 @@ SPDX-License-Identifier: Apache-2.0
 
 ### Soundness fixes
 
+**Batch B15 — the trace gate observed part of a program and claimed all of
+it** (`fix/B15-trace-gate-observation`). Branched from `a759809`.
+
+- **A warm jit trace cache no longer hides a narrowing from the gate.** The
+  armed gate traced through a fresh closure, which defeats
+  `jax.make_jaxpr`'s identity cache and so guarantees the OUTER trace is
+  re-run. It guarantees nothing about an inner `@jax.jit` helper, whose
+  trace cache is keyed on the jitted callable and its avals: a helper any
+  earlier trace already warmed is REPLAYED, the const-fold rule never runs
+  over its body, and the gate's zero meant "I observed no narrowing" while
+  being read as "no narrowing occurred". Measured on jax 0.11.0: one
+  harness with a jitted helper, checked four times, gave `UNKNOWN,
+  VERIFIED, VERIFIED, VERIFIED`; two DIFFERENT harnesses sharing one jitted
+  helper gave `UNKNOWN` and then a **wrong VERIFIED** — about a program
+  whose written 40000 had already been destroyed to -25536. `check()` now
+  empties jax's trace caches before the trace it gates, so a verdict's
+  observation is complete by construction.
+
+  It is an eviction and not a detector because a detector was measured and
+  does not work: `jax.jit(f, inline=True)` replays a warm body and leaves NO
+  nested jaxpr in the enclosing jaxpr to notice the replay by, and jax
+  publishes no per-jit trace counter on a public surface (`_cache_size` and
+  `_clear_cache` are private, `clear_cache()` clears rather than reports and
+  cannot be enumerated, and `jax.explain_cache_misses` logs MISSES where the
+  state that matters is a HIT).
+
+- **The gate has three states where it had two, and the third has its own
+  sentence.** Observed-and-clean proceeds; observed-and-narrowed refuses
+  with `trace unfaithful`; NOT-FULLY-OBSERVED refuses with a message that
+  says no narrowing was seen AND none was seen not to be. The third state
+  is reached when the cache eviction fails or when the tripwire is
+  disarmed/re-armed mid-trace — the latter previously took the refusal path
+  by way of `narrowings = max(narrowings, 1)` and printed *"1 integer
+  narrowing(s) detected"* about a trace in which nothing was observed to
+  narrow. The refusal was right and the sentence was wrong. When a
+  narrowing IS seen while the watch was partial, the count is now published
+  as a LOWER BOUND.
+
+- **User-visible cost, and it is real.** While the tripwire is armed —
+  opt-in, and nothing changes without it — every `check()` calls
+  `jax.clear_caches()`, which is process-global and drops the caller's own
+  compiled functions. Measured on jax 0.11.0: the call is 58 µs empty and
+  1.4–3.5 ms populated; a caller then pays one re-trace-and-compile per
+  jitted function it re-uses (18 ms trivial, 45 ms for a 32-step `scan`,
+  330 ms for a 200-primitive chain). Across this repository's suite and
+  `corpus/` — 1475 armed gated traces — it was not measurable above the
+  noise (522.0 s → 519.7 s). Priced in `docs/overflow-tripwire.md`.
+
+- **What the fix cost in verdicts: nothing.** Measured across the suite and
+  `corpus/` at `a759809`: 1475 armed gated traces, of which 88 were NOT
+  FULLY OBSERVED, of which **0** actually contained a narrowing — so 0
+  verdicts were WRONG and 88 were merely UNGUARDED, and VERIFIED counts are
+  312 before and 312 after. The eviction adds observation, not refusals.
+
+- **The tripwire's coverage claim is now an asserted inventory.**
+  `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` declares a bucket
+  for each of 31 constant-construction routes — `watched`, `unwatched`,
+  `loud` (jax raises), `deferred` (the constant reaches the jaxpr and the
+  convert transfer declines it) — and the suite MEASURES every route by
+  driving it through `check()` twice, comparing, and failing on a route
+  whose two calls disagree. Driving it once was the shape that made this
+  defect invisible. `report.UNCOVERED` and `docs/overflow-tripwire.md` gain
+  the doors the sweep found unnamed (`lax.full`, anything built on `full`
+  such as `jnp.stack`, and values numpy narrows before jax sees them), and
+  the warm-trace-cache row now records that the door is closed for a
+  *verdict* and still open for the *session report*, which has no single
+  moment that owns the whole program.
+
 **Batch B13 — the instruments that read as enforcing something**
 (`fix/B13-instrument-reach`). Branched from `3482822`. Nothing here is on
 the analysis, transfer or emission path; the one user-visible change is a
