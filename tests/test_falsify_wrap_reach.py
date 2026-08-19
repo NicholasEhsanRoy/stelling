@@ -33,8 +33,22 @@ defect lives on a different axis — *source versus program* — because jax
 destroys the constant at or before the trace, so the program stelling
 judged and the program the probe executes are the SAME program, ``v + 0``,
 and the analysis is faithful to it. No sample budget closes that, because
-the probe and the analysis share exactly one step and the defect is inside
-it.
+the defect is inside the machinery the probe and the analysis SHARE — the
+tracer, and the declaration API that runs in front of it.
+
+**AND THE RESULT IS STRONGER THAN "THE TRACER DESTROYS IT", WHICH IS
+WHERE THE ARGUMENT USED TO STOP.**
+:func:`test_no_executable_form_of_the_program_carries_the_written_constant`
+drives the constant with no tracer in sight: ``jnp.full((), 256,
+jnp.int8)`` is ``0`` EAGERLY, and eager ``jnp.array(5, jnp.int8) + 256``
+is ``5``, while numpy raises ``OverflowError`` on ``np.int8(256)`` rather
+than wrapping quietly. So for the ``jnp.full`` door the destruction
+happens strictly BEFORE the trace, and **there is no executable form of
+this program — traced or eager — in which 256 survives.** An execution
+probe of any budget or design therefore cannot see it; only the source
+text, or a hook at the moment of the narrowing, can. ("At or before the
+trace" is the accurate phrasing for the pair of doors; "inside the tracer"
+is not, and this file used to imply it.)
 
 **THE INSTRUMENT THAT DOES COVER THAT AXIS ALREADY EXISTS** and is a
 different shape: ``stelling._tripwire``, the trace-time integer-narrowing
@@ -289,6 +303,40 @@ def test_the_trace_gate_reaches_the_inline_door_where_the_probe_does_not(x64):
     )
     report, fired = _probe(harness)
     assert fired is None and report.declined is None
+
+
+def test_no_executable_form_of_the_program_carries_the_written_constant(
+    x64,
+):
+    """THE STRONGEST FORM OF THE NULL RESULT, and it needs no probe at all.
+
+    The probe finding nothing is one measurement; that no execution COULD
+    find anything is a different and much stronger one, and it is settled
+    without tracing anything:
+
+    * ``jnp.full((), 256, jnp.int8)`` evaluates to ``0`` eagerly — the
+      value is destroyed at construction, before any jaxpr exists;
+    * eager ``jnp.array(5, jnp.int8) + 256`` is ``5`` — the addend is
+      destroyed the same way;
+    * numpy, asked the same thing, RAISES ``OverflowError`` rather than
+      wrapping, which is what makes this a jax convention and not an
+      inevitability of the format.
+
+    So the object the probe would have to execute in order to see ``256``
+    does not exist in either evaluation mode. That is why this file's
+    result is structural: it is not that the sampler looked in the wrong
+    place, it is that no sampler has anything to look at. Driven in both
+    ``x64`` cells because the whole ``SOUNDNESS.md`` page is sensitive to
+    that dial.
+    """
+    assert int(jnp.full((), 256, jnp.int8)) == 0, (
+        "jnp no longer destroys the int8 literal eagerly; if it now raises "
+        "or saturates, SOUNDNESS.md's open false VERIFIED has changed shape "
+        "and this whole file needs rewriting rather than patching"
+    )
+    assert int(jnp.array(5, jnp.int8) + 256) == 5
+    with pytest.raises(OverflowError):
+        np.int8(256)
 
 
 def test_NEITHER_instrument_reaches_the_jnp_full_door(x64):

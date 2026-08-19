@@ -195,6 +195,14 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     is allowed to import and why that set is the independent one, and —
     measured, not assumed — the class of defect it cannot reach.
 
+    The same keyword is accepted by
+    :func:`stelling.contracts.check_contract` and
+    :func:`stelling.inductive.check_inductive_step`, which mint VERIFIEDs
+    through this same pipeline. It reached only THIS door when it landed,
+    which made the probe's reach an accident of which function carried the
+    keyword rather than a decision; the decision is that every door that
+    can mint a VERIFIED can ask for the downstream check.
+
     Version, precision, and solver stamps are filled from the live
     environment; the precision entry records the *actual*
     ``jax_enable_x64`` state at trace time, not an assumption.

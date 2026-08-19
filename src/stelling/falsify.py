@@ -38,26 +38,65 @@ this project exists to prevent exactly that.
 
 **THE SKIP RATE IS PART OF THE RESULT.** The probe declines on shapes it
 cannot sample — an unbounded declaration, a dtype it cannot construct, an
-integer box containing no integer, a point at which the program raises.
-Every one of those is counted by reason in :attr:`ProbeReport.skips` and
-appears in the stamp line. A probe that silently declined most of what it
-was pointed at would read as coverage while doing nothing, which is worse
-than no probe at all.
+integer box containing no integer, a point at which the program raises —
+and it declines on executed VIOLATIONS the fire condition will not stand
+behind. Every one of those is counted by reason in
+:attr:`ProbeReport.skips`, adjudicated in
+:attr:`ProbeReport.adjudications`, and named in the stamp line. A probe
+that silently declined most of what it was pointed at would read as
+coverage while doing nothing, which is worse than no probe at all.
+
+The declined violation is the half that used to be missing, and it was
+the expensive half: on ``x + 1.0 > x`` over ``[0, 2**54]`` the report read
+*120 points executed, skip rate 0.0000* while 32 of those points had
+evaluated the obligation FALSE and been dropped. The rate now counts them
+and the stamp line says the number in the same sentence as the counts.
 
 **WHAT IT DID WHEN POINTED AT THE WHOLE SUITE.** Forced on for every
-``check()`` call across this repository's own tests (jax 0.11.0, 3968
-tests), the probe saw 332 VERIFIED verdicts. It executed points on 166 of
-them and declined 5 outright — a probe-level decline rate near 3%, the
-declines being unbounded or otherwise unsampleable declarations. It fired
-**77 times, and every firing was inside a mutation**: the ``pow`` row's
-own gauge battery installs deliberately wrong transfers and emissions, and
-those are the runs that produced a discharge the program contradicts.
-Driven WITHOUT a mutation, every one of those same fixtures returns
-REFUTED or UNKNOWN and the probe never fires. So on this corpus the false
-alarm count is zero and the instrument demonstrably fires — which is the
-pair of facts a default-off flag has to establish before anyone argues
-about releasing it, and neither of them is an argument that a VERIFIED it
-did not break is any better for it.
+``check()`` call across this repository's own tests (jax 0.11.0, x64 on,
+one process, ``-p no:randomly``, a plugin that sets ``falsify="sample"``
+in the pipeline and swallows the raise so the run reaches the end), the
+probe was handed **500 VERIFIED verdicts**. It declined **8** outright —
+unbounded or otherwise unsampleable declarations — and on the rest it
+built 31,340 points, executed 31,336, and found 24,914 of them inside
+every declaration and admitted by every assume. It fired **169 times**,
+across six files:
+
+======================================  =======  ==============================
+file                                    firings  what it is
+======================================  =======  ==============================
+``tests/test_falsify_probe.py``              81  the probe's own fixtures,
+                                                 false by hand
+``tests/test_pow_row_gauge_jax.py``          48  a mutation battery
+``tests/test_square_row_gauge_jax.py``       24  a mutation battery
+``tests/test_falsify_fire_condition.py``     11  the probe's own fixtures,
+                                                 false by hand
+``tests/test_scatter_gauge_jax.py``           3  a mutation battery
+``tests/test_falsify_independence.py``        2  the lying propagator
+======================================  =======  ==============================
+
+**Every firing is inside a deliberate mutation or a by-construction-false
+fixture**, and the attribution is spelled out rather than summarised
+because the earlier version of this paragraph said *"every firing was
+inside the ``pow`` row's own gauge battery"* and reported 77 firings in
+four figures that no longer re-derive. Five files fire, not one; the
+``pow`` gauge is 48 of 169. (The two ``falsify`` test files' own counts
+are measured under an instrumentation that swallows the raise, which
+changes those tests' control flow — the three GAUGE rows are not affected
+by it, and they are identical before and after this batch's fire-condition
+rework: 48, 24 and 3 both times.) Driven WITHOUT the mutation, every one
+of those gauge fixtures returns REFUTED or UNKNOWN and the probe never
+fires.
+
+So on this corpus the false-alarm count is zero and the instrument
+demonstrably fires — which is the pair of facts a default-off flag has to
+establish before anyone argues about releasing it, and neither of them is
+an argument that a VERIFIED it did not break is any better for it. **Zero
+false alarms ON THIS CORPUS is also not zero false alarms**: the corpus
+had none of the shape that reached one, and the fire condition this module
+shipped with raised "stelling is UNSOUND" on a correct VERIFIED that four
+lines of ordinary compensated summation produce. What that cost, and what
+replaced the test that caused it, is the fire-condition section below.
 
 --------------------------------------------------------------------------
 THE INDEPENDENCE ARGUMENT: WHAT THIS MODULE IS ALLOWED TO IMPORT
@@ -107,9 +146,22 @@ Three of those absences are load-bearing beyond the obvious:
   probe sample the same wrong set and agree. The cost of re-deriving is
   that the two can disagree, and the probe is the conservative side of any
   disagreement: :func:`_admissible` re-checks every sampled value against
-  the raw declared endpoints before the point is allowed to falsify
-  anything, so a probe-side error can lose a refutation but cannot invent
-  one.
+  the declared endpoints before the point is allowed to falsify anything,
+  so **a SAMPLER error can lose a refutation but cannot invent one.**
+
+  That sentence used to end at "a probe-side error", and as a claim about
+  the whole probe it is FALSE. :func:`_window` (which builds points) and
+  :func:`_admissible` (which guards them) read the same
+  ``Declaration.lo``/``hi`` off the same :func:`_census`: one reading, not
+  two, so the guard is a check on the sampler and not on the census.
+  Measured — mutating ``_census``'s ``hi=p["hi"]`` to ``hi=p["hi"] * 2 +
+  1`` produced **four false alarms on correct VERIFIEDs**, because both
+  halves were steered by the same wrong number. No second reading exists
+  inside a module whose value depends on importing none of the analysis,
+  which is the trade this design makes; what pins the census is a TEST,
+  which is under no such constraint and compares the probe's reading
+  against the transcription:
+  ``tests/test_falsify_independence.py::test_the_census_reading_of_the_declared_box_is_pinned_against_the_IR``.
 * **``stelling.verdict`` is absent.** The probe is handed the statuses it
   is trying to break as plain strings by its caller. Reading the CLAIM is
   unavoidable — you cannot falsify a claim without knowing what was
@@ -118,23 +170,43 @@ Three of those absences are load-bearing beyond the obvious:
 
 **AND ONE HONEST QUALIFICATION, BECAUSE IT WAS MEASURED RATHER THAN
 ASSUMED.** "Does not import" is a statement about this module's own code,
-not about what ends up in ``sys.modules``. Two of the banned modules are
-loaded anyway, by machinery that runs before the probe does:
-``_jax_compat`` imports ``stelling.ir`` at module scope, and ``any_array``
-itself does ``from stelling.propagate import _INT_DTYPE_BOUNDS`` while
-validating a declaration — so merely TRACING a harness loads the
-propagator. Neither is the probe consulting the analysis, and the test
-that guards this is therefore a DIFFERENCE: running the probe must load no
-analysis module that tracing the same harness had not already loaded. That
-is the claim that is both true and worth making.
+not about what ends up in ``sys.modules``. **FIVE** of the banned modules
+are loaded anyway, by machinery that runs before the probe does — counted,
+because the sentence here used to say two: ``import stelling.harness``
+brings in ``stelling.ir`` (``_jax_compat`` imports it at module scope),
+and merely TRACING a harness adds ``stelling.propagate``,
+``stelling.interval``, ``stelling.coverage`` and ``stelling.exactness``,
+because ``any_array``'s own dtype validation does ``from
+stelling.propagate import _INT_DTYPE_BOUNDS``.
+
+None of that is the probe consulting the analysis, so the test that guards
+it is a DIFFERENCE: running the probe must load no analysis module that
+tracing the same harness had not already loaded. **That difference is
+blind to exactly those five**, which is the set that matters, and it is
+therefore not the whole test: a second measurement replaces each
+already-loaded module with a recording proxy for the duration of the probe
+call and refuses any attribute read whose immediate frame is this file.
+Both mutations that defeated the difference alone — ``_window`` reading
+``sys.modules["stelling.propagate"]._INT_DTYPE_BOUNDS``, and
+``_admissible`` delegating to ``stelling.interval.from_bounds`` — fail the
+proxy.
 
 **WHAT IS SHARED, STATED PLAINLY BECAUSE IT BOUNDS THE PROBE'S REACH.**
-The probe and the analysis share exactly one step: **jax's tracer**. Both
-start from ``jax.make_jaxpr(harness)``. Everything downstream of that
-tracer is independent; nothing upstream of it is. That is not a gap in
-the sampling, and no sample budget closes it — it is where the probe's
-reach ends, and :ref:`the blind spot <blind-spot>` below names the live
-defect that sits in it.
+The probe and the analysis share **jax's tracer and the declaration API**.
+Both start from ``jax.make_jaxpr(harness)``, and both read a box that
+``any_array`` — not either of them — decided to record.
+
+The second half of that sentence is a correction: this paragraph used to
+say "exactly one step: jax's tracer". ``any_array`` validates a
+declaration through ``propagate._INT_DTYPE_BOUNDS``, so the propagator has
+a vote on which declarations exist at all. Measured: with that table
+replaced by ``{"int8": (-500, 500)}`` the declaration ``any_array((),
+"int8", (200.0, 300.0))`` stops being refused and the probe reads and
+samples a box that on the clean tree never reaches it. Everything
+DOWNSTREAM of the declaration API is independent; nothing upstream of it
+is. That is not a gap in the sampling, and no sample budget closes it —
+it is where the probe's reach ends, and :ref:`the blind spot <blind-spot>`
+below names the live defect that sits in it.
 
 .. _blind-spot:
 
@@ -144,10 +216,17 @@ to ``0`` while the source says ``256``, so ``x + 256 <= 10.0`` is false at
 all eleven declared points and stelling returns VERIFIED. **This probe
 does not catch it, and cannot.** Measured, both of that entry's doors, jit
 and eager, ``x64`` on and off: the executed program returns ``0.0`` and
-the predicate HOLDS at every declared point. It holds because the wrap
-happens in jax, at or before the trace, so the program stelling judged and
-the program the probe executes are the same program — ``v + 0`` — and both
-are faithful to it. Only the SOURCE TEXT says ``256``.
+the predicate HOLDS at every declared point.
+
+The reason is sharper than "the wrap happens in the tracer", which is what
+this paragraph used to say and is not accurate for the ``jnp.full`` door:
+``jnp.full((), 256, jnp.int8)`` evaluates to ``0`` **EAGERLY, before any
+trace exists**, and so does ``jnp.array(5, jnp.int8) + 256`` (it is ``5``);
+numpy by contrast raises ``OverflowError`` on ``np.int8(256)``. **There is
+no executable form of the program — traced or eager — in which 256
+survives.** So an execution probe of any budget or design cannot see it;
+only the source text, or a hook at the moment of the narrowing, can. The
+accurate phrasing is the commit message's, *at or before the trace*.
 
 That defect is therefore not an analysis-versus-program disagreement,
 which is the axis this probe measures; it is a source-versus-program
@@ -157,6 +236,29 @@ gate armed by ``pytest -p stelling.overflow``, which watches the
 constant being destroyed as it happens. The two instruments are
 complementary and neither subsumes the other. Nothing here should be read
 as covering what the tripwire covers.
+
+**AND THE BLIND SPOT IS SPECIFICALLY TRACE-TIME CONSTANT DESTRUCTION, NOT
+INTEGER WRAPPING.** With ``propagate``'s integer guard out of the way the
+probe DOES catch an ``int8`` runtime wrap: ``x + y >= 0`` over ``int8
+[0, 100]**2`` is true over ℤ, the program computes ``-56`` at ``(100,
+100)``, and the probe reports it. Pinned by
+``tests/test_falsify_fire_condition.py::test_the_integer_branch_is_not_a_rational_replay``,
+which also pins the reason that catch survives the fire-condition rework:
+exact-rational arithmetic does not wrap, so the all-integral branch must
+never be routed through the rational replay.
+
+**A SECOND REACH GAP, NAMED HERE BECAUSE A DECLINE COUNT IS NOT A
+DISCLOSURE: ``bfloat16`` AND THE ``float8`` FAMILY.** Every declaration in
+one of those formats is declined outright with ``dtype-not-sampleable``,
+so the probe has ZERO reach exactly where format-rounding defects are most
+likely. The cause is mechanical rather than principled — numpy classifies
+the ml_dtypes extension types as ``kind == "V"`` (and some of the
+``float8`` family have no ``finfo``), while every phase of this sampler
+steps with ``nextafter`` and measures with ``finfo`` in the declaration's
+own format — but a reach gap a reader has to infer from a decline count is
+a reach gap that reads as coverage. Closing it is a sampler that steps in
+each of those grids, which is a feature and not a repair, and it is not in
+this module today.
 
 --------------------------------------------------------------------------
 WHAT HAPPENS WHEN IT FIRES, AND WHAT WAS REJECTED
@@ -202,6 +304,15 @@ stamp records who was asked, the notes carry the failure, and neither is
 where a reader looks."* Routing a soundness event into a channel this
 repository has measured as unread is building the instrument and throwing
 away the signal.
+
+**WHERE IT CAN BE TURNED ON.** All three public doors that mint a
+VERIFIED: :func:`stelling.preconditions.check`,
+:func:`stelling.contracts.check_contract` and
+:func:`stelling.inductive.check_inductive_step`. It reached only the first
+when it landed, and the other two run the same ``_pipeline`` — so the
+probe's reach was an accident of which function had been given the keyword
+rather than a decision about what is worth checking. The decision is that
+a VERIFIED is a VERIFIED whichever door minted it.
 
 The standing objection to raising is that it is useless in production.
 That objection is answered by the dial rather than by the disposition:
@@ -259,6 +370,18 @@ Five strategies, each measured separately (:attr:`ProbeReport.strategy_hits`):
     over the reals becomes false in floats, and it is the reason the fire
     condition below is what it is.
 
+**WHICH OF THEM EARN THEIR PLACE, AND ON WHICH ARGUMENT.** Two of the five
+have a fixture no other strategy reaches (``tight``, ``ulp``); the other
+three do not, and are kept on COST, which is a weaker claim and is
+asserted as the weaker claim. Measured over
+``tests/test_falsify_probe.py``'s live corpus, per single-strategy
+configuration — executions, then fixtures reached out of six:
+``endpoints`` 20/4, ``ulp`` 26/4, ``uniform`` 28/3, ``exact`` 41/5,
+``tight`` 49/6, all five together 55/6. So ``endpoints`` is the cheapest
+configuration there is and ``exact`` reaches the ``pow`` perfect-power
+shape in less than half of ``tight``'s executions. Both of those are now
+pinned by a test; the ``endpoints`` half was claimed and unmeasured.
+
 --------------------------------------------------------------------------
 THE FIRE CONDITION, AND WHY IT IS SEMANTICS-AWARE
 --------------------------------------------------------------------------
@@ -269,28 +392,69 @@ computes, so an executed violation refutes it outright.
 A ``semantics="real"`` VERIFIED is a claim about the REALS, and the probe
 executes in IEEE floats. An executed violation is then not automatically
 an unsoundness: the analysis may be perfectly right about ℝ while the
-float program lands a half-ulp the other side of a tight bound. Firing on
-that would make the probe a machine for manufacturing false alarms about
-correct analyses — and since it raises, a false alarm is expensive.
+float program lands the other side of a tight bound. Firing on that would
+make the probe a machine for manufacturing false alarms about correct
+analyses — and since it raises, a false alarm is expensive.
 
-So under ``real`` semantics the probe fires only on a violation it has
-some reason to believe is not a rounding artefact, and the test is
-stability rather than a tolerance (a tolerance would be a fudge factor
-with a number in it that nothing measured):
+**THE FIRST VERSION OF THIS TEST WAS ULP-STABILITY OF THE INPUT, AND IT
+FALSE-ALARMED ON FOUR LINES OF ORDINARY NUMERICAL CODE.** The rule was
+that a violation had to survive perturbing the point to its ``nextafter``
+neighbours in every declaration. It is a good test for a ONE-ULP artefact
+— ``(x/3)*3``, ``(x*x)/x``, ``x*0.1*10`` and ``sqrt(x)**2`` all have a
+longest consecutive violating run of a single float, and all four are
+correctly declined — and no test at all for COARSE QUANTISATION::
 
-* if every declared value at the violating point is integral and the
-  program's dtypes are integral, the arithmetic is exact and the violation
-  is reported; otherwise
-* the violation must survive perturbing the point to its ``nextafter``
-  neighbours in every declaration — a violation that flips within one ulp
-  of the input is a knife-edge and is DECLINED, counted under
-  ``precision-ambiguous`` and reported in the stamp line rather than
-  dropped.
+    y = any_array((), "float64", (0.0, 2.0))
+    s = 1e16
+    assert_((s + y) - s <= y)          # Kahan/Neumaier compensation
 
-This is a proxy and is named as one: ulp-stability in the INPUT is not a
-proof about rounding in the COMPUTATION. It reduces false alarms; it does
-not eliminate them. Under ``ieee`` semantics the filter is not applied,
-because there the executed float IS the subject of the claim.
+``1e16`` is exactly ``10**16``, float64's spacing there is ``2.0``, and
+``(s + y) - s`` is ``2.0`` across a band about 4.5e15 ulps wide — every
+point of it perfectly stable under a one-ulp input perturbation. Over ℝ
+the expression IS ``y``, so the obligation is true, both solvers answered
+unsat, and the verdict was RIGHT. The probe raised *"stelling is UNSOUND
+at this query"* on it, and a soundness alarm that reports our defect as
+the caller's, in the one message a reader acts on, is worse than no alarm.
+It was reachable BECAUSE of this batch's own reach improvement: handing
+the probe the VERDICT's statuses lets it attack solver-decided
+discharges, and the solver reasons over ℝ, which is exactly where ℝ and
+floats diverge most.
+
+**WHAT DECIDES NOW.** In order:
+
+* **``ieee`` semantics: nothing decides.** The executed float IS the
+  subject of the claim and the violation stands as it is.
+* **every declaration integral: exact integer arithmetic decides.** No
+  rounding is involved and the violation stands. This branch MUST NOT
+  become a rational replay — see the blind-spot note above: ℚ does not
+  wrap, and replaying an ``int8`` program in ℚ would report values it
+  never computed and would then declare a genuine runtime wrap an
+  artefact.
+* **otherwise: EXACT-RATIONAL REPLAY of the same traced jaxpr at the same
+  point** (:func:`_replay`). Every finite float is a rational and
+  ``Fraction(float)`` is exact, so the program can be re-evaluated over ℚ
+  with each primitive carrying its REAL meaning. False over ℚ as well as
+  in floats — the analysis discharged something false about ℝ, and the
+  firing stands. True over ℚ — the violation was manufactured by rounding
+  and is declined, counted under ``float-rounding-artefact``. This is the
+  same standard :class:`stelling.verdict.Witness` already applies to a
+  REFUTED, and it is ``fractions`` and nothing else: no analysis module is
+  imported to do it, which is why it is an interpreter here rather than a
+  call into ``stelling.exactness``.
+* **where the replay ABSTAINS, the old ulp proxy decides.** ``exp``,
+  ``log``, ``sin`` and a fractional ``pow`` are irrational at almost every
+  rational argument; an integer intermediate that left its dtype wrapped
+  and ℚ does not; a primitive with no rational reading is refused rather
+  than guessed. On any of those the fire condition degrades to the weaker
+  test rather than declining everything it cannot prove — and it COUNTS
+  that it did, in :attr:`ProbeReport.adjudications` and in the firing
+  message, because a fire condition that degraded silently would be the
+  same defect one layer down.
+
+The proxy is still named a proxy, because it still is one: stability of
+the INPUT is not a proof about rounding in the COMPUTATION. What changed
+is that it is now the fallback rather than the rule, and that every
+firing says which of the two admitted it.
 """
 
 from __future__ import annotations
@@ -299,6 +463,7 @@ import itertools
 import math
 import random
 from dataclasses import dataclass, field
+from fractions import Fraction
 
 from stelling._optional import require
 
@@ -321,18 +486,64 @@ __all__ = [
     "Declaration",
     "Falsification",
     "FALSIFY_MODES",
+    "DECLINE_REASONS",
     "ProbeReport",
+    "SEED_LABEL",
     "STRATEGIES",
     "VerifiedFalsified",
     "probe",
 ]
 
-# The dial's accepted values, exported so `preconditions` validates against
-# ONE definition rather than a second copy of the tuple.  `None` is off and
-# is the default everywhere.
+# The dial's accepted values.  `preconditions.check` spells the same pair
+# out as a literal rather than importing this, because importing this
+# module imports jax and the dial has to be validated in a jax-less
+# environment too; the two spellings are pinned to each other by
+# `tests/test_falsify_fire_condition.py::test_the_dial_has_ONE_definition_and_the_second_spelling_is_pinned`,
+# which is what makes "one definition" a fact rather than a comment.
+# `None` is off and is the default everywhere.
 FALSIFY_MODES = (None, "sample")
 
 STRATEGIES = ("endpoints", "exact", "uniform", "tight", "ulp")
+
+# EVERY DECLINE REASON THIS MODULE CAN EMIT, in one place.  Not consumed
+# by the code -- the emission sites keep their literals, because a reason
+# read three lines from the branch that produces it is a reason a reviewer
+# checks -- but pinned to those literals and to a test apiece by
+# `tests/test_falsify_fire_condition.py`.  Ten of the thirteen this module
+# shipped with appeared in NO test, which is how a decline reason drifts
+# into meaning something other than what it says.
+DECLINE_REASONS = (
+    # `_window`: the declared set cannot be sampled at all
+    "dtype-unconstructible",
+    "bound-unreadable",
+    "bound-nan",
+    "unbounded-declaration",
+    "empty-integer-box",
+    "empty-box",
+    "box-outside-the-dtype-range",
+    "dtype-not-sampleable",
+    # a built point that could not be used
+    "point-outside-declaration",
+    "program-raised",
+    "obligation-count-changed",
+    "assume-unsatisfied",
+    # an executed VIOLATION the fire condition would not report
+    "precision-ambiguous",
+    "float-rounding-artefact",
+    "assume-unsatisfied-over-the-rationals",
+    # the boundary phases had nothing to steer on
+    "no-margin-no-boundary-search",
+)
+
+# `tight` and `ulp` refine points the first three strategies reached, so
+# when they are run without them they must generate their own starting
+# points.  Those points are executed and counted like any others, under
+# THIS label rather than under a strategy name -- because attributing them
+# to `tight` would credit a margin search with reach its seeds supplied.
+# It is a label and not a strategy: it is not in `STRATEGIES`, it cannot
+# be requested, and it reaches the user-facing firing message, which is
+# why it is named and exported rather than left as a bare string literal.
+SEED_LABEL = "seed"
 
 # Default point budget.  Deliberately modest: the probe runs on every
 # VERIFIED when it is switched on, and a budget large enough to be
@@ -413,14 +624,26 @@ class Falsification:
     values: tuple[str, ...]  # one repr per declaration, as executed
     margin: float | None  # signed slack, when the obligation compared
     detail: str
+    # WHICH TEST LET THIS THROUGH.  A firing adjudicated by exact-rational
+    # replay and one adjudicated by the ulp proxy are not the same claim,
+    # and the message a reader acts on has to say which it is.
+    adjudication: str = "unrecorded"
 
     def render(self) -> str:
         margin = "" if self.margin is None else f", margin {self.margin!r}"
+        how = (
+            f" [{self.strategy!r} is a sampling strategy; "
+            f"{SEED_LABEL!r} labels the starting points a seeded strategy "
+            f"generates for itself and is not one]"
+            if self.strategy == SEED_LABEL
+            else ""
+        )
         return (
             f"assert #{self.obligation_position} was DISCHARGED by the "
             f"analysis and is FALSE when the program is executed at a "
             f"declared point found by the {self.strategy!r} strategy"
-            f"{margin}: {self.detail}"
+            f"{how}{margin}, and the violation was admitted by the "
+            f"{self.adjudication!r} test: {self.detail}"
         )
 
 
@@ -439,6 +662,10 @@ class ProbeReport:
     points_built: int = 0
     points_executed: int = 0
     points_admissible: int = 0  # in-box AND every assume satisfied
+    points_declined: int = 0  # admissible, VIOLATED, and not reported
+    violations_seen: int = 0  # executed points at which an attacked
+    # obligation evaluated FALSE in floats, however they were then judged
+    adjudications: tuple[tuple[str, int], ...] = ()
     strategy_points: tuple[tuple[str, int], ...] = ()
     strategy_hits: tuple[tuple[str, int], ...] = ()
     skips: tuple[tuple[str, int], ...] = ()
@@ -454,12 +681,23 @@ class ProbeReport:
         silently-skipping probe would hide.  Returns ``1.0`` for a probe
         that declined outright, which is the honest reading: it sampled
         nothing.
+
+        **A DECLINED VIOLATION IS DECLINED WORK, AND IT USED NOT TO
+        COUNT.** Measured on ``x + 1.0 > x`` over ``[0, 2**54]``: 120
+        points executed, 32 of them points at which the obligation
+        evaluated FALSE and the probe declined to report it, and the rate
+        this property returned was ``0.0000`` -- a number that reads as
+        "nothing was skipped" on a run whose most interesting 32 results
+        were exactly the ones dropped.  The numerator is therefore the
+        admissible points the probe actually drew a conclusion from, and
+        ``points_declined`` is subtracted from it.
         """
         if self.declined is not None:
             return 1.0
         if not self.points_built:
             return 1.0
-        return 1.0 - (self.points_admissible / self.points_built)
+        used = self.points_admissible - self.points_declined
+        return 1.0 - (used / self.points_built)
 
     def stamp_line(self) -> str:
         """One sentence, about WORK DONE, carrying its own disclaimer.
@@ -469,6 +707,20 @@ class ProbeReport:
         verdict is better for having been probed, because it is not.  A
         reader who takes "0 violations found" as evidence of soundness has
         been misled, so the sentence refuses to stop there.
+
+        **THREE BRANCHES, AND THE FIRING ONE USED TO BE MISSING.**  This
+        method is called from :func:`_fire` as well as from the VERIFIED
+        path, and with only the two branches below it appended *"NO
+        VIOLATION WAS FOUND"* to the message whose first line is "the
+        probe fired" -- the module's single most important message
+        contradicting itself in its own tail.
+
+        The second correction is the declined violation.  A run that
+        executed a violation and declined to report it must SAY the number,
+        in the same sentence, and must not follow it with a phrase that
+        reads as "nothing was there": those are precisely the points where
+        the answer was not "no violation" but "a violation this instrument
+        will not stand behind".
         """
         if self.declined is not None:
             return (
@@ -478,11 +730,30 @@ class ProbeReport:
             )
         skipped = ", ".join(f"{n} {why}" for why, n in self.skips)
         tail = f"; declined {skipped}" if skipped else ""
-        return (
+        head = (
             f"falsification probe: {self.points_executed} point(s) "
             f"executed, {self.points_admissible} inside the declared set "
             f"and admitted by every assume, across {self.obligations} "
-            f"obligation(s){tail}. NO VIOLATION WAS FOUND, WHICH IS NOT "
+            f"obligation(s){tail}"
+        )
+        if self.falsification is not None:
+            return (
+                f"{head}. A VIOLATION WAS FOUND AND IS REPORTED ABOVE; "
+                f"this line is the work that reached it and nothing more."
+            )
+        if self.points_declined:
+            how = ", ".join(f"{n} {why}" for why, n in self.adjudications)
+            return (
+                f"{head}. {self.points_declined} EXECUTED VIOLATION(S) WERE "
+                f"DECLINED, NOT ABSENT: at those points the obligation "
+                f"evaluated FALSE and the probe would not report it "
+                f"({how}). Every other point left the obligation true, "
+                f"WHICH IS NOT EVIDENCE THAT THERE IS NO VIOLATION: this "
+                f"probe can only refute, and a null result is a fact about "
+                f"the sampler, not about the verdict."
+            )
+        return (
+            f"{head}. NO VIOLATION WAS FOUND, WHICH IS NOT "
             f"EVIDENCE THAT THERE IS NONE: this probe can only refute, and "
             f"a null result is a fact about the sampler, not about the "
             f"verdict."
@@ -548,23 +819,127 @@ def _window(decl: Declaration):
             return None, "unbounded-declaration"
         if lo > hi:
             return None, "empty-box"
-        return (float(lo), float(hi)), None
+        # INTERSECTED WITH THE FORMAT, exactly as the integer branch above
+        # intersects with `np.iinfo`.  A declaration is a set of values of
+        # its own dtype, and `float16` has no value at 1e5; sampling one
+        # anyway meant `np.full(shape, 1e5, dtype="float16")`, whose
+        # `RuntimeWarning: overflow encountered in cast` turned a green
+        # VERIFIED into a crash under `-W error::RuntimeWarning` -- an
+        # ordinary CI setting.  Both endpoints of an ordinary `float64`
+        # declaration are inside `finfo(float64).max`, so this is a no-op
+        # everywhere except the narrow formats, which is where it was
+        # measured to matter.
+        try:
+            limit = float(np.finfo(dt).max)
+        except (ValueError, TypeError):
+            # a float-kinded dtype numpy has no `finfo` for -- some of the
+            # `float8` family arrive here rather than at the `V` branch
+            # below, and the sampler cannot step in a format it cannot ask
+            # the extent of
+            return None, "dtype-not-sampleable"
+        a, b = max(float(lo), -limit), min(float(hi), limit)
+        if a > b:
+            return None, "box-outside-the-dtype-range"
+        return (a, b), None
+    # `bfloat16` and the `float8_*` family land here: numpy classifies the
+    # ml_dtypes extension types as `kind == "V"`, they have no `nextafter`,
+    # and every phase of this sampler is built on stepping and comparing in
+    # the declaration's own format.  That is a REACH GAP and it is named in
+    # the module docstring's blind-spot section rather than left to be
+    # discovered from a decline count.
     return None, "dtype-not-sampleable"
 
 
 def _admissible(decl: Declaration, arr) -> bool:
     """Is every element of ``arr`` inside the endpoints AS DECLARED?
 
-    The conservative side of any disagreement between :func:`_window` and
-    the propagator's own membership rule.  Because a firing RAISES, the
-    probe must never be able to invent a refutation out of a point the
-    declaration did not admit; a point this rejects is lost, which costs a
-    refutation at worst, and that is the right direction to be wrong in.
+    The conservative side of any disagreement between :func:`_window`'s
+    re-derived declared set and the point the sampler actually built.
+    Because a firing RAISES, the sampler must never be able to hand the
+    fire condition a point the declaration did not admit; a point this
+    rejects is lost, which costs a refutation at worst, and that is the
+    right direction to be wrong in.
+
+    **WHAT IT DOES NOT GUARD, SAID PLAINLY, BECAUSE THE DOCSTRING USED TO
+    CLAIM MORE.**  This reads ``decl.lo``/``decl.hi`` -- the same two
+    numbers :func:`_window` reads, from the same :class:`Declaration`
+    :func:`_census` built.  That is ONE reading, not two, so it is not a
+    check on the census: an audit mutation that doubled ``hi`` in
+    ``_census`` produced FOUR false alarms on correct VERIFIEDs, because
+    the sampler and this guard were both steered by the same wrong number.
+    What pins the census reading is a test, which is allowed to import the
+    analysis and compare the two:
+    ``tests/test_falsify_independence.py::test_the_census_reading_of_the_declared_box_is_pinned_against_the_IR``.
+    No second reading is available inside a module whose value depends on
+    importing none of the analysis.
+
+    **AND IT HAD NEVER REJECTED A POINT ON THE LIVE CORPUS** -- 0 of the
+    30,194 points the corpus built before this batch, measured; the four
+    rejections it shows now are the ones that test manufactures.  That is what a guard against a sampler
+    defect looks like when the sampler has no defect, not evidence it is
+    unnecessary, so
+    ``tests/test_falsify_fire_condition.py::test_the_admissibility_guard_rejects_a_point_the_sampler_should_not_build``
+    drives it with a sampler that leaves the box, and the rejection path
+    has now been seen to fire.
     """
     a = np.asarray(arr)
-    if not np.all(np.isfinite(a.astype("float64", copy=False))):
-        return False
-    return bool(np.all(a >= decl.lo) and np.all(a <= decl.hi))
+    if a.size == 0:
+        return True
+    if a.dtype.kind == "f":
+        # WIDEN THE ARRAY, NEVER NARROW THE ENDPOINT.  `np.all(a <=
+        # decl.hi)` on a `float16` array against a `float64` endpoint casts
+        # the ENDPOINT into float16 -- which both emits `RuntimeWarning:
+        # overflow encountered in cast` (an exception under the ordinary CI
+        # setting `-W error::RuntimeWarning`, and it escaped a green
+        # VERIFIED) and gives the WRONG ANSWER, because a `hi` of 1e5
+        # becomes `inf` and admits every float16 there is.  Widening is
+        # exact for every binary format numpy classifies as `f`.
+        w = a.astype("float64", copy=False)
+        if not np.all(np.isfinite(w)):
+            return False
+        return bool(np.all(w >= decl.lo) and np.all(w <= decl.hi))
+    if a.dtype.kind in "iub":
+        # and for integers the comparison is done in PYTHON, whose
+        # int-against-float comparison is exact: an int64 value above 2**53
+        # does not survive a float64 cast, and a membership test that
+        # rounded its own operand is not a membership test.
+        return bool(
+            int(np.min(a)) >= decl.lo and int(np.max(a)) <= decl.hi
+        )
+    return False
+
+
+def _representable(v, dt) -> bool:
+    """Can ``dt`` hold ``v`` as a finite value?
+
+    A candidate fill outside the dtype's own finite range is not a value
+    of that dtype, so it is not a point of the declared set and must be
+    dropped BEFORE anything tries to build an array out of it.  Dropping
+    it before the cast rather than after is not tidiness: ``np.full(shape,
+    1e5, dtype="float16")`` emits ``RuntimeWarning: overflow encountered
+    in cast``, and under ``-W error::RuntimeWarning`` -- an ordinary CI
+    setting -- that warning became an exception that escaped a green
+    VERIFIED and crashed the caller's run.  Measured on this tree, a
+    ``float16`` declaration of ``(0.0, 1e5)`` crashed there and one of
+    ``(-65504.0, 65504.0)`` crashed in ``np.nextafter``, while the probe's
+    only interest in either value was to discard it.
+
+    :func:`_window` now intersects the declared interval with this range
+    before any fill is generated, so an in-window candidate is
+    representable by construction; this stays as the second, cheap guard
+    at the point of construction, because the failure it prevents is a
+    warning in the CALLER's process rather than a wrong answer here.
+    """
+    if dt.kind == "f":
+        try:
+            limit = float(np.finfo(dt).max)
+        except (ValueError, TypeError):
+            return False
+        return math.isfinite(v) and abs(v) <= limit
+    if dt.kind in "iu":
+        info = np.iinfo(dt)
+        return int(info.min) <= v <= int(info.max)
+    return dt.kind == "b"
 
 
 # --------------------------------------------------------------------------
@@ -583,6 +958,7 @@ class _Census:
     # comparison that produced its operand, when there was one
     margins: dict = field(default_factory=dict)
     exponents: tuple[int, ...] = ()  # k of every integer_pow / pow in the program
+    replay_cost: int = 0  # element-visits one exact-rational replay would do
 
 
 def _census(harness) -> _Census:
@@ -593,7 +969,19 @@ def _census(harness) -> _Census:
     what the probe is checking.  What comes back here is jax's object,
     which is also the object the probe will execute.
     """
-    closed = jax.make_jaxpr(harness)()
+    return _read(jax.make_jaxpr(harness)())
+
+
+def _read(closed) -> _Census:
+    """Read a traced program's declarations, asserts, margins and exponents.
+
+    Split from :func:`_census` so that :func:`probe` can tell a TRACE
+    failure from a READ failure.  It used to catch both under one
+    ``except`` and report both as *"the harness could not be traced"*, and
+    that mattered because the read had a live defect of its own (the
+    literal-operand crash pinned just below) -- so a note reaching the user
+    named the wrong stage, on a trace that had succeeded.
+    """
     jaxpr = closed.jaxpr
     producer = {}
     for eqn in jaxpr.eqns:
@@ -621,7 +1009,21 @@ def _census(harness) -> _Census:
         elif name == "stelling_assert":
             k = len(asserts)
             asserts.append(i)
-            src = producer.get(eqn.invars[0])
+            # THE OPERAND CAN BE A LITERAL, and a `dict.get` on one raises
+            # `TypeError: unhashable type: 'Literal'`.  Hit twice by this
+            # tree's own corpus -- `assert_` on a value the tracer folded
+            # to a constant, e.g.
+            # `tests/test_contracts.py::test_t2_constant_transform_returns_produce_verdicts`.
+            # A literal has no producing equation, so
+            # there is no margin to read; that is the whole answer, and the
+            # crash was `_execute`'s `read()` handling literals while this
+            # walk did not.
+            operand = eqn.invars[0]
+            src = (
+                None
+                if isinstance(operand, jex_core.Literal)
+                else producer.get(operand)
+            )
             if src is not None and src.primitive.name in _MARGIN_RELATIONS:
                 small, large = _MARGIN_RELATIONS[src.primitive.name]
                 margins[k] = (
@@ -662,6 +1064,7 @@ def _census(harness) -> _Census:
         assert_positions=tuple(asserts),
         margins=margins,
         exponents=tuple(sorted(exponents)),
+        replay_cost=_replay_cost(jaxpr),
     )
 
 
@@ -796,7 +1199,7 @@ def _fills(decl: Declaration, window, strategy, exponents, rng):
             cands += [lo + 1, hi - 1]
         else:
             cands += [math.nextafter(lo, hi), math.nextafter(hi, lo)]
-        return _clean(cands, lo, hi, integral)
+        return _clean(cands, lo, hi, integral, dt)
 
     if strategy == "exact":
         cands: list = []
@@ -836,21 +1239,31 @@ def _fills(decl: Declaration, window, strategy, exponents, rng):
                     for v in (r, math.floor(r), math.ceil(r)):
                         if lo <= v <= hi:
                             cands.append(float(v))
-        return _clean(cands, lo, hi, integral)
+        return _clean(cands, lo, hi, integral, dt)
 
     if strategy == "uniform":
         n = 8
         if integral:
             return _clean(
-                [rng.randint(int(lo), int(hi)) for _ in range(n)], lo, hi, integral
+                [rng.randint(int(lo), int(hi)) for _ in range(n)],
+                lo, hi, integral, dt,
             )
-        return _clean([rng.uniform(lo, hi) for _ in range(n)], lo, hi, integral)
+        return _clean(
+            [rng.uniform(lo, hi) for _ in range(n)], lo, hi, integral, dt
+        )
 
     return ()
 
 
-def _clean(cands, lo, hi, integral):
-    """De-duplicate, clamp into the window, and keep the order stable."""
+def _clean(cands, lo, hi, integral, dt=None):
+    """De-duplicate, drop what the window cannot hold, keep the order stable.
+
+    ``dt`` is kept as a second, cheap guard: :func:`_window` already
+    intersects the declared interval with the dtype's own finite range, so
+    an in-window candidate is representable by construction, and this
+    catches a future fill generator that stops respecting the window
+    before `np.full` turns the mistake into a warning the caller sees.
+    """
     out = []
     seen = set()
     for c in cands:
@@ -859,6 +1272,8 @@ def _clean(cands, lo, hi, integral):
         except (TypeError, ValueError, OverflowError):
             continue
         if not (lo <= v <= hi):
+            continue
+        if dt is not None and not _representable(v, dt):
             continue
         if v in seen:
             continue
@@ -971,10 +1386,19 @@ def probe(
     which they all fire together.  The default is all of them and no
     caller in the library passes anything else.
 
+    ``strategies`` never contains :data:`SEED_LABEL`: that is the label
+    the seeded phases' own starting points are counted under, so a
+    ``tight``-only run's reach is not credited to the margin search when
+    its seeds supplied it.  It can appear in a report and in the firing
+    message; it cannot be requested.
+
     Returns a :class:`ProbeReport`.  Raises :class:`VerifiedFalsified` if
     the program violates a discharged obligation at a point inside every
-    declaration and admitted by every assume -- see the module docstring
-    for why that is a raise and not a status.
+    declaration, admitted by every assume, AND admitted by the fire
+    condition -- under ``semantics="real"`` that last one is exact
+    rational replay of the same traced program, not the executed float
+    alone; see the module docstring for what it costs to get that wrong
+    and for why a firing is a raise and not a status.
     """
     unknown = [s for s in strategies if s not in STRATEGIES]
     if unknown:
@@ -987,10 +1411,23 @@ def probe(
     shits = _Counter()
     rng = random.Random(seed)
 
+    # TWO STAGES, TWO REASONS.  One `try` around both said "the harness
+    # could not be traced" for a read defect on a trace that had worked --
+    # a note that sent a reader to their own harness for a defect in this
+    # file.
     try:
-        census = _census(harness)
+        closed = jax.make_jaxpr(harness)()
     except Exception as exc:  # noqa: BLE001
         return ProbeReport(declined=f"the harness could not be traced: {exc}")
+    try:
+        census = _read(closed)
+    except Exception as exc:  # noqa: BLE001
+        return ProbeReport(
+            declined=(
+                f"the harness traced, but the probe could not read the "
+                f"traced program: {type(exc).__name__}: {exc}"
+            )
+        )
 
     targets = [i for i, s in enumerate(statuses) if s == "discharged"]
     if not targets:
@@ -1028,6 +1465,9 @@ def probe(
     built = 0
     executed = 0
     admissible = 0
+    declined_points = 0
+    violations = 0
+    adjudged = _Counter()
     best: list = []  # (margin, point) of the least-slack admissible points
 
     def run_one(strategy, point):
@@ -1038,7 +1478,7 @@ def probe(
         obligations do not compare.  It is returned rather than only
         recorded because the ``tight`` search STEERS on it.
         """
-        nonlocal built, executed, admissible
+        nonlocal built, executed, admissible, declined_points, violations
         built += 1
         spoints.add(strategy)
         if not all(
@@ -1059,12 +1499,18 @@ def probe(
             skips.add("assume-unsatisfied")
             return None, None
         admissible += 1
+        point_declined = False
         for k in targets:
             if bool(np.all(run.asserts[k])):
                 continue
-            verdict = _confirm(census, statuses, point, k, semantics)
-            if verdict is None:
-                skips.add("precision-ambiguous")
+            violations += 1
+            detail, why, how = _confirm(
+                census, statuses, point, k, semantics
+            )
+            adjudged.add(how)
+            if detail is None:
+                skips.add(why)
+                point_declined = True
                 continue
             shits.add(strategy)
             return (
@@ -1073,10 +1519,17 @@ def probe(
                     obligation_position=k,
                     values=tuple(repr(np.asarray(a).tolist()) for a in point),
                     margin=run.margins.get(k),
-                    detail=verdict,
+                    detail=detail,
+                    adjudication=how,
                 ),
                 None,
             )
+        if point_declined:
+            # counted as DECLINED WORK, which is what it is: the probe
+            # executed a violation here and would not stand behind it, and
+            # a skip rate that ignored that read as "nothing was skipped"
+            # on exactly the runs where the interesting result was dropped.
+            declined_points += 1
         m = min(
             (run.margins[k] for k in targets if k in run.margins), default=None
         )
@@ -1097,6 +1550,9 @@ def probe(
             points_built=built,
             points_executed=executed,
             points_admissible=admissible,
+            points_declined=declined_points,
+            violations_seen=violations,
+            adjudications=adjudged.items(),
             strategy_points=spoints.items(),
             strategy_hits=shits.items(),
             skips=skips.items(),
@@ -1125,7 +1581,7 @@ def probe(
             "endpoints", census.declarations, windows, census.exponents,
             rng, max(4, share // 4),
         )
-        hit = run_batch("seed", pts)
+        hit = run_batch(SEED_LABEL, pts)
         if hit is not None:
             _fire(hit, finish(hit))
 
@@ -1250,6 +1706,39 @@ def _tight_search(census, windows, seed, budget, run_one):
     return None, tuple(point)
 
 
+def _step(base, direction, dt):
+    """One representable step of ``base`` toward ``direction``, or ``None``.
+
+    ``None`` when the step leaves the format -- which is not an error and
+    not a point: past the last finite value of a format there is nothing
+    to sample.  Handling it HERE rather than letting ``np.nextafter``
+    return an infinity is what keeps ``RuntimeWarning: overflow
+    encountered in nextafter`` from escaping the probe; under
+    ``-W error::RuntimeWarning`` that warning turned a green VERIFIED on a
+    plain ``float16`` declaration of ``(-65504.0, 65504.0)`` into a crash.
+    """
+    try:
+        if dt.kind in "iub":
+            moved = np.asarray(base).astype("int64") + (
+                -1 if direction < 0 else 1
+            )
+            info = np.iinfo(dt)
+            if not np.all((moved >= int(info.min)) & (moved <= int(info.max))):
+                return None
+            return moved.astype(dt)
+        limit = float(np.finfo(dt).max)
+        arr = np.asarray(base)
+        target = math.copysign(limit, direction)
+        if np.any(np.asarray(arr, dtype="float64") * math.copysign(1.0, direction)
+                  >= limit):
+            # already at (or past) the format's last finite value in this
+            # direction: there is no next float, so there is no point
+            return None
+        return np.nextafter(arr, np.asarray(target, dtype=dt))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def _ulp_points(census, windows, seeds, budget):
     """The last representable step, in both directions, per declaration."""
     out = []
@@ -1258,18 +1747,10 @@ def _ulp_points(census, windows, seeds, budget):
             dt = np.dtype(decl.dtype)
             base = np.asarray(point[i])
             for direction in (-math.inf, math.inf):
-                try:
-                    if dt.kind in "iub":
-                        step = -1 if direction < 0 else 1
-                        moved = base.astype("int64") + step
-                        if not np.all((moved >= lo) & (moved <= hi)):
-                            continue
-                        arr = moved.astype(dt)
-                    else:
-                        arr = np.nextafter(base, np.asarray(direction, dtype=dt))
-                        if not np.all((arr >= lo) & (arr <= hi)):
-                            continue
-                except (TypeError, ValueError, OverflowError):
+                arr = _step(base, direction, dt)
+                if arr is None:
+                    continue
+                if not np.all((arr >= lo) & (arr <= hi)):
                     continue
                 nxt = list(point)
                 nxt[i] = arr
@@ -1279,16 +1760,517 @@ def _ulp_points(census, windows, seeds, budget):
     return out
 
 
-def _confirm(census, statuses, point, k, semantics):
-    """Decide whether an executed violation may be REPORTED, or is a tie.
+# --------------------------------------------------------------------------
+# the exact-rational replay: the SAME traced program, judged over Q
+# --------------------------------------------------------------------------
+#
+# WHY THIS EXISTS.  Under `semantics="real"` a VERIFIED is a claim about
+# the REALS and the probe executes in IEEE floats, so an executed
+# violation is not automatically an unsoundness -- the analysis may be
+# right about R while the float program lands the other side of a tight
+# bound.  The first version of the fire condition tested ULP-STABILITY OF
+# THE INPUT as a proxy for that, and its own docstring named it a proxy.
+# It is a good proxy for the shape it was built on (a 1-ulp artefact:
+# `(x/3)*3`, `(x*x)/x`, `x*0.1*10`, `sqrt(x)**2` all have a longest
+# consecutive violating run of one float and are declined) and NO proxy at
+# all for COARSE QUANTISATION, where the violating set is thousands of
+# ulps wide.  Four lines of ordinary numerical code reached it:
+#
+#     y = any_array((), "float64", (0.0, 2.0))
+#     s = 1e16
+#     assert_((s + y) - s <= y)          # the Kahan/Neumaier shape
+#
+# `1e16` is exactly 10**16 and the spacing of float64 there is 2.0, so
+# `(s + y) - s` is 2.0 for every y strictly between 1 and 2 -- a violating
+# band about 4.5e15 ulps wide, every point of it stable under a one-ulp
+# input perturbation.  Over R the expression is y exactly, so the
+# obligation is TRUE, both solvers answered unsat, and the verdict was
+# RIGHT.  The probe raised "stelling is UNSOUND at this query" on it.
+# Measured on this tree at 123ad75, x64=1, on jax 0.11.0 AND 0.10.2, with
+# the same point out of each: `<=` fires at y = 1.6888437030500962 (the
+# `uniform` strategy) and `>=` at y = 0.5 (`exact`).  A soundness alarm
+# that reports our defect as the caller's is worse than no alarm.
+#
+# WHAT REPLACES IT.  The same standard `verdict.Witness` already applies
+# to a REFUTED: replay the point through exact arithmetic.  Every finite
+# IEEE float IS a rational -- `Fraction(float)` is exact and lossless --
+# so the traced jaxpr can be re-evaluated over Q at the violating point,
+# with `+ - * /` and the rest carrying their REAL meanings.  If the
+# obligation is false over Q too, the analysis discharged something false
+# about R and the firing stands.  If it is true over Q, the violation was
+# manufactured by rounding and must not be reported.
+#
+# IT IS `fractions` AND NOTHING ELSE.  No analysis module is imported to
+# do it, so the independence argument at the top of this file is untouched
+# -- which is the reason this is a rational interpreter here rather than a
+# call into `stelling.exactness`, which already knows how to do it.
+#
+# WHAT IT REFUSES TO DO, WHICH IS AS IMPORTANT.  Not every primitive has
+# an exact rational reading: `exp`, `log`, `sin` and a fractional `pow`
+# are irrational at almost every rational argument, and integer arithmetic
+# that WRAPS is not R arithmetic at all.  On any of those this evaluator
+# ABSTAINS -- and the fire condition then falls back to the ulp proxy,
+# exactly as before, and COUNTS that it did (`ProbeReport.adjudications`),
+# because a fire condition that silently degraded to the weaker test on
+# the programs it matters most for would be the same defect one layer
+# down.
 
-    Returns the detail string when the violation stands, or ``None`` when
-    it is a knife-edge that the probe declines to fire on.  See the module
-    docstring's fire-condition section: under ``ieee`` the executed float
-    IS the subject of the claim and the violation stands as it is; under
-    ``real`` the claim is about ℝ and a violation that flips within one
-    ulp of the input is not distinguishable, by this instrument, from the
-    analysis being right about ℝ and the float landing the other side.
+
+class _Unreplayable(Exception):
+    """This program has a step with no exact rational reading at this point."""
+
+
+# HOW MUCH RATIONAL ARITHMETIC ONE REPLAY MAY DO, and the number is a cost
+# decision with a measurement under it rather than a taste.  Measured on
+# this tree (`sum(v*v) <= 0.5`, one float64 declaration, jax 0.11.0): the
+# replay costs 2.8 - 10.5 microseconds per element visited, ~3.9 at the
+# largest size driven (65,536 elements, 253 ms).  So a quarter of a million
+# element-visits is on the order of one second, once, and only on a probe
+# run that executed a violation.  Past that the replay ABSTAINS before it
+# starts and the ulp proxy decides, which is the same degradation an
+# irrational primitive produces and is counted the same way -- a fire
+# condition that hung a caller's CI to prove a point would be traded for a
+# fire condition nobody switches on.
+REPLAY_ELEMENT_BUDGET = 250_000
+
+
+def _replay_cost(jaxpr) -> int:
+    """Element-visits one replay of this program will do, near enough.
+
+    The sum of every equation's output size, which is what the
+    element-at-a-time evaluators below actually walk.  Counted off the
+    AVALS, so it is known before any arithmetic happens and costs nothing
+    to ask.
+    """
+    total = 0
+    for eqn in jaxpr.eqns:
+        for var in eqn.outvars:
+            shape = getattr(getattr(var, "aval", None), "shape", ())
+            n = 1
+            for d in shape:
+                n *= int(d)
+            total += max(1, n)
+        for sub in _sub_jaxprs(eqn):
+            total += _replay_cost(sub)
+    return total
+
+
+# Call primitives whose body is a nested closed jaxpr to be replayed in
+# place.  `jax.numpy` routes almost everything through `pjit`, so a replay
+# that abstained here would abstain on most real programs.
+_CALL_PRIMITIVES = ("pjit", "closed_call", "remat", "checkpoint")
+
+
+def _call_jaxpr_of(eqn):
+    """The nested closed jaxpr a call primitive carries, whatever it is called."""
+    for key in ("jaxpr", "call_jaxpr"):
+        sub = eqn.params.get(key)
+        if sub is not None and hasattr(sub, "jaxpr") and hasattr(sub, "consts"):
+            return sub
+    raise _Unreplayable(f"{eqn.primitive.name!r} carries no closed jaxpr")
+
+
+# The elementwise primitives whose meaning over R is a closed-form
+# rational function of rational arguments.  Anything absent abstains, and
+# that is the safe direction: abstaining loses a refutation, admitting a
+# wrong reading invents one.
+_EXACT_BINARY = {
+    "add": lambda a, b: a + b,
+    "sub": lambda a, b: a - b,
+    "mul": lambda a, b: a * b,
+    "max": lambda a, b: a if a >= b else b,
+    "min": lambda a, b: a if a <= b else b,
+    "atan2": None,  # named to be explicit that it is refused
+    "nextafter": None,  # a FLOAT operation; it has no meaning over R
+}
+_EXACT_UNARY = {
+    "neg": lambda a: -a,
+    "abs": lambda a: abs(a),
+    "sign": lambda a: Fraction(0) if a == 0 else Fraction(1 if a > 0 else -1),
+    "floor": lambda a: Fraction(math.floor(a)),
+    "ceil": lambda a: Fraction(math.ceil(a)),
+    "copy": lambda a: a,
+    "stop_gradient": lambda a: a,
+    "real": lambda a: a,
+}
+_COMPARISONS = {
+    "le": lambda a, b: a <= b,
+    "lt": lambda a, b: a < b,
+    "ge": lambda a, b: a >= b,
+    "gt": lambda a, b: a > b,
+    "eq": lambda a, b: a == b,
+    "ne": lambda a, b: a != b,
+}
+_BOOLEAN = {
+    "and": lambda a, b: bool(a) and bool(b),
+    "or": lambda a, b: bool(a) or bool(b),
+    "xor": lambda a, b: bool(a) != bool(b),
+}
+
+# Pure data movement: every output element is a copy of one input element,
+# and WHICH one is a function of the shapes and the params alone.  Those
+# are replayed by asking jax itself -- the primitive is bound to an INDEX
+# array in place of the data, so the answer to "where did this element
+# come from" comes from the same implementation the real run used, rather
+# than from a second hand-written copy of jax's shape rules in this file.
+# The value is the tuple of operand positions that carry DATA; every other
+# operand (a gather's start indices, say) is passed through verbatim
+# because its VALUE, not its position, is what the primitive reads.
+_MOVEMENT = {
+    "broadcast_in_dim": (0,),
+    "reshape": (0,),
+    "transpose": (0,),
+    "squeeze": (0,),
+    "expand_dims": (0,),
+    "rev": (0,),
+    "slice": (0,),
+    "concatenate": None,  # every operand is data; filled in at use
+    "pad": (0, 1),
+}
+
+_REDUCTIONS = {
+    "reduce_sum": lambda vs: sum(vs, Fraction(0)),
+    "reduce_prod": lambda vs: math.prod(vs, start=Fraction(1)),
+    "reduce_max": max,
+    "reduce_min": min,
+    "reduce_and": lambda vs: all(bool(v) for v in vs),
+    "reduce_or": lambda vs: any(bool(v) for v in vs),
+}
+
+
+def _exact(a):
+    """Every element of ``a`` as an exact ``Fraction`` (or ``bool``).
+
+    Lossless in both directions that matter: a finite binary float is a
+    dyadic rational and ``Fraction(float)`` is its exact value, and a
+    narrow float widens to ``float`` exactly.  A non-finite float has no
+    rational value at all, and a dtype numpy does not classify as boolean,
+    integer or float (``bfloat16`` and the ``float8`` family arrive here as
+    ``kind == "V"``) has no exact reading this evaluator can produce.
+    """
+    arr = np.asarray(a)
+    kind = arr.dtype.kind
+    flat = arr.reshape(-1).tolist()
+    out = np.empty(len(flat), dtype=object)
+    for i, v in enumerate(flat):
+        if kind == "b":
+            out[i] = bool(v)
+        elif kind in "iu":
+            out[i] = Fraction(int(v))
+        elif kind == "f":
+            f = float(v)
+            if not math.isfinite(f):
+                raise _Unreplayable(
+                    "a non-finite float has no rational value"
+                )
+            out[i] = Fraction(f)
+        else:
+            raise _Unreplayable(f"dtype {arr.dtype!r} has no rational reading")
+    return out.reshape(arr.shape)
+
+
+def _ew(fn, *args):
+    """Apply ``fn`` elementwise over broadcast object arrays."""
+    b = np.broadcast_arrays(*args)
+    flat = [x.reshape(-1) for x in b]
+    n = flat[0].size
+    out = np.empty(n, dtype=object)
+    for i in range(n):
+        out[i] = fn(*(f[i] for f in flat))
+    return out.reshape(b[0].shape)
+
+
+def _rat_div(a, b):
+    if b == 0:
+        raise _Unreplayable("division by zero")
+    return a / b
+
+
+def _rat_pow(a, k):
+    """``a ** k`` when the exponent is an integer; abstain otherwise.
+
+    A rational raised to a non-integer power is irrational except on a
+    measure-zero set, and the probe has no business guessing which side of
+    that it is on.  ``_rat_sqrt`` handles the one exception worth taking.
+    """
+    if k.denominator != 1 or not (-64 <= k.numerator <= 64):
+        raise _Unreplayable("a non-integer (or huge) exponent is not rational")
+    n = int(k.numerator)
+    if a == 0 and n < 0:
+        raise _Unreplayable("zero raised to a negative power")
+    return a ** n
+
+
+def _rat_sqrt(a):
+    """Exact only where the argument is a perfect rational square."""
+    if a < 0:
+        raise _Unreplayable("sqrt of a negative rational")
+    rn, rd = math.isqrt(a.numerator), math.isqrt(a.denominator)
+    if rn * rn == a.numerator and rd * rd == a.denominator:
+        return Fraction(rn, rd)
+    raise _Unreplayable("sqrt is irrational at this point")
+
+
+def _rat_convert(a, src_kind, dst_dtype):
+    """``convert_element_type`` over R.
+
+    Float to float is the IDENTITY, of any width, because rounding onto a
+    narrower grid is a float operation and R has no such operation -- and
+    that reading is exactly what the ``semantics="real"`` claim under
+    attack means.  Float to integer TRUNCATES toward zero, which is jax's
+    rule and is exact on a rational.  Integer or boolean to float is the
+    identity.  The integer target is range-checked by the caller.
+    """
+    dk = dst_dtype.kind
+    if dk == "b":
+        return bool(a != 0) if src_kind != "b" else bool(a)
+    if src_kind == "b":
+        return Fraction(1) if a else Fraction(0)
+    if dk in "iu":
+        return Fraction(math.trunc(a))
+    if dk == "f":
+        return a
+    raise _Unreplayable(f"conversion to {dst_dtype!r} has no rational reading")
+
+
+def _movement(prim, params, exact_ins, raw_ins, data_positions):
+    """Replay a pure data-movement primitive by asking jax where each element
+    came from.
+
+    The operands that carry DATA are replaced by ``int32`` index arrays
+    numbering their elements consecutively; every other operand is passed
+    through with its real value.  Binding the primitive to those returns,
+    for each output position, the index of the source element -- computed
+    by jax's own implementation of its own primitive rather than by a
+    second copy of its shape rules living here, which is the same posture
+    the executor takes toward arithmetic.
+    """
+    idx_ins = []
+    offset = 0
+    pool = []
+    for j, (ex, raw) in enumerate(zip(exact_ins, raw_ins)):
+        if j in data_positions:
+            n = int(np.asarray(raw).size)
+            idx = np.arange(offset, offset + n, dtype="int32")
+            idx_ins.append(idx.reshape(np.asarray(raw).shape))
+            pool.extend(np.asarray(ex).reshape(-1).tolist())
+            offset += n
+        else:
+            idx_ins.append(raw)
+    out = prim.bind(*idx_ins, **params)
+    if prim.multiple_results:
+        raise _Unreplayable(f"{prim.name!r} has multiple results")
+    mapped = np.asarray(out)
+    if mapped.dtype.kind not in "iu":
+        raise _Unreplayable(f"{prim.name!r} did not move indices")
+    flat = mapped.reshape(-1).tolist()
+    picked = np.empty(len(flat), dtype=object)
+    for i, src in enumerate(flat):
+        if not (0 <= int(src) < offset):
+            raise _Unreplayable(f"{prim.name!r} produced an index it invented")
+        picked[i] = pool[int(src)]
+    return picked.reshape(mapped.shape)
+
+
+def _reduce(fn, a, axes):
+    axes = tuple(int(x) for x in axes)
+    if not axes:
+        return a
+    moved = np.moveaxis(a, axes, tuple(range(-len(axes), 0)))
+    kept = moved.shape[: moved.ndim - len(axes)]
+    rows = moved.reshape(math.prod(kept) if kept else 1, -1)
+    out = np.empty(rows.shape[0], dtype=object)
+    for i in range(rows.shape[0]):
+        vals = list(rows[i])
+        if not vals:
+            raise _Unreplayable("a reduction over an empty axis")
+        out[i] = fn(vals)
+    return out.reshape(kept)
+
+
+def _int_ok(vals, dt):
+    """Did an integer-typed result stay inside its own dtype?
+
+    THIS IS WHAT KEEPS THE INTEGER WRAP VISIBLE.  Exact rational
+    arithmetic does not wrap, so replaying a program whose integer
+    arithmetic overflowed would report a value the program never computed
+    -- and would then declare the executed violation a rounding artefact
+    and decline it, suppressing exactly the runtime-wrap catch this probe
+    was measured to have.  A result that left its dtype is therefore not
+    replayable: the evaluator abstains and the ulp proxy decides, which is
+    what it did before this replay existed.
+    """
+    info = np.iinfo(dt)
+    for v in vals:
+        if v.denominator != 1 or not (int(info.min) <= v <= int(info.max)):
+            raise _Unreplayable(
+                "integer arithmetic left its dtype's range: the program "
+                "wraps there and rational arithmetic does not"
+            )
+
+
+def _replay(census, point):
+    """Re-evaluate the traced program at ``point`` in exact rational arithmetic.
+
+    Returns ``(assumes, asserts)`` as lists of Python bools, or raises
+    :class:`_Unreplayable`.  The point is the same array tuple the float
+    execution used, so the two runs differ in exactly one thing: the
+    arithmetic.
+    """
+    cost = census.replay_cost
+    if cost > REPLAY_ELEMENT_BUDGET:
+        raise _Unreplayable(
+            f"the replay would visit about {cost} elements and the budget "
+            f"is {REPLAY_ELEMENT_BUDGET}"
+        )
+    assumes: list = []
+    asserts: list = []
+
+    def run(jaxpr, consts, args, decl):
+        env: dict = {}
+
+        def read(atom):
+            if isinstance(atom, jex_core.Literal):
+                return _exact(atom.val)
+            return env[atom]
+
+        for v, c in zip(jaxpr.constvars, consts):
+            env[v] = _exact(c)
+        for v, a in zip(jaxpr.invars, args):
+            env[v] = a
+
+        for eqn in jaxpr.eqns:
+            prim = eqn.primitive
+            name = prim.name
+            if name == "stelling_any":
+                env[eqn.outvars[0]] = _exact(point[decl[0]])
+                decl[0] += 1
+                continue
+            ins = [read(a) for a in eqn.invars]
+            raw = [
+                a.val if isinstance(a, jex_core.Literal) else None
+                for a in eqn.invars
+            ]
+            if name in _CALL_PRIMITIVES:
+                # `jnp` puts most of its work behind `pjit`, so a replay
+                # that abstained on it would abstain on most real programs.
+                sub = _call_jaxpr_of(eqn)
+                inner = run(sub.jaxpr, sub.consts, ins, decl)
+                for var, o in zip(eqn.outvars, inner):
+                    env[var] = o
+                continue
+            if name in ("stelling_assume", "stelling_nonvacuity"):
+                if name == "stelling_assume":
+                    assumes.append(all(bool(v) for v in ins[0].reshape(-1)))
+                env[eqn.outvars[0]] = ins[0]
+                continue
+            if name == "stelling_assert":
+                asserts.append(all(bool(v) for v in ins[0].reshape(-1)))
+                env[eqn.outvars[0]] = ins[0]
+                continue
+            out = _apply(eqn, prim, name, ins, raw)
+            env[eqn.outvars[0]] = out
+        return [read(a) for a in jaxpr.outvars]
+
+    def _apply(eqn, prim, name, ins, raw):
+        params = dict(eqn.params)
+        aval = eqn.outvars[0].aval
+        out_dt = np.dtype(aval.dtype)
+
+        if name in _EXACT_UNARY and _EXACT_UNARY[name] is not None:
+            out = _ew(_EXACT_UNARY[name], ins[0])
+        elif name in _EXACT_BINARY and _EXACT_BINARY[name] is not None:
+            out = _ew(_EXACT_BINARY[name], *ins)
+        elif name in _COMPARISONS:
+            return _ew(_COMPARISONS[name], *ins)
+        elif name in _BOOLEAN:
+            return _ew(_BOOLEAN[name], *ins)
+        elif name == "not":
+            return _ew(lambda a: not bool(a), ins[0])
+        elif name == "div":
+            if out_dt.kind != "f":
+                raise _Unreplayable(
+                    "integer division truncates; that is not division over Q"
+                )
+            out = _ew(_rat_div, *ins)
+        elif name == "integer_pow":
+            y = params.get("y")
+            if not isinstance(y, int):
+                raise _Unreplayable("integer_pow with a non-integer exponent")
+            out = _ew(lambda a, k=Fraction(y): _rat_pow(a, k), ins[0])
+        elif name == "pow":
+            out = _ew(_rat_pow, *ins)
+        elif name == "sqrt":
+            out = _ew(_rat_sqrt, ins[0])
+        elif name == "square":
+            out = _ew(lambda a: a * a, ins[0])
+        elif name == "select_n":
+            which = ins[0]
+            cases = ins[1:]
+            out = _ew(
+                lambda w, *cs: cs[int(w)], which, *np.broadcast_arrays(*cases)
+            )
+        elif name == "convert_element_type":
+            src_kind = np.dtype(eqn.invars[0].aval.dtype).kind
+            out = _ew(
+                lambda a: _rat_convert(a, src_kind, out_dt), ins[0]
+            )
+        elif name in _REDUCTIONS:
+            out = _reduce(_REDUCTIONS[name], ins[0], params.get("axes", ()))
+        elif name in _MOVEMENT:
+            positions = _MOVEMENT[name]
+            if positions is None:
+                positions = tuple(range(len(ins)))
+            # a non-literal operand contributes only its SHAPE here; the
+            # values travel in `ins` and are picked out by the index map
+            raw_ins = [
+                r if r is not None else np.zeros(tuple(a.aval.shape))
+                for r, a in zip(raw, eqn.invars)
+            ]
+            out = _movement(prim, params, ins, raw_ins, positions)
+        else:
+            raise _Unreplayable(f"{name!r} has no exact rational reading")
+
+        if out_dt.kind in "iu":
+            _int_ok(out.reshape(-1), out_dt)
+        return out
+
+    run(census.closed.jaxpr, census.closed.consts, (), [0])
+    return assumes, asserts
+
+
+def _confirm(census, statuses, point, k, semantics):
+    """Decide whether an executed violation may be REPORTED, or is declined.
+
+    Returns ``(detail, decline_reason, adjudication)``: exactly one of the
+    first two is ``None``, and ``adjudication`` always names WHICH test
+    decided, because the strength of a firing is the strength of the test
+    that let it through.
+
+    Under ``ieee`` the executed float IS the subject of the claim and the
+    violation stands as it is.  Under ``real`` the claim is about ℝ and
+    the float run is only evidence about floats, so the point is re-judged:
+
+    * **all-integral declarations** short-circuit, exactly as before.  The
+      arithmetic is exact, and this branch MUST NOT become a rational
+      replay -- rational arithmetic does not wrap, so replaying an
+      ``int8`` program would report values it never computed and would
+      declare a genuine runtime wrap a rounding artefact.  Measured: with
+      ``propagate._int_guarded`` removed the probe catches an ``int8``
+      runtime wrap, and it catches it through this branch.
+    * **otherwise, EXACT-RATIONAL REPLAY of the same traced jaxpr** at the
+      same point (:func:`_replay`).  False over ℚ as well as in floats:
+      the analysis discharged something false about ℝ and the firing
+      stands.  True over ℚ: the violation was manufactured by rounding and
+      is declined.
+    * **and where the replay abstains** -- an irrational step, an integer
+      result that left its dtype, a primitive with no rational reading --
+      the ulp-stability PROXY below decides, as it did for everything
+      before this replay existed.  It is named as a proxy because it is
+      one: stability of the INPUT is not a proof about rounding in the
+      COMPUTATION, and it is blind to coarse quantisation (see the
+      commentary above :class:`_Unreplayable`).  Every fall-back is
+      counted, so a report says how much of its firing rests on it.
     """
     detail = (
         f"the obligation evaluated FALSE at this point; the declared box, "
@@ -1296,12 +2278,51 @@ def _confirm(census, statuses, point, k, semantics):
         f"executing the program"
     )
     if semantics == "ieee":
-        return detail
+        return detail, None, "ieee-executed-float"
     integral = all(
         np.dtype(d.dtype).kind in "iub" for d in census.declarations
     )
     if integral:
-        return detail + " (exact integer arithmetic: no rounding involved)"
+        return (
+            detail + " (exact integer arithmetic: no rounding involved)",
+            None,
+            "exact-integer-arithmetic",
+        )
+
+    why = None
+    try:
+        assumes, asserts = _replay(census, point)
+    except _Unreplayable as exc:
+        why = str(exc)
+    except Exception as exc:  # noqa: BLE001 - an abstention, never a firing
+        why = f"{type(exc).__name__}: {exc}"
+    else:
+        if len(asserts) != len(statuses):
+            why = "the rational replay saw a different number of obligations"
+        elif assumes and not all(assumes):
+            # The point satisfies the assume in floats but not over ℚ, so
+            # over ℝ it is outside the assumed region and a violation there
+            # refutes nothing.  Declining is the conservative side.
+            return (
+                None,
+                "assume-unsatisfied-over-the-rationals",
+                "exact-replay-outside-the-assumed-region",
+            )
+        elif asserts[k]:
+            return (
+                None,
+                "float-rounding-artefact",
+                "exact-replay-holds-over-the-rationals",
+            )
+        else:
+            return (
+                detail
+                + " (and exact-rational replay of the same traced jaxpr at "
+                "the same point makes it FALSE over ℚ, so this is not a "
+                "rounding artefact)",
+                None,
+                "exact-replay-refutes-over-the-rationals",
+            )
 
     # ulp-stability, as a PROXY and named as one
     neighbours: list = []
@@ -1311,23 +2332,32 @@ def _confirm(census, statuses, point, k, semantics):
             continue
         base = np.asarray(point[i])
         for direction in (-math.inf, math.inf):
-            try:
-                arr = np.nextafter(base, np.asarray(direction, dtype=dt))
-            except (TypeError, ValueError):
-                continue
-            if not _admissible(decl, arr):
+            arr = _step(base, direction, dt)
+            if arr is None or not _admissible(decl, arr):
                 continue
             nxt = list(point)
             nxt[i] = arr
             neighbours.append(tuple(nxt))
     if not neighbours:
-        return detail + " (no ulp-neighbour inside the box to test against)"
+        return (
+            detail
+            + f" (no ulp-neighbour inside the box to test against; the "
+            f"exact-rational replay abstained: {why})",
+            None,
+            "ulp-proxy-refutes-with-no-neighbour",
+        )
     for nb in neighbours:
         run = _execute(census, [jax.numpy.asarray(a) for a in nb])
         if run.raised is not None or len(run.asserts) != len(statuses):
-            return None
+            return None, "precision-ambiguous", "ulp-proxy-ambiguous"
         if run.assumes and not all(bool(np.all(a)) for a in run.assumes):
             continue
         if bool(np.all(run.asserts[k])):
-            return None
-    return detail + " (and at every ulp-neighbour of it inside the box)"
+            return None, "precision-ambiguous", "ulp-proxy-ambiguous"
+    return (
+        detail
+        + f" (and at every ulp-neighbour of it inside the box; the "
+        f"exact-rational replay abstained: {why})",
+        None,
+        "ulp-proxy-refutes",
+    )

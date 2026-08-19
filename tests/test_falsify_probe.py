@@ -58,6 +58,7 @@ import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
 
 from stelling.falsify import (  # noqa: E402
+    SEED_LABEL,
     STRATEGIES,
     Declaration,
     ProbeReport,
@@ -232,7 +233,7 @@ def test_the_probe_finds_a_violation_that_is_there(name, harness):
         f"in the strategies."
     )
     assert found.obligation_position == 0
-    assert found.strategy in STRATEGIES or found.strategy == "seed"
+    assert found.strategy in STRATEGIES or found.strategy == SEED_LABEL
 
 
 @pytest.mark.parametrize(
@@ -304,6 +305,59 @@ def test_a_cheap_strategy_is_kept_for_COST_not_for_reach(
     )
 
 
+def test_endpoints_is_the_CHEAPEST_configuration_and_that_is_its_whole_case():
+    """``endpoints`` is in the budget for cost, and nothing measured it.
+
+    The batch's argument was that ``endpoints`` and ``exact`` are
+    "justified by cost and not by reach, and the tests say so in those
+    words". Half of that was carried: :data:`CHEAPER` has exactly one row
+    and it is ``exact``. ``endpoints`` had no test of either kind, so its
+    place in a budget that runs on every VERIFIED rested on a sentence.
+
+    Measured here, over this file's whole live corpus, per single-strategy
+    configuration (executions, fixtures reached out of six):
+
+    ==========  ==========  ========
+    strategy    executions  reached
+    ==========  ==========  ========
+    endpoints           20       4/6
+    ulp                 26       4/6
+    uniform             28       3/6
+    exact               41       5/6
+    tight               49       6/6
+    all five            55       6/6
+    ==========  ==========  ========
+
+    So ``endpoints`` IS the cheapest configuration, by a margin, and it
+    reaches four of the six — which is the claim, and it is a cost claim.
+    It is emphatically not a reach claim: ``tight`` alone reaches
+    everything ``endpoints`` does. If the cheapest column ever stops being
+    ``endpoints``, the strategy should be deleted rather than defended.
+    """
+    cost = {}
+    reach = {}
+    for strategy in STRATEGIES:
+        cost[strategy] = sum(
+            run(h, strategies=(strategy,))[1].points_executed for _, h in LIVE
+        )
+        reach[strategy] = sum(
+            1 for _, h in LIVE if run(h, strategies=(strategy,))[0] is not None
+        )
+
+    cheapest = min(cost, key=lambda k: cost[k])
+    assert cheapest == "endpoints", (
+        f"the cheapest single-strategy configuration over the live corpus "
+        f"is now {cheapest!r} at {cost[cheapest]} execution(s), not "
+        f"'endpoints' at {cost['endpoints']}. Cost is the ONLY argument "
+        f"`endpoints` has: {cost}"
+    )
+    assert 0 < reach["endpoints"] < len(LIVE), (
+        f"`endpoints` reached {reach['endpoints']} of {len(LIVE)}. At zero "
+        f"it is an instrument nobody has seen fire; at all six it is "
+        f"justified by REACH and this docstring understates it."
+    )
+
+
 def test_the_ENSEMBLE_does_not_dominate_its_most_general_member():
     """A MEASUREMENT THAT DID NOT COME OUT THE FLATTERING WAY.
 
@@ -315,7 +369,8 @@ def test_the_ENSEMBLE_does_not_dominate_its_most_general_member():
     Read "configuration" literally, because the attribution matters and
     flatters ``tight`` if it is skipped. ``tight`` is a SEEDED phase: run
     alone it must still generate its own starting points, and those seeds
-    are endpoint points, executed and counted under the label ``"seed"``.
+    are endpoint points, executed and counted under
+    :data:`stelling.falsify.SEED_LABEL`.
     So of the six fixtures the ``tight``-only configuration reaches, four
     are actually reached by its seeds and two by the margin search itself
     -- which is what the per-strategy hit rate in
@@ -357,14 +412,24 @@ def test_the_ENSEMBLE_does_not_dominate_its_most_general_member():
 
 
 def test_the_ulp_strategy_can_fire():
-    """``ulp`` gets its own test because its fixture is ieee-only.
+    """``ulp`` gets its own test, and it fires under BOTH semantics now.
 
-    The violation is a SINGLE float, so it is by construction not stable
-    under an ulp perturbation of the input — which is exactly what the
-    real-semantics filter declines on. Under ``ieee`` the executed float IS
-    the subject of the claim and it fires; under ``real`` it must decline
-    and say so. Both directions are asserted, because the pair is what
-    shows the filter is a filter and not an off switch.
+    THIS ASSERTION USED TO RUN THE OTHER WAY, and the change is a
+    correction rather than a relaxation. The fixture's violation is a
+    single float, so it is not stable under an ulp perturbation of the
+    INPUT — and while ulp-stability of the input was the real-semantics
+    filter, the point was declined as ``precision-ambiguous``.
+
+    But ``nextafter(4.0)`` is an exactly representable rational and
+    ``|x - MID_NEXT| >= HALF_ULP`` is FALSE there over ℝ, not only in
+    floats: the obligation really is violated at a declared point, so a
+    discharge really would be unsound, and the old filter was LOSING a
+    refutation rather than suppressing a false alarm. Exact-rational
+    replay says so, and the firing records which test admitted it.
+
+    The pair that shows the filter is a filter and not an off switch is
+    now :func:`test_the_real_filter_declines_a_violation_that_is_a_pure_
+    float_artefact`, whose fixture is true over ℚ at every point.
     """
     found, _ = run(ulp_only, strategies=("ulp",), semantics="ieee")
     assert found is not None and found.strategy == "ulp", (
@@ -373,11 +438,17 @@ def test_the_ulp_strategy_can_fire():
         "no other fixture, so with this red it is an instrument nobody "
         "has seen fire"
     )
-    declined, report = run(ulp_only, strategies=("ulp",), semantics="real")
-    assert declined is None
-    assert dict(report.skips).get("precision-ambiguous"), (
-        f"under real semantics a single-float violation must be declined "
-        f"as precision-ambiguous and COUNTED; skips were {report.skips}"
+    real_found, report = run(ulp_only, strategies=("ulp",), semantics="real")
+    assert real_found is not None, (
+        f"the obligation is FALSE over ℝ at nextafter(4.0), which is a "
+        f"declared point, so a real-semantics discharge of it is unsound "
+        f"and the probe must report it; skips were {report.skips}"
+    )
+    assert (
+        real_found.adjudication == "exact-replay-refutes-over-the-rationals"
+    ), (
+        f"the firing must be admitted by the exact-rational replay and say "
+        f"so, not by the ulp proxy: {real_found.adjudication!r}"
     )
 
 

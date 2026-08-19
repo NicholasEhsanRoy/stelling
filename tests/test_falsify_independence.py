@@ -175,7 +175,7 @@ def test_the_probe_reads_declarations_from_jax_not_from_the_IR():
 
 
 def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
-    """The runtime half, as a DIFFERENTIAL — which is the honest shape.
+    """The runtime half, in TWO measurements, because one had a blind set.
 
     The first version of this test blocked every analysis module and ran a
     probe in the subprocess. It failed, twice, and both failures were
@@ -184,26 +184,54 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
     * ``stelling._jax_compat`` -- the probe's one permitted stelling
       import -- imports ``stelling.ir`` at module scope, so ``import
       stelling.harness`` dies before any probe code runs;
-    * ``any_array`` itself does ``from stelling.propagate import
-      _INT_DTYPE_BOUNDS`` while validating a declaration, so merely
-      TRACING a harness loads the propagator.
+    * ``any_array``'s dtype validation does ``from stelling.propagate
+      import _INT_DTYPE_BOUNDS``, so merely TRACING a harness loads the
+      propagator.
 
     Neither is the probe consulting the analysis, and a test that reported
-    them as such would be lying in the expensive direction: it would make
-    the independence claim look violated when it is not, and the fix would
-    be to weaken the test until it passed.
+    them as such would be lying in the expensive direction. So the
+    question is asked as a DIFFERENCE: does running the probe load any
+    analysis module that tracing the same harness had not already loaded?
 
-    So the question is asked as a difference instead, which is both true
-    and strictly stronger than the absolute form could have been: **does
-    running the probe load any analysis module that tracing the same
-    harness had not already loaded?** The baseline is measured in the same
-    process, on the same harness, immediately before. Anything the probe
-    adds is something only the probe wanted, and that is exactly the set
-    that must be empty.
+    **THAT DIFFERENCE HAS A BLIND SET, AND IT IS THE SET THAT MATTERS.**
+    The docstring here used to claim it could see a reach "through a
+    module already in ``sys.modules``". It cannot: a module already
+    loaded cannot be loaded again, so no difference appears. Measured --
+    two mutations passed all 56 tests this batch ships:
+
+    * ``_window`` reading ``sys.modules["stelling.propagate"].
+      _INT_DTYPE_BOUNDS`` with no import statement anywhere;
+    * ``_admissible`` -- the guard the module docstring calls the defence
+      against inventing refutations -- delegating to
+      ``stelling.interval.from_bounds`` through ``sys.modules``.
+
+    And the blind set is exactly the five deepest-shared modules:
+    ``coverage``, ``exactness``, ``interval``, ``ir`` and ``propagate``,
+    every one of which tracing loads.
+
+    So the second measurement below closes it, and does not replace the
+    first: every module the baseline already loaded is replaced, for the
+    duration of the probe call only, by a recording proxy that forwards
+    every attribute to the real module and records the FRAME that asked.
+    A reach whose immediate frame is ``falsify.py`` is the probe
+    consulting the analysis, whatever it was spelled like -- an
+    ``importlib`` call, a ``sys.modules`` subscript, an attribute on the
+    package object -- while the same attribute fetched by ``_jax_compat``
+    validating a declaration is attributed to ``_jax_compat`` and allowed.
+    The two halves cover both directions: the difference catches a reach
+    at a module that was NOT preloaded, the proxy catches a reach at one
+    that was.
+
+    What neither catches is a reach the probe makes through an object
+    handed to it by someone else, since then no frame of the probe's own
+    ever touches the module. Nothing hands the probe such an object today
+    -- its inputs are a callable, a sequence of strings and four scalars
+    -- and that is a fact about the signature rather than a claim about
+    this test.
     """
     script = textwrap.dedent(
-        """
-        import sys
+        '''
+        import os, sys, types
         BANNED = %r
 
         import jax
@@ -212,15 +240,44 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
         from stelling.harness import any_array, assert_
 
         def h():
+            # ONE FLOAT AND ONE INT declaration, on purpose: `_window` has
+            # a separate branch per dtype kind, and a float-only harness
+            # leaves the integer branch unexecuted -- so a reach placed
+            # there would be invisible to a test that never runs it.
             x = any_array((), "float64", (0.0, 9.0))
-            return assert_(jnp.power(x, 2.0) <= 40.0)
+            n = any_array((), "int32", (0, 3))
+            return assert_(jnp.power(x, 2.0) + n <= 40.0)
 
         # BASELINE: what merely tracing the harness pulls in.
         jax.make_jaxpr(h)()
         before = sorted(m for m in BANNED if m in sys.modules)
         print("BASELINE", before)
 
+        REACHES = []
+
+        class _Watched(types.ModuleType):
+            # Forwards every attribute to the real module, and records the
+            # frame that asked for it.
+            def __init__(self, real):
+                super().__init__(real.__name__)
+                object.__setattr__(self, "_real", real)
+
+            def __getattr__(self, name):
+                frame = sys._getframe(1)
+                real = object.__getattribute__(self, "_real")
+                REACHES.append((real.__name__, name, frame.f_code.co_filename))
+                return getattr(real, name)
+
+        import stelling
+        for m in before:
+            w = _Watched(sys.modules[m])
+            sys.modules[m] = w
+            setattr(stelling, m.rsplit(".", 1)[1], w)
+
         from stelling.falsify import probe, VerifiedFalsified
+        PROBE = os.path.abspath(sys.modules["stelling.falsify"].__file__)
+        del REACHES[:]      # importing the probe is not running it
+
         try:
             r = probe(h, statuses=["discharged"])
             print("EXECUTED", r.points_executed, "DECLINED", r.declined)
@@ -229,7 +286,11 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
 
         after = sorted(m for m in BANNED if m in sys.modules)
         print("ADDED", sorted(set(after) - set(before)))
-        """
+        print("REACHED", sorted(
+            {(mod, attr) for mod, attr, f in REACHES
+             if os.path.abspath(f) == PROBE}
+        ))
+        '''
         % sorted(FORBIDDEN)
     )
     proc = subprocess.run(
@@ -252,7 +313,7 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
         f"the probe did not find the violation in the subprocess, so this "
         f"test proves nothing about a probe that works.\n{proc.stdout}"
     )
-    added = proc.stdout.split("ADDED", 1)[1].strip()
+    added = proc.stdout.split("ADDED", 1)[1].split("\n", 1)[0].strip()
     assert added == "[]", (
         f"running the probe loaded analysis module(s) {added} that tracing "
         f"the same harness had not already loaded. That is the probe "
@@ -260,6 +321,85 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
         f"is spelled like -- the source scan above cannot see an "
         f"importlib call or an attribute reach, and this can."
     )
+    reached = proc.stdout.split("REACHED", 1)[1].strip()
+    assert reached == "[]", (
+        f"a frame in stelling/falsify.py read {reached} off an analysis "
+        f"module that was already in sys.modules. No import statement is "
+        f"needed for that and no difference against a baseline can see it, "
+        f"which is the whole reason this half of the test exists: the "
+        f"probe's value is that it does not consult the machinery it is "
+        f"checking, and this is the probe consulting it."
+    )
+
+
+def test_the_census_reading_of_the_declared_box_is_pinned_against_the_IR():
+    """THE ONE READING THE PROBE CANNOT CROSS-CHECK FOR ITSELF.
+
+    ``falsify.py``'s independence argument used to say that a probe-side
+    error "can lose a refutation but cannot invent one", on the strength
+    of ``_admissible`` re-checking every sampled value against the
+    declared endpoints. That sentence is FALSE, and the reason is
+    structural: ``_window`` (which builds the points) and ``_admissible``
+    (which is supposed to guard them) read the SAME ``Declaration.lo`` and
+    ``hi`` that ``_census`` produced. One reading, not two. Measured, by
+    mutating ``_census``'s ``hi=p["hi"]`` to ``hi=p["hi"] * 2 + 1``: the
+    probe raised on FOUR correct VERIFIEDs.
+
+    No second reading is available inside the probe, because every other
+    source of the declared box is a module it may not import -- which is
+    exactly the trade the independence argument makes, and the honest
+    thing is to name the cost rather than to claim a guard that is not
+    there.
+
+    A TEST is not under that constraint. This one reads the analysis's own
+    transcription and asserts the two readings agree, which pins the
+    census against an independent source at the one layer where two
+    independent sources exist.
+    """
+    jax = pytest.importorskip("jax")
+    import jax.numpy as jnp
+
+    from stelling.falsify import _census
+    from stelling.harness import any_array, assert_, trace
+
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+
+        def h():
+            x = any_array((3,), "float64", (-2.5, 7.25))
+            n = any_array((), "int32", (0, 4))
+            return assert_(jnp.sum(x) + n <= 100.0)
+
+        census = _census(h)
+        closed = trace(h)
+    finally:
+        jax.config.update("jax_enable_x64", old)
+
+    declared = [
+        eqn
+        for eqn in closed.jaxpr.eqns
+        if str(eqn.primitive) == "stelling_any"
+    ]
+    assert len(declared) == len(census.declarations) == 2, (
+        f"the probe read {len(census.declarations)} declaration(s) off "
+        f"jax's jaxpr and the transcription carries {len(declared)}"
+    )
+    for decl, eqn in zip(census.declarations, declared):
+        params = dict(eqn.params)
+        assert (float(decl.lo), float(decl.hi)) == (
+            float(params["lo"]),
+            float(params["hi"]),
+        ), (
+            f"the probe reads declaration #{decl.position} as "
+            f"[{decl.lo}, {decl.hi}] off jax's jaxpr and the analysis "
+            f"transcribed it as [{params['lo']}, {params['hi']}]. "
+            f"The two readings are independent by construction and must "
+            f"agree; if they do not, one of them is steering a sampler or "
+            f"a solver onto a box the user did not write."
+        )
+        assert decl.shape == tuple(params["shape"])
+        assert decl.dtype == str(params["dtype"])
 
 
 def test_the_probe_disagrees_with_a_LYING_propagator():

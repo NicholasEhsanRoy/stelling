@@ -131,6 +131,40 @@ SPDX-License-Identifier: Apache-2.0
 
 ### Verification pipeline
 
+- **`check(..., falsify="sample")` — the falsification probe, DEFAULT-OFF
+  and UNRELEASED.** A new keyword on `stelling.preconditions.check`,
+  `stelling.contracts.check_contract` and
+  `stelling.inductive.check_inductive_step`. With the default `None`
+  nothing changes: `stelling.falsify` is never imported and the verdict
+  is byte-identical. Set to `"sample"` it runs, after a VERIFIED, the
+  check this library has never had — it executes the real program at
+  concrete points inside the declared set and tries to find one that
+  violates a discharged obligation. `stelling` replays a REFUTED's
+  witness through the real program; an `unsat` is a universal claim with
+  no witness to replay, so a false VERIFIED had nothing downstream at
+  all.
+
+  Two properties are enforced rather than described. It **can only
+  refute**: the note it appends is a sentence about work done and carries
+  its own disclaimer, so a probed VERIFIED never reads as a better
+  VERIFIED. And when it finds a violation it **raises**
+  `stelling.falsify.VerifiedFalsified` instead of returning a status,
+  because a discharged obligation the program violates is a defect in
+  *stelling*, not a finding about the caller's code.
+
+  Under `semantics="real"` a violation is admitted only by **exact
+  rational replay of the same traced jaxpr** at the same point (stdlib
+  `fractions`; the probe imports no analysis module), falling back to a
+  named and counted ulp-stability proxy where a primitive has no exact
+  rational reading. The all-integer path keeps its own exact-integer
+  branch, because rational arithmetic does not wrap and routing it there
+  would suppress the runtime-wrap catch.
+
+  Blind spots, disclosed rather than discovered: the probe cannot see the
+  `jnp.full((), 256, jnp.int8)` narrowing (there is no executable form of
+  that program, traced or eager, in which `256` survives), and it
+  declines `bfloat16` and the `float8_*` formats outright.
+
 - **Reachability conjunct**: a backward walk from the jaxpr's outputs
   identifies variables that flow to an output. Violated obligations on
   "dead" variables (computed but never observed by the caller) are
