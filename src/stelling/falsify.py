@@ -85,6 +85,20 @@ that no longer re-derive. Five files fire, not one. Driven WITHOUT the
 mutation, every one of those gauge fixtures returns REFUTED or UNKNOWN and
 the probe never fires.
 
+**RE-RUN AFTER THE TOTALITY GUARDS, ON THE SAME CORPUS: STILL 92.** The
+batch that added the guards below (see THE CLASS) re-ran exactly this
+measurement on both trees. Over the nodes both corpora share, **base 92
+firings and fixed 92** — no firing is lost. Six probe calls change and
+none of them fired in either tree: three now decline under
+``assume-not-fully-executed`` (``test_undescended_assume.py`` ×2 and
+``test_vacuous_precondition.py``, all three programs whose assume is
+inside a ``scan``/``jit`` body, which is the false-alarm shape itself);
+two replace 21 per-point ``program-raised`` skips apiece with one accurate
+whole-probe decline (``test_vacuity_depth.py``, a ``stelling_any`` the
+probe cannot vary); and one is the ``points_admissible`` correction. On 31
+ordinary one-line ``jnp`` programs the reports are IDENTICAL field for
+field, 18 firing in each tree.
+
 **AND 169 BECAME 92, WHICH IS THE PRICE OF THE FIRE CONDITION AND IS
 STATED IN THE ONE FORM THAT IS NOT MISLEADING.** The figures 169 and 92
 are from DIFFERENT corpora — this batch rewrote the two ``falsify`` test
@@ -488,7 +502,10 @@ the probe the VERDICT's statuses lets it attack solver-decided
 discharges, and the solver reasons over ℝ, which is exactly where ℝ and
 floats diverge most.
 
-**WHAT DECIDES NOW.** In order:
+**WHAT DECIDES NOW.** In order — and all of it downstream of the point
+being ADMITTED BY EVERY ASSUME, which is a reading of the program that can
+itself be partial and is guarded before any of this is consulted (see THE
+CLASS below):
 
 * **``ieee`` semantics: nothing decides.** The executed float IS the
   subject of the claim and the violation stands as it is.
@@ -611,6 +628,86 @@ they are not the same finding:
 
 The second list is where this instrument's reach is bought back, and
 nothing in it is bought by relaxing the first paragraph of this section.
+
+--------------------------------------------------------------------------
+THE CLASS: A PREDICATE COMPUTED FROM SOMETHING ELSE, FOUR TIMES
+--------------------------------------------------------------------------
+
+Four audits of this module have found four defects and they are the same
+defect. **Every one is a predicate that licenses a claim about the
+PROGRAM while being computed from something else**, and every one let this
+probe raise the categorical *"stelling is UNSOUND at this query"* about a
+verdict that is CORRECT, in a handful of lines through the public API,
+with no mutation and no solver:
+
+1. **ulp-stability of the INPUT** standing in for *"this violation is not
+   a rounding artefact"*. Kahan compensation, four lines.
+2. **a fall-back to that same proxy** standing in for *"an exact test
+   admitted this"* — with a jax primitive named that does not exist, so
+   the exact test rarely ran and the proxy usually did.
+3. **a predicate over the DECLARED DTYPES** standing in for *"this
+   program does integer arithmetic"*. An ``int16`` declaration cast to
+   ``float32`` rounds, and the parenthetical said no rounding was
+   involved.
+4. **the TOP-LEVEL ``stelling_assume`` walk** standing in for *"a point
+   the analysis itself admitted"*. ``_execute`` iterates ``jaxpr.eqns`` at
+   the top level, so an assume one ``jit`` deep executes and never reaches
+   ``run.assumes``, and ``if run.assumes and not all(...)`` on an empty
+   list admits every point::
+
+       x = any_array((), "int32", (0, 10))
+       y = jax.jit(lambda a: (assume(a >= 9), a)[1])(x)
+       assert_(y >= 9)                        # VERIFIED, and correct
+
+   ``propagate`` DOES narrow on that assume — it is the whole reason the
+   VERIFIED exists — so the probe fired at ``x = 0``, a point outside the
+   region the analysis had claimed anything about. Reached in all four
+   shapes it has: through ``jit`` and through ``remat2``, under
+   ``semantics="real"`` (via the all-integral branch) and under
+   ``semantics="ieee"``, on both supported jax series and through all
+   three public doors.
+
+**PATCHING THE FOURTH IS NOT CLOSING THE CLASS**, so the fourth repair is
+a rule rather than a patch. The rule has two halves.
+
+*First:* **a predicate that licenses a claim about the program is computed
+from the program** — the form recorded when instance 3 was fixed.
+
+*Second, and this is what instance 4 added:* **a reading of the program
+can be PARTIAL, and a partial reading licenses nothing.** Instance 4's
+predicate WAS computed from the program; it was computed from part of it.
+So every quantity this probe reads is now checked against a census taken
+at every depth there is (``_declaration_totals``) before it may license
+anything, and a reading that comes up short declines by name. Two
+quantities already had such a guard and nobody had asked for the rest:
+asserts had ``obligation-count-changed``, declarations had *"the harness
+declares no inputs to vary"* (which catches zero, not partial), assumes
+had none. The table is ``_READINGS``, it covers every field of ``_Census``
+and of ``_Run``, and a test holds it to those two dataclasses
+field-for-field — a new quantity cannot arrive without either a guard or a
+written argument that it cannot license anything. **The class had to be
+closed against the fifth instance, not just the fourth.**
+
+**AND THE STRUCTURAL OBSERVATION UNDERNEATH ALL FOUR.** ``_execute`` and
+``_replay`` are two walkers with different depth behaviour, and the gap
+between them is where these defects live. The obvious reconciliation —
+make ``_execute`` descend the way ``_replay`` does — was DRIVEN, and it is
+NOT AVAILABLE: ``prim.bind`` on a call equation compiles the whole body
+and XLA contracts across it, so walking the body op by op computes
+different floats. Over 22 one-line ``jit`` bodies on both jax series the
+two disagree on 5, including a SIGN disagreement on 3 of 3 attempts for
+``a*b + c`` — and a sign is what an obligation reads. A descending
+``_execute``, written out in full, does repair all four false alarms above
+— and then raises *"stelling is UNSOUND at this query"*, under
+``ieee-executed-float``, on ``jit(lambda p,q,r: p*q+r)(a, b0, c0) != 0.0``
+with ``c0 = -fl32(a0*b0)``, an obligation the real program satisfies at
+both of its declared points (it computes ``-9.49e-08`` and ``+6.10e-08``
+there). **That is instance 5, manufactured by the repair for instance 4**,
+and it is why the reach-preserving option was refused on a measurement
+rather than on a preference. The walkers are reconciled by MEASUREMENT
+instead: neither is trusted to be complete because of how it is written,
+and each one's reading is checked against the census. The argument in full
+is in :func:`_execute`.
 """
 
 from __future__ import annotations
@@ -670,6 +767,12 @@ STRATEGIES = ("endpoints", "exact", "uniform", "tight", "ulp")
 # shipped with appeared in NO test, which is how a decline reason drifts
 # into meaning something other than what it says.
 #
+# `assume-not-fully-executed` is the fourth defect's guard, and it is the
+# one that says the quiet part: `_execute` walks the TOP LEVEL of the
+# jaxpr, so a `stelling_assume` inside a `jit` or a `remat2` body executes
+# but never reaches `run.assumes`, and the gate that reads *"admitted by
+# every assume"* off that list was vacuous exactly there. See `_READINGS`.
+#
 # `precision-ambiguous` is gone with the ulp proxy that emitted it, and
 # `no-exact-reading-of-this-program` is new and is the one to watch: it is
 # the reason every program this instrument cannot read exactly declines
@@ -693,6 +796,7 @@ DECLINE_REASONS = (
     "program-raised",
     "obligation-count-changed",
     "assume-unsatisfied",
+    "assume-not-fully-executed",
     # an executed VIOLATION the fire condition would not report
     "float-rounding-artefact",
     "assume-unsatisfied-over-the-rationals",
@@ -831,7 +935,20 @@ class ProbeReport:
     obligations: int = 0
     points_built: int = 0
     points_executed: int = 0
-    points_admissible: int = 0  # in-box AND every assume satisfied
+    # in-box AND every assume satisfied -- and BOTH halves are readings of
+    # the program that can come up short, which is why this number is
+    # taken back when a later, exact reading contradicts an earlier float
+    # one (`assume-unsatisfied-over-the-rationals`) and is not given at
+    # all when the executed run could not see every assume
+    # (`assume-not-fully-executed`).  It shipped as the float reading
+    # alone and produced a stamp line that contradicted itself in one
+    # sentence.  Re-derived at `cefc4a9` on `assume(y*0.1*10.0 <= y)`
+    # under the Kahan assert: *"74 point(s) executed, 65 inside the
+    # declared set and admitted by every assume ... declined 9
+    # assume-unsatisfied, 39 assume-unsatisfied-over-the-rationals"* --
+    # 39 of those 65 were points the exact replay had just said NO assume
+    # admitted.
+    points_admissible: int = 0
     points_declined: int = 0  # admissible, VIOLATED, and not reported
     violations_seen: int = 0  # executed points at which an attacked
     # obligation evaluated FALSE in floats, however they were then judged
@@ -1205,7 +1322,21 @@ def _representable(v, dt) -> bool:
 
 @dataclass
 class _Census:
-    """Everything the probe needs, read off jax's own jaxpr, once."""
+    """Everything the probe needs, read off jax's own jaxpr, once.
+
+    **EVERY FIELD HERE IS A READING OF THE PROGRAM, AND EVERY READING HAS
+    A DEPTH.**  Some are taken at the top level of the jaxpr and some at
+    every depth, and which one a field is decides what it may license.
+    That is not a stylistic distinction: four separate defects in this
+    module have been one predicate licensing a claim about the PROGRAM
+    while being computed from something else, and the fourth was a
+    top-level reading of ``stelling_assume`` licensing *"a point the
+    analysis itself admitted"*.  The depths, the guards, and the reasons
+    for the three fields that need no guard are in :data:`_READINGS`,
+    which is checked field-by-field against this dataclass by
+    ``tests/test_falsify_fire_condition.py::test_every_census_quantity_has_a_totality_guard``
+    -- so a new field here cannot arrive without one.
+    """
 
     closed: object
     declarations: tuple[Declaration, ...] = ()
@@ -1220,6 +1351,157 @@ class _Census:
     # use of it licenses an exactness claim: a `_Census` built without
     # reading a jaxpr must not be able to license one by omission.
     integral: bool = False
+
+    # HOW MANY OF EACH DECLARATION PRIMITIVE THE PROGRAM CONTAINS AT EVERY
+    # DEPTH (:func:`_declaration_totals`), against which each partial
+    # reading above -- and each partial reading `_execute` takes at run
+    # time -- is checked before it may license anything.
+    #
+    # **DEFAULTED TO -1 AND NOT TO 0**, for the same reason `integral`
+    # defaults to False: a `_Census` built without reading a jaxpr must
+    # not be able to license "the reading was complete" by omission.  Zero
+    # would agree with an empty reading and admit; -1 agrees with nothing
+    # and declines.
+    declarations_in_program: int = -1
+    obligations_in_program: int = -1
+    assumes_in_program: int = -1
+
+
+@dataclass(frozen=True)
+class _Reading:
+    """One quantity this probe reads off the program, and its guard.
+
+    ``subject`` is ``"census"`` or ``"run"`` and ``name`` is the field of
+    :class:`_Census` or :class:`_Run` it describes; ``depth`` is where the
+    reading is taken.  Exactly one of ``guard`` and ``why`` is set:
+    ``guard`` names the decline a PARTIAL reading produces, and ``why`` is
+    the argument that this particular reading cannot license anything and
+    so needs none.
+    """
+
+    subject: str
+    name: str
+    depth: str
+    guard: str | None = None
+    why: str = ""
+
+
+# THE RULE, IN A TABLE, BECAUSE FOUR AUDITS FOUND FOUR INSTANCES OF ONE
+# DEFECT AND A FIFTH WOULD HAVE BEEN A FIFTH FIELD.
+#
+# Every one of the four was a predicate licensing a claim about the
+# PROGRAM while being computed from something else, and the fourth --
+# `stelling_assume` read at the TOP LEVEL, licensing *"a point the
+# analysis itself admitted"* -- was possible because two of this module's
+# quantities had a totality guard and the rest had never been asked for
+# one.  Asserts had `obligation-count-changed`; declarations had *"the
+# harness declares no inputs to vary"*, which catches zero and not
+# partial; assumes had nothing at all.
+#
+# So the rule is stated once and applied to EVERY quantity: **a reading
+# that may be partial is checked against what is in the program before it
+# licenses anything, and declines when the two disagree.**  A reading
+# needs no guard only when it cannot license a claim, and that argument is
+# written in `why` rather than left to be re-derived.
+#
+# `tests/test_falsify_fire_condition.py::test_every_census_quantity_has_a_totality_guard`
+# holds this table to the two dataclasses field-for-field, so a new
+# quantity cannot arrive without either a guard or a written exemption.
+# Which is the whole point: the class had to be closed against the FIFTH
+# instance, not just the fourth.
+_READINGS = (
+    _Reading(
+        "census", "closed", "the-program-itself",
+        why=(
+            "not a reading -- it IS the traced program, the object every "
+            "other reading is a reading OF"
+        ),
+    ),
+    _Reading(
+        "census", "declarations", "top-level",
+        guard="the harness declares inputs the probe cannot see",
+    ),
+    _Reading(
+        "census", "assert_positions", "top-level",
+        guard="the harness states obligations the probe cannot see",
+    ),
+    _Reading(
+        "census", "margins", "top-level",
+        why=(
+            "steering and display only: a margin chooses where `tight` and "
+            "`ulp` look next and prints in the firing message. It admits "
+            "nothing, and an assert whose margin is missing is still "
+            "probed through its boolean -- `no-margin-no-boundary-search`"
+        ),
+    ),
+    _Reading(
+        "census", "exponents", "every-depth",
+        why=(
+            "sampling only: the exponents decide which perfect powers the "
+            "`exact` strategy tries. A partial reading costs candidate "
+            "points and can lose a refutation; it cannot invent one"
+        ),
+    ),
+    _Reading(
+        "census", "replay_cost", "every-depth",
+        why=(
+            "a budget, and it is compared with `>`: an UNDER-estimate lets "
+            "a replay start that the two `_Guard` bounds then stop, and an "
+            "over-estimate declines. Neither admits anything"
+        ),
+    ),
+    _Reading(
+        "census", "integral", "every-depth",
+        why=(
+            "guarded BY CONSTRUCTION rather than by a count: "
+            "`_integral_program` answers False for any atom it cannot "
+            "classify and for any sub-jaxpr that is not integral, so a "
+            "partial reading of it is already a decline. This is the shape "
+            "the other guards imitate"
+        ),
+    ),
+    _Reading(
+        "census", "declarations_in_program", "every-depth",
+        why=(
+            "a total, not a reading: it is what the guards are checked "
+            "against"
+        ),
+    ),
+    _Reading(
+        "census", "obligations_in_program", "every-depth",
+        why=(
+            "a total, not a reading: it is what the guards are checked "
+            "against"
+        ),
+    ),
+    _Reading(
+        "census", "assumes_in_program", "every-depth",
+        why=(
+            "a total, not a reading: it is what the guards are checked "
+            "against"
+        ),
+    ),
+    _Reading("run", "assumes", "top-level", guard="assume-not-fully-executed"),
+    _Reading("run", "asserts", "top-level", guard="obligation-count-changed"),
+    _Reading(
+        "run", "margins", "top-level",
+        why=(
+            "the executed side of `census.margins`, and the same argument: "
+            "a margin steers the boundary phases and prints in the firing "
+            "message, and admits nothing"
+        ),
+    ),
+    _Reading("run", "raised", "top-level", guard="program-raised"),
+)
+
+# The guards above that stop the WHOLE probe with a `ProbeReport.declined`
+# sentence rather than skipping one point with a `DECLINE_REASONS` code.
+# They are whole-probe guards because what they find is a property of the
+# program and not of a point: no other point would fare better.
+_WHOLE_PROBE_GUARDS = (
+    "the harness declares inputs the probe cannot see",
+    "the harness states obligations the probe cannot see",
+)
 
 
 def _census(harness) -> _Census:
@@ -1319,6 +1601,7 @@ def _read(closed) -> _Census:
                 walk(sub)
 
     walk(jaxpr)
+    totals = _declaration_totals(jaxpr)
     return _Census(
         closed=closed,
         declarations=tuple(decls),
@@ -1327,7 +1610,44 @@ def _read(closed) -> _Census:
         exponents=tuple(sorted(exponents)),
         replay_cost=_replay_cost(jaxpr),
         integral=_integral_program(jaxpr),
+        declarations_in_program=totals["stelling_any"],
+        obligations_in_program=totals["stelling_assert"],
+        assumes_in_program=totals["stelling_assume"],
     )
+
+
+def _declaration_totals(jaxpr) -> dict[str, int]:
+    """How many of each stelling declaration primitive the program contains.
+
+    **AT EVERY DEPTH**, through :func:`_sub_jaxprs`, which is the widest
+    walk this module has: it follows a jaxpr wherever a parameter carries
+    one, so a ``jit`` body, a ``remat2`` body, a ``cond`` arm, a ``scan``
+    body and a ``custom_jvp`` rule all count.  That is deliberately wider
+    than either walker: the number is not what any walker will see, it is
+    what is THERE, and the difference between the two is exactly the
+    quantity every guard in this module is checking.
+
+    ``stelling_nonvacuity`` is counted with the others even though nothing
+    gates on it, because the cost of counting is one dictionary entry and
+    the cost of a quantity nobody counted is this batch.
+    """
+    totals = {
+        "stelling_any": 0,
+        "stelling_assert": 0,
+        "stelling_assume": 0,
+        "stelling_nonvacuity": 0,
+    }
+
+    def walk(jx):
+        for eqn in jx.eqns:
+            name = eqn.primitive.name
+            if name in totals:
+                totals[name] += 1
+            for sub in _sub_jaxprs(eqn):
+                walk(sub)
+
+    walk(jaxpr)
+    return totals
 
 
 def _sub_jaxprs(eqn):
@@ -1445,6 +1765,78 @@ def _execute(census: _Census, point) -> _Run:
     environment rather than monkeypatching the primitive's impl keeps the
     probe free of process-global state, which matters because it may run
     inside a caller's test session.
+
+    --------------------------------------------------------------------
+    WHY THIS WALK DOES NOT DESCEND, AND :func:`_replay` DOES
+    --------------------------------------------------------------------
+
+    **THE TWO WALKERS HAVE DIFFERENT DEPTH BEHAVIOUR ON PURPOSE, AND ALL
+    FOUR OF THIS MODULE'S DEFECTS HAVE LIVED IN THE GAP.**  A call
+    equation goes whole to ``prim.bind`` here, while :func:`_replay`
+    descends into its body (``_CALL_PRIMITIVES``).  The fourth defect was
+    exactly that gap: a ``stelling_assume`` one ``jit`` deep executes and
+    never reaches ``run.assumes``, so the gate reading *"admitted by every
+    assume"* off that list admitted everything, and the probe raised
+    *"stelling is UNSOUND at this query"* about a correct VERIFIED.
+
+    The obvious reconciliation is to make this walk descend too.  **It was
+    measured, and it is not available: descending changes the program.**
+    ``prim.bind`` on a call equation compiles the WHOLE body, and XLA is
+    then free to contract across the equations inside it; walking those
+    equations one at a time asks jax for each primitive separately and
+    gets no contraction.  Over 22 one-line ``jit`` bodies on both
+    supported jax series (``a*b+c``, ``sum(x*y)``, ``dot``, a matmul,
+    ``exp``, ``log1p``, ``tanh``, Kahan, ``cumsum``, ``softmax``, in
+    float32 and float64) the two disagree on **5**, and the disagreement
+    is not confined to the last bits: for ``a*b + c`` with ``c`` set to
+    ``-fl(a*b)``, the descended walk returns exactly ``0.0`` while the
+    bound call returns the rounding error of the product -- **a SIGN
+    disagreement, found on 3 of 3 attempts in each of float32 and
+    float64**, and a sign is what an obligation ``>= 0`` reads.
+
+    That is disqualifying rather than merely awkward, because of the
+    sentence the ``ieee`` branch of :func:`_confirm` fires on: *"the
+    executed float IS the subject of the claim."*  If this walk un-jitted
+    the body, the executed float would be one the user's program never
+    computes, and the branch would be licensing a claim about the program
+    from something else -- **the fifth instance of the class, manufactured
+    by the repair for the fourth.**  What this loop reproduces today is
+    what the user's own code does: their un-jitted top level op by op,
+    their ``jit`` compiled whole.
+
+    **AND THAT IS DRIVEN, NOT ARGUED.**  The descending version was
+    written out in full and run.  It does repair the four false alarms
+    this batch is about -- and on this program, whose obligation the real
+    program SATISFIES at every declared point, it raises::
+
+        a0 = float32(1.9669843); b0 = float32(1.3077438)
+        c0 = float32(-fl32(a0 * b0))           # minus the ROUNDED product
+        a  = any_array((), "float32", (nextafter_down(a0), a0))
+        assert_(jax.jit(lambda p, q, r: p * q + r)(a, b0, c0) != 0.0)
+
+    The body computes the rounding error of a product: nonzero when the
+    call is compiled, and exactly zero when its body is walked op by op.
+    Executed, the two declared points give ``-9.491779e-08`` and
+    ``+6.097741e-08``, so the obligation holds.  With a descending
+    ``_execute`` in place, on both supported jax series::
+
+        FALSIFICATION PROBE FIRED — stelling is UNSOUND at this query.
+        ... admitted by the 'ieee-executed-float' test ...
+        at a = 1.9669841527938843
+
+    Pinned by
+    ``tests/test_falsify_fire_condition.py::test_the_EXECUTED_walk_does_not_descend_into_call_bodies``,
+    which drives the fixture as well as the sign disagreement and refuses
+    the source change.
+
+    **SO THE WALKERS ARE RECONCILED BY MEASUREMENT AND NOT BY MERGING.**
+    Each one's reading is checked against a census taken at EVERY depth
+    (:func:`_declaration_totals`) before it may license anything, and a
+    reading that comes up short declines: ``run.assumes`` here against
+    ``census.assumes_in_program`` in ``probe``, the replay's own assume
+    list against the same number in :func:`_confirm`.  Neither walker is
+    trusted to be complete because of how it is written.  See
+    :data:`_READINGS` for the same rule applied to every other quantity.
     """
     jaxpr = census.closed.jaxpr
     env: dict = {}
@@ -1809,8 +2201,44 @@ def probe(
                 f"top-level assert(s); the probe cannot pair them"
             )
         )
+    if len(census.assert_positions) != census.obligations_in_program:
+        # AND THE PAIRING GUARD ABOVE IS NOT THIS GUARD, though today they
+        # decline together on every program either has been shown.  That
+        # one compares the probe's reading with the ANALYSIS's count and so
+        # depends on the analysis descending into call bodies -- measured,
+        # it does: an `assert_` one `jit` deep makes `check()` report two
+        # obligations against one top-level assert.  This one compares the
+        # probe's reading with the PROGRAM and holds whatever the analysis
+        # does with a nested obligation later.  The distinction is the
+        # whole subject of this batch: a guard on a claim about the program
+        # is computed from the program.
+        return ProbeReport(
+            declined=(
+                f"the traced program states {census.obligations_in_program} "
+                f"obligation(s) and {len(census.assert_positions)} of them "
+                f"are at the top level, where this probe reads them; it "
+                f"cannot say which obligation an index means"
+            )
+        )
     if not census.declarations:
         return ProbeReport(declined="the harness declares no inputs to vary")
+    if len(census.declarations) != census.declarations_in_program:
+        # A `stelling_any` inside a call body is a declaration the probe
+        # has no sampled value to substitute for, so `_execute` hands the
+        # equation to `Primitive.bind` and `stelling_any` -- which has no
+        # implementation, by design -- raises.  Every point then skipped
+        # under `program-raised`, a reason that names the USER's program
+        # for a limit of this walk.  Declining here says the true thing
+        # instead, and says it once rather than once per point.
+        return ProbeReport(
+            declarations=census.declarations,
+            declined=(
+                f"the harness declares {census.declarations_in_program} "
+                f"input(s) and {len(census.declarations)} of them are at "
+                f"the top level, where this probe substitutes sampled "
+                f"values; it cannot vary the rest"
+            ),
+        )
 
     windows = []
     for d in census.declarations:
@@ -1861,11 +2289,32 @@ def probe(
         if len(run.asserts) != len(statuses):
             skips.add("obligation-count-changed")
             return None, None
+        if len(run.assumes) != census.assumes_in_program:
+            # THE GATE BELOW READS *"admitted by every assume"* OFF A LIST
+            # THAT CAN BE SHORT.  `_execute` walks the top level and hands
+            # a call equation whole to `Primitive.bind`, so a
+            # `stelling_assume` inside a `jit` or `remat2` body EXECUTES
+            # and never reaches `run.assumes` -- and `if run.assumes and
+            # ...` on an empty list admits everything.  `propagate` does
+            # narrow on that assume, which is why the VERIFIED exists, so
+            # the probe was attacking points the analysis never claimed
+            # anything about and raising "stelling is UNSOUND" about a
+            # correct verdict, in five lines through the public API:
+            #
+            #     x = any_array((), "int32", (0, 10))
+            #     y = jax.jit(lambda a: (assume(a >= 9), a)[1])(x)
+            #     assert_(y >= 9)          # VERIFIED, and correct
+            #
+            # A short reading is not a satisfied assume and it is not an
+            # unsatisfied one; it is no reading, and the point declines.
+            skips.add("assume-not-fully-executed")
+            return None, None
         if run.assumes and not all(bool(np.all(a)) for a in run.assumes):
             skips.add("assume-unsatisfied")
             return None, None
         admissible += 1
         point_declined = False
+        point_unassumed = False
         for k in targets:
             if bool(np.all(run.asserts[k])):
                 continue
@@ -1878,6 +2327,9 @@ def probe(
                 abstained.add(unread)
             if detail is None:
                 skips.add(why)
+                if why == "assume-unsatisfied-over-the-rationals":
+                    point_unassumed = True
+                    break
                 point_declined = True
                 continue
             shits.add(strategy)
@@ -1892,6 +2344,34 @@ def probe(
                 ),
                 None,
             )
+        if point_unassumed:
+            # THE POINT WAS NEVER ADMISSIBLE AND `admissible` HAS ALREADY
+            # COUNTED IT.  The gate above is the EXECUTED-FLOAT reading of
+            # the assume; `_confirm`'s replay reads the same assume over ℚ,
+            # which is the reading that decides under `real` semantics, and
+            # it can say the point is outside the assumed region after the
+            # float said it was inside.  Leaving the increment standing
+            # produced a stamp line that contradicted itself in one
+            # sentence.  Driven at `cefc4a9` on `assume(y*0.1*10.0 <= y)`
+            # under the Kahan assert: *"74 point(s) executed, 65 inside
+            # the declared set and admitted by every assume ... declined
+            # 39 assume-unsatisfied-over-the-rationals"* -- i.e. a count
+            # that READS AS COVERAGE for 39 of its 65, which is the
+            # failure this module's docstring exists to prevent.  It
+            # additionally called them *"39 EXECUTED VIOLATION(S) ...
+            # DECLINED"*, which they were not.  Fixed, the same fixture
+            # reports 71 built, 47 admissible, 16 + 8 declined, and no
+            # declined violations at all.
+            #
+            # It is taken back rather than never given because the two
+            # readings run at different times: only the exact one can say
+            # this, and it only runs where the float found a violation.
+            # Not counted in `points_declined` either: this is not an
+            # admissible violation the probe would not stand behind, it is
+            # a point that was never inside the assumed region, and the
+            # skip rate counts it by leaving it out of the numerator.
+            admissible -= 1
+            return None, None
         if point_declined:
             # counted as DECLINED WORK, which is what it is: the probe
             # executed a violation here and would not stand behind it, and
@@ -3013,6 +3493,20 @@ def _confirm(census, statuses, point, k, semantics):
     ``ulp`` SAMPLING strategy uses it to choose points, which is a
     different job and cannot admit anything.
 
+    **AND ALL THREE ARE DOWNSTREAM OF ONE PRECONDITION THAT IS NOT STATED
+    HERE.** Every branch below says "the violation stands", and a
+    violation only means anything at a point the analysis CLAIMED
+    something about — i.e. one admitted by every assume. That gate is in
+    ``probe.run_one``, and for the first two branches it is the only
+    reading of the assumes there is: they return before the replay is
+    consulted, so nothing downstream re-checks. It was reading a list
+    ``_execute`` fills at the TOP LEVEL only, so an assume one ``jit`` deep
+    left it empty and the gate admitted everything — the fourth of this
+    module's four defects, see the module docstring. The gate now declines
+    (``assume-not-fully-executed``) unless the executed run saw every
+    assume the program contains at every depth, which is what makes the
+    two early returns below safe.
+
     THE THREE TESTS THAT MAY ADMIT, in the order they are consulted:
 
     * **``ieee`` semantics.** The executed float IS the subject of the
@@ -3032,9 +3526,17 @@ def _confirm(census, statuses, point, k, semantics):
       ``int16`` declaration cast to ``float32`` rounds, and four lines
       through the public API called a correct ``VERIFIED`` ``UNSOUND``
       under a parenthetical saying no rounding was involved.  The rule the
-      three instances share, and the one to apply to a fourth: **a
-      predicate that licenses an exactness claim is computed from the
-      object the claim is about.**  See :func:`_integral_program`.
+      three instances share: **a predicate that licenses an exactness
+      claim is computed from the object the claim is about.**  See
+      :func:`_integral_program`.
+
+      **THERE WAS A FOURTH, AND IT ADDED THE OTHER HALF OF THE RULE.**
+      Its predicate WAS computed from the program -- it was computed from
+      part of it, a ``stelling_assume`` walk that stopped at the top
+      level.  So: **and the computation must read all of it.**  Every
+      quantity is now checked against a census taken at every depth
+      (:data:`_READINGS`), and this branch is reachable only when that
+      check passed.
     * **exact-rational replay** of the same traced jaxpr at the same point
       (:func:`_replay`), for everything else.  False over ℚ as well as in
       floats: the analysis discharged something false about ℝ and the
@@ -3081,6 +3583,19 @@ def _confirm(census, statuses, point, k, semantics):
     else:
         if len(asserts) != len(statuses):
             why = "the rational replay saw a different number of obligations"
+        elif len(assumes) != census.assumes_in_program:
+            # DEFENCE IN DEPTH, and the same check as `run_one`'s applied
+            # to the OTHER walker.  `_replay` descends `_CALL_PRIMITIVES`
+            # where `_execute` binds them, so the two walkers read the
+            # program at different depths -- which is the gap all four of
+            # this module's defects have lived in.  Neither reading is
+            # trusted to be complete because of how it is written; each is
+            # checked against `census.assumes_in_program`, which is counted
+            # at every depth there is.
+            why = (
+                f"the rational replay reached {len(assumes)} of the "
+                f"program's {census.assumes_in_program} assume(s)"
+            )
         elif assumes and not all(assumes):
             # The point satisfies the assume in floats but not over ℚ, so
             # over ℝ it is outside the assumed region and a violation there

@@ -177,6 +177,36 @@ SPDX-License-Identifier: Apache-2.0
   fixtures in `tests/test_falsify_probe.py` are `scatter` and now decline;
   they are listed there with the primitive that costs each one.
 
+  Every admission is also downstream of the point being **admitted by
+  every assume**, and that gate is a reading of the program that can be
+  PARTIAL. The executed walk hands a call equation whole to jax, so a
+  `stelling_assume` inside a `jit` or a `remat2` body executes without
+  ever reaching the list the gate reads — and `propagate` narrows on that
+  assume, so the probe was attacking points the analysis had claimed
+  nothing about. The gate now declines (`assume-not-fully-executed`)
+  unless the executed run saw every assume the program contains at every
+  depth. Generalised rather than patched: every quantity the probe reads
+  off the program is checked against a census taken at every depth before
+  it may license anything, a declaration or an obligation the probe cannot
+  see declines the whole probe by name, and a table (`_READINGS`) is held
+  to the two dataclasses field-for-field so a new quantity cannot arrive
+  without either a guard or a written argument that it needs none.
+
+  The two walkers stay at **different depths on purpose**, and that is
+  measured: `Primitive.bind` on a call equation compiles the whole body
+  and XLA contracts across it, so a version that walked the body op by op
+  computed different floats (5 disagreements over 22 one-line `jit`
+  bodies, including sign disagreements) and raised "stelling is UNSOUND"
+  on an obligation the real program satisfies. Each walker's reading is
+  therefore checked against the census instead.
+
+  A point the exact replay places **outside** the assumed region is no
+  longer counted under `points_admissible`, and is not reported as a
+  declined violation either. The stamp line could say "74 point(s)
+  executed, 65 inside the declared set and admitted by every assume …
+  declined 39 assume-unsatisfied-over-the-rationals" — a count that reads
+  as coverage for 39 points no assume admitted.
+
   Blind spots, disclosed rather than discovered: the probe cannot see the
   `jnp.full((), 256, jnp.int8)` narrowing (there is no executable form of
   that program, traced or eager, in which `256` survives), it declines

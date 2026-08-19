@@ -1139,6 +1139,11 @@ REASON_COVERAGE = {
     "point-outside-declaration": "driven: a sampler that leaves the box",
     "program-raised": "driven: a program that raises at a declared point",
     "assume-unsatisfied": "driven: a point below the assume",
+    "assume-not-fully-executed": (
+        "driven: `assume()` inside a `jit` or a `remat2` body, which "
+        "`_execute` binds whole — four shapes, and at all three public "
+        "doors"
+    ),
     "float-rounding-artefact": "driven: the Kahan shape above",
     "no-exact-reading-of-this-program": (
         "driven: `exp`, and the three `scatter` fixtures in "
@@ -1472,3 +1477,709 @@ def test_an_assume_that_rounds_across_its_boundary_declines_over_Q():
     assert dict(report.adjudications).get(
         "exact-replay-outside-the-assumed-region", 0
     ) == counts["assume-unsatisfied-over-the-rationals"], report.adjudications
+
+
+# ------------------------------------- a reading of the program can be PARTIAL
+#
+# THE FOURTH DEFECT, AND THE RULE THAT CLOSES THE CLASS. Four audits found
+# four defects and they are one defect: a predicate licensing a claim about
+# the PROGRAM while being computed from something else. The first three are
+# pinned above (`test_the_ulp_proxy_is_gone_from_the_fire_condition_entirely`,
+# `test_an_int_declared_program_that_ROUNDS_is_not_integer_arithmetic`,
+# `test_the_integer_admission_IS_A_READING_OF_THE_PROGRAM_at_the_source`).
+#
+# The fourth adds a second half to the rule. Its predicate WAS computed
+# from the program — it was computed from PART of it. `_execute` iterates
+# `jaxpr.eqns` at the top level and hands a call equation whole to
+# `Primitive.bind`, so a `stelling_assume` inside a `jit` or `remat2` body
+# executes and never reaches `run.assumes`, and the gate `if run.assumes
+# and not all(...)` on an empty list admitted every point. `propagate` DOES
+# narrow on that assume — it is the whole reason the VERIFIED exists — so
+# the probe attacked points the analysis had claimed nothing about.
+#
+# So: a reading that may be partial is checked against what is in the
+# program before it licenses anything. Every quantity, not just this one.
+
+
+def nested_assume_harness(wrapper, dtype, lo, hi, bound):
+    """``assume(a >= bound)`` one call deep, and an assert that repeats it.
+
+    Over the declared box the obligation is TRUE **on the assumed region**
+    and false below it, so a ``VERIFIED`` is CORRECT and any firing is a
+    false alarm. Worked out by hand from the box and the arithmetic, not
+    by asking stelling: the assume admits exactly ``[bound, hi]`` and the
+    assert asserts exactly ``>= bound``, so the two coincide.
+    """
+
+    def harness():
+        x = any_array((), dtype, (lo, hi))
+        y = wrapper(lambda a: (assume(a >= bound), a)[1])(x)
+        return assert_(y >= bound)
+
+    return harness
+
+
+NESTED_ASSUME_SHAPES = [
+    # (label, wrapper, dtype, lo, hi, bound, semantics)
+    # the two branches of `_confirm` that return BEFORE the replay is
+    # consulted are the exposure, and they are reached by different
+    # programs: `exact-integer-arithmetic` by an integral one under
+    # `real`, `ieee-executed-float` by any program under `ieee`.
+    ("jit, integral, real", jax.jit, "int32", 0, 10, 9, "real"),
+    ("remat2, integral, real", jax.checkpoint, "int32", 0, 10, 9, "real"),
+    ("jit, float, ieee", jax.jit, "float32", 0.0, 10.0, 9.0, "ieee"),
+    ("remat2, float, ieee", jax.checkpoint, "float32", 0.0, 10.0, 9.0, "ieee"),
+]
+
+
+@pytest.mark.parametrize(
+    "label,wrapper,dtype,lo,hi,bound,semantics", NESTED_ASSUME_SHAPES
+)
+def test_an_assume_the_executed_walk_CANNOT_SEE_does_not_admit_a_point(
+    label, wrapper, dtype, lo, hi, bound, semantics
+):
+    """The fourth false alarm, in all four shapes that reach it.
+
+    ``_execute`` cannot see this assume, so the probe does not know whether
+    the point is inside the assumed region — and *"does not know"* is not
+    *"admitted"*. It declines by name, and the count says how many points
+    it declined, which is what stops the decline from reading as coverage.
+    """
+    harness = nested_assume_harness(wrapper, dtype, lo, hi, bound)
+    found, report = attack(harness, semantics=semantics)
+    assert found is None, (
+        f"[{label}] the probe raised 'stelling is UNSOUND' on a CORRECT "
+        f"VERIFIED: {found and found.render()}"
+    )
+    counts = dict(report.skips)
+    assert counts.get("assume-not-fully-executed", 0) > 0, (
+        f"[{label}] the point was not declined for the right reason: "
+        f"{counts}"
+    )
+    assert report.points_executed > 0, "nothing was executed; wrong fixture"
+    assert report.points_admissible == 0, (
+        f"[{label}] {report.points_admissible} point(s) counted as "
+        f"'admitted by every assume' while an assume went unread"
+    )
+
+
+@pytest.mark.parametrize(
+    "label,wrapper,dtype,lo,hi,bound,semantics", NESTED_ASSUME_SHAPES
+)
+def test_the_nested_assume_false_alarm_is_gone_through_the_public_door(
+    label, wrapper, dtype, lo, hi, bound, semantics
+):
+    """Five lines, no mutation, no solver, and it used to RAISE.
+
+    The probe's own entry point is where the repair lives, but the cost of
+    getting this wrong is paid at ``check()``, so that is where it is
+    pinned too: same verdict with the probe on as with it off.
+    """
+    harness = nested_assume_harness(wrapper, dtype, lo, hi, bound)
+    quiet = check(harness, vacuity_mode="inputs-only", semantics=semantics)
+    assert quiet.status == "VERIFIED", (
+        f"[{label}] the fixture does not reach the branch under test: "
+        f"{quiet.status}"
+    )
+    probed = check(
+        harness,
+        vacuity_mode="inputs-only",
+        semantics=semantics,
+        falsify="sample",
+    )
+    assert probed.status == "VERIFIED", probed.status
+
+
+def test_the_nested_assume_false_alarm_is_gone_at_the_other_two_doors():
+    """``check_contract`` and ``check_inductive_step`` mint VERIFIEDs too.
+
+    All three doors run the same ``_pipeline``, so all three reached the
+    false alarm. A repair pinned at one of them would be a repair whose
+    reach was an accident of which function carried the keyword.
+
+    **BOTH FIXTURES REACH IT, AND THE FIRST TWO DID NOT.** The inductive
+    step this test was written with had a float state and an assume that
+    the step did not need, and it returned VERIFIED at ``cefc4a9`` too —
+    a door assertion that could not fail, which is the shape this
+    repository keeps paying for. The float version is saved by the exact
+    replay (which descends and DOES see the nested assume, declining under
+    ``assume-unsatisfied-over-the-rationals``), so reaching the two
+    branches that return before the replay needs an INTEGRAL step: ``v *
+    2`` over ``int32 [0, 10]``, where the assume ``v <= 5`` is what keeps
+    the result inside the invariant. Both fixtures below are driven to
+    RAISE at ``cefc4a9``.
+    """
+    from stelling.contracts import Contract, check_contract
+    from stelling.inductive import check_inductive_step
+
+    harness = nested_assume_harness(jax.jit, "int32", 0, 10, 9)
+    verdict = check_contract(
+        Contract(
+            name="nested-assume",
+            requires_description="x >= 9 is assumed inside a jit body",
+            harness=harness,
+            ensures=None,
+            no_ensures_reason="this contract states no guarantee",
+        ),
+        vacuity_mode="inputs-only",
+        falsify="sample",
+    )
+    assert verdict.requires.status == "VERIFIED", verdict.requires.status
+
+    def step(state, constants):
+        # the assume is LOAD-BEARING: without it `v * 2` leaves [0, 10] at
+        # v = 10, and the step is integral throughout, so the violation is
+        # admitted by `exact-integer-arithmetic` before any replay
+        v = jax.jit(lambda a: (assume(a <= 5), a)[1])(state["v"])
+        return {"v": v * 2}
+
+    verdict = check_inductive_step(
+        step, {"v": ((0, 10), "int32")}, falsify="sample"
+    )
+    assert verdict.status == "VERIFIED", verdict.status
+    assert check_inductive_step(
+        step, {"v": ((0, 10), "int32")}
+    ).status == "VERIFIED", "the fixture does not reach the branch under test"
+
+
+def test_a_TOP_LEVEL_assume_still_gates_points_exactly_as_before():
+    """The repair must not be an off switch for the gate it repairs.
+
+    The same program with the assume left where users write it: points
+    below the assumed region are still declined under
+    ``assume-unsatisfied``, points inside it are still counted admissible,
+    and nothing declines under the new reason because nothing is unread.
+    """
+
+    def harness():
+        x = any_array((), "int32", (0, 10))
+        assume(x >= 9)
+        return assert_(x >= 9)
+
+    found, report = attack(harness)
+    assert found is None, found and found.render()
+    counts = dict(report.skips)
+    assert counts.get("assume-unsatisfied", 0) > 0, counts
+    assert "assume-not-fully-executed" not in counts, counts
+    assert report.points_admissible > 0, report.points_admissible
+
+
+def test_the_gate_still_FIRES_when_the_assume_admits_the_violating_point():
+    """And the other side: a genuinely false obligation still fires.
+
+    ``assume(x >= 5)`` admits ``x = 5`` and the obligation ``x >= 9`` is
+    false there, so the analysis discharging it would be a real
+    unsoundness and the probe must say so.
+    """
+
+    def harness():
+        x = any_array((), "int32", (0, 10))
+        assume(x >= 5)
+        return assert_(x >= 9)
+
+    found, report = attack(harness)
+    assert found is not None, f"the gate swallowed a real one: {report.skips}"
+    assert found.adjudication == "exact-integer-arithmetic", found.adjudication
+
+
+def test_a_declaration_the_probe_cannot_VARY_declines_the_whole_probe():
+    """``stelling_any`` one ``jit`` deep, which has no value to substitute.
+
+    ``_execute`` substitutes the sampled point at top-level ``stelling_any``
+    equations only; one inside a call body is bound instead, and
+    ``stelling_any`` has no implementation by design, so the program raises
+    at EVERY point. That was already a decline — under ``program-raised``,
+    a reason that names the USER's program for a limit of this walk, once
+    per point. The reading is partial, so it declines as a partial reading,
+    once, saying which.
+    """
+
+    def harness():
+        x = any_array((), "float64", (0.0, 1.0))
+        y = jax.jit(lambda: any_array((), "float64", (0.0, 1.0)))()
+        return assert_(x + y <= 2.0)
+
+    found, report = attack(harness)
+    assert found is None, found and found.render()
+    assert report.declined is not None, report.skips
+    assert "at the top level" in report.declined, report.declined
+    assert report.points_built == 0, report.points_built
+    assert "program-raised" not in dict(report.skips), report.skips
+
+
+def test_an_obligation_the_probe_cannot_SEE_declines_the_whole_probe():
+    """An ``assert_`` one ``jit`` deep: the probe cannot pair the indices.
+
+    This declines today through the OTHER guard — the analysis descends,
+    reports two obligations, and the pairing check refuses one top-level
+    assert against two statuses. That guard is computed from what the
+    ANALYSIS did; this one is computed from the PROGRAM, and it is the
+    second that survives the analysis changing its mind about nested
+    obligations. Both are asserted, in that order, because a guard that
+    only ever fires behind another guard is a guard nobody has driven.
+    """
+
+    def harness():
+        x = any_array((), "float64", (0.0, 10.0))
+        y = jax.jit(lambda a: (assert_(a >= 0.0), a)[1])(x)
+        return assert_(y <= 10.0)
+
+    import stelling.falsify as F
+
+    census = F._census(harness)
+    assert len(census.assert_positions) == 1, census.assert_positions
+    assert census.obligations_in_program == 2, census.obligations_in_program
+
+    # the pairing guard, when the analysis's count is what disagrees
+    found, report = attack(harness, n=2)
+    assert found is None and report.declined is not None
+    assert "cannot pair them" in report.declined, report.declined
+
+    # and the program-side guard, when it is not
+    found, report = attack(harness, n=1)
+    assert found is None and report.declined is not None
+    assert "at the top level" in report.declined, report.declined
+
+
+def test_every_census_quantity_has_a_totality_guard():
+    """THE TEST THAT FAILS WHEN A FIFTH QUANTITY ARRIVES WITHOUT A GUARD.
+
+    Four audits, four defects, one class — and the fourth was reachable
+    because two of this module's readings had a totality guard and nobody
+    had asked for the rest. Asserts had ``obligation-count-changed``;
+    declarations had *"the harness declares no inputs to vary"*, which
+    catches zero and not partial; assumes had nothing at all.
+
+    Patching the fourth instance does not close the class, so what is
+    pinned here is the RULE rather than the instance: every field of
+    ``_Census`` and of ``_Run`` appears in ``_READINGS`` with either the
+    decline a partial reading produces, or a written argument that this
+    reading cannot license anything. A new field arrives red.
+
+    This test cannot know whether a `why` is a GOOD argument. It can know
+    that somebody had to write one down, in the file, next to the field,
+    where a reviewer meets it — which is the difference between a decision
+    and an omission.
+    """
+    from dataclasses import fields
+
+    import stelling.falsify as F
+
+    declared = {(r.subject, r.name) for r in F._READINGS}
+    actual = {("census", f.name) for f in fields(F._Census)}
+    actual |= {("run", f.name) for f in fields(F._Run)}
+
+    unguarded = actual - declared
+    assert not unguarded, (
+        f"{sorted(unguarded)} is read off the program and has no entry in "
+        f"stelling.falsify._READINGS. Give it the totality guard that "
+        f"declines when the reading is partial, or record in `why` the "
+        f"argument that it cannot license a claim. This module has shipped "
+        f"four predicates that licensed a claim about the program while "
+        f"being computed from something else; the fourth was a reading "
+        f"taken at the top level of a jaxpr that has more than one level."
+    )
+    stale = declared - actual
+    assert not stale, f"_READINGS names {sorted(stale)}, which is not a field"
+
+    for r in F._READINGS:
+        assert (r.guard is None) != (not r.why), (
+            f"{r.subject}.{r.name} must have exactly one of a guard and a "
+            f"written exemption, and has guard={r.guard!r} why={r.why!r}"
+        )
+        if r.guard is not None:
+            assert (
+                r.guard in DECLINE_REASONS or r.guard in F._WHOLE_PROBE_GUARDS
+            ), (
+                f"{r.subject}.{r.name}'s guard {r.guard!r} is neither a "
+                f"listed decline reason nor a listed whole-probe decline"
+            )
+        else:
+            # a floor, so that "no guard needed" cannot be discharged with
+            # a word. It is not a quality bar and does not pretend to be;
+            # it is the difference between an argument and a shrug.
+            assert len(r.why) >= 60, (
+                f"{r.subject}.{r.name} claims it needs no totality guard "
+                f"on {r.why!r}, which is too short to be the argument"
+            )
+        assert r.depth in ("top-level", "every-depth", "the-program-itself")
+
+
+def test_the_guards_named_in_the_readings_table_are_LIVE_in_the_source():
+    """A table of guards is worth exactly as much as a name list nothing checks.
+
+    This module has been here before: ``_CALL_PRIMITIVES`` named four jax
+    primitives that do not exist, under a comment describing what it
+    would do if they did, and nothing failed for a batch. So each guard
+    ``_READINGS`` claims is grepped for in ``falsify.py`` — the point-level
+    ones as a ``skips.add`` literal, the whole-probe ones as the sentence
+    the user is shown.
+    """
+    import stelling.falsify as F
+
+    source = PROBE_SRC.read_text(encoding="utf-8")
+
+    # the whole-probe guards emit a SENTENCE rather than a code, so what is
+    # grepped for is the comparison that produces it: the reading against
+    # the every-depth total. Without this the table could name a guard the
+    # code had stopped taking.
+    comparisons = {
+        "declarations":
+            "len(census.declarations) != census.declarations_in_program",
+        "assert_positions":
+            "len(census.assert_positions) != census.obligations_in_program",
+        "assumes": "len(run.assumes) != census.assumes_in_program",
+    }
+    for r in F._READINGS:
+        if r.guard is None:
+            continue
+        if r.name in comparisons:
+            assert comparisons[r.name] in source, (
+                f"_READINGS says {r.subject}.{r.name} is guarded and "
+                f"falsify.py no longer contains "
+                f"`{comparisons[r.name]}`"
+            )
+        if r.guard in F._WHOLE_PROBE_GUARDS:
+            continue
+        assert (
+            f'skips.add("{r.guard}")' in source
+            or f'return None, "{r.guard}"' in source
+        ), (
+            f"_READINGS says {r.subject}.{r.name} declines under "
+            f"{r.guard!r} and nothing in falsify.py emits it"
+        )
+
+
+def test_the_EXECUTED_walk_does_not_descend_into_call_bodies():
+    """AND HERE IS WHY, BECAUSE THE OBVIOUS REPAIR IS TO MAKE IT DESCEND.
+
+    ``_execute`` and ``_replay`` are two walkers with different depth
+    behaviour and all four of this module's defects have lived in the gap.
+    The tempting reconciliation is to make ``_execute`` descend the way
+    ``_replay`` already does, which would keep the reach the totality guard
+    costs. **It is not available: descending changes the program.**
+
+    ``Primitive.bind`` on a call equation compiles the WHOLE body and XLA
+    may contract across the equations inside it; walking those equations
+    one at a time asks jax for each primitive separately and gets no
+    contraction. This test drives the disagreement rather than describing
+    it: with ``c = -fl(a*b)``, the descended walk returns exactly ``0.0``
+    and the bound call returns the rounding error of the product — **a
+    SIGN disagreement**, and a sign is what an obligation ``>= 0`` reads.
+
+    If ``_execute`` descended, the ``ieee`` branch of ``_confirm`` would be
+    firing on *"the executed float IS the subject of the claim"* about a
+    float the user's program never computes: the fifth instance of the
+    class, manufactured by the repair for the fourth. So the walkers are
+    reconciled by MEASUREMENT — each reading checked against a census taken
+    at every depth — and not by merging.
+
+    **AND THAT IS DRIVEN AND NOT ARGUED.** A descending ``_execute`` was
+    written out in full and run: it does fix the four false alarms this
+    batch is about, and on the fixture in the second half of this test it
+    raises *"FALSIFICATION PROBE FIRED — stelling is UNSOUND at this
+    query"* under ``ieee-executed-float`` at a point where the user's
+    program satisfies the obligation. Both halves of this test kill it.
+    """
+    import stelling.falsify as F
+
+    def walk_descending(jaxpr, consts, args):
+        env = {}
+
+        def read(a):
+            return a.val if isinstance(a, F.jex_core.Literal) else env[a]
+
+        for v, c in zip(jaxpr.constvars, consts):
+            env[v] = c
+        for v, a in zip(jaxpr.invars, args):
+            env[v] = a
+        for eqn in jaxpr.eqns:
+            ins = [read(a) for a in eqn.invars]
+            if eqn.primitive.name in F._CALL_PRIMITIVES:
+                body, body_consts = F._call_jaxpr_of(eqn)
+                outs = walk_descending(body, body_consts, ins)
+            else:
+                out = eqn.primitive.bind(*ins, **eqn.params)
+                outs = out if eqn.primitive.multiple_results else [out]
+            for var, o in zip(eqn.outvars, outs):
+                env[var] = o
+        return [read(a) for a in jaxpr.outvars]
+
+    flips = 0
+    tried = 0
+    for a_, b_ in ((0.61446244, 1.6698782), (1.1576139, 1.5851978),
+                   (1.9669843, 1.3077438)):
+        a = jnp.asarray(a_, "float32")
+        b = jnp.asarray(b_, "float32")
+        c = jnp.asarray(-np.asarray(a * b), "float32")
+        closed = jax.make_jaxpr(jax.jit(lambda p, q, r: p * q + r))(a, b, c)
+        # `_execute`'s policy: the call goes whole to `bind`
+        env = {}
+        for v, x in zip(closed.jaxpr.invars, (a, b, c)):
+            env[v] = x
+        eqn = closed.jaxpr.eqns[0]
+        assert eqn.primitive.name in F._CALL_PRIMITIVES, eqn.primitive.name
+        bound = np.asarray(
+            eqn.primitive.bind(*[env[v] for v in eqn.invars], **eqn.params)
+        )
+        descended = np.asarray(
+            walk_descending(closed.jaxpr, closed.consts, (a, b, c))[0]
+        )
+        tried += 1
+        flips += np.sign(bound) != np.sign(descended)
+
+    assert flips == tried, (
+        f"only {flips} of {tried} of these bodies still disagree in SIGN "
+        f"between the compiled call and an op-by-op walk of its body. That "
+        f"is the measurement this module's depth policy rests on; if this "
+        f"jax no longer contracts, re-derive the argument in `_execute` "
+        f"before changing the policy, do not just delete this test."
+    )
+
+    # AND THE COST OF DESCENDING, AT THE PROBE, ON A PROGRAM WHOSE
+    # OBLIGATION IS TRUE.  `c` is exactly `-fl32(a0 * b)`, so the body
+    # computes the rounding error of the product: nonzero when the call is
+    # compiled and exactly zero when its body is walked op by op. `y != 0`
+    # therefore HOLDS at every declared point of the real program and FAILS
+    # at every point of the descended one. Measured with a descending
+    # `_execute` in place: FIRED, `ieee-executed-float`, at
+    # a = 1.9669841527938843, where the program computes -9.491779e-08.
+    a0 = np.float32(1.9669843)
+    b0 = np.float32(1.3077438)
+    c0 = np.float32(-np.float32(a0 * b0))
+    box = (float(np.nextafter(a0, np.float32(-np.inf))), float(a0))
+    prod = jax.jit(lambda p, q, r: p * q + r)
+
+    def rounding_error_of_a_product():
+        a = any_array((), "float32", box)
+        return assert_(prod(a, jnp.float32(b0), jnp.float32(c0)) != 0.0)
+
+    for endpoint in box:
+        computed = np.asarray(
+            prod(np.float32(endpoint), b0, c0)
+        )
+        assert computed != 0, (
+            f"at a = {endpoint!r} this jax computes {float(computed)!r} for "
+            f"the rounding error of a product, so the fixture no longer "
+            f"states something the program satisfies"
+        )
+
+    found, report = attack(rounding_error_of_a_product, semantics="ieee")
+    assert found is None, (
+        f"the probe raised 'stelling is UNSOUND' about an obligation the "
+        f"program SATISFIES at that point: {found and found.render()}"
+    )
+    assert report.points_executed > 0, report.declined
+
+    # and the policy itself, at the source: the loop binds the call
+    src = PROBE_SRC.read_text(encoding="utf-8")
+    body = src.split("def _execute(", 1)[1].split("\ndef ", 1)[0]
+    assert "_call_jaxpr_of" not in body, (
+        "`_execute` now descends into call bodies. Read its docstring: the "
+        "executed float stops being the one the user's program computes, "
+        "and `ieee-executed-float` licenses a firing on exactly that."
+    )
+
+
+def test_a_float_step_hidden_in_a_STRUCTURED_body_is_not_integer_arithmetic():
+    """``_integral_program`` recurses UNCONDITIONALLY, and that is the pin.
+
+    ``test_the_integer_admission_IS_A_READING_OF_THE_PROGRAM_at_the_source``
+    asserts that ``_integral_program`` calls itself somewhere. It does not
+    assert that the recursion is unconditional, and a mutant that restricts
+    it to ``if eqn.primitive.name in _CALL_PRIMITIVES`` survives the whole
+    falsify suite while answering **True** for each of the three programs
+    below — every one of which converts to float32 and rounds inside a
+    ``cond`` arm, a ``scan`` body or a ``while`` body, behind an
+    all-integer signature.
+
+    Not exploitable today: ``propagate`` returns UNKNOWN on all three, so
+    no VERIFIED exists for the probe to attack. That is a fact about
+    another module, which is exactly the kind of fact this file does not
+    lean on — the third defect was a predicate that was *"correlated with
+    the thing it stood for"*, and *"nothing reaches it"* is the same
+    argument one level out.
+    """
+    import stelling.falsify as F
+
+    def rounds(a):
+        y = a.astype("float32")
+        b = jnp.float32(2 ** 24)
+        return ((b + y) - b).astype("int32")
+
+    def in_a_cond():
+        x = any_array((), "int32", (0, 3))
+        return assert_(jax.lax.cond(x > 1, rounds, lambda a: a, x) <= 3)
+
+    def in_a_scan():
+        x = any_array((), "int32", (0, 3))
+        out, _ = jax.lax.scan(
+            lambda c, _: (rounds(c), 0), x, jnp.zeros((2,), "int32")
+        )
+        return assert_(out <= 3)
+
+    def in_a_while():
+        x = any_array((), "int32", (0, 3))
+        out = jax.lax.while_loop(
+            lambda s: s[1] < 1,
+            lambda s: (rounds(s[0]), s[1] + 1),
+            (x, jnp.int32(0)),
+        )[0]
+        return assert_(out <= 3)
+
+    for name, harness in (
+        ("cond", in_a_cond), ("scan", in_a_scan), ("while", in_a_while)
+    ):
+        closed = jax.make_jaxpr(harness)()
+        # the fixture is only interesting if the OUTER program is integral
+        assert all(
+            F._integral_atom(atom)
+            for eqn in closed.jaxpr.eqns
+            for atom in (*eqn.invars, *eqn.outvars)
+        ), f"[{name}] the float step is not hidden; wrong fixture"
+        assert F._integral_program(closed.jaxpr) is False, (
+            f"[{name}] a float32 rounding step inside a {name} body is "
+            f"called 'exact integer arithmetic: no rounding involved'"
+        )
+        assert F._census(harness).integral is False, name
+
+    # and at the source, so the shape of the mutant is refused and not just
+    # the three programs someone thought of: the recursion is a direct
+    # statement of the equation loop, never guarded by a primitive name
+    import ast
+
+    tree = ast.parse(PROBE_SRC.read_text(encoding="utf-8"))
+    fn = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_integral_program"
+    )
+    eqn_loop = next(
+        n for n in fn.body
+        if isinstance(n, ast.For) and "eqns" in ast.unparse(n.iter)
+    )
+    assert any(
+        isinstance(stmt, ast.For) and "_sub_jaxprs" in ast.unparse(stmt.iter)
+        for stmt in eqn_loop.body
+    ), (
+        "`_integral_program`'s recursion is no longer an unconditional "
+        "statement of its equation loop. A recursion restricted to "
+        "`_CALL_PRIMITIVES` answers True for a float step inside a "
+        "`cond`/`scan`/`while` body."
+    )
+
+
+def test_a_point_no_assume_admitted_is_not_counted_as_ADMITTED_BY_EVERY_ASSUME():
+    """The stamp line contradicted itself in one sentence, and this is it.
+
+    Measured on the fixture below at ``cefc4a9``: *"74 point(s) executed,
+    65 inside the declared set and admitted by every assume ... declined 39
+    assume-unsatisfied-over-the-rationals"*. Thirty-nine of the
+    sixty-five were points the exact replay had just said NO assume
+    admitted — the reads-as-coverage failure this module's docstring exists
+    to prevent, in the module's own headline number.
+
+    The two readings run at different times: the float gate admits the
+    point, and only the replay, which runs where the float found a
+    violation, can say otherwise. So the count is TAKEN BACK. It is not
+    moved to ``points_declined`` either — that number means *"an admissible
+    violation the probe would not stand behind"*, and this point was never
+    admissible.
+    """
+
+    def rounding_assume():
+        y = any_array((), "float64", (0.0, 2.0))
+        assume(y * 0.1 * 10.0 <= y)
+        s = 1e16
+        return assert_((s + y) - s <= y)
+
+    found, report = attack(rounding_assume)
+    assert found is None, found and found.render()
+    counts = dict(report.skips)
+    outside = counts.get("assume-unsatisfied-over-the-rationals", 0)
+    assert outside > 0, counts
+
+    # EVERY skip this fixture produces is a whole-POINT decline — no
+    # obligation-level one, which could legitimately fire more than once at
+    # a point that IS admissible — so the three numbers have to add up
+    # exactly. Asserted rather than assumed, so that a fixture drifting
+    # into a mixed regime turns this red instead of passing by luck.
+    assert set(counts) <= {
+        "assume-unsatisfied", "assume-unsatisfied-over-the-rationals"
+    }, counts
+    accounted = report.points_admissible + sum(counts.values())
+    assert accounted == report.points_built, (
+        f"{report.points_built} built, {report.points_admissible} counted "
+        f"admissible and {sum(counts.values())} declined: {accounted}"
+    )
+    assert report.points_declined == 0, (
+        f"{report.points_declined} point(s) reported as admissible "
+        f"violations the probe would not stand behind, when no assume "
+        f"admitted them"
+    )
+    line = report.stamp_line()
+    assert "EXECUTED VIOLATION(S) WERE DECLINED" not in line, line
+    assert f"{report.points_admissible} inside the declared set" in line, line
+
+
+ORDINARY_WRAPPERS = [
+    ("plain", lambda a: a * 2.0),
+    ("jit", jax.jit(lambda a: a * 2.0)),
+    ("jit in jit", jax.jit(lambda a: jax.jit(lambda b: b * 2.0)(a))),
+    ("checkpoint", jax.checkpoint(lambda a: a * 2.0)),
+    ("cond", lambda a: jax.lax.cond(
+        a > 0.5, lambda b: b * 2.0, lambda b: b, a)),
+    ("scan", lambda a: jax.lax.scan(
+        lambda c, _: (c * 1.0, 0.0), a, jnp.zeros((2,)))[0]),
+    ("while", lambda a: jax.lax.while_loop(
+        lambda s: s[1] < 1, lambda s: (s[0] * 1.0, s[1] + 1), (a, 0))[0]),
+    ("grad", jax.grad(lambda a: (a * 2.0).sum())),
+]
+
+
+@pytest.mark.parametrize("name,wrapper", ORDINARY_WRAPPERS)
+def test_the_totality_walk_counts_each_declaration_ONCE(name, wrapper):
+    """A guard that OVER-counts declines programs that are perfectly fine.
+
+    ``_declaration_totals`` walks through ``_sub_jaxprs``, which follows a
+    jaxpr wherever a PARAMETER carries one — and a primitive that carried
+    the same body under two parameter keys would be counted twice, so the
+    executed run's reading would always come up short and the probe would
+    decline every such program under ``assume-not-fully-executed``. That is
+    the conservative direction and therefore the direction nobody notices:
+    it costs reach silently.
+
+    So the total is compared against the top-level count on ordinary jax
+    constructs, where they must agree exactly because nothing is nested,
+    and against what ``_execute`` actually reads.
+    """
+    import stelling.falsify as F
+
+    def harness():
+        x = any_array((), "float64", (0.0, 1.0))
+        assume(x >= 0.0)
+        return assert_(jnp.sum(wrapper(x)) >= 0.0)
+
+    closed = jax.make_jaxpr(harness)()
+    totals = F._declaration_totals(closed.jaxpr)
+    top = {
+        n: sum(1 for e in closed.jaxpr.eqns if e.primitive.name == n)
+        for n in totals
+    }
+    assert totals == top, (
+        f"[{name}] the every-depth walk counts {totals} where the top level "
+        f"has {top}; a declaration counted twice declines a program the "
+        f"probe could read"
+    )
+
+    census = F._read(closed)
+    run = F._execute(census, [jnp.asarray(np.float64(0.5))])
+    assert run.raised is None, run.raised
+    assert len(run.assumes) == census.assumes_in_program == 1, (
+        f"[{name}] the executed run read {len(run.assumes)} assume(s) "
+        f"against a census of {census.assumes_in_program}"
+    )
+
+    found, report = attack(harness)
+    assert found is None, found and found.render()
+    assert "assume-not-fully-executed" not in dict(report.skips), report.skips
+    assert report.declined is None, report.declined
