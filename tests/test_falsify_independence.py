@@ -263,6 +263,13 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
     docstring that stood here named the first of these two and not the
     second.
     """
+    # THE SUBPROCESS THIS TEST SPAWNS IMPORTS jax, so the test is a
+    # statement about a jax-bearing environment and skips without one.
+    # Its two siblings below already gate this way; this one did not, and
+    # the zero-dep CI lane read the subprocess's ModuleNotFoundError as
+    # "the probe subprocess failed" -- a red lane naming the wrong cause.
+    pytest.importorskip("jax")
+
     script = textwrap.dedent(
         '''
         import os, sys, types
