@@ -99,8 +99,17 @@ faithful to what you wrote. JAX silently wraps out-of-range integer
 constants before they reach the jaxpr — if your code has one, the verifier
 is correct about a program you did not write. Enable the
 [overflow tripwire](overflow-tripwire.md) (`pytest -p stelling.overflow`)
-and a VERIFIED with the tripwire armed means both: the trace is faithful
-AND the property holds.
+and a VERIFIED with the tripwire armed says the property holds AND that no
+narrowing was seen **on the routes the tripwire watches**.
+
+That last clause is load-bearing, and this is the on-ramp, so here is the
+short version of it: the watched set is finite and the unwatched one is
+real. `jnp.full(shape, N, dt)` — and everything built on it, and everything
+numpy narrows before jax is involved — destroys the constant where nothing
+can see it, and that program still gets a VERIFIED. Both sets are
+enumerated door by door, and measured rather than asserted, in
+[the tripwire's coverage table](overflow-tripwire.md#what-it-does-not-find);
+read it before you rely on a VERIFIED as a statement about your source.
 
 ## 2. The three judgments
 

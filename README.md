@@ -75,8 +75,18 @@ actively suppresses the signal that something is wrong.
 
 The tripwire detects this at trace time, and the static verifier refuses to
 certify a trace it flagged — the verdict is UNKNOWN with a note naming what
-was narrowed. A VERIFIED with the tripwire armed is a statement that the
-trace is faithful to what was written AND that the property holds.
+was narrowed. It also refuses, in different words, when it could not watch
+the whole trace: "no narrowing was seen" and "no narrowing occurred" are
+different claims and only the second one licenses a VERIFIED.
+
+So a VERIFIED with the tripwire armed says the property holds AND that no
+narrowing was seen on any route the tripwire watches. **That last clause is
+load-bearing and the watched set is finite**: constants that numpy destroys
+before jax is involved — `jnp.full(shape, N, dt)` is the one to know — are
+narrowed where nothing can see it. The watched and unwatched routes are
+enumerated door by door, and the enumeration is measured rather than
+asserted, in
+[`docs/overflow-tripwire.md`](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md).
 
 ---
 

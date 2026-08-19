@@ -117,6 +117,26 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     found one), or ``UNKNOWN`` — never guessed; anything the analysis
     could not decide says so, with the reason quoted in the notes.
 
+    **With the overflow tripwire armed** (``pytest -p stelling.overflow``)
+    this call also runs the trace gate, which refuses to judge a jaxpr that
+    does not represent the program as written — and refuses, separately and
+    in different words, when it could not watch the whole trace. Making the
+    watch complete against jax's caches costs one ``jax.clear_caches()``
+    per call, which is process-global and drops the caller's own compiled
+    functions;
+    ``docs/overflow-tripwire.md`` prices it. Nothing of this happens when
+    the tripwire is not armed, which is the default.
+
+    The gate watches a FINITE set of routes by which a constant can be
+    narrowed, and its silence is worth exactly that set: routes such as
+    ``jnp.full(shape, N, dt)`` destroy the constant before the watched site
+    and are VERIFIED with zero fires. The eviction closes the warm-cache
+    route against jax's own caches in a single-threaded process, and no
+    further — a memo jax does not own, or a competing thread, is outside
+    it. Both lists are enumerated, with their measurements, in
+    ``stelling._tripwire.report.UNCOVERED`` and in
+    ``tests/test_tripwire_gate_coverage.py::GATE_COVERAGE``.
+
     ``vacuity_mode`` is **required** (no default — the two registered
     procedures answer different questions, and a silently-picked mode
     would let a caller run the wrong one without saying so; see
@@ -225,6 +245,20 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     re-check at the same pipeline depth (refined iff the original
     refined, escalated iff the original escalated).
 
+    THE TRACE GATE, when the overflow tripwire is armed, has THREE states
+    and not two: observed-and-clean proceeds, observed-and-narrowed refuses
+    with ``trace unfaithful``, and NOT-FULLY-OBSERVED refuses in its own
+    words. The third exists because the gate's silence is evidence of
+    nothing when part of the trace was replayed from a cache or the
+    instrument stopped watching, and reporting that as "0 narrowings
+    detected" — or, as B14 left it, as "1 narrowing detected" — describes a
+    measurement nobody made. Observation is made complete — with respect to
+    JAX's caches, in a single-threaded process, which is the whole of what
+    is claimed — by EVICTING those caches rather than by detecting
+    incompleteness; the comment at the gate carries the measurement that
+    decides between those, and ``_tripwire.report.UNCOVERED`` carries what
+    the two qualifiers leave outside.
+
     Returns ``(verdict, closed)``: exactly the verdict :func:`check`
     returns (behavior-identical extraction — check() is this helper with
     the traced query dropped), plus the traced :class:`stelling.ir`
@@ -289,31 +323,75 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
         raise ValueError(LIBM_BUDGET_REAL_MODE_REFUSAL)
 
     from stelling._tripwire import (
-        _pop_gate, _push_gate, fires_count as _fires_count,
+        _pop_gate, _push_gate, evict_trace_caches as _evict_trace_caches,
+        fires_count as _fires_count,
     )
     from stelling._tripwire import _adapter_jax as _adapter
 
+    # THE GATE HAS THREE STATES, NOT TWO (B15). It used to have two — clean
+    # and narrowed — and read its own silence as the first of them. It is not:
+    # a `@jax.jit` helper whose trace cache some earlier trace already warmed
+    # is REPLAYED, not traced, so the fold rule never runs over its body and
+    # the gate's zero establishes "I observed no narrowing", never "no
+    # narrowing occurred". Measured on jax 0.11.0: one harness with a jitted
+    # helper, checked four times, gives UNKNOWN then three VERIFIEDs; two
+    # DIFFERENT harnesses sharing one jitted helper give UNKNOWN then a WRONG
+    # VERIFIED about a program whose constant was destroyed.
+    #
+    # The fix is EVICTION, not detection, and that is a measurement rather
+    # than a preference: `jax.jit(f, inline=True)` replays a warm body and
+    # leaves NO nested jaxpr behind to detect the replay by, and jax publishes
+    # no per-jit trace counter on a public surface. Emptying the cache first
+    # makes the observation complete WITH RESPECT TO JAX'S CACHES, IN A
+    # SINGLE-THREADED PROCESS. It empties jax's caches and no others, so a
+    # constant narrowed into a memo jax does not own (`jaxpr_as_fun` over a
+    # saved jaxpr, a user `lru_cache`, `jax.closure_convert`) is still
+    # unobserved; and jax's cache is process-global while this counter is
+    # per-thread, so a competing thread can re-warm a body inside the
+    # eviction-to-trace window — measured 0/400 wrong VERIFIED
+    # single-threaded and 247/400 with four competing threads, against
+    # 399/400 before the eviction existed. Both are disclosed with their
+    # numbers in `report.UNCOVERED`. The third state is for when even the
+    # eviction could not be done — see `unobserved` below.
     armed = _fires_count() is not None
+    unobserved = None
     if armed:
         recorder_before = _adapter._installed.get("recorder")
+        eviction = _evict_trace_caches()
         _push_gate()
         try:
-            # Fresh closure defeats jax.make_jaxpr's identity cache, ensuring
-            # the fold rule fires fresh and the gate can observe narrowings.
+            # Fresh closure defeats jax.make_jaxpr's identity cache; the
+            # eviction above defeats every trace cache BELOW it, which the
+            # fresh closure never reached.
             cj = trace(lambda: harness())
         finally:
             narrowings = _pop_gate()
-        # If the recorder changed (disarm/rearm during trace) or the tripwire
-        # was disarmed, the wrapper may have stopped firing mid-trace while
-        # narrowings had already occurred. Refuse to certify.
+        # Two ways the watch can be PARTIAL, and neither is a narrowing. The
+        # recorder changing identity, or the tripwire being disarmed, means
+        # the wrapper stopped counting partway through; a failed eviction
+        # means it never got to see the cached regions at all. Both are
+        # "we did not look", and B14's `narrowings = max(narrowings, 1)` said
+        # "1 integer narrowing(s) detected" about the first of them — sending
+        # a reader to hunt a narrowed constant that was never observed.
         recorder_after = _adapter._installed.get("recorder")
         if recorder_after is not recorder_before or _fires_count() is None:
-            narrowings = max(narrowings, 1)
+            unobserved = (
+                "the overflow tripwire stopped watching partway through this "
+                "trace (it was disarmed, or re-armed onto a different "
+                "recorder, while the harness was being traced)"
+            )
+        elif eviction != "evicted":
+            unobserved = (
+                f"jax's trace caches could not be emptied before this trace "
+                f"({eviction}), so any jit helper whose cache was already "
+                f"warm was replayed from that cache instead of being traced "
+                f"under the instrument"
+            )
     else:
         cj = trace(harness)
         narrowings = 0
 
-    if narrowings > 0:
+    if narrowings > 0 or unobserved is not None:
         from stelling.verdict import Stamp, Verdict, solver_absent
 
         versions = dict(
@@ -321,12 +399,35 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
             jax_version=jax_version(),
             precision_config=f"jax_enable_x64={x64_enabled()}",
         )
-        reason = (
-            f"trace unfaithful: {narrowings} integer narrowing(s) detected "
-            f"during tracing — the jaxpr does not represent the program as "
-            f"written. Enable the overflow tripwire (pytest -p stelling."
-            f"overflow) to see which constants were narrowed."
-        )
+        if narrowings > 0:
+            reason = (
+                f"trace unfaithful: {narrowings} integer narrowing(s) "
+                f"detected during tracing — the jaxpr does not represent the "
+                f"program as written. Enable the overflow tripwire (pytest -p "
+                f"stelling.overflow) to see which constants were narrowed."
+            )
+            if unobserved is not None:
+                # The count is a floor, and saying so is the whole point of
+                # keeping the third state separate: a reader who fixes the
+                # narrowing this names must not read the next clean run as
+                # proof there was only one.
+                reason += (
+                    f" That count is a LOWER BOUND and not a total: part of "
+                    f"this trace was not observed at all — {unobserved}."
+                )
+        else:
+            # THE THIRD STATE GETS ITS OWN SENTENCE. "No narrowing was seen"
+            # and "no narrowing occurred" are different claims and only the
+            # first one was ever established here; a reader sent to look for a
+            # narrowed constant, when the real answer is that nobody looked,
+            # has been sent to the wrong place.
+            reason = (
+                f"trace NOT FULLY OBSERVED: the overflow tripwire could not "
+                f"watch all of this trace, so this run has no evidence either "
+                f"way about the part it did not watch. THIS IS NOT A REPORT "
+                f"THAT A CONSTANT WAS NARROWED — none was seen, and none was "
+                f"seen not to be. Cause: {unobserved}."
+            )
         stamp = Stamp(
             stelling_version=versions["stelling_version"],
             jax_version=versions["jax_version"],

@@ -572,6 +572,75 @@ def _gate_fire_stack() -> list[int]:
         return _gate_fire_local.stack
 
 
+def evict_trace_caches() -> str:
+    """Empty jax's trace caches so the NEXT trace re-traces what they hold.
+
+    ``evicted``
+        the caches are gone; every jit body the next trace enters will be
+        traced again, under the instrument.
+    ``no-module``
+        jax is not importable, so there is nothing to instrument anyway.
+    ``no-clear-caches``
+        this jax has no ``clear_caches``. Nothing was evicted, so a caller
+        that needs COMPLETE observation has not got it and must say so.
+    ``unexpected:<ExcType>``
+        it raised. Same conclusion.
+
+    WHY EVICTION AND NOT DETECTION, in the one paragraph a reader needs before
+    the cost. jax's trace cache is keyed on the jitted callable and its avals,
+    so a ``@jax.jit`` helper that some earlier trace already warmed is REPLAYED
+    rather than traced: the const-fold rule never runs over its body and the
+    gate sees a clean zero for a region it did not watch. Detecting that from
+    the outside was measured and does not work -- ``jax.jit(f, inline=True)``
+    hides the replay and leaves NO nested jaxpr in the enclosing jaxpr to
+    detect it by, and jax publishes no per-jit trace counter on a public
+    surface (``_cache_size``/``_clear_cache`` are private; ``clear_cache()`` is
+    public but clears rather than reports and cannot be enumerated;
+    ``jax.explain_cache_misses`` logs MISSES, and the state that matters here
+    is a HIT). Emptying the cache makes the observation complete by
+    construction instead -- within the bounds of the next paragraph -- and
+    needs no detector to be right.
+
+    WHAT "COMPLETE" DOES NOT COVER, because the word invites more than it
+    earns. This empties JAX'S caches: a value narrowed into a memo jax does
+    not own survives it, and three constructs measured on jax 0.11.0 return
+    VERIFIED with 0 fires through it -- ``jax.extend.core.jaxpr_as_fun`` over
+    a saved jaxpr, a user ``functools.lru_cache`` holding an eagerly narrowed
+    value, and ``jax.closure_convert``, a public jax API that traces at setup
+    and hoists the narrowed constant. And jax's cache is PROCESS-GLOBAL while
+    the gate's fire counter is per-thread, so the window between this call
+    and the trace it protects is not atomic: measured 0/400 wrong VERIFIED
+    single-threaded and 247/400 with four threads re-warming the same jitted
+    helper (399/400 before this existed). Single-threaded, against jax's own
+    caches, it is complete; outside that it is an improvement.
+
+    WHAT IT COSTS, because it is a process-global side effect and the caller
+    is entitled to know. ``jax.clear_caches()`` also drops the CALLER's
+    compiled functions. The call itself SCALES WITH HOW MANY JITTED
+    FUNCTIONS ARE LIVE, so "populated" is not a number: measured on jax
+    0.11.0 (median of 12), 0.049ms empty, 1.4ms with one live jit, 8.3ms
+    with ten, and 41.8ms (39.6-48.3) with fifty. On top of that the next
+    call to a jitted function the caller still wanted pays its whole
+    trace-and-compile again -- 18ms for a trivial one, 330ms for a
+    200-primitive chain. This runs only when the tripwire is ARMED, which is
+    opt-in, and ``docs/overflow-tripwire.md`` prices it there.
+
+    Nothing jax-shaped leaves this function: it returns a string.
+    """
+    try:
+        from stelling._jax_compat import jax as _jax  # public jax, via the boundary
+    except Exception:  # noqa: BLE001
+        return "no-module"
+    clear = getattr(_jax, "clear_caches", None)
+    if clear is None:
+        return "no-clear-caches"
+    try:
+        clear()
+    except Exception as exc:  # noqa: BLE001
+        return f"unexpected:{type(exc).__name__}"
+    return "evicted"
+
+
 def _make_wrapper(original, recorder: record.Recorder, jaxroot: str):
     """Build the recording wrapper. Nothing in here may raise into a trace.
 

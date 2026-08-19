@@ -83,12 +83,19 @@ UNCOVERED = (
     "receives something IN RANGE and does not fire -- AND THE VISIT IS "
     "COUNTED IN THE DENOMINATOR ABOVE, which is why a large denominator is "
     "not evidence of coverage: `jnp.full(shape, N, dt)`, "
-    "`jnp.full_like(x, N)`, `lax.convert_element_type(N, dt)`, "
+    "`jnp.full_like(x, N)`, `lax.full(shape, N, dt)`, "
+    "`lax.full_like(x, N)`, `lax.convert_element_type(N, dt)`, "
     "`lax.select(p, jnp.full(shape, N, dt), x)`, "
-    "`jnp.take(x, i, mode='fill', fill_value=N)`, and an operand that was "
-    "already an array (the rule declines to fold non-scalars). numpy "
+    "`jnp.stack([x, jnp.full(shape, N, dt)])` and anything else built on "
+    "`full`, `jnp.take(x, i, mode='fill', fill_value=N)`, "
+    "`np.asarray(N).astype(dt)` and every other value numpy narrows before "
+    "it reaches jax at all, and an operand that was already an array (the "
+    "rule declines to fold non-scalars). numpy "
     "truncates on the way in and the rule sees the wrapped value, so THE "
-    "VALUE STILL WRAPS and nothing here can tell.",
+    "VALUE STILL WRAPS and nothing here can tell. THE SET IS ENUMERATED AND "
+    "MEASURED, route by route, in "
+    "`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` -- a door that "
+    "moves bucket goes red there rather than going quiet here.",
     "anything inside a scoped `with jax.disable_jit():`, which swallows a "
     "door that is otherwise COVERED: `a + 200` on `int8` inside the block "
     "produces a jaxpr BYTE-IDENTICAL to the one that fires outside it and 0 "
@@ -97,8 +104,58 @@ UNCOVERED = (
     "different case and is handled: `arm()` reports `not-invoked` and the "
     "tool disables itself rather than reporting a quiet zero. Inside the "
     "scoped block THE VALUE STILL WRAPS.",
-    "anything traced BEFORE the tripwire was armed -- jit caches mean a "
-    "function traced earlier in the process is never re-traced",
+    "anything replayed from a WARM TRACE CACHE instead of being traced: "
+    "jax's cache is keyed on the jitted callable and its avals, so a "
+    "`@jax.jit` function any earlier trace already reached -- before this "
+    "tripwire armed OR after it, in an earlier test -- is never traced again "
+    "and the rule never runs over its body. `jax.jit(f, inline=True)` does "
+    "this while leaving NO nested jaxpr behind to notice it by. THE GATE IN "
+    "`preconditions.check()` AND `contracts.check_contract()` CLOSES THIS "
+    "FOR JAX'S OWN CACHES: it calls `jax.clear_caches()` before the trace it "
+    "watches, so a verdict's observation is complete WITH RESPECT TO JAX'S "
+    "CACHES, IN A SINGLE-THREADED PROCESS (B15) -- and both halves of that "
+    "qualifier are load-bearing, so the next two entries say what is outside "
+    "it. This session report has "
+    "no such moment -- it watches whatever your suite happens to trace -- so "
+    "the door stays open for this report's findings and is closed only "
+    "for the verdicts.",
+    # RESTORED, and it is the broader claim the warm-cache entry above
+    # narrowed: `jax.clear_caches()` empties JAX's caches and nothing else,
+    # so a value narrowed earlier and held anywhere ELSE is still not
+    # observed. This bullet is what the three MEASURED constructs below sit
+    # under; dropping it and then asserting completeness over the difference
+    # is the shape B15 exists to close, repeated one layer down.
+    "ANYTHING NARROWED BEFORE THE TRACE THE GATE WATCHES -- a constant "
+    "destroyed earlier in the process and handed to the trace already "
+    "wrapped, so there is nothing left at trace time to fire on. The "
+    "eviction above closes this only where the thing holding the narrowed "
+    "value is JAX'S OWN cache. Where it is not, nothing re-traces it and "
+    "nothing sees it. Three such constructs, measured on jax 0.11.0 with "
+    "x64 on, each writing "
+    "40000 into an int16 program: `jax.extend.core.jaxpr_as_fun(saved)`, "
+    "where the narrowed -25536 is already inside the saved jaxpr; a user "
+    "`functools.lru_cache` (or any memo) returning a value that was narrowed "
+    "when the memo was filled; and `jax.closure_convert`, A PUBLIC JAX API, "
+    "which traces at setup and hoists the already-narrowed constant into the "
+    "consts it returns. All three: VERIFIED, 0 fires, and the program jax "
+    "executes returns [-25536, -25436] where the program as written returns "
+    "[40000, 40100]. THE VALUE STILL WRAPS.",
+    "anything traced while ANOTHER THREAD is also tracing: jax's trace cache "
+    "is process-global and this gate's fire counter is per-thread, so the "
+    "window between the eviction and the trace it protects is NOT ATOMIC -- "
+    "another thread can re-warm a jit body inside it, and the fires that "
+    "thread causes are counted on its own stack and not on the gate's. "
+    "Measured on jax 0.11.0, one harness whose narrowing sits in a shared "
+    "jitted helper: 0/400 wrong VERIFIED single-threaded, 247/400 (61.8%) "
+    "with four threads calling that helper while the gate traced. THE RATE "
+    "IS A FUNCTION OF HOW WIDE THE WINDOW IS -- how much the harness traces "
+    "before it reaches the shared helper -- so it is a range and not a "
+    "constant: with the same four threads, 1/100 when the helper is the "
+    "first thing traced, 52/100 after 50 preceding primitives, 247/400 "
+    "after 100, and 100/100 after 200. Before the eviction existed it was "
+    "399/400 single-threaded, so this is a large improvement and not a "
+    "guarantee. stelling makes no thread-safety claim anywhere; run gated "
+    "checks on one thread.",
 )
 
 
@@ -496,7 +553,13 @@ def render(status, rec: record.Recorder, notes: tuple[str, ...] = ()) -> list[st
     lines.append(
         "  - arm order: the tripwire arms at pytest_configure. A function "
         "your conftest traced before that is cached and never re-traced, so "
-        "it is invisible here. `jax.clear_caches()` is NOT called -- that "
-        "would change your suite's timing and behaviour to flatter a report."
+        "it is invisible here. THIS REPORT never calls `jax.clear_caches()` "
+        "-- it would change your suite's timing and behaviour to flatter a "
+        "report. `preconditions.check()` DOES call it, once per gated trace, "
+        "and so does `contracts.check_contract()`, which reaches the same "
+        "gate -- because a VERDICT has to be able to say it watched the "
+        "whole program and a report does not (B15); so if your suite calls "
+        "either of them, its caches are being emptied and the sentence "
+        "above about arm order does not describe what they see."
     )
     return lines
