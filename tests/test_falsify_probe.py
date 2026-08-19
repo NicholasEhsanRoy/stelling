@@ -194,13 +194,39 @@ def pow_true():
     return assert_(jnp.power(x, 2.0) <= 81.0)
 
 
+# THE FIXTURES THE PROBE CAN STILL FIRE ON, and it used to be six.
+#
+# The fire condition now admits a violation ONLY when an exact test refutes
+# it (:func:`stelling.falsify._confirm`); an abstention declines. That is
+# what stopped the Kahan false alarm reaching through `jnp.where` and a
+# fractional `pow`, and it is not free: a program with a step the rational
+# replay cannot read is a program this probe cannot fire on, however false
+# the obligation is. The three ``scatter`` fixtures below are exactly that
+# case and they have moved to :data:`DECLINED_FOR_WANT_OF_AN_EXACT_READING`
+# rather than being deleted, because the reach this instrument LOST is a
+# fact about it and belongs in its own test file.
 LIVE = [
     ("pow_endpoint", pow_endpoint),
     ("pow_perfect_square_only", pow_perfect_square_only),
     ("pow_interior_band", pow_interior_band),
-    ("scatter_dup_accumulate", scatter_dup_accumulate),
-    ("scatter_spike", scatter_spike),
-    ("scatter_set_row", scatter_set_row),
+]
+
+# FIXTURES WHOSE OBLIGATION IS FALSE AT A DECLARED POINT AND WHICH THE
+# PROBE NO LONGER REPORTS, with the primitive that costs each one.
+#
+# All three are ``scatter``-family, and the abstention is NOT because a
+# scatter has no exact rational reading -- it plainly does, it moves and
+# adds exact values -- but because ``_MOVEMENT`` and the arithmetic tables
+# in ``falsify.py`` do not contain one. That distinction is the whole
+# point of the test below,
+# :func:`test_the_exactness_requirement_costs_these_fixtures_and_names_it`
+# -- a reader has to be able to tell "this instrument
+# cannot see irrational arithmetic", which is inherent, from "this
+# instrument has not been taught ``scatter`` yet", which is a table entry.
+DECLINED_FOR_WANT_OF_AN_EXACT_READING = [
+    ("scatter_dup_accumulate", scatter_dup_accumulate, "scatter-add"),
+    ("scatter_spike", scatter_spike, "scatter-add"),
+    ("scatter_set_row", scatter_set_row, "scatter"),
 ]
 
 # The strategies each strategy is measured against below. Two of the five
@@ -234,6 +260,51 @@ def test_the_probe_finds_a_violation_that_is_there(name, harness):
     )
     assert found.obligation_position == 0
     assert found.strategy in STRATEGIES or found.strategy == SEED_LABEL
+
+
+@pytest.mark.parametrize(
+    "name,harness,primitive",
+    DECLINED_FOR_WANT_OF_AN_EXACT_READING,
+    ids=[n for n, _, _ in DECLINED_FOR_WANT_OF_AN_EXACT_READING],
+)
+def test_the_exactness_requirement_costs_these_fixtures_and_names_it(
+    name, harness, primitive
+):
+    """THE PRICE OF THE FIRE CONDITION, DRIVEN RATHER THAN ASSERTED.
+
+    Each of these obligations is false by hand at a declared point, the
+    probe EXECUTES that violation, and it declines to report it -- because
+    only an exact test may admit a firing and the rational replay has no
+    reading of ``scatter``. Three of the six fixtures this file's live
+    corpus used to hold.
+
+    Written as a test rather than as a note because the two things a
+    reader needs are both facts that can rot: that the violation is still
+    reached (if it stopped being reached, the reason would no longer be
+    the fire condition) and that the reason is still the missing table
+    entry (if ``scatter`` is ever added, this test goes red and the
+    fixture goes back into :data:`LIVE`, which is the correct way for that
+    change to announce itself).
+    """
+    found, report = run(harness)
+    assert found is None, (
+        f"{name} fires again, which is better news than this test records: "
+        f"move it back into LIVE and rewrite the reach paragraphs that "
+        f"quote three fixtures"
+    )
+    assert report.violations_seen > 0, (
+        f"{name} no longer even REACHES its violation, so this test is no "
+        f"longer measuring the fire condition -- it is measuring a sampler "
+        f"that stopped looking. skips {report.skips}"
+    )
+    assert dict(report.skips).get("no-exact-reading-of-this-program") == (
+        report.points_declined
+    ), report.skips
+    reasons = dict(report.abstentions)
+    assert any(primitive in text for text in reasons), (
+        f"{name} declined for some reason other than the missing "
+        f"{primitive!r} reading: {reasons}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -315,24 +386,31 @@ def test_endpoints_is_the_CHEAPEST_configuration_and_that_is_its_whole_case():
     place in a budget that runs on every VERIFIED rested on a sentence.
 
     Measured here, over this file's whole live corpus, per single-strategy
-    configuration (executions, fixtures reached out of six):
+    configuration (executions, fixtures reached out of three):
 
     ==========  ==========  ========
     strategy    executions  reached
     ==========  ==========  ========
-    endpoints           20       4/6
-    ulp                 26       4/6
-    uniform             28       3/6
-    exact               41       5/6
-    tight               49       6/6
-    all five            55       6/6
+    endpoints           12       1/3
+    ulp                 18       1/3
+    uniform             24       0/3
+    exact               33       2/3
+    tight               41       3/3
+    all five            47       3/3
     ==========  ==========  ========
 
     So ``endpoints`` IS the cheapest configuration, by a margin, and it
-    reaches four of the six — which is the claim, and it is a cost claim.
+    reaches one of the three — which is the claim, and it is a cost claim.
     It is emphatically not a reach claim: ``tight`` alone reaches
     everything ``endpoints`` does. If the cheapest column ever stops being
     ``endpoints``, the strategy should be deleted rather than defended.
+
+    THESE NUMBERS ARE SMALLER THAN THE ONES THIS DOCSTRING USED TO CARRY
+    (20/26/28/41/49/55 executions over six fixtures) and the difference is
+    not a sampler change: three ``scatter`` fixtures left the live corpus
+    when the fire condition stopped admitting anything an exact test had
+    not refuted. See :data:`DECLINED_FOR_WANT_OF_AN_EXACT_READING`. The
+    ORDER of the column is what this test is about and it is unchanged.
     """
     cost = {}
     reach = {}
@@ -363,16 +441,16 @@ def test_the_ENSEMBLE_does_not_dominate_its_most_general_member():
 
     Over this file's whole live corpus, the ``tight``-only CONFIGURATION
     finds every fixture in fewer total executions than all five strategies
-    together. The ensemble is not, on this corpus, better than its most
-    general member.
+    together (41 against 47). The ensemble is not, on this corpus, better
+    than its most general member.
 
     Read "configuration" literally, because the attribution matters and
     flatters ``tight`` if it is skipped. ``tight`` is a SEEDED phase: run
     alone it must still generate its own starting points, and those seeds
     are endpoint points, executed and counted under
     :data:`stelling.falsify.SEED_LABEL`.
-    So of the six fixtures the ``tight``-only configuration reaches, four
-    are actually reached by its seeds and two by the margin search itself
+    So of the three fixtures the ``tight``-only configuration reaches, one
+    is actually reached by its seeds and two by the margin search itself
     -- which is what the per-strategy hit rate in
     :func:`test_a_strategy_with_a_fixture_no_other_strategy_reaches` and
     its neighbours measure, since those count only hits attributed to the

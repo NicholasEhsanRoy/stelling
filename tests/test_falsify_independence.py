@@ -222,6 +222,21 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
     at a module that was NOT preloaded, the proxy catches a reach at one
     that was.
 
+    **AND THE PROXY HALF HAD ITS OWN BLIND SPOT, IN THE SAME SHAPE.** It
+    installed the proxies, imported the probe, and then did ``del
+    REACHES[:]`` with the comment *"importing the probe is not running
+    it"*. In the shipped path it IS: ``preconditions._pipeline`` imports
+    ``stelling.falsify`` lazily, after the whole analysis has run and
+    every banned module is loaded, so a module-scope
+    ``getattr(sys.modules.get("stelling.propagate"), "_INT_DTYPE_BOUNDS")``
+    executes with everything in place and binds the value for every later
+    call. It was fully effective in production and cleared before this
+    test looked. Measured: a mutation of exactly that shape passed all 93
+    falsify tests and all 174 across every file that mentions falsify.
+    Nothing is cleared now; the import-time reaches are printed separately
+    so a failure says WHEN the reach happened, and both windows are
+    asserted empty.
+
     What neither catches is a reach the probe makes through an object
     handed to it by someone else, since then no frame of the probe's own
     ever touches the module. Nothing hands the probe such an object today
@@ -274,9 +289,20 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
             sys.modules[m] = w
             setattr(stelling, m.rsplit(".", 1)[1], w)
 
+        # NOTHING IS CLEARED BETWEEN THE IMPORT AND THE RUN.  This line
+        # used to be `del REACHES[:]`, on the reasoning that "importing
+        # the probe is not running it" -- and that reasoning is what a
+        # module-scope bind walks straight through.  In the shipped path
+        # `stelling.falsify` is imported LAZILY, inside `_pipeline`, after
+        # the whole analysis has run and every banned module is loaded, so
+        # a `getattr(sys.modules.get("stelling.propagate"), ...)` at
+        # module scope in falsify.py is fully effective in production and
+        # was invisible here.  Measured: such a mutation passed all 93
+        # falsify tests and all 174 across every file that mentions
+        # falsify.
         from stelling.falsify import probe, VerifiedFalsified
         PROBE = os.path.abspath(sys.modules["stelling.falsify"].__file__)
-        del REACHES[:]      # importing the probe is not running it
+        IMPORTED = len(REACHES)
 
         try:
             r = probe(h, statuses=["discharged"])
@@ -286,6 +312,10 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
 
         after = sorted(m for m in BANNED if m in sys.modules)
         print("ADDED", sorted(set(after) - set(before)))
+        print("AT-IMPORT", sorted(
+            {(mod, attr) for mod, attr, f in REACHES[:IMPORTED]
+             if os.path.abspath(f) == PROBE}
+        ))
         print("REACHED", sorted(
             {(mod, attr) for mod, attr, f in REACHES
              if os.path.abspath(f) == PROBE}
@@ -321,14 +351,19 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
         f"is spelled like -- the source scan above cannot see an "
         f"importlib call or an attribute reach, and this can."
     )
+    at_import = proc.stdout.split("AT-IMPORT", 1)[1].split("\n", 1)[0].strip()
     reached = proc.stdout.split("REACHED", 1)[1].strip()
     assert reached == "[]", (
         f"a frame in stelling/falsify.py read {reached} off an analysis "
-        f"module that was already in sys.modules. No import statement is "
-        f"needed for that and no difference against a baseline can see it, "
-        f"which is the whole reason this half of the test exists: the "
-        f"probe's value is that it does not consult the machinery it is "
-        f"checking, and this is the probe consulting it."
+        f"module that was already in sys.modules (of which {at_import} "
+        f"happened while the module was being IMPORTED). No import "
+        f"statement is needed for that and no difference against a "
+        f"baseline can see it, which is the whole reason this half of the "
+        f"test exists: the probe's value is that it does not consult the "
+        f"machinery it is checking, and this is the probe consulting it. "
+        f"An import-time reach is not a lesser case -- the shipped path "
+        f"imports this module lazily, after the analysis has run, so a "
+        f"value bound at module scope is bound from the live analysis."
     )
 
 

@@ -152,13 +152,27 @@ SPDX-License-Identifier: Apache-2.0
   because a discharged obligation the program violates is a defect in
   *stelling*, not a finding about the caller's code.
 
-  Under `semantics="real"` a violation is admitted only by **exact
-  rational replay of the same traced jaxpr** at the same point (stdlib
-  `fractions`; the probe imports no analysis module), falling back to a
-  named and counted ulp-stability proxy where a primitive has no exact
-  rational reading. The all-integer path keeps its own exact-integer
-  branch, because rational arithmetic does not wrap and routing it there
-  would suppress the runtime-wrap catch.
+  Under `semantics="real"` a violation is admitted **only** by an exact
+  test: exact **rational replay of the same traced jaxpr** at the same
+  point (stdlib `fractions`; the probe imports no analysis module), or —
+  where every declaration is integral — exact integer arithmetic, which
+  keeps its own branch because rational arithmetic does not wrap and
+  routing it through the replay would suppress the runtime-wrap catch.
+  **Everything else declines**, under `no-exact-reading-of-this-program`,
+  with the reason the exact reading was unavailable counted by primitive
+  in `ProbeReport.abstentions` and repeated in the stamp line. There is no
+  fall-back: an alarm whose message is "stelling is UNSOUND" must not be
+  admitted by a heuristic, and the ulp-stability proxy that used to sit
+  behind the replay is gone from the firing path.
+
+  That is a deliberate reach cost and it is measured rather than implied.
+  A program with one step the replay cannot read cannot be fired on,
+  however false its obligation is — irrational steps (`exp`, `log`,
+  trigonometry, a fractional `pow`, a non-square `sqrt`) inherently, and
+  `scatter`, `dot_general`, `sort`, `cumsum` and `rem` because this
+  module's tables have no reading for them yet. Three of the six live
+  fixtures in `tests/test_falsify_probe.py` are `scatter` and now decline;
+  they are listed there with the primitive that costs each one.
 
   Blind spots, disclosed rather than discovered: the probe cannot see the
   `jnp.full((), 256, jnp.int8)` narrowing (there is no executable form of
