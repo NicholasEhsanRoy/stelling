@@ -43,10 +43,10 @@ from stelling.propagate import (
     Propagation,
     _query_float_formats,
     conditional_on_precondition,
+    nonvacuity_summary,
     query_identity,
     unpaired_propagation,
 )
-from stelling.reachability import defined_vars, reaches_output
 
 __all__ = [
     "declined",
@@ -1677,83 +1677,84 @@ def top_despite_coverage_note(propagation: Propagation) -> str | None:
     )
 
 
-_VIOLATION_STATUSES = frozenset({"violated-over-set", "violated-witness"})
-
-
-def _apply_reachability_conjunct(
-    closed,
-    obligations: tuple[ObligationReport, ...],
-    status: str,
-) -> tuple[tuple[ObligationReport, ...], tuple[str, ...], str]:
-    """Downgrade violations on dead variables (unreachable outputs).
-
-    A violated obligation whose predicate operand does NOT reach any output
-    of the harness function is a violation on a dead variable: the caller
-    never observes the bad value.  Downgrade from the violation status to
-    ``"unknown"`` with a note explaining why.  Only REFUTED verdicts are
-    affected; VERIFIED and UNKNOWN are returned unchanged.
-
-    Matching is by IDENTITY: each ObligationReport carries the Var IDs of
-    its assert equation's invars (operand_var_ids), populated by the
-    propagator at construction.  No positional indexing against the jaxpr's
-    equation list -- obligations from sub-jaxprs (forced cond branches, jit
-    bodies) interleave with top-level ones and positional mapping misaligns.
-
-    Returns ``(obligations, reachability_notes, status)`` where *status* may
-    be downgraded from REFUTED to UNKNOWN if all violations were unreachable.
-    """
-    if status != "REFUTED":
-        return obligations, (), status
-    live = reaches_output(closed.jaxpr)
-    scope = defined_vars(closed.jaxpr)
-    downgraded: list[ObligationReport] = []
-    reachability_notes: list[str] = []
-    for ob in obligations:
-        if ob.status not in _VIOLATION_STATUSES:
-            downgraded.append(ob)
-            continue
-        # If the obligation carries no operand_var_ids (unexamined,
-        # or from a path that did not record them), fail-safe: never
-        # downgrade what we cannot prove dead.
-        if not ob.operand_var_ids:
-            downgraded.append(ob)
-            continue
-        # If the obligation's var IDs are not in the top-level
-        # jaxpr's scope, the obligation came from a sub-jaxpr (cond
-        # branch, etc.) and the top-level walk cannot judge it.
-        # Fail-safe: keep as violated.
-        if not any(vid in scope for vid in ob.operand_var_ids):
-            downgraded.append(ob)
-        elif any(vid in live for vid in ob.operand_var_ids):
-            # Reachable: the violation stays.
-            downgraded.append(ob)
-        else:
-            # Unreachable: downgrade to UNKNOWN with a note.
-            reachability_notes.append(
-                f"obligation #{ob.index} is violated but the violated "
-                f"variable does not reach any output of the harness "
-                f"function"
-            )
-            downgraded.append(
-                ObligationReport(
-                    index=ob.index,
-                    status="unknown",
-                    detail=(
-                        f"{ob.status} but unreachable: the "
-                        f"predicate operand does not flow to any output "
-                        f"of the traced function (dead variable)"
-                    ),
-                    source_info=ob.source_info,
-                    operand_var_ids=ob.operand_var_ids,
-                    top_level_eqn_pos=ob.top_level_eqn_pos,
-                )
-            )
-    obligations = tuple(downgraded)
-    # Re-evaluate status: if all violations were unreachable, no
-    # reachable violation remains to drive REFUTED.
-    if not any(o.status in _VIOLATION_STATUSES for o in obligations):
-        status = "UNKNOWN"
-    return obligations, tuple(reachability_notes), status
+# THE REACHES-OUTPUT CONJUNCT IS GONE, AND THIS PARAGRAPH IS WHY — audit
+# 0.2.0 B8a, item 4 (M1).
+#
+# `_apply_reachability_conjunct` used to sit here: on a REFUTED verdict it
+# ran `reachability.reaches_output(closed.jaxpr)`, and downgraded to UNKNOWN
+# any violated obligation whose `operand_var_ids` were in the top-level scope
+# but not in the live set — "a violation on a dead variable, one the caller
+# never observes".
+#
+# IT COULD NOT FIRE ON A DEAD VARIABLE, AND ITS ONLY REACHABLE BEHAVIOUR WAS
+# TO SILENCE A GENUINE REFUTED.
+#
+# * `reaches_output` seeded the live set with EVERY `stelling_assert`
+#   equation's outvars, unconditionally and CORRECTLY — an assert is a
+#   declaration, not a value the caller reads, so a harness that does not
+#   return it has not withdrawn it (`docs/harness-api.md` says so, and
+#   removing the seed downgrades real violations in the style almost every
+#   harness is written in). The reverse walk then makes every one of those
+#   asserts' INVARS live, and `ObligationReport.operand_var_ids` IS the
+#   assert equation's invars. So for any top-level assert WITH AN OUTVAR
+#   `any(vid in live for vid in ob.operand_var_ids)` held by construction
+#   and the downgrade was unreachable. Driven: over a query whose assert
+#   output is not returned and whose whole operand chain is otherwise dead,
+#   `live` still contains every operand id.
+#
+#   "WITH AN OUTVAR" IS THE WHOLE OF THE PROOF, and it is not a formality —
+#   see the third bullet. Both halves of `reaches_output` are quantified
+#   over `eqn.outvars`: the seed adds nothing for an empty tuple, and the
+#   reverse walk's `any(out.id in live for out in eqn.outvars)` is False
+#   over one. Jax always gives `stelling_assert` an outvar; `from_dict`
+#   does not require one, and round-trips a document without one.
+# * For an obligation from an inner scope the top-level walk cannot judge
+#   the ids at all, and the conjunct said so and failed safe.
+# * TWO reachable inputs were left, and the downgrade is WRONG on both.
+#   DRIVEN on `aabb58d`, each against the same query with the defect
+#   removed:
+#     - A VAR-ID COLLISION — an inner obligation's operand id equal to a
+#       dead top-level id. A hand-built query whose `jit` body asserts
+#       `x < 0.5` over `x ∈ [1, 2]` reports REFUTED; adding one unrelated,
+#       unread `exp` equation at top level whose outvar id happens to equal
+#       the inner predicate's id turns the SAME query into UNKNOWN with
+#       "the violated variable does not reach any output of the harness
+#       function". Two scopes' ids are not one variable. A genuine
+#       refutation, silenced by an unrelated equation.
+#     - A ZERO-OUTVAR `stelling_assert` at TOP LEVEL, which needs no
+#       collision and no sub-jaxpr at all. `stelling_assert(pred)` with
+#       `outvars=()` over `x ∈ [1, 2] ⊢ x < 0.5`, the harness returning
+#       `x`: the seed loop adds no id, the reverse walk never lights the
+#       predicate, `operand_var_ids` IS in `defined_vars`, and the
+#       conjunct downgraded a `violated-over-set` obligation to `unknown`
+#       and REFUTED to UNKNOWN. Measured: REFUTED with the outvar, UNKNOWN
+#       without it, same declared box and same predicate.
+#
+# Repairing it rather than removing it would mean un-seeding the asserts,
+# which is reverting a correct decision; and the reachability question that
+# IS real here — an assert inside a branch the program may never take — is
+# already answered, by certificate rather than by dataflow, in
+# `propagate._withhold_uncertified_branch_refutations` and
+# `propagate.UNCERTIFIED_REACHABILITY_REFUSAL`.
+#
+# THAT IS A SUBSTITUTION OF QUESTION, NOT AN EQUIVALENCE, and calling it
+# one would overstate the removal (audit 0.2.0 B8a FIXUP). The certificate
+# answers CONTROL-FLOW reachability of the OBLIGATION — whether the branch
+# carrying an assert is one the program can take — and it is keyed on
+# `(branch_path, id(eqn))`, never on a var id. The conjunct's own question,
+# whether a VIOLATION lands on a value the caller never observes, was
+# answered by nothing, before the removal or after. That is deliberate and
+# is what `design/finding-conjunction.md` already records stelling as
+# doing: `reaches-output` is ASSERTED of the harness contract (an assert is
+# live by intent) rather than mechanised. The conjunct was a mechanism that
+# did not implement that assertion and could only contradict it.
+#
+# `stelling/reachability.py` went with the conjunct: both of its functions
+# existed only to serve it.
+#
+# THE STANDING PROPERTY THIS LEAVES: no path in verdict assembly downgrades
+# a violated obligation on reachability grounds. Pinned in
+# `tests/test_reachability_removed.py`.
 
 
 def _query_has_non_f64_float(closed) -> bool:
@@ -1922,30 +1923,17 @@ def make_verdict(
     else:
         status = "UNKNOWN"
 
-    # -- reaches-output conjunct ------------------------------------------------
-    obligations, reachability_notes, status = _apply_reachability_conjunct(
-        closed, propagation.obligations, status
-    )
+    obligations = propagation.obligations
 
-    checks = propagation.nonvacuity_checks
-    if not checks:
-        nonvacuity = "UNCHECKED — no membership conditions declared"
-    elif all(c.status == "discharged" for c in checks):
-        nonvacuity = (
-            f"checked — {len(checks)} membership condition(s) definitely true "
-            f"(the declared set contains the stated point)"
-        )
-    elif any(c.status == "violated-over-set" for c in checks):
-        nonvacuity = (
-            "FAILED — a membership condition is definitely false: the stated "
-            "point is NOT in the declared set (harness defect, not a box fact)"
-        )
-    else:
-        nonvacuity = "undecided — a membership condition could not be decided"
+    # ONE MINTER for this sentence, shared with the solver-assisted
+    # assembly in `stelling.solvers` (audit 0.2.0 B8a FIXUP, item 2): the
+    # two paths must agree byte for byte, and two hand-kept copies is a
+    # requirement rather than a mechanism.
+    nonvacuity = nonvacuity_summary(propagation.nonvacuity_checks)
 
     notes = propagation.notes + undecided_cause_note(
         propagation.coverage, obligations
-    ) + tuple(reachability_notes)
+    )
     if status == "VERIFIED" and not nonvacuity.startswith("checked"):
         notes = notes + (
             f"nonvacuity {nonvacuity.split(' — ')[0]}: this VERIFIED may be "

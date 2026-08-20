@@ -103,7 +103,7 @@ def test_applied_and_noop_are_accounted_without_any_solver():
     """The judged set is already inside those conjuncts, so nothing has to be
     told to a solver and an empty emitted set accounts for them."""
     ledger = (
-        AssumeDisposition(kind=ASSUME_APPLIED, reason="narrowed var 3"),
+        AssumeDisposition(kind=ASSUME_APPLIED, reason="narrowed x1 (IR var 3)"),
         AssumeDisposition(kind=ASSUME_NOOP, reason="definitely true"),
     )
     assert unaccounted_assumes(ledger, ()) == ()

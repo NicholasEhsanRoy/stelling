@@ -864,7 +864,12 @@ def test_zero_size_assert_is_discharged_by_interval_matching_jnp_all():
     )
     p = propagate(q)
     assert [o.status for o in p.obligations] == ["discharged"]
-    assert "0 element(s)" in p.obligations[0].detail
+    # ... and the discharge SAYS it is vacuous, in the detail AND in the
+    # notes a consumer reads (audit 0.2.0 B8a, item 6 / M18 — it used to
+    # say only "definitely true for all 0 element(s)", which every reader
+    # of `status` and `notes` met as an ordinary discharge)
+    assert "ZERO elements" in p.obligations[0].detail
+    assert any("VACUOUSLY discharged" in n for n in p.notes), p.notes
     # nothing unknown -> nothing sliced
     assert slice_unknown_obligations(q, p, interval_env(q)) == ()
     # a DIRECT ask (bypassing propagation's discharge) declines, quoted —

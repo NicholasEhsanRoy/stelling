@@ -11,8 +11,11 @@
    with solver does not decline on the div guard.
 4. is_finite definite-false (point at infinity): unit test of iv.is_finite
    on [inf, inf] -> [0, 0].
-5. Assert-always-live in reachability: assert_(pred) without return is still
-   REFUTED (not downgraded to UNKNOWN by the dead-variable rule).
+5. Assert-always-live: assert_(pred) without return is still REFUTED. The
+   unit test that used to stand here drove `reachability.reaches_output`,
+   which is removed with the conjunct it served (audit 0.2.0 B8a, item 4);
+   the PROPERTY is now driven end to end, through `make_verdict`, in
+   `tests/test_reachability_removed.py`.
 """
 
 from __future__ import annotations
@@ -22,9 +25,6 @@ import math
 import pytest
 
 from stelling import interval as iv
-from stelling import ir
-from stelling.propagate import propagate
-from stelling.reachability import reaches_output
 
 
 # ---------------------------------------------------------------------------
@@ -56,76 +56,6 @@ def test_is_finite_bounded_is_definite_true():
     result = iv.is_finite(a)
     assert result.los == (1.0,)
     assert result.his == (1.0,)
-
-
-# ---------------------------------------------------------------------------
-# Test 5: Assert-always-live in reachability — no jax needed
-# ---------------------------------------------------------------------------
-
-
-F64 = ir.Aval(kind="ShapedArray", shape=(), dtype="float64")
-BOOL = ir.Aval(kind="ShapedArray", shape=(), dtype="bool")
-
-
-def test_assert_without_return_is_still_live():
-    """An assert_(pred) whose output is NOT in the jaxpr's outvars must
-    still be considered live — its operand var must reach_output.
-
-    Without the assert-always-live rule, the predicate operand appears dead
-    and real violations get downgraded from REFUTED to UNKNOWN."""
-    # Build a jaxpr where assert's output is NOT returned.
-    # x = any_array(...), pred = x > 5, assert_(pred)
-    # The jaxpr's outvars contain something ELSE (e.g. a dummy literal).
-    x = ir.Var(id=0, aval=F64)
-    threshold = ir.Literal(val=5.0, aval=F64)
-    pred = ir.Var(id=1, aval=BOOL)
-    assert_out = ir.Var(id=2, aval=BOOL)
-    # A dummy output that is NOT the assert — simulates a harness that
-    # does not return the assert value.
-    dummy = ir.Var(id=3, aval=F64)
-
-    jaxpr = ir.Jaxpr(
-        constvars=(),
-        invars=(x,),
-        outvars=(dummy,),  # assert_out is NOT returned
-        eqns=(
-            ir.JaxprEqn(
-                primitive="stelling_any",
-                invars=(),
-                outvars=(x,),
-                params=(("shape", ()), ("dtype", "float64"),
-                        ("lo", 0.0), ("hi", 10.0)),
-            ),
-            ir.JaxprEqn(
-                primitive="gt",
-                invars=(x, threshold),
-                outvars=(pred,),
-                params=(),
-            ),
-            ir.JaxprEqn(
-                primitive="stelling_assert",
-                invars=(pred,),
-                outvars=(assert_out,),
-                params=(),
-            ),
-            # dummy computation to have something in outvars
-            ir.JaxprEqn(
-                primitive="add",
-                invars=(x, threshold),
-                outvars=(dummy,),
-                params=(),
-            ),
-        ),
-    )
-
-    live = reaches_output(jaxpr)
-    # The assert's operand (pred, id=1) must be live even though
-    # assert_out is not in outvars.
-    assert pred.id in live, (
-        "assert operand should be live even when assert output is not returned"
-    )
-    # And transitively, x must be live too (it feeds the pred).
-    assert x.id in live
 
 
 # ---------------------------------------------------------------------------

@@ -1391,12 +1391,23 @@ def test_the_element_count_census_covers_propagate_TOO():
     defect one level up, so the enumeration is COMPUTED here from the
     module's own AST and the prose cites this test.
 
-    Three of the six loop over a shape read straight off an `ir.Aval` or
+    Two of the five loop over a shape read straight off an `ir.Aval` or
     an `ir.Array` AT THE SITE. What makes those safe is not `_size`: it is
     that those two dataclasses now install the extents their own
     `__post_init__` validated (audit 5, F1), so there is no second
-    protocol left to reach. The other three take a caller-supplied
-    ``shape``, and `_elements` is reached only from `ir.Array.shape`.
+    protocol left to reach.
+
+    **THE CENSUS IS FIVE, NOT SIX, AND ONE OF THE FIVE NO LONGER LOOPS
+    OVER A SHAPE AT ALL** — audit 0.2.0 B8a, item 1. `_refused_value_
+    problem` carried a sixth raw product over `value.shape`; it now counts
+    the extents `iv.check_shape` returned. And `_elements` was rewritten to
+    take ALREADY-NORMALISED EXTENTS rather than a shape — its parameter is
+    named `extents` and its two callers hand it `iv.check_shape(...)`'s
+    return — which is why the row below reads `("_elements", "extents")`.
+    That distinction is the whole point of the census: a product over a
+    caller-supplied `shape` reaches `__mul__`, a third protocol beside the
+    `__index__` every guard validates with; a product over a guard's
+    RETURN VALUE cannot.
     """
     import ast
     import inspect
@@ -1433,9 +1444,8 @@ def test_the_element_count_census_covers_propagate_TOO():
     _Census().visit(ast.parse(src))
 
     assert sorted(found) == sorted([
-        ("_elements", "shape"),
+        ("_elements", "extents"),  # a guard's RETURN, not a shape (B8a #1)
         ("_value_to_interval", "shape"),
-        ("_refused_value_problem", "value.shape"),
         ("_atom_element_count", "atom.aval.shape"),
         ("_probe_point", "shape"),
         ("_declared_element_count", "out.aval.shape"),
@@ -1449,7 +1459,6 @@ def test_the_element_count_census_covers_propagate_TOO():
     off_ir = [f for f, it in found if it.endswith(".shape")]
     assert sorted(off_ir) == [
         "_atom_element_count", "_declared_element_count",
-        "_refused_value_problem",
     ], off_ir
 
     # THE RECORD MUST NAME THEM. A claim of totality a `grep` refutes is

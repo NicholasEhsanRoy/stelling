@@ -508,7 +508,19 @@ class IntervalArray:
     his: tuple[float, ...]
 
     def __post_init__(self) -> None:
-        check_shape(self.shape)
+        # THE VALIDATED EXTENTS ARE INSTALLED, not merely checked (audit
+        # 0.2.0 B8a, item 1). `check_shape` reads every extent ONCE through
+        # `__index__` and hands back what it read; writing that back onto
+        # the field is what makes `self.shape` — and therefore `.size`,
+        # `_size_of`, `_strides` and `_coords`, each of which re-reads it —
+        # a plain tuple of plain ints no protocol can move between reads.
+        # Same repair, same reason, as `ir.Aval.__post_init__`'s
+        # `object.__setattr__(self, "shape", _validate_aval(...))`. Before
+        # it, the count below was `n *= d` over the RAW objects: an extent
+        # answering 2 to `__index__` and 1 to `__mul__` made this
+        # constructor refuse the correct two-element payload for its own
+        # shape.
+        object.__setattr__(self, "shape", check_shape(self.shape))
         n = 1
         for d in self.shape:
             n *= d
@@ -600,8 +612,9 @@ def _safe_repr(obj) -> str:
         return "<unreadable>"
 
 
-def check_shape(shape) -> None:
-    """Refuse shapes no jax program can carry, through the decline channel.
+def check_shape(shape) -> tuple[int, ...]:
+    """Refuse shapes no jax program can carry, through the decline channel,
+    and RETURN the extents that survived, normalised to plain ``int``.
 
     Two predicates, both measured on jax 0.11.0 (fix re-attacks R1/N2):
     every extent must be INTEGRAL (``from_dict`` does not coerce shape
@@ -625,7 +638,33 @@ def check_shape(shape) -> None:
     answer ``__index__`` is a non-integer extent whatever it raises saying
     so. And the message that says so quotes both the shape and the extent
     through :func:`_safe_repr`, because an object that refuses one dunder
-    may refuse ``__repr__`` too."""
+    may refuse ``__repr__`` too.
+
+    **AND IT RETURNS WHAT IT VALIDATED, BECAUSE A PREDICATE IS NOT A
+    VALUE** — audit 0.2.0 B8a, item 1. This function used to answer only
+    "well-formed or not", and every caller that needed the ELEMENT COUNT
+    then re-read the raw objects with ``n *= d`` — ``__mul__``, a THIRD
+    protocol beside the ``__index__`` validated here and the ``__eq__``
+    the shape comparisons use. Measured on ``aabb58d`` with an extent
+    whose ``__index__`` answers ``2`` and whose ``__mul__`` is the
+    identity: ``point(1.0, (d,))`` returned a ONE-element box for a
+    two-element shape, and ``IntervalArray(shape=(d,), los=(1.0, 1.0),
+    his=(1.0, 1.0))`` — the CORRECT payload for that shape — was refused
+    as *"shape (…) needs 1 elements, got 2/2"*. Two faces, one shape,
+    from one unvalidated read.
+
+    This is :func:`stelling.obligation._extents`' and
+    :func:`stelling.ir._load_extents`' repair, one module over and for the
+    identical reason: read once, hand back what was read, and let no
+    caller obtain a count from a protocol no guard validated.
+    :meth:`IntervalArray.__post_init__` goes one step further and
+    INSTALLS the returned extents, the way :meth:`stelling.ir.Aval.
+    __post_init__` does — so ``box.shape`` is a plain ``tuple`` of plain
+    ``int`` from construction onward, and every later reader of it
+    (:attr:`IntervalArray.size`, :func:`_size_of`, :func:`_coords`,
+    :func:`_strides`) is reading a single-valued object rather than
+    trusting whatever the caller passed."""
+    out: list[int] = []
     for d in shape:
         try:
             k = operator.index(d)
@@ -641,12 +680,14 @@ def check_shape(shape) -> None:
                 f"program constructs such a value (measured: jax rejects "
                 f"negative dims in every concrete context)"
             )
+        out.append(k)
+    return tuple(out)
 
 
 def point(value: float, shape: tuple[int, ...] = ()) -> IntervalArray:
     """A degenerate (exact) interval; no outward bump — the value itself is
     the set."""
-    check_shape(shape)
+    shape = check_shape(shape)
     n = 1
     for d in shape:
         n *= d
@@ -655,7 +696,7 @@ def point(value: float, shape: tuple[int, ...] = ()) -> IntervalArray:
 
 
 def from_bounds(shape: tuple[int, ...], lo: float, hi: float) -> IntervalArray:
-    check_shape(shape)
+    shape = check_shape(shape)
     n = 1
     for d in shape:
         n *= d
@@ -663,7 +704,7 @@ def from_bounds(shape: tuple[int, ...], lo: float, hi: float) -> IntervalArray:
 
 
 def from_values(shape: tuple[int, ...], values: list[float]) -> IntervalArray:
-    check_shape(shape)
+    shape = check_shape(shape)
     vals = tuple(float(v) for v in values)
     return IntervalArray(shape=shape, los=vals, his=vals)
 
@@ -1564,10 +1605,13 @@ def dot_general_geometry(
     geometry — holds plain ``int``s. The emission face quotes the
     ``IntervalError`` as a decline.
     """
-    check_shape(lhs_shape)
-    check_shape(rhs_shape)
-    lhs_shape = tuple(lhs_shape)
-    rhs_shape = tuple(rhs_shape)
+    # BOUND, like the dimension numbers below: `check_shape` normalises
+    # every extent through `__index__` and returns what it read, so the
+    # geometry this builds — `out_shape`, `contracted_extents`, both of
+    # which the emission and the replay read — holds plain `int`s (audit
+    # 0.2.0 B8a, item 1). `tuple(lhs_shape)` preserved the RAW objects.
+    lhs_shape = check_shape(lhs_shape)
+    rhs_shape = check_shape(rhs_shape)
     try:
         (lc, rc), (lb, rb) = dimension_numbers
         lc, rc, lb, rb = tuple(lc), tuple(rc), tuple(lb), tuple(rb)
@@ -1676,7 +1720,7 @@ def dot_general_geometry(
         + tuple(lhs_shape[i] for i in lfree)
         + tuple(rhs_shape[j] for j in rfree)
     )
-    check_shape(out_shape)
+    out_shape = check_shape(out_shape)
     return DotGeneralGeometry(
         lc=lc,
         rc=rc,
@@ -2783,7 +2827,7 @@ def _coords(shape: tuple[int, ...]):
     if shape == ():
         yield ()
         return
-    check_shape(shape)  # non-integer or negative extents must never
+    shape = check_shape(shape)  # non-integer or negative extents must never
     # enumerate: on (-2,-2) the loop below would yield exactly ONE
     # coordinate while the element product says 4 — the silent
     # inconsistency behind the fix-re-attack's dropped-addends UNSOUND

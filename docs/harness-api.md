@@ -140,11 +140,19 @@ does not take it back out.
 removing it from the return.** An `assume` you drop from the return list
 is still in force, and a VERIFIED still rides on it. Delete the call.
 
-**Return your asserts.** An `assert_` whose output is not returned is
-still recorded and still evaluated, but the reachability conjunct
-downgrades its violation to UNKNOWN because the violated variable is
-dead (does not flow to any output). Return it to keep the violation
-consequential.
+**The same is true of `assert_`.** An `assert_` whose output is not
+returned is still recorded, still evaluated, and still reported: an
+assert is a declaration about the program, not a value the caller reads,
+so leaving it out of the return list does not withdraw it and does not
+soften its verdict.
+
+This paragraph used to promise the opposite — that a violation on an
+un-returned assert was downgraded to UNKNOWN "because the violated
+variable is dead". That was never the behaviour of the shipped code
+(`reachability.reaches_output` seeded every assert as live for exactly
+the reason above), and the conjunct that would have performed the
+downgrade is removed; audit 0.2.0 B8a, item 4, and the block comment in
+`stelling/verdict.py` where it stood.
 
 ## `any_array(shape, dtype, bounds)`
 
@@ -452,15 +460,24 @@ box you declared — computed in traced code, through the same transforms
 the box is stated in. It moves the stamp's `nonvacuity` field, and
 nothing else: the verdict's status is unaffected.
 
-The field takes four values, and each corresponds to what the membership
+The field takes six values, and each corresponds to what the membership
 conditions did:
 
 | stamp says | means |
 |---|---|
 | `UNCHECKED — no membership conditions declared` | you declared none |
 | `checked — N membership condition(s) definitely true` | all N decided true |
+| `checked in part — K of N membership condition(s) definitely true` | K decided true; the other N−K are over **zero-element** arrays and tested no point |
+| `VACUOUS — N membership condition(s) hold over ZERO elements` | every one is over a zero-element array: nothing was tested, and a VERIFIED alongside it carries the "may be vacuous" note |
 | `undecided — a membership condition could not be decided` | at least one fell to ⊤ or straddled |
 | `FAILED — a membership condition is definitely false` | the stated point is **not** in your box — a harness defect |
+
+A membership condition over a size-0 array is *discharged*, because
+`jnp.all` of an empty array is true — but it tested no point, so it
+establishes nothing about the declared set. That case used to be counted
+into the plain `checked — …` line, whose parenthetical then claimed "the
+declared set contains the stated point" for a set nothing had been
+compared against.
 
 ### Three spellings, and the one that behaves differently
 

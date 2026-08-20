@@ -1111,15 +1111,25 @@ def test_the_S10_sweep_table_reproduces_exactly():
 
     Exact equality, not a bound, and on all four columns: a sweep that
     quietly stops sampling half its grid still reports "0 failures".
+
+    DRIVEN THROUGH ``run_all``, not through a second loop over ``ROWS``
+    (audit 0.2.0 B8a, item 7). That helper was dead and documented the
+    OPPOSITE column order from ``POST_FIX_ROWS`` two screens above it — in
+    a module whose purpose is stopping numbers from drifting. Realigning it
+    and then leaving it uncalled would have fixed the text and kept the
+    trap; calling it here is what holds the two orders together.
     """
     sweep = importlib.import_module("ieee_containment_sweep")
     assert (sweep.POOL_SIZE, sweep.BOX_COUNT, sweep.BOX_PAIRS) == (
         len(sweep.POOL), len(sweep.BOXES), len(sweep.BOXES) ** 2
     ), "the grid moved; SOUNDNESS.md quotes its size"
-    for name, fmt, fn in sweep.ROWS:
-        s, f, n, r, misses = fn()
-        got = (f, s, n, r)
-        want = sweep.POST_FIX_ROWS[(name, fmt)]
+    rows = sweep.run_all()
+    assert {k for k in rows if len(k) == 2} == set(sweep.POST_FIX_ROWS), (
+        "run_all and the quoted table cover different rows"
+    )
+    for (name, fmt), want in sweep.POST_FIX_ROWS.items():
+        got = rows[(name, fmt)]
+        misses = rows.get((name, fmt, "misses"), ())
         assert got == want, (
             f"{name}/{fmt}: sweep produced (failures, samples, nan, raised)"
             f"={got}, SOUNDNESS.md quotes {want}. Update both or neither."
