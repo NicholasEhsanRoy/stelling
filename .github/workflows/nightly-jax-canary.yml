@@ -103,7 +103,7 @@ jobs:
           JAX_PLATFORMS: cpu
         run: .venv/bin/python .github/scripts/tripwire_canary.py --require
 
-      # PROPERTY 4, AND IT WAS MISSING. `JAX_ENABLE_X64: "1"` above is this
+      # PROPERTY 3, AND IT WAS MISSING. `JAX_ENABLE_X64: "1"` above is this
       # repository's setting for jax work, and it is the setting in which the
       # canary's EAGER CONSTANT SWEEP cannot find anything: jax's own threefry
       # mask widens to int64, so nothing of jax's narrows, `unmatched` is
@@ -164,7 +164,7 @@ jobs:
           JAX_PLATFORMS: cpu
         run: .venv/bin/python .github/scripts/tripwire_canary.py --require
 
-      # PROPERTY 4 on this leg too — see the control job. At x64 on, the eager
+      # PROPERTY 3 on this leg too — see the control job. At x64 on, the eager
       # constant sweep is structurally blind (jax's mask fits in int64), so a
       # nightly that grew a second internal eager truncation would come back
       # green from the step above. This is the step that can go red.

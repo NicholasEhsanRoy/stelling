@@ -1919,15 +1919,27 @@ def test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN():
     bounds = [pos for pos, _ in starts] + [len(workflow)]
     for index, (_, job) in enumerate(starts):
         block = workflow[bounds[index]:bounds[index + 1]]
-        # ONE STEP AT A TIME, so the setting read is the one that step runs
-        # under. A job-level `env:` and another step's `env:` both live in the
-        # same block, and matching across them would let an x64-off step
-        # somewhere else certify an x64-on canary run.
+        # RESOLVE THE SETTING THE WAY THE RUNNER DOES: a step's own `env:`
+        # wins, else the job's (which lives in the block HEAD, before
+        # `steps:`), else the workflow's top-level one. Reading only the step
+        # chunk and calling a miss "unset" is how this guard first went blind:
+        # hoisting the repeated `env:` up to the job -- a tidy-up this
+        # workflow openly invites, four steps repeat it -- left every canary
+        # run at x64=1 with the guard still green. What must NOT leak is
+        # ANOTHER STEP's `env:`, so the per-step search stays per-step and the
+        # job's is taken from the head alone. Anchored, because a comment
+        # QUOTING the setting is not the workflow setting it -- two of the
+        # mutants that killed the old guard were caught only by that accident.
+        setting_re = re.compile(r'^\s*JAX_ENABLE_X64:\s*"?([01])"?', re.M)
+        head = block.split("\n    steps:", 1)[0]
+        inherited = setting_re.search(head) or setting_re.search(
+            workflow.split("\njobs:", 1)[0]
+        )
         cells = []
         for step in re.split(r"\n      - (?=name:|uses:|run:)", block)[1:]:
             if not re.search(r"^\s*run:[^\n]*tripwire_canary\.py", step, re.M):
                 continue
-            setting = re.search(r'JAX_ENABLE_X64:\s*"?([01])"?', step)
+            setting = setting_re.search(step) or inherited
             cells.append(setting.group(1) if setting else "unset")
         assert cells, (
             f"the `{job}` leg does not run the canary at all"
