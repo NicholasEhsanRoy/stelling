@@ -1210,6 +1210,33 @@ _KNOWN_EAGER_HASHES: dict[str, str] = {
 #: ``jnp.bitwise_and(x, 4294967295)`` too. ``_threefry_seed`` is the PRNG and
 #: nothing else.
 #:
+#: KEYED ON THE SOURCE DTYPE AS WELL AS THE VALUE, and that field is the one
+#: an audit had to put back. A row of ``(value, to-dtype, site)`` cannot tell
+#: jax's constant from a CALLER'S constant of the same value narrowed at the
+#: same site, and at this site they collide::
+#:
+#:     jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))
+#:
+#: produces TWO truncations under ``_threefry_seed`` -- the caller's seed and
+#: jax's mask, both ``4294967295 -> -1`` at ``int32`` -- and the three-field
+#: row suppressed both, then printed *"written by jax at `_threefry_seed()`:
+#: the threefry PRNG's 32-bit mask"* at the caller's own line, which is false
+#: of one of the two. THE SOURCE DTYPE SEPARATES THEM, and that it does is
+#: measured rather than hoped: all **13** of jax's own truncation events in
+#: :func:`eager_jax_constant_sweep` arrive from ``uint32``
+#: (``np.uint32(0xFFFFFFFF)``, spelled in jax's own source), and a seed a
+#: caller hands this entry point arrives from ``int64`` -- so the collision
+#: is one field wide and the field is in hand at the hook.
+#:
+#: WHAT IS LEFT IS DISCLOSED RATHER THAN CLAIMED CLOSED. A row is still a
+#: VALUE match and not a proof of authorship, so a caller's narrowing that
+#: agreed with a row in ALL FOUR fields would still be suppressed. No route
+#: into ``_threefry_seed`` reaches that state on any jax this repository has
+#: measured -- a caller's ``uint32`` seed of the same value promotes to
+#: ``uint32`` and does not narrow at all (measured: 2 conversions, 0
+#: truncations) -- but a sweep is a sample, and the residue is in
+#: ``report.EAGER_UNCOVERED`` in the general form.
+#:
 #: A USER CALLBACK BREAKS THE MATCH BY CONSTRUCTION. The run of frames
 #: searched stops at the first non-jax, non-stelling frame, so a constant
 #: narrowed inside a function *the user* passed into jax is never matched by
@@ -1219,10 +1246,13 @@ _KNOWN_EAGER_HASHES: dict[str, str] = {
 #: there: with x64 on, ``promote_dtypes`` widens the mask to ``int64``, which
 #: holds it, and there is no truncation to attribute at all. Driven both
 #: ways.
-_JAX_EAGER_CONSTANTS: dict[tuple[str, str], tuple[tuple[int, str, str], ...]] = {
+_JAX_EAGER_CONSTANTS: dict[
+    tuple[str, str], tuple[tuple[int, str, str, str], ...]
+] = {
     ("_src/random/threefry2x32.py", "_threefry_seed"): (
         (
             4294967295,
+            "uint32",
             "int32",
             "the threefry PRNG's 32-bit mask -- `jnp.bitwise_and(seed, "
             "np.uint32(0xFFFFFFFF))` -- which x64-off dtype promotion "
@@ -1381,8 +1411,28 @@ def _eager_dtype_name(new_dtype) -> str | None:
     return name if name in record.INT_DTYPES else None
 
 
+#: The source-dtype name for an operand that is a plain Python ``int`` and
+#: therefore has no dtype at all. Not a numpy name and not one of
+#: :data:`record.INT_DTYPES` -- numpy has ``int8`` through ``uint64`` and
+#: never a bare ``int`` -- so a row keyed on a numpy dtype can never be
+#: matched by a Python literal, and a row about a Python literal has a name
+#: to be keyed on.
+PYTHON_INT = "int"
+
+
 def _eager_scalar_int(operand):
-    """The written integer, if this operand is one. None otherwise.
+    """``(written integer, the dtype it arrived in)``, or None.
+
+    THE SOURCE DTYPE IS HALF THE ANSWER AND IT IS NOT DECORATION. It is the
+    field that separates jax's own constant from a caller's constant of the
+    same value at the same site, which is the one collision
+    :data:`_JAX_EAGER_CONSTANTS` is otherwise blind to: jax's threefry mask
+    arrives at ``_threefry_seed`` from ``uint32`` and a caller's seed of the
+    same integer arrives there from ``int64``. Measured: all 13 of jax's own
+    truncations in the sweep arrive from ``uint32``. It costs nothing new to
+    read: the numpy branch below already reads ``operand.dtype`` to decide
+    whether it wants this operand at all, and a Python ``int`` has no dtype
+    to read.
 
     THREE SPELLINGS REACH THE NARROWING WITH THE WRITTEN VALUE INTACT, measured
     on both series, and they take two different branches inside jax:
@@ -1409,17 +1459,18 @@ def _eager_scalar_int(operand):
     of numpy and free of jax alike.
     """
     if type(operand) is int:
-        return operand
+        return operand, PYTHON_INT
     if type(operand).__module__.split(".")[0] != "numpy":
         return None
     shape = getattr(operand, "shape", None)
     dtype = getattr(operand, "dtype", None)
     if shape != () or dtype is None:
         return None
-    if _eager_dtype_name(dtype) is None:
+    from_dtype = _eager_dtype_name(dtype)
+    if from_dtype is None:
         return None
     try:
-        return int(operand)
+        return int(operand), from_dtype
     except Exception:  # noqa: BLE001 - a probe may not raise
         return None
 
@@ -1473,13 +1524,13 @@ def _make_eager_wrapper(original):
             operand = args[0] if args else kwargs.get("operand")
             new_dtype = args[1] if len(args) > 1 else kwargs.get("new_dtype")
             if new_dtype is not None:
-                written = _eager_scalar_int(operand)
-                if written is not None:
+                scalar = _eager_scalar_int(operand)
+                if scalar is not None:
                     to_dtype = _eager_dtype_name(new_dtype)
                     if to_dtype is not None:
                         observer = _eager_installed.get("observer")
                         if observer is not None:
-                            observer(written, to_dtype)
+                            observer(scalar[0], scalar[1], to_dtype)
         except BaseException as exc:  # noqa: BLE001
             if isinstance(exc, (EagerTruncationError, KeyboardInterrupt, SystemExit)):
                 raise
@@ -1736,9 +1787,9 @@ def eager_selfcheck() -> str:
     if not _eager_installed:
         return "not-invoked"
     saved = _eager_installed.get("observer")
-    seen: list[tuple[int, str]] = []
-    _eager_installed["observer"] = lambda written, to_dtype: seen.append(
-        (written, to_dtype)
+    seen: list[tuple[int, str, str]] = []
+    _eager_installed["observer"] = lambda written, from_dtype, to_dtype: seen.append(
+        (written, from_dtype, to_dtype)
     )
     try:
         try:
@@ -1753,7 +1804,8 @@ def eager_selfcheck() -> str:
             except Exception as exc:  # noqa: BLE001
                 return f"unexpected:{type(exc).__name__}"
             if not any(
-                written == EAGER_OVER and to == EAGER_DTYPE for written, to in seen
+                written == EAGER_OVER and to == EAGER_DTYPE
+                for written, _from, to in seen
             ):
                 return f"route-blind:{name}"
             try:
@@ -1771,7 +1823,7 @@ def eager_selfcheck() -> str:
                 return f"unexpected:{type(exc).__name__}"
         if not seen:
             return "not-invoked"
-        if any(not record.in_range(written, to) for written, to in seen):
+        if any(not record.in_range(written, to) for written, _from, to in seen):
             return "cries-wolf"
         return "armed"
     finally:
@@ -1945,8 +1997,8 @@ def eager_jax_constant_sweep() -> dict:
         {"code": "swept" | "not-armed" | "unexpected:<Type>",
          "conversions": int,          # the denominator: 0 means it went blind
          "truncations": int,
-         "unmatched": ((written, dtype, ((file, func), ...)), ...),
-         "matched": ((file, func, written, dtype), ...)}
+         "unmatched": ((written, from_dtype, to_dtype, ((file, func), ...)), ...),
+         "matched": ((file, func, written, from_dtype, to_dtype), ...)}
 
     ``unmatched`` non-empty is the signal: jax performs an eager truncation
     this repository has not read and has no row for, and until someone reads
@@ -1971,17 +2023,17 @@ def eager_jax_constant_sweep() -> dict:
     unmatched: dict = {}
     matched: set = set()
 
-    def collect(written, to_dtype):
+    def collect(written, from_dtype, to_dtype):
         counters[0] += 1
         if record.in_range(written, to_dtype):
             return
         counters[1] += 1
         segment = eager.jax_segment(1)
-        row = eager.jax_constant(written, to_dtype, segment)
+        row = eager.jax_constant(written, from_dtype, to_dtype, segment)
         if row is None:
-            unmatched[(written, to_dtype, segment)] = True
+            unmatched[(written, from_dtype, to_dtype, segment)] = True
         else:
-            matched.add((row[0], row[1], written, to_dtype))
+            matched.add((row[0], row[1], written, from_dtype, to_dtype))
 
     _eager_installed["observer"] = collect
     try:

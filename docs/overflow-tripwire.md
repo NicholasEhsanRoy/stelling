@@ -371,23 +371,36 @@ closes is bullet 4 except its numpy clause, and bullet 5's scoped
 **With `jit` off, jax narrows its OWN constants eagerly**, and this detector
 sits where that happens. Its threefry PRNG mask is `4294967295 -> -1` at
 `int32`, and a rule that raised on it would stop every test that touches
-`jax.random` under `jax.disable_jit()`, `JAX_DISABLE_JIT=1` or
-`chex.fake_jit()` — and would ask you to declare a constant you never wrote,
-sometimes at a line inside a library you cannot edit.
+`jax.random` under `jax.disable_jit()` or `JAX_DISABLE_JIT=1` — and, because
+`chex.fake_jit()` installs `jax.disable_jit()` around a test body, **also with
+jax's own defaults untouched**: any suite using `chex.variants(without_jit=True)`
+in its default configuration meets jax's eager mask with `jit` ON. That is not
+a `JAX_DISABLE_JIT=1` special case; it is a public chex API, confirmed at
+`chex/_src/fake.py:256`. Such a rule would ask you to declare a constant you
+never wrote, sometimes at a line inside a library you cannot edit.
 
 So the detector does not GUESS whether a constant is jax's. **It looks it up.**
-A map records what jax writes, keyed on the jax function that writes it and the
-exact value and dtype:
+A map records what jax writes, keyed on the jax function that writes it, the
+exact value, the dtype the value ARRIVES in, and the dtype it is narrowed to:
 
 ```
-("_src/random/threefry2x32.py", "_threefry_seed"): 4294967295 -> int32
+("_src/random/threefry2x32.py", "_threefry_seed"): 4294967295, uint32 -> int32
 ```
 
 A narrowing is attributed to jax when, and only when, one of those functions is
-in the unbroken run of jax frames beneath your line AND the value and dtype are
-that row's. **Everything else is yours and raises.** Each suppression is
-counted and printed with the site of your call, the jax function that wrote the
-constant, and what the constant is.
+in the unbroken run of jax frames beneath your line AND the value and both
+dtypes are that row's. **Everything else is yours and raises.** Each
+suppression is counted and printed with the site of your call, the jax function
+that wrote the constant, and what the constant is.
+
+**The source dtype is in the key because without it a row can suppress YOUR
+constant.** At that one site your seed and jax's mask collide:
+`jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))` narrows twice
+under `_threefry_seed` — your seed and jax's mask, both `4294967295 -> -1` at
+`int32` — and a row without the source dtype suppressed both, then printed
+*"written by jax … the threefry PRNG's 32-bit mask"* at your own line. They
+differ in one field the hook can see: all 13 of jax's own truncations arrive
+from `uint32`, and a seed you pass arrives from `int64`.
 
 That map has **one row**, and that is the measurement rather than an omission.
 A sweep of jax's own integer surface under `disable_jit` — every key
@@ -405,6 +418,38 @@ write. The alarm says so in its own message and prints jax's own frames beneath
 your line, so a report is one paste away. That is the direction this instrument
 fails in on purpose: an over-report is visible to you, holding the quoted line;
 a suppression is not.
+
+**The other residue is a collision, and it is the quiet one.** A row is a value
+lookup, not a proof of authorship, so a narrowing of yours that agrees with a
+row in every field — value, source dtype, target dtype, and a jax function in
+the run — is attributed to jax and does not raise. No route this repository has
+measured reaches that state any more (a `uint32` seed of the same value
+promotes to `uint32` and does not narrow at all), but a sweep is a sample and
+the shape stands. It is `report.EAGER_UNCOVERED`'s bullet on collisions.
+
+### A seed that does not survive, which this detector cannot see
+
+**`jax.random.PRNGKey(2**32)` is `jax.random.PRNGKey(0)`, silently, and nothing
+here says so.** `PRNGKey` and `key` cast the seed with
+`jnp.asarray(np.int64(seeds))` inside jax's own `random_seed`
+(`jax/_src/random/prng.py`, line 558 on jax 0.11.0), and that cast is
+NUMPY-level — it happens before the construction site this detector patches, so
+the hook records **zero** observations of your seed, with `jit` on and with
+`jit` off alike. Measured on jax 0.11.0 with x64 off:
+
+```
+PRNGKey(2**32 - 1) == PRNGKey(-1)     True
+PRNGKey(2**32)     == PRNGKey(0)      True
+PRNGKey(2**33 + 5) == PRNGKey(5)      True
+```
+
+The one observation that program *does* produce at the hook is jax's own mask
+(`4294967295` from `uint32`, `jit` off only), which is correctly suppressed. So
+**`no alarm` on `jax.random.PRNGKey(N)` means "stelling saw nothing of yours",
+not "your seed survived."** A seed wider than `int32` is not covered, and
+closing it needs a hook at a numpy cast rather than at jax's constructor —
+a different design, not a patch. It is disclosed in the section's own coverage
+list.
 
 ### It fails closed
 

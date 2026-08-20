@@ -24,13 +24,13 @@ Measured over ``README.md`` + ``docs/*.md``, and pinned by
       EXECUTED (exit 0 required)                    30
         marked run-only — output not compared        3
         OUTPUT COMPARED against a fence             27
-    plain ``` fences                                68
+    plain ``` fences                                69
       consumed as an example's claimed output       27
-      HAND-WRITTEN, compared to nothing             41
+      HAND-WRITTEN, compared to nothing             42
 
 So the claim this file earns is: *every runnable example runs, and 27 of
 the 30 have their stdout compared byte for byte after a narrow
-normalisation.* The 41 unattached fences — a render pasted into prose, a
+normalisation.* The 42 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
 
@@ -176,8 +176,14 @@ EXPECTED_INVENTORY = {
     # B16 added one: the eager detector's alarm, quoted so a reader can see
     # what it says before switching it on. Hand-written and attached to
     # nothing, like every other rendered excerpt on that page.
-    "plain_fences": 68,
-    "plain_unattached": 41,
+    # B16 fixup 3 added one more, for the same reason and in the same
+    # section: the three measured `PRNGKey(N) == PRNGKey(M)` equalities that
+    # say a seed wider than int32 does not survive jax's numpy-level cast.
+    # It is a MEASUREMENT quoted in prose, not an example's output --
+    # `tests/test_tripwire_eager.py` re-drives the equalities against the
+    # real jax, which is what holds them down.
+    "plain_fences": 69,
+    "plain_unattached": 42,
 }
 
 _MARKER = re.compile(r"<!--\s*doc-example:\s*(illustrative|run-only)\s*-->")

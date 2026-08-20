@@ -124,6 +124,19 @@ is the caller's. That map carries the rows, the sweep that re-derives them,
 and the argument for a map over a predicate — which is the argument
 ``_KNOWN_HASHES`` in the same file already makes at length.
 
+A ROW IS KEYED ON THE SOURCE DTYPE AS WELL, and that field was an audit's
+finding rather than foresight. A row of ``(value, target dtype, site)``
+cannot separate jax's own constant from a CALLER'S constant of the same
+value narrowed at the same jax function, and at the one site the map names
+they collide: ``jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 -
+1))`` narrows twice under ``_threefry_seed``, and the three-field row
+suppressed both — telling the caller their own line carried jax's PRNG mask.
+The two observations differ in exactly one field the hook can see, and it is
+in hand at the hook: all 13 of jax's own truncation events in the sweep
+arrive from ``uint32``, and a seed a caller hands that entry point arrives
+from ``int64``. The collision residue that is LEFT is disclosed in
+``report.EAGER_UNCOVERED`` rather than claimed closed.
+
 A GENERAL PREDICATE STOOD HERE FOR ONE REVISION AND WAS WRONG IN BOTH
 DIRECTIONS. It asked *"is the narrowed integer among the arguments of the
 call that crossed out of non-jax code into jax?"* and suppressed when the
@@ -272,17 +285,27 @@ class EagerTruncationError(BaseException):
     The fields are attributes rather than only text, so a caller that does
     catch this can act on it without parsing the message:
 
-    ``written``   the integer the author wrote.
-    ``to_dtype``  the dtype it was being narrowed into, as a string.
-    ``became``    what two's-complement truncation makes of it.
+    ``written``    the integer the author wrote.
+    ``from_dtype`` the dtype it ARRIVED in, as a string -- a numpy dtype name
+                   for a numpy scalar or 0-d array, and ``"int"`` for a plain
+                   Python integer, which has no dtype. It is here because it
+                   is half of what identifies a constant as jax's own rather
+                   than yours, so a reader reporting a wrong attribution has
+                   the whole key in hand.
+    ``to_dtype``   the dtype it was being narrowed into, as a string.
+    ``became``     what two's-complement truncation makes of it.
     ``file``, ``line``, ``func``
                   the innermost frame outside jax and outside stelling —
                   the writer, by the same rule the tripwire's report uses.
     """
 
-    def __init__(self, message, *, written, to_dtype, became, file, line, func):
+    def __init__(
+        self, message, *, written, to_dtype, became, file, line, func,
+        from_dtype="",
+    ):
         super().__init__(message)
         self.written = written
+        self.from_dtype = from_dtype
         self.to_dtype = to_dtype
         self.became = became
         self.file = file
@@ -654,26 +677,38 @@ def jax_segment(skip: int) -> tuple:
     return _walk(skip + 1)[1]
 
 
-def jax_constant(written: int, to_dtype: str, jax_run) -> tuple | None:
+def jax_constant(written: int, from_dtype: str, to_dtype: str, jax_run) -> tuple | None:
     """The enumerated row naming this narrowing as JAX'S OWN, or ``None``.
 
     ``(file, function, what it is)`` when some frame in ``jax_run`` is a site
-    :data:`_JAX_CONSTANTS` records, AND the pair actually observed is the
-    pair that row records. Both halves are required: a row is a statement
-    about one constant at one site, not a licence for the function it names.
+    :data:`_JAX_CONSTANTS` records, AND the ``(value, from-dtype, to-dtype)``
+    actually observed is the one that row records. All of it is required: a
+    row is a statement about one constant, arriving one way, at one site --
+    not a licence for the function it names.
+
+    THE FROM-DTYPE IS IN THE KEY BECAUSE WITHOUT IT A ROW SUPPRESSES THE
+    CALLER'S OWN CONSTANT ON A COLLISION.
+    ``jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))``
+    narrows TWICE under ``_threefry_seed`` -- the caller's seed and jax's
+    mask, both ``4294967295 -> -1`` at ``int32`` -- and a row without a
+    from-dtype field suppressed both, then told the caller their own line
+    carried "the threefry PRNG's 32-bit mask". The two differ in exactly one
+    observable: jax's mask arrives from ``uint32`` and the seed from
+    ``int64``. Measured: all 13 of jax's own truncation events in
+    ``_adapter_jax.eager_jax_constant_sweep`` arrive from ``uint32``.
 
     ``None`` is the answer for everything else, including every narrowing
     seen before :func:`arm` has filled the map in — which is the direction
     that fails closed.
     """
     for file, func in jax_run:
-        for value, dtype, what in _JAX_CONSTANTS.get((file, func), ()):
-            if value == written and dtype == to_dtype:
+        for value, source, dtype, what in _JAX_CONSTANTS.get((file, func), ()):
+            if value == written and source == from_dtype and dtype == to_dtype:
                 return file, func, what
     return None
 
 
-def _origin(written: int, to_dtype: str, skip: int):
+def _origin(written: int, from_dtype: str, to_dtype: str, skip: int):
     """Did the USER write this constant, or did jax? ``(origin, writer, where, run)``.
 
     THE QUESTION ``record.attribute`` ANSWERS FOR THE OTHER HOOK, ASKED WHERE
@@ -692,9 +727,9 @@ def _origin(written: int, to_dtype: str, skip: int):
 
     SO THE ANSWER IS NOT INFERRED AT ALL. It is looked up:
 
-        is this exact ``(value, dtype)`` one that jax is RECORDED as writing,
-        at one of the jax functions in the unbroken run of jax frames beneath
-        the line that made the call?
+        is this exact ``(value, source dtype, target dtype)`` one that jax is
+        RECORDED as writing, at one of the jax functions in the unbroken run
+        of jax frames beneath the line that made the call?
 
     ``ORIGIN_JAX`` only for a row of :data:`_JAX_CONSTANTS`; ``ORIGIN_USER``
     for everything else, with no third state to lean in a direction.
@@ -723,15 +758,54 @@ def _origin(written: int, to_dtype: str, skip: int):
     because the identity of "the outermost jax frame" depends on how many
     wrapper frames jax installs.
 
-    What this reads is the written value, the target dtype, and which jax
-    functions are in the run beneath the caller, and ``jit`` changes none of
-    the three: the decision is an EXISTENCE test over the run, not a question
-    about which of its frames is outermost. Driven as an equality over 19
-    programs in ``tests/test_tripwire_eager.py``.
+    WHY THE EQUALITY HOLDS, AND IT IS NOT BECAUSE ``jit`` CHANGES NOTHING
+    THIS READS. The sentence that stood here said the verdict is a function
+    of the value, the dtypes and which jax functions are in the run, *"and
+    ``jit`` changes none of the three"*. **The third clause is false**, and
+    it is the clause somebody adding a second row would lean on. Measured on
+    jax 0.11.0, one fresh subprocess per cell so that no trace cache is
+    shared, over 36 programs: 26 narrowings are observed with ``jit`` on and
+    47 with it off; 25 ``(program, value, from-dtype, to-dtype)``
+    observations occur in BOTH modes, and **6 of those 25 -- in 5 different
+    programs -- present a different run of jax frames**.
 
-    What ``jit`` DOES change is a different sentence, about the population
-    rather than the verdict: with it on, jax's mask is traced and never
-    arrives here at all, so there is nothing to attribute.
+    AND THE DIFFERENCE GOES BOTH WAYS, which is why the invariant is weaker
+    than a superset:
+
+    * ``jit`` ON inserts its TRACING machinery between the caller and the
+      narrowing. ``jax.jit(partial(jnp.full_like, fill_value=300))(x)``
+      observes an 8-frame run under ``jit`` -- ``full_like``, ``full_like``,
+      ``trace_to_jaxpr_nocache``, ``trace_to_jaxpr``, ``_trace_for_jit``,
+      ``_infer_params``, ``cache_miss``, ``reraise_with_filtered_traceback``
+      -- and a 2-frame run without it. 5 of the 6 differ this way.
+    * ``jit`` OFF inserts jax's EAGER DISPATCH, which a trace does not
+      contain. ``jnp.take(x, jnp.array([9]), mode="fill")`` observes 25
+      frames under ``jit`` and 31 without it, the six extra ones being
+      ``_take``, ``gather``, ``apply_primitive``, ``process_primitive``,
+      ``bind_with_trace`` and ``bind``. 1 of the 6 differs this way, and it
+      is the one that stops "the ``jit``-on run is a superset" being the
+      invariant.
+
+    SO THE INVARIANT IS ABOUT ONE ROW'S FUNCTION AND NOT ABOUT THE RUN, and
+    it is a CONSTRAINT ON ADDING ROWS rather than a property of ``jit``: the
+    verdict is stable across ``jit`` exactly when the function a row names is
+    in the run under both modes or in neither. The row this map has holds
+    because ``_threefry_seed`` is a PRNG LEAF -- neither jit's tracing
+    machinery nor jax's eager dispatch ever contains it, so it is present in
+    both runs or absent from both.
+
+    **A ROW KEYED ON A FUNCTION ONLY ONE MODE'S RUN CONTAINS FLIPS THE
+    VERDICT**, and in either direction: a tracing frame suppresses with
+    ``jit`` on and raises with it off, an eager-dispatch frame does the
+    reverse. That asymmetry is what an audit found in the predicate this
+    lookup replaced, so before a second row is added its function must be
+    read off the run in BOTH modes, and the equality in
+    ``tests/test_tripwire_eager.py`` must be re-driven with the program that
+    reaches it.
+
+    What ``jit`` DOES change is a different sentence again, about the
+    population rather than the verdict: with it on, jax's mask is traced and
+    never arrives here at all, so there is nothing to attribute.
 
     THE RESIDUE, AND IT IS THE PRICE OF AN ENUMERATION: a jax release that
     adds a second internal eager truncation has no row, so it is the
@@ -740,17 +814,47 @@ def _origin(written: int, to_dtype: str, skip: int):
     ``report.EAGER_UNCOVERED`` discloses it, the alarm's own message tells
     the reader what to do about it, a sweep drives it in both jax lanes, and
     :func:`arm` refuses to attach if the row it has stops holding.
+
+    THE SECOND RESIDUE IS A COLLISION, AND IT IS THE QUIET DIRECTION. A row
+    is a VALUE match and not a proof of authorship, so a narrowing of the
+    caller's own that matches one in every field -- value, source dtype,
+    target dtype, and a frame in the run -- is attributed to jax and does
+    not raise. That direction was REACHABLE and is the defect this field was
+    added for: with the row keyed on ``(value, target, site)`` only,
+    ``jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))``
+    narrowed twice under ``_threefry_seed`` -- the caller's seed and jax's
+    mask, both ``4294967295 -> -1`` at ``int32`` -- and BOTH were suppressed,
+    with the caller's own line then labelled *"written by jax ... the
+    threefry PRNG's 32-bit mask"*. With the source dtype in the key the
+    caller's seed (``int64``) raises at their line and jax's mask
+    (``uint32``) is still suppressed; measured on both routes that reach
+    that entry point, with a numpy scalar and with a 0-d array.
+
+    WHAT IS LEFT IS NARROWER AND IS NOT CLAIMED CLOSED. No route into
+    ``_threefry_seed`` that this repository has found now collides in all
+    four fields -- a caller's ``uint32`` seed of that value promotes to
+    ``uint32`` and does not narrow at all, measured: 2 conversions, 0
+    truncations -- but "not found" is not "not there", the sweep is a sample,
+    and the general shape stands: an enumerated row cannot tell a caller's
+    constant from jax's when they agree in every field the hook can see.
+    ``report.EAGER_UNCOVERED`` discloses it in that form.
     """
     writer, jax_run = _walk(skip + 1)
-    row = jax_constant(written, to_dtype, jax_run)
+    row = jax_constant(written, from_dtype, to_dtype, jax_run)
     if row is None:
         return record.ORIGIN_USER, writer, "", jax_run
     file, func, what = row
     return record.ORIGIN_JAX, writer, f"{file}, in {func}(): {what}", jax_run
 
 
-def observe(written: int, to_dtype: str) -> None:
+def observe(written: int, from_dtype: str, to_dtype: str) -> None:
     """Every scalar integer -> integer conversion jax performs, one call each.
+
+    ``from_dtype`` is the dtype the operand ARRIVED in -- a numpy dtype name,
+    or ``"int"`` for a plain Python integer, which has none. It is read only
+    by :func:`_origin`, where it is the field that keeps an enumerated row
+    about jax's own constant from swallowing a caller's constant of the same
+    value at the same jax function.
 
     This is the whole policy, and it lives here rather than in the adapter so
     that it can be driven in an interpreter with no jax at all — which is what
@@ -776,15 +880,17 @@ def observe(written: int, to_dtype: str) -> None:
         return
     TRUNCATIONS += 1
 
-    origin, (file, line, func), where, jax_run = _origin(written, to_dtype, 1)
+    origin, (file, line, func), where, jax_run = _origin(
+        written, from_dtype, to_dtype, 1
+    )
     if origin == record.ORIGIN_JAX:
         SUPPRESSED_JAX += 1
         entry = SUPPRESSED.setdefault((file, line), [0, ""])
         entry[0] += 1
         entry[1] = _join_reason(
             entry[1],
-            f"{written} -> {record.narrow(written, to_dtype)} ({to_dtype}), "
-            f"written by jax at {where}",
+            f"{written} ({from_dtype}) -> {record.narrow(written, to_dtype)} "
+            f"({to_dtype}), written by jax at {where}",
         )
         return
 
@@ -798,8 +904,11 @@ def observe(written: int, to_dtype: str) -> None:
 
     became = record.narrow(written, to_dtype)
     raise EagerTruncationError(
-        _message(written, to_dtype, became, file, line, func, jax_run),
+        _message(
+            written, from_dtype, to_dtype, became, file, line, func, jax_run
+        ),
         written=written,
+        from_dtype=from_dtype,
         to_dtype=to_dtype,
         became=became,
         file=file,
@@ -834,13 +943,25 @@ def _join_reason(existing: str, reason: str) -> str:
     return " | ".join(reasons + [reason])
 
 
-def _message(written, to_dtype, became, file, line, func, jax_run=()) -> str:
+def _message(
+    written, from_dtype, to_dtype, became, file, line, func, jax_run=()
+) -> str:
     """The alarm, in the shape ``report.py`` argues every finding must have.
 
     Both halves observed, the arithmetic a reader can check with a pencil, the
     user's own line quoted, and what to do about it. No inference about intent
     is offered, because there is none to be had: the module docstring records
     why ``0xFF`` and ``255`` are the same event here.
+
+    THE CORRECTION COMES BEFORE THE REMEDY, and that ordering is a fix rather
+    than a preference. The ``intentional_wrap(...)`` block is an IMPOSSIBLE
+    remedy when the attributed line is inside jax -- the reader cannot edit
+    it -- so a message that offered it first asked a reader who did not write
+    the constant to do something they cannot do, and only afterwards told
+    them the attribution may be stelling's error to fix. The paragraph that
+    says *this may be wrong and here are jax's frames* is the one that helps
+    that reader, so it goes first; the declaration follows, for the reader
+    whose line it really is.
     """
     bounds = record.dtype_range(to_dtype)
     quoted = record.source_line(file, line)
@@ -865,40 +986,45 @@ def _message(written, to_dtype, became, file, line, func, jax_run=()) -> str:
         "construction. It is not an error in jax and jax does not warn: the "
         "value is gone before any primitive is bound, so every later check — "
         "stelling's included — is a check of a program you did not write.",
-        "",
-        "If the wrap is what you meant, DECLARE it and the declaration will "
-        "be carried and disclosed:",
-        "",
-        f"    from stelling import intentional_wrap",
-        f"    intentional_wrap({written}, {to_dtype!r})   # == {became}",
-        "",
-        "There is no value-based exemption and there will not be one: "
-        f"{written} written as a mask and {written} written by accident are "
-        "the same event at this point in jax, differing only in source text.",
     ]
-    # THE ATTRIBUTION, AND HOW TO REPORT IT WRONG. This alarm names a line
-    # because a LOOKUP said the narrowing is not one jax is recorded as
-    # performing itself. That lookup is an enumeration, so it fails closed: a
-    # jax release that adds an internal eager truncation nobody has read yet
-    # lands HERE, on a reader who did not write the constant -- and the only
-    # thing that turns that into a row somebody adds is their being told it
-    # is worth reporting.
+    # THE ATTRIBUTION, AND HOW TO REPORT IT WRONG, BEFORE THE REMEDY. This
+    # alarm names a line because a LOOKUP said the narrowing is not one jax is
+    # recorded as performing itself. That lookup is an enumeration, so it
+    # fails closed: a jax release that adds an internal eager truncation
+    # nobody has read yet lands HERE, on a reader who did not write the
+    # constant -- and the only thing that turns that into a row somebody adds
+    # is their being told it is worth reporting. The declaration below is no
+    # use to that reader, because the line is not theirs to edit, so it is
+    # printed after this and not before it.
     if jax_run:
         lines += [
             "",
             f"If you did not write {written} anywhere near that line, this "
             "attribution is wrong and it is stelling's to fix. It names your "
-            f"line because {written} at {to_dtype} is not one of the "
-            "constants stelling records jax as writing ITSELF, and that list "
-            "is an enumeration rather than a rule -- so a jax release that "
-            "adds one lands here. The jax frames it happened under, "
-            "innermost first, are what a report needs:",
+            f"line because {written}, arriving as {from_dtype} and narrowed "
+            f"to {to_dtype}, is not one of the constants stelling records jax "
+            "as writing ITSELF, and that list is an enumeration rather than a "
+            "rule -- so a jax release that adds one lands here. Those three "
+            "fields and the jax frames it happened under, innermost first, "
+            "are what a report needs:",
         ]
         lines += [
             f"      {func}()  ({file})" for file, func in jax_run[:MAX_JAX_FRAMES]
         ]
         if len(jax_run) > MAX_JAX_FRAMES:
             lines.append(f"      ... and {len(jax_run) - MAX_JAX_FRAMES} more")
+    lines += [
+        "",
+        "If the wrap is what you meant, DECLARE it and the declaration will "
+        "be carried and disclosed:",
+        "",
+        "    from stelling import intentional_wrap",
+        f"    intentional_wrap({written}, {to_dtype!r})   # == {became}",
+        "",
+        "There is no value-based exemption and there will not be one: "
+        f"{written} written as a mask and {written} written by accident are "
+        "the same event at this point in jax, differing only in source text.",
+    ]
     return "\n".join(lines)
 
 

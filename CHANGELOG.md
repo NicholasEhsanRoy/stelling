@@ -188,12 +188,27 @@ SPDX-License-Identifier: Apache-2.0
   conversions and 13 truncation events all of which are that one row, on both
   jax series. So the one thing jax writes is
   written down, at jax's own site, in `_adapter_jax._JAX_EAGER_CONSTANTS`:
-  `("_src/random/threefry2x32.py", "_threefry_seed") -> 4294967295 into
-  int32`. A narrowing is jax's when one of those functions is in the unbroken
-  run of jax frames beneath the caller AND the value and dtype are that row's.
-  Everything else is the caller's. That is the same shape — a narrow map plus
-  a canary that reddens when it is incomplete — that `_KNOWN_HASHES` already
-  argues for one screen up in the same file.
+  `("_src/random/threefry2x32.py", "_threefry_seed") -> 4294967295, uint32
+  into int32`. A narrowing is jax's when one of those functions is in the
+  unbroken run of jax frames beneath the caller AND the value, the SOURCE
+  dtype and the target dtype are that row's. Everything else is the caller's.
+  That is the same shape — a narrow map plus a canary that reddens when it is
+  incomplete — that `_KNOWN_HASHES` already argues for one screen up in the
+  same file.
+
+  **The source dtype is in the key because without it a row suppresses the
+  CALLER'S constant.** At that one site the two collide:
+  `jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))` narrows
+  twice under `_threefry_seed` — the caller's seed and jax's mask, both
+  `4294967295 -> -1` at `int32` — and a three-field row suppressed **both**,
+  then printed *"written by jax … the threefry PRNG's 32-bit mask"* at the
+  caller's own line. It was a value collision and not a general quiet
+  (`seed=8589934592` and `seed=2147483648` alarmed correctly throughout), and
+  the two differ in exactly one field the hook can see: all 13 of jax's own
+  truncation events arrive from `uint32` and a caller's seed from `int64`.
+  Driven before and after on both routes into that entry point. What remains
+  is the shape rather than the instance — a row is a value lookup, not a proof
+  of authorship — and it is disclosed in `report.EAGER_UNCOVERED`.
 
   It **fails closed**: a jax release that adds a second internal eager
   truncation has no row, is therefore the caller's, and RAISES at a line
@@ -204,7 +219,18 @@ SPDX-License-Identifier: Apache-2.0
   it. It needs no container scan, so the depth, breadth and budget constants
   and the "inconclusive" bucket are gone rather than documented; and it
   removes the previously-disclosed false alarm on `jax.random.PRNGKey(2**32 -
-  1)`, where jax's mask and the caller's seed are the same integer.
+  1)`, where jax's mask and the caller's seed are the same integer — a correct
+  verdict about a program whose seed is nonetheless **already dead**, which is
+  now disclosed rather than left to read as a clean bill of health.
+  `PRNGKey` and `key` cast the seed with `jnp.asarray(np.int64(seeds))` inside
+  jax's own `random_seed`, a NUMPY-level cast this detector has never sat on —
+  `jit` on or off, before this work and after it — so the seed produces **zero**
+  observations at the hook. Measured on jax 0.11.0, x64 off:
+  `PRNGKey(2**32 - 1) == PRNGKey(-1)`, `PRNGKey(2**32) == PRNGKey(0)`,
+  `PRNGKey(2**33 + 5) == PRNGKey(5)`. A seed that does not survive is exactly
+  what this instrument exists to report and it structurally cannot report this
+  one; closing it needs a hook at a numpy cast rather than at jax's array
+  constructor.
 
   **The `jit` claim is now the narrow one.** *"A call boundary exists whether
   or not a trace is in progress, which is why the answer does not depend on
@@ -212,14 +238,26 @@ SPDX-License-Identifier: Apache-2.0
   `jax.jit(partial(jnp.full_like, fill_value=300))(x)` gave no alarm with
   `jit` on and raised with it off, on the same observed conversion, because
   which frame is "the outermost jax frame" depends on how many wrapper frames
-  jax installs. What is true of the lookup: the verdict depends on the written
-  value, the target dtype and which jax functions are in the run beneath the
-  caller, and `jit` changes none of the three. Driven as an equality over **19
-  programs** covering `jit`, `vmap`, `tree.map`, `lax.map`, `lax.scan`,
+  jax installs. **And the sentence that replaced it carried a false clause of
+  its own** — *"the verdict is a function of the value, the dtypes and which
+  jax functions are in the run, and `jit` changes none of the three"*. The
+  third clause is false, measured on jax 0.11.0 with one fresh subprocess per
+  cell over 36 programs: of the 25 observations that occur in both modes, **6
+  (in 5 programs) present a different run of jax frames**, and it differs in
+  BOTH directions — `jit` on inserts tracing frames
+  (`jit(partial(full_like, fill_value=300))(x)`: 8 frames on, 2 off) and `jit`
+  off inserts jax's eager dispatch, which a trace does not contain
+  (`jnp.take(x, [9], mode="fill")`: 25 frames on, 31 off). The real invariant
+  is a **constraint on rows**: the verdict is stable across `jit` exactly when
+  the function a row names is in the run under both modes or in neither, which
+  is why the one row holds — `_threefry_seed` is a PRNG leaf that neither
+  jit's machinery nor eager dispatch contains. A row keyed on a function only
+  one mode's run contains would flip the verdict. Driven as an equality over
+  **19 programs** covering `jit`, `vmap`, `tree.map`, `lax.map`, `lax.scan`,
   `lax.fori_loop`, five carrier shapes and two pytrees big enough to have
   exhausted the old scan's budget: 0 of 19 verdicts differ. Suppressions are
-  counted and printed with their sites, the jax function that wrote them and
-  what the constant is.
+  counted and printed with their sites, their source dtype, the jax function
+  that wrote them and what the constant is.
 
   **Off by default, and NOT turned on by `--stelling-overflow`.** Two dials,
   because the tripwire is a report over a session and this is a rule: a

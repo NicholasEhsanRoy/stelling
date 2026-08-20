@@ -200,6 +200,10 @@ def test_the_alarm_carries_the_facts_as_fields_and_not_only_as_text(armed):
         jnp.full((4,), 300, jnp.int8)
     exc = caught.value
     assert (exc.written, exc.to_dtype, exc.became) == (300, "int8", 44)
+    # the dtype the value ARRIVED in: half of what identifies a constant as
+    # jax's own rather than yours, so a caller who catches this has the whole
+    # key and does not have to read it out of the message.
+    assert exc.from_dtype == "int"
     assert exc.file == __file__
     assert exc.func == "test_the_alarm_carries_the_facts_as_fields_and_not_only_as_text"
     # THE LINE IS CHECKED BY READING IT, not by arithmetic on a code object.
@@ -1204,7 +1208,175 @@ def test_the_origin_filter_keeps_JAX_S_OWN_constants_out_of_the_alarm(armed, jit
             report.render_eager(_tripwire.Status(code="armed"), eager.snapshot())
         )
         assert "written BY JAX ITSELF" in lines
-        assert "4294967295 -> -1 (int32)" in lines
+        assert "4294967295 (uint32) -> -1 (int32)" in lines, (
+            "the suppression row must show the SOURCE dtype: it is the "
+            "field that separates jax's mask from a caller's seed of the "
+            "same value at the same jax function, so a reader checking "
+            "the attribution needs to see it"
+        )
+
+
+#: The one jax entry point at which a CALLER'S constant and jax's own mask
+#: reach the same jax function with the same value and the same target dtype.
+#: PUBLIC surface (``jax.extend``), so this file names no private jax module.
+#: ``jax.random.*`` cannot get here: ``prng.random_seed`` does
+#: ``jnp.asarray(...)`` first, so the seed arrives as a jax ``Array`` and the
+#: only scalar this hook sees from those routes is jax's literal mask.
+#:
+#: ``jax.extend`` is imported inside rather than at module scope: it is a
+#: separate module and this file's ``importorskip`` covers ``jax`` only.
+SEED_ROUTES = ("0-d numpy array", "numpy scalar")
+
+
+def _seed_routes():
+    import jax.extend.random
+
+    impl = jax.extend.random.threefry_prng_impl
+    return {
+        "numpy scalar": lambda v: impl.seed(np.int64(v)),
+        "0-d numpy array": lambda v: impl.seed(np.array(v, dtype=np.int64)),
+    }
+
+
+@pytest.mark.parametrize("route", SEED_ROUTES)
+def test_a_CALLER_S_constant_that_collides_with_jax_s_mask_still_RAISES(armed, route):
+    """F1. A row must name jax's constant, not every constant of that value.
+
+    THE COLLISION IS REAL AND IT WAS SUPPRESSED. Under ``disable_jit``,
+    ``threefry_prng_impl.seed(np.int64(2**32 - 1))`` narrows TWICE inside
+    ``_threefry_seed`` -- the caller's seed and jax's mask, both
+    ``4294967295 -> -1`` at ``int32``. With the row keyed on value, target
+    dtype and site alone, BOTH were suppressed and the report printed
+    *"written by jax ... the threefry PRNG's 32-bit mask"* at the caller's
+    own line, which is false of one of the two. It was a VALUE collision and
+    not a general quiet: the two neighbouring seeds below alarmed correctly
+    throughout, and they are here so that a fix which simply stopped
+    suppressing would not pass.
+
+    THE SOURCE DTYPE SEPARATES THEM. jax's mask arrives from ``uint32``
+    (``np.uint32(0xFFFFFFFF)``, in jax's own source) and a caller's seed from
+    ``int64`` -- measured, and all 13 of jax's own truncation events in
+    ``adapter.eager_jax_constant_sweep`` arrive from ``uint32``.
+    """
+    drive = _seed_routes()[route]
+    assert _tripwire.evict_trace_caches() == "evicted"
+    if jax.config.jax_enable_x64:
+        # x64 ON widens the promotion to int64, which holds both integers, so
+        # NEITHER the seed nor the mask narrows and there is no collision to
+        # separate. Asserted rather than skipped: "no alarm" here has to be
+        # "nothing narrowed", not "something narrowed and was suppressed".
+        eager.reset_counters()
+        with jax.disable_jit():
+            drive(2 ** 32 - 1)
+        snap = eager.snapshot()
+        assert snap["conversions"] > 0, "the hook saw nothing, so this is vacuous"
+        assert snap["truncations"] == 0, snap
+        return
+    with jax.disable_jit():
+        # the collision itself: the caller's seed, at the caller's line
+        eager.reset_counters()
+        with pytest.raises(stelling.EagerTruncationError) as caught:
+            drive(2 ** 32 - 1)
+        assert caught.value.written == 4294967295
+        assert caught.value.from_dtype == "int64", (
+            "the alarm must carry the field that made it the caller's"
+        )
+        assert caught.value.to_dtype == "int32"
+        assert caught.value.file == __file__, (
+            f"attributed to {caught.value.file}:{caught.value.line} rather "
+            "than to the line in this file that wrote the seed"
+        )
+        assert eager.SUPPRESSED_JAX == 0, (
+            "the caller's own seed was attributed to jax: "
+            f"{eager.snapshot()['suppressed']}"
+        )
+        # ...and the neighbours, which never collided and must be unchanged
+        for seed in (8589934592, 2147483648):
+            eager.reset_counters()
+            with pytest.raises(stelling.EagerTruncationError) as caught:
+                drive(seed)
+            assert caught.value.written == seed
+            assert caught.value.from_dtype == "int64"
+
+
+def test_JAX_S_OWN_mask_is_STILL_suppressed_after_that_separation(armed):
+    """The other half of F1: the fix must not have been bought with a fire.
+
+    ``jax.random.key(0)`` under ``disable_jit`` is the program audit 1 found
+    raising inside jax's own PRNG in eight real workloads and in chex's own
+    suite. It must still be attributed to jax, and the suppression row must
+    show the SOURCE dtype -- the field that made the match -- so a reader can
+    check the attribution rather than take it.
+    """
+    assert _tripwire.evict_trace_caches() == "evicted"
+    eager.reset_counters()
+    with jax.disable_jit():
+        jax.random.key(0)
+        jax.random.PRNGKey(2 ** 32 - 1)
+    if jax.config.jax_enable_x64:
+        # x64 ON widens the mask to int64, which holds it: nothing narrows,
+        # so there is nothing to attribute and nothing to suppress. Asserted
+        # rather than skipped, because "0 suppressions" is also what a blind
+        # hook reports and the two must not read the same.
+        assert eager.CONVERSIONS > 0, "the hook saw nothing, so this is vacuous"
+        assert (eager.TRUNCATIONS, eager.SUPPRESSED_JAX) == (0, 0), eager.snapshot()
+        return
+    assert eager.SUPPRESSED_JAX == 2, eager.snapshot()
+    text = " ".join(row[1] for row in eager.snapshot()["suppressed"].values())
+    assert "4294967295 (uint32) -> -1 (int32)" in text, text
+    assert "threefry" in text
+
+
+def test_a_seed_that_DOES_NOT_SURVIVE_is_a_gap_this_detector_CANNOT_see(armed):
+    """The residue that matters most, measured rather than left implied.
+
+    ``jax.random.PRNGKey(2**32 - 1)`` raising no alarm is a CORRECT verdict --
+    the one observation that reaches this hook is jax's mask, from ``uint32``,
+    and it is jax's. It must not be read as *"the program is fine"*. That
+    program's seed is already dead when the hook is reached: ``PRNGKey`` and
+    ``key`` cast the seed with ``jnp.asarray(np.int64(seeds))`` inside jax's
+    own ``random_seed``, which is a NUMPY-level cast this detector has never
+    sat on -- ``jit`` on or off, before the source-dtype fix and after it --
+    so the seed produces ZERO observations here.
+
+    A seed that does not survive is exactly what this instrument exists to
+    report, and it structurally cannot report this one. Closing it needs a
+    hook at a numpy cast rather than at jax's array constructor, which is a
+    design question; what this test does is keep the CONSEQUENCE measured and
+    the disclosure honest, so that neither can quietly stop being true.
+    """
+    if jax.config.jax_enable_x64:
+        # x64 ON is the configuration in which the gap does not arise: the
+        # seed is kept at int64 and SURVIVES. Asserted rather than skipped,
+        # so that the day this stops being true in either configuration a
+        # test says so rather than a skip line hiding it.
+        for wide, narrow in ((2 ** 32 - 1, -1), (2 ** 32, 0), (2 ** 33 + 5, 5)):
+            assert not bool(
+                (jax.random.PRNGKey(wide) == jax.random.PRNGKey(narrow)).all()
+            ), f"PRNGKey({wide}) collapsed onto PRNGKey({narrow}) with x64 ON"
+        return
+    # the consequence, in the user's own terms
+    for wide, narrow in ((2 ** 32 - 1, -1), (2 ** 32, 0), (2 ** 33 + 5, 5)):
+        assert bool((jax.random.PRNGKey(wide) == jax.random.PRNGKey(narrow)).all()), (
+            f"PRNGKey({wide}) no longer collapses onto PRNGKey({narrow}); the "
+            "disclosure this test guards has gone stale in the good direction"
+        )
+    # ...and the detector sees nothing of the seed, in EITHER jit mode
+    for jit_on in (True, False):
+        assert _tripwire.evict_trace_caches() == "evicted"
+        eager.reset_counters()
+        with contextlib.nullcontext() if jit_on else jax.disable_jit():
+            jax.random.PRNGKey(2 ** 32)
+        snap = eager.snapshot()
+        assert snap["truncations"] == snap["suppressed_jax"], (
+            f"jit_on={jit_on}: a truncation here that is not jax's own would "
+            f"mean the seed HAD been seen: {snap}"
+        )
+    # ...and it is disclosed, with the measurement, where a user reads it
+    text = " ".join(report.EAGER_UNCOVERED)
+    assert "PRNGKey(2**32) == PRNGKey(0)" in text, (
+        "the numpy-cast gap is not disclosed with its measurement"
+    )
 
 
 #: The basis the ``jit``-independence claim is driven over. It was FOUR
@@ -1275,7 +1447,16 @@ def _jit_equality_basis():
          lambda: jax.tree.map(jax.random.PRNGKey, (((((0,),),),),))),
         ("tree.map(PRNGKey, 9000 leaves)", "no alarm",
          lambda: jax.tree.map(jax.random.PRNGKey, list(range(9000)))),
-        # --- jax's mask and the caller's seed, the same integer ---
+        # --- jax's mask and the caller's seed, the same integer. THE
+        # --- VERDICT IS RIGHT AND THE PROGRAM IS NOT FINE: the only
+        # --- observation that reaches the hook here is jax's mask, from
+        # --- uint32, and it is jax's -- while the SEED died earlier, at
+        # --- `jnp.asarray(np.int64(seeds))` inside jax's own `random_seed`,
+        # --- a numpy-level cast this detector has never sat on. "no alarm"
+        # --- means "stelling saw nothing of yours", not "your seed
+        # --- survived": measured, PRNGKey(2**32) == PRNGKey(0). The gap is
+        # --- disclosed in `report.EAGER_UNCOVERED` and driven by
+        # --- `test_a_seed_that_DOES_NOT_SURVIVE_...` above.
         ("random.PRNGKey(2**32 - 1)", "no alarm",
          lambda: jax.random.PRNGKey(2 ** 32 - 1)),
         # --- narrowings reached by their own routes ---
@@ -1311,18 +1492,42 @@ def test_the_origin_answer_does_not_depend_on_a_trace_being_in_progress(armed):
     conversion, because which frame is "the outermost jax frame" depends on
     how many wrapper frames jax installs and that is what ``jit`` changes.
 
-    What is true of the design that replaced it: the verdict is a function of
-    the written VALUE, the target DTYPE, and WHICH jax functions are in the
-    unbroken run of jax frames beneath the caller. ``jit`` changes none of the
-    three -- the decision is an existence test over that run, not a question
-    about which of its frames is outermost.
+    WHAT REPLACED IT ALSO CARRIED A FALSE CLAUSE, and this is the correction
+    of it. It said the verdict is a function of the written VALUE, the
+    DTYPES, and WHICH jax functions are in the run beneath the caller, *"and
+    ``jit`` changes none of the three"*. The third clause is FALSE. Measured
+    on jax 0.11.0, one fresh subprocess per cell, over 36 programs: 26
+    narrowings observed with ``jit`` on and 47 with it off, 25
+    ``(program, value, from-dtype, to-dtype)`` observations occur in both
+    modes, and **6 of those 25, in 5 different programs, present a different
+    run of jax frames**. It differs in BOTH directions: ``jit`` ON inserts
+    tracing frames (``jit(partial(full_like, fill_value=300))(x)``: 8 frames
+    on, 2 off), and ``jit`` OFF inserts jax's EAGER DISPATCH, which a trace
+    does not contain (``jnp.take(x, [9], mode="fill")``: 25 frames on, 31
+    off, the extra six being ``_take``, ``gather``, ``apply_primitive``,
+    ``process_primitive``, ``bind_with_trace``, ``bind``). So the run is not
+    stable and neither mode's run contains the other's.
 
-    WHAT ``jit`` DOES CHANGE, and it is a different sentence: which narrowings
-    happen eagerly at all. With ``jit`` on, jax's threefry mask is traced and
-    never arrives here, so there is nothing to attribute; with it off it
-    arrives and is attributed. That is a statement about the POPULATION of
-    observations, not about the verdict on a member of it, and this test
-    measures the second.
+    THE REAL INVARIANT IS A CONSTRAINT ON ROWS, and it is what this test
+    establishes for the row the map has: the verdict is stable across ``jit``
+    exactly when the function a row names is in the run under both modes or
+    in neither. ``_threefry_seed`` is a PRNG LEAF -- neither jit's tracing
+    machinery nor jax's eager dispatch ever contains it -- which is why the
+    equality below holds. **A row keyed on a function only one mode's run
+    contains would flip the verdict**, in either direction: a tracing frame
+    suppresses with ``jit`` on and raises with it off, an eager-dispatch
+    frame does the reverse. Before a second row is added, its function must
+    be read off the run in BOTH modes and this equality re-driven with the
+    program that reaches it.
+
+    WHAT ``jit`` DOES CHANGE BESIDES, and it is a different sentence again:
+    which narrowings happen eagerly at all. With ``jit`` on, jax's threefry
+    mask is traced and never arrives here, so there is nothing to attribute;
+    with it off it arrives and is attributed. That is a statement about the
+    POPULATION of observations, not about the verdict on a member of it, and
+    this test measures the second -- which is why a program whose narrowing
+    exists in only one mode (``threefry_prng_impl.seed(np.int64(...))``: 0
+    observations with ``jit`` on, 2 with it off) is not in this basis.
     """
     basis = _jit_equality_basis()
 
@@ -1489,7 +1694,7 @@ def test_the_enumeration_of_jax_s_own_eager_truncations_is_RE_DERIVED(armed):
         "reads it and writes a row down, the detector attributes it to "
         "whoever called jax and RAISES there: " + repr(swept["unmatched"])
     )
-    exercised = {(file, func) for file, func, _w, _d in swept["matched"]}
+    exercised = {(file, func) for file, func, _w, _f, _d in swept["matched"]}
     if jax.config.jax_enable_x64:
         # x64 ON widens jax's mask to int64, which holds it, so there is no
         # truncation to attribute and nothing to exercise. That is not a hole
@@ -1539,6 +1744,21 @@ def test_an_UNENUMERATED_constant_of_jax_s_own_RAISES_rather_than_hiding(armed):
         "so a reader who did not write it has nothing to report. It is five "
         "frames below the narrowing, which is what eager.MAX_JAX_FRAMES is "
         "sized for"
+    )
+    assert "arriving as uint32 and narrowed to int32" in text, (
+        "the message does not name the SOURCE dtype, so the report a reader "
+        "sends back is missing a third of the key the row needs"
+    )
+    # ...AND THE CORRECTION COMES BEFORE THE REMEDY. `intentional_wrap` is an
+    # IMPOSSIBLE remedy here -- the attributed line is inside jax and the
+    # reader cannot edit it -- so a message that offered it first asked them
+    # to do something they cannot do, and only afterwards said the
+    # attribution might be stelling's error. Ordering is the whole finding.
+    assert text.index("this attribution is wrong") < text.index(
+        "intentional_wrap("
+    ), (
+        "the alarm offers a declaration the reader cannot write before it "
+        "tells them the attribution may be wrong:\n" + text
     )
     # ...and with the row back, the same program is silent again.
     assert _tripwire.evict_trace_caches() == "evicted"
@@ -1615,8 +1835,9 @@ def test_arming_REFUSES_when_the_user_leg_of_that_control_stops_holding(unarmed,
     # run rather than typed, so this cannot go stale against a jax release.
     seen = {}
 
-    def spy(value, to_dtype):
+    def spy(value, from_dtype, to_dtype):
         seen.setdefault("run", eager.jax_segment(1))
+        seen.setdefault("from", from_dtype)
 
     probe_status = _tripwire.arm_eager()
     assert probe_status.armed, probe_status.code
@@ -1633,7 +1854,8 @@ def test_arming_REFUSES_when_the_user_leg_of_that_control_stops_holding(unarmed,
     monkeypatch.setattr(
         adapter,
         "_JAX_EAGER_CONSTANTS",
-        {run[0]: ((written, adapter.EAGER_DTYPE, "a row that must not exist"),)},
+        {run[0]: ((written, seen["from"], adapter.EAGER_DTYPE,
+                   "a row that must not exist"),)},
     )
     status = _tripwire.arm_eager()
     try:
@@ -1658,7 +1880,7 @@ def test_that_arm_time_control_leaves_the_counters_EXACTLY_as_it_found_them(unar
     figures and ``reset_counters()`` would take those with it.
     """
     eager.reset_counters()
-    eager.observe(300, "int16")  # in range: one conversion, no truncation
+    eager.observe(300, "int", "int16")  # in range: a conversion, no truncation
     before = eager.snapshot()
     assert before["conversions"] == 1
     status = _tripwire.arm_eager()

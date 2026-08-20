@@ -230,15 +230,38 @@ a class. This is not a class; it is a list of length one.
 ### THE ANSWER THAT SHIPPED: AN ENUMERATION, AT JAX'S OWN SITE
 
 `_adapter_jax._JAX_EAGER_CONSTANTS` records what jax writes, keyed on the jax
-FUNCTION that writes it and on the exact value and dtype:
+FUNCTION that writes it, the exact value, the dtype the value ARRIVES in and
+the dtype it is narrowed to:
 
 ```
-("_src/random/threefry2x32.py", "_threefry_seed"): ((4294967295, "int32", ...),)
+("_src/random/threefry2x32.py", "_threefry_seed"):
+    ((4294967295, "uint32", "int32", ...),)
 ```
 
 `eager._origin` suppresses when, and only when, some frame in the **unbroken
 run of jax frames** beneath the caller's line is a site with a row, and the
-observed `(value, dtype)` is that row's. Everything else is the caller's.
+observed `(value, source dtype, target dtype)` is that row's. Everything else
+is the caller's.
+
+**The source dtype is in the key because an audit showed a three-field row
+suppressing the CALLER'S constant.** At the one site the map names, a caller's
+seed and jax's mask collide:
+`jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))` (under
+`disable_jit`) narrows **twice** under `_threefry_seed` —
+
+| operand | source dtype | written -> became | with a three-field row |
+|---|---|---|---|
+| the caller's seed | `int64` | `4294967295 -> -1` (int32) | **suppressed, wrongly** |
+| jax's mask | `uint32` | `4294967295 -> -1` (int32) | suppressed, rightly |
+
+— and the report then printed *"written by jax at `_threefry_seed()`: the
+threefry PRNG's 32-bit mask"* at the caller's own line, which is false of one
+of the two. It was a VALUE COLLISION and not a general quiet: `seed=8589934592`
+and `seed=2147483648` alarmed correctly throughout. The two observations differ
+in exactly one field the hook can see, and the hook already holds it: **all 13
+of jax's own truncation events in the sweep arrive from `uint32`**, and a seed
+a caller hands that entry point arrives from `int64`. Driven before and after
+on both routes that reach it — a numpy scalar and a 0-d numpy array.
 
 That shape is this repository's own: `_KNOWN_HASHES`, in the same file, is a
 narrow map plus a canary that reddens when it is incomplete, and the argument
@@ -271,20 +294,49 @@ Four properties follow, and each is driven:
   audit found, and the paragraph they contradicted, are gone rather than
   documented.
 
-**The `jit` claim is now the narrow one, and it is true as stated.** What stood
-here was *"a call boundary exists whether or not a trace is in progress, which
-is why this answer does not depend on `jit`"*, and it was false: widened from
-four programs to fourteen, `jax.jit(partial(jnp.full_like, fill_value=300))(x)`
-gave **no alarm with `jit` on and raised with it off**, on the same observed
-conversion, because the identity of "the outermost jax frame" depends on how
-many wrapper frames jax installs. The verdict now depends on three things —
-the written value, the target dtype, and which jax functions are in the run
-beneath the caller — and `jit` changes none of them, because the decision is an
-EXISTENCE test over that run rather than a question about which of its frames
-is outermost. Driven as an equality over **19 programs**, covering `jit`,
-`vmap`, `tree.map`, `lax.map`, `lax.scan` and `lax.fori_loop`, five carrier
-shapes, two pytrees big enough to have exhausted the old scan's budget, and
-jax's own PRNG: 0 of 19 verdicts differ.
+**The `jit` claim, and the third clause it used to carry was FALSE.** What
+stood here first was *"a call boundary exists whether or not a trace is in
+progress, which is why this answer does not depend on `jit`"*, and it was
+false: widened from four programs to fourteen,
+`jax.jit(partial(jnp.full_like, fill_value=300))(x)` gave **no alarm with `jit`
+on and raised with it off**, on the same observed conversion. What replaced it
+said the verdict is a function of the value, the dtypes and which jax functions
+are in the run, *"and `jit` changes none of the three"* — and the third clause
+is false too. Measured on jax 0.11.0, **one fresh subprocess per cell** so no
+trace cache is shared, over 36 programs: 26 narrowings observed with `jit` on
+and 47 with it off, **25 `(program, value, source dtype, target dtype)`
+observations occur in both modes, and 6 of those 25 — in 5 different programs —
+present a different run of jax frames.**
+
+**And it differs in BOTH directions, which is why the invariant is not a
+superset.**
+
+* `jit` ON inserts its **tracing** machinery. `jax.jit(partial(jnp.full_like,
+  fill_value=300))(x)` observes an 8-frame run under `jit` — `full_like`,
+  `full_like`, `trace_to_jaxpr_nocache`, `trace_to_jaxpr`, `_trace_for_jit`,
+  `_infer_params`, `cache_miss`, `reraise_with_filtered_traceback` — and a
+  2-frame run without it. **5 of the 6** differ this way.
+* `jit` OFF inserts jax's **eager dispatch**, which a trace does not contain.
+  `jnp.take(x, jnp.array([9]), mode="fill")` observes 25 frames under `jit` and
+  31 without it, the six extra being `_take`, `gather`, `apply_primitive`,
+  `process_primitive`, `bind_with_trace`, `bind`. **1 of the 6** differs this
+  way, and it is the one that kills "the `jit`-on run is a superset".
+
+**So the real invariant is a constraint on ROWS, not a property of `jit`:** the
+verdict is stable across `jit` exactly when the function a row names is in the
+run under both modes or in neither. The row this map has holds because
+`_threefry_seed` is a **PRNG leaf** — neither jit's tracing machinery nor jax's
+eager dispatch ever contains it. **A row keyed on a function only one mode's
+run contains would flip the verdict**, and in either direction: a tracing frame
+suppresses with `jit` on and raises with it off, an eager-dispatch frame does
+the reverse. That asymmetry is audit 2's finding in the predicate this lookup
+replaced, so before a second row is added, read its function off the run in
+BOTH modes and re-drive the equality with the program that reaches it.
+
+The equality itself is driven over **19 programs**, covering `jit`, `vmap`,
+`tree.map`, `lax.map`, `lax.scan` and `lax.fori_loop`, five carrier shapes, two
+pytrees big enough to have exhausted the old scan's budget, and jax's own PRNG:
+0 of 19 verdicts differ.
 
 What `jit` does change is a different sentence, and it is about the POPULATION
 rather than the verdict: with `jit` on, jax's mask is traced and never reaches
@@ -294,11 +346,43 @@ Everything suppressed is counted in `eager.SUPPRESSED` and printed with its
 site, the jax function that wrote it and what the constant IS, exactly as the
 tripwire's `suppressed_jax` is.
 
-**One residue the enumeration REMOVED, worth naming because it was disclosed
-here.** The predicate raised on `jax.random.PRNGKey(2**32 - 1)`, where jax's
-mask and the caller's seed are the same integer; it was the second fire in the
-table above. A lookup on the SITE does not have that edge: the mask is jax's
-wherever the seed came from, and that program is now silent.
+**One residue the enumeration MOVED rather than removed, and the collision is
+now disclosed in the direction that survives.** The predicate raised on
+`jax.random.PRNGKey(2**32 - 1)`, where jax's mask and the caller's seed are the
+same integer; it was the second fire in the table above. A lookup on the SITE
+does not have that LOUD edge — the mask is jax's wherever the seed came from —
+but it acquired a QUIET one in exchange, which is the three-field row above
+suppressing a caller's colliding seed. The source dtype closes that instance.
+What is left is the shape rather than the instance: a row is a value lookup and
+not a proof of authorship, so a narrowing of the caller's that agreed with a
+row in all four fields would still be suppressed. No route measured here now
+reaches that state — a caller's `uint32` seed of the same value promotes to
+`uint32` and does not narrow at all (2 conversions, 0 truncations) — but a
+sweep is a sample, and `report.EAGER_UNCOVERED` carries the residue in the
+general form.
+
+**And `jax.random.PRNGKey(2**32 - 1)` being silent is a correct verdict about a
+program whose seed is already dead.** That program is in the `jit`-equality
+basis as `("random.PRNGKey(2**32 - 1)", "no alarm", ...)` and the verdict is
+right — the one observation that reaches the hook is jax's mask, from `uint32`,
+and it is jax's. It must not be read as *"the program is fine"*: `PRNGKey` and
+`key` cast the seed with `jnp.asarray(np.int64(seeds))` inside jax's own
+`random_seed` (`jax/_src/random/prng.py:558` on jax 0.11.0, `:563` on 0.10.2),
+which is a **numpy-level cast this detector has never sat on** — before the
+source-dtype fix, after it, `jit` on and `jit` off, with **zero** observations
+of the seed at the hook. Measured on jax 0.11.0, x64 off:
+
+```
+PRNGKey(2**32 - 1) == PRNGKey(-1)     True
+PRNGKey(2**32)     == PRNGKey(0)      True
+PRNGKey(2**33 + 5) == PRNGKey(5)      True
+```
+
+A seed that does not survive is exactly what this instrument exists to report,
+and it structurally cannot report this one. Closing it needs a hook at a numpy
+cast rather than at jax's array constructor — the numpy-scalar residue
+`SOUNDNESS.md` already names, and a design question rather than a fixup. It is
+disclosed in `report.EAGER_UNCOVERED` with the measurement.
 
 **The cost, stated rather than discovered.** `finally:` blocks still run and
 context managers still exit, so ordinary cleanup is unaffected. Cleanup written

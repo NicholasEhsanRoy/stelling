@@ -282,35 +282,57 @@ def test_a_narrowing_at_no_enumerated_jax_site_is_the_CALLER_S():
     """
     from stelling._tripwire import eager
 
-    assert eager.jax_constant(4294967295, "int32", ()) is None
-    assert eager.jax_constant(300, "int8", (("_src/lax/lax.py", "full"),)) is None
+    assert eager.jax_constant(4294967295, "uint32", "int32", ()) is None
+    assert eager.jax_constant(
+        300, "int", "int8", (("_src/lax/lax.py", "full"),)
+    ) is None
 
 
-def test_a_row_matches_on_the_SITE_and_the_VALUE_and_the_DTYPE_together():
-    """A row is a statement about one constant at one site.
+def test_a_row_matches_on_the_SITE_and_the_VALUE_and_BOTH_DTYPES_together():
+    """A row is a statement about one constant, arriving one way, at one site.
 
     Not a licence for the function it names -- a jax function that writes one
     constant of its own still narrows the caller's constants too -- and not a
     licence for the value anywhere else.
+
+    THE SOURCE DTYPE IS IN THE KEY, and an audit is why. Without it a row
+    about jax's own constant also suppresses a CALLER'S constant of the same
+    value narrowed at the same jax function, and at the one site the map
+    names those collide:
+    ``jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))``
+    narrows twice under ``_threefry_seed`` -- the caller's seed and jax's
+    mask, both ``4294967295 -> -1`` at ``int32`` -- and the three-field row
+    suppressed both, then printed "written by jax ... the threefry PRNG's
+    32-bit mask" at the caller's own line. The two differ in exactly one
+    observable, which is the field added here: jax's mask arrives from
+    ``uint32`` and a caller's seed from ``int64``. Driven against the real
+    jax in ``tests/test_tripwire_eager.py``.
     """
     from stelling._tripwire import eager
 
-    rows = {("f.py", "writer"): ((4294967295, "int32", "the mask"),)}
+    rows = {("f.py", "writer"): ((4294967295, "uint32", "int32", "the mask"),)}
     saved = dict(eager._JAX_CONSTANTS)
     eager._JAX_CONSTANTS.clear()
     eager._JAX_CONSTANTS.update(rows)
     try:
         run = (("g.py", "narrower"), ("f.py", "writer"), ("h.py", "caller"))
-        assert eager.jax_constant(4294967295, "int32", run)[:2] == ("f.py", "writer")
+        assert eager.jax_constant(
+            4294967295, "uint32", "int32", run
+        )[:2] == ("f.py", "writer")
         # the right site, the wrong value
-        assert eager.jax_constant(300, "int32", run) is None
-        # the right site and value, the wrong dtype
-        assert eager.jax_constant(4294967295, "int16", run) is None
-        # the right value and dtype, no site
-        assert eager.jax_constant(4294967295, "int32", (("g.py", "narrower"),)) is None
+        assert eager.jax_constant(300, "uint32", "int32", run) is None
+        # the right site and value, the wrong TARGET dtype
+        assert eager.jax_constant(4294967295, "uint32", "int16", run) is None
+        # the right site, value and target -- the wrong SOURCE dtype. This is
+        # the caller's colliding constant, and it must NOT be suppressed.
+        assert eager.jax_constant(4294967295, "int64", "int32", run) is None
+        # the right value and dtypes, no site
+        assert eager.jax_constant(
+            4294967295, "uint32", "int32", (("g.py", "narrower"),)
+        ) is None
         # the right file, a different function in it
         assert eager.jax_constant(
-            4294967295, "int32", (("f.py", "somebody_else"),)
+            4294967295, "uint32", "int32", (("f.py", "somebody_else"),)
         ) is None
     finally:
         eager._JAX_CONSTANTS.clear()
@@ -329,10 +351,12 @@ def test_the_row_carries_a_SENTENCE_and_the_report_prints_it():
     saved = dict(eager._JAX_CONSTANTS)
     eager._JAX_CONSTANTS.clear()
     eager._JAX_CONSTANTS.update(
-        {("f.py", "writer"): ((4294967295, "int32", "the threefry mask"),)}
+        {("f.py", "writer"): ((4294967295, "uint32", "int32", "the threefry mask"),)}
     )
     try:
-        row = eager.jax_constant(4294967295, "int32", (("f.py", "writer"),))
+        row = eager.jax_constant(
+            4294967295, "uint32", "int32", (("f.py", "writer"),)
+        )
         assert row == ("f.py", "writer", "the threefry mask")
     finally:
         eager._JAX_CONSTANTS.clear()
@@ -1547,13 +1571,14 @@ def test_an_UNENUMERATED_eager_truncation_of_jax_s_own_pages(monkeypatch):
     _sweep({"code": "swept", "conversions": 675, "truncations": 13,
             "unmatched": (),
             "matched": (("_src/random/threefry2x32.py", "_threefry_seed",
-                         4294967295, "int32"),)})
+                         4294967295, "uint32", "int32"),)})
     note, reason = canary._eager_sweep_row(True)
     assert reason is None, note
     assert "675 conversion(s)" in note and "1 row(s) exercised" in note
 
     _sweep({"code": "swept", "conversions": 675, "truncations": 14,
-            "unmatched": ((511, "uint8", (("_src/somewhere.py", "new_thing"),)),),
+            "unmatched": ((511, "int", "uint8",
+                           (("_src/somewhere.py", "new_thing"),)),),
             "matched": ()})
     note, reason = canary._eager_sweep_row(True)
     assert reason is not None, "an unenumerated jax constant did not page"
