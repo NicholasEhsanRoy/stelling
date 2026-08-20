@@ -852,14 +852,14 @@ def test_two_workers_eager_snapshots_are_summed_and_their_sites_kept():
 
     a = {
         "conversions": 10, "truncations": 2, "internal_errors": 1,
-        "suppressed_jax": 1, "inconclusive": 0,
+        "suppressed_jax": 1,
         "declared": {"f.py:1": [1, "300 -> 44 (int8)"]},
         "permitted": {"g.py:9": [2, "because"]},
         "suppressed": {"y.py:3": [1, "4294967295 -> -1 (int32)"]},
     }
     b = {
         "conversions": 5, "truncations": 1, "internal_errors": 0,
-        "suppressed_jax": 2, "inconclusive": 1,
+        "suppressed_jax": 2,
         "declared": {"f.py:1": [3, "300 -> 44 (int8)"],
                      "h.py:7": [1, "255 -> -1 (int8)"]},
         "permitted": {},
@@ -876,7 +876,6 @@ def test_two_workers_eager_snapshots_are_summed_and_their_sites_kept():
     # figure is silently dropped on the controller. Asserted against the
     # snapshot itself rather than against a list typed here.
     assert merged["suppressed_jax"] == 3
-    assert merged["inconclusive"] == 1
     assert merged["suppressed"]["y.py:3"][0] == 3
     from stelling._tripwire import eager as _eager
 

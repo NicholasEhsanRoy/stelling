@@ -1286,9 +1286,17 @@ ad._FLOOR = (999, 0, 0)
 
 #: ``(id, shim, argv, expected exit, expected reason codes, control state,
 #: control report)``. ``summary`` says where ``$GITHUB_STEP_SUMMARY`` points.
+# `--no-sweep` ON EVERY CELL BUT THE FIRST, and the first is what pays for
+# the default. The canary re-derives `_adapter_jax._JAX_EAGER_CONSTANTS` by
+# running ~700 jax operations under `disable_jit`, which costs about twelve
+# seconds; this battery drives the script a dozen times to check WHICH reason
+# produced which exit status, and twelve identical sweeps measure the same
+# thing eleven extra times. The `clean` cell runs the DEFAULT command line, so
+# the sweep is still driven end to end in a real process, and
+# `tests/test_tripwire_record.py` asserts neither workflow leg passes the flag.
 _CANARY_PROCESS_TABLE = [
     ("clean", "", ["--require"], 0, [], "fired", "rendered"),
-    ("clean-no-require", "", [], 0, [], "fired", "rendered"),
+    ("clean-no-require", "", ["--no-sweep"], 0, [], "fired", "rendered"),
     # TWO REASONS, AND BOTH ARE TRUE. `detach("bypass")` puts jax's own rule
     # back over stelling's wrapper, so the hook is attached-but-blind
     # (`control:did-not-fire`) AND stelling's wrapper is no longer the live
@@ -1297,33 +1305,38 @@ _CANARY_PROCESS_TABLE = [
     # hooks are live, and a bypass is exactly what that question is for. Before
     # it, this run printed `disarm(): foreign-patch` on stdout and paged for
     # the control alone.
-    ("dead-hook", _SHIM_DEAD_HOOK, ["--require"], 1,
+    ("dead-hook", _SHIM_DEAD_HOOK, ["--require", "--no-sweep"], 1,
      ["control:did-not-fire", "hooks:displaced"], "did-not-fire", "rendered"),
     # `--require` MUST NOT MATTER here. `arm()` says the hook is attached and
     # the control says nothing reached it, so the armed status is unverified
     # either way -- and gating this on `--require` is the shape of the defect
     # this batch closed.
-    ("dead-hook-no-require", _SHIM_DEAD_HOOK, [], 1,
+    ("dead-hook-no-require", _SHIM_DEAD_HOOK, ["--no-sweep"], 1,
      ["control:did-not-fire", "hooks:displaced"], "did-not-fire", "rendered"),
-    ("probe-raised", _SHIM_PROBE_RAISES, ["--require"], 1,
+    ("probe-raised", _SHIM_PROBE_RAISES, ["--require", "--no-sweep"], 1,
      ["control:raised"], "raised", "not-run"),
-    ("probe-raised-no-require", _SHIM_PROBE_RAISES, [], 1,
+    ("probe-raised-no-require", _SHIM_PROBE_RAISES, ["--no-sweep"], 1,
      ["control:raised"], "raised", "not-run"),
-    ("findings-unreadable", _SHIM_FINDINGS_UNREADABLE, ["--require"], 1,
+    ("findings-unreadable", _SHIM_FINDINGS_UNREADABLE,
+     ["--require", "--no-sweep"], 1,
      ["control:indeterminate"], "ran", "not-run"),
-    ("finding-shape-moved", _SHIM_FINDING_SHAPE_MOVED, ["--require"], 1,
+    ("finding-shape-moved", _SHIM_FINDING_SHAPE_MOVED,
+     ["--require", "--no-sweep"], 1,
      ["control:unrenderable"], "fired", "unrenderable"),
     ("dead-hook-and-unrenderable", _SHIM_DEAD_HOOK_AND_UNRENDERABLE,
-     ["--require"], 1,
+     ["--require", "--no-sweep"], 1,
      ["control:did-not-fire", "control:unrenderable", "hooks:displaced"],
      "did-not-fire", "unrenderable"),
-    ("hash-contradicted", _SHIM_HASH_CONTRADICTED, ["--require"], 1,
+    ("hash-contradicted", _SHIM_HASH_CONTRADICTED,
+     ["--require", "--no-sweep"], 1,
      ["hash:contradicted"], "fired", "rendered"),
-    ("hash-contradicted-no-require", _SHIM_HASH_CONTRADICTED, [], 1,
+    ("hash-contradicted-no-require", _SHIM_HASH_CONTRADICTED,
+     ["--no-sweep"], 1,
      ["hash:contradicted"], "fired", "rendered"),
-    ("never-read", _SHIM_NEVER_READ, ["--require"], 0, [], "fired", "rendered"),
-    ("not-armed", _SHIM_BELOW_FLOOR, [], 0, [], "not-run", "not-run"),
-    ("not-armed-require", _SHIM_BELOW_FLOOR, ["--require"], 1,
+    ("never-read", _SHIM_NEVER_READ, ["--require", "--no-sweep"], 0, [],
+     "fired", "rendered"),
+    ("not-armed", _SHIM_BELOW_FLOOR, ["--no-sweep"], 0, [], "not-run", "not-run"),
+    ("not-armed-require", _SHIM_BELOW_FLOOR, ["--require", "--no-sweep"], 1,
      ["not-armed"], "not-run", "not-run"),
 ]
 

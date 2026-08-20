@@ -136,12 +136,13 @@ UNCOVERED = (
     "detector armed, `jit` off is also the configuration in which jax "
     "evaluates ITS OWN constants eagerly -- the threefry PRNG mask, "
     "4294967295 -> -1 at int32 -- and the first version of the detector "
-    "raised on those, in eight of this project's 33 census workloads. It "
-    "does not now: `eager._origin` attributes a narrowing to whoever the "
-    "data came from, and jax's own are counted and printed rather than "
-    "raised on. What is NOT closed in this mode is the same residue as "
-    "everywhere else (the numpy routes above), plus the origin filter's own "
-    "lenient edge, which the eager section names.",
+    "raised on those, in eight of this project's 32 census workloads. It "
+    "does not now: `eager._origin` looks the narrowing up in an enumerated "
+    "map of jax's own eager truncations, and the ones it names are counted "
+    "and printed rather than raised on. What is NOT closed in this mode is "
+    "the same residue as everywhere else (the numpy routes above), plus the "
+    "one an enumeration has -- a jax constant nobody has written a row for "
+    "raises rather than hiding -- which the eager section names.",
     "anything replayed from a WARM TRACE CACHE instead of being traced: "
     "jax's cache is keyed on the jitted callable and its avals, so a "
     "`@jax.jit` function any earlier trace already reached -- before this "
@@ -664,19 +665,25 @@ EAGER_UNCOVERED = (
     "asks whether stelling's wrapper is the live attribute at the end of a "
     "region; a patch installed and removed inside that region is invisible "
     "to it, exactly as it is to the trace gate.",
-    "A CONSTANT THE ORIGIN FILTER CANNOT ESTABLISH AS YOURS. The detector "
-    "raises only on a narrowing whose value crossed from your code into jax "
-    "as an argument of the call you made -- that is what keeps it from "
-    "raising inside jax's own PRNG under `jax.disable_jit()`, "
-    "`JAX_DISABLE_JIT=1` and `chex.fake_jit()`. Its two edges are both "
-    "disclosed and they lean opposite ways. A constant reaching jax inside a "
-    "custom object rather than a plain value, tuple, list or dict is not "
-    "found in that scan, so it is attributed to jax and does NOT raise: a "
-    "missed narrowing, and the only one this rule can produce. And a "
-    "constant jax wrote that happens to EQUAL something you passed at the "
-    "same call IS attributed to you and raises -- measured, "
-    "`jax.random.PRNGKey(4294967295)`, where jax's mask and your seed are "
-    "the same integer.",
+    "AN EAGER TRUNCATION OF JAX'S OWN THAT NOBODY HAS WRITTEN DOWN YET. The "
+    "detector does not GUESS whether jax wrote a constant; it looks the "
+    "narrowing up in an enumerated map of jax's own eager truncations "
+    "(`_adapter_jax._JAX_EAGER_CONSTANTS`), keyed on the jax function that "
+    "writes it and the exact value and dtype. Today that map has ONE row -- "
+    "the threefry PRNG mask, `4294967295 -> -1` at int32 -- because a sweep "
+    "of jax's own integer surface (every key implementation and seed "
+    "spelling, then `jax.random`'s consumers and `jnp`'s integer ops over six "
+    "integer dtypes) under `disable_jit` sees 675 conversions and 13 "
+    "truncations of jax's own, and all 13 are that one row, identically on "
+    "jax 0.11.0 and 0.10.2. THE RESIDUE IS "
+    "THAT THE MAP IS AN ENUMERATION AND A SWEEP IS A SAMPLE: a jax release "
+    "that adds a second internal eager truncation has no row, so it is "
+    "attributed to WHOEVER CALLED JAX and it RAISES, at a line inside jax "
+    "they did not write. That is the loud direction and it is deliberate -- "
+    "an over-report is visible to a reader holding the quoted line and a "
+    "suppression is not -- and the alarm says so in its own message. The "
+    "sweep runs as a test on both jax series, and arming drives the row it "
+    "has and refuses to attach if it stops holding.",
     "A NARROWING THAT HAPPENS WHILE A GENERATOR IS SUSPENDED INSIDE AN "
     "`expected_truncation` REGION. The region is dynamically scoped to one "
     "context's stack -- isolated across threads and across asyncio tasks, "
@@ -752,21 +759,12 @@ def render_eager(status, snapshot) -> list[str]:
             f"below your call, at {len(suppressed)} call site(s), and did not "
             "raise. jax narrows its own constants -- the threefry PRNG mask "
             "is 4294967295 -> -1 at int32 -- and a constant you did not write "
-            "is not a constant you can declare, so it is attributed and "
-            "counted here instead:"
+            "is not a constant you can declare, so each is matched against "
+            "an enumerated map of jax's own eager truncations, attributed, "
+            "and counted here with the jax function that wrote it:"
         )
         for site, (count, text) in sorted(suppressed.items()):
             lines.append(f"      {site}  x{count}  {text}")
-    inconclusive = snapshot.get("inconclusive", 0)
-    if inconclusive:
-        lines.append(
-            f"    {inconclusive} of the origin decisions above could NOT be "
-            "established: the scan of the boundary call's arguments ran out "
-            "of budget, and those were attributed to you rather than to jax, "
-            "because over-reporting is visible to you and a suppression is "
-            "not. If one of them raised on a constant you did not write, that "
-            "is the residue and it is worth reporting."
-        )
     if declared:
         lines.append(
             f"    {sum(row[0] for row in declared.values())} wrap(s) DECLARED "

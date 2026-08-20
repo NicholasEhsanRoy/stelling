@@ -235,10 +235,15 @@ def pytest_configure(config):
         # self-check reaches the eager hook with 2 IN-RANGE conversions, so
         # arming the rule first starts every session's eager denominator at 2
         # instead of 0, and those two are stelling's own traffic rather than
-        # the suite's. The order stands; the reason is this one. (The eager
-        # self-check has the mirror problem and does not have it: it drives
-        # the live wrapper with the observer swapped out, so it never reaches
-        # the policy that raises.)
+        # the suite's. The order stands; the reason is this one.
+        #
+        # THE EAGER SIDE HAS THE MIRROR PROBLEM AND PAYS FOR IT THE SAME WAY.
+        # Its route probes swap the observer out and never reach the policy
+        # that raises -- which is why arming also runs `eager._origin_control`,
+        # one narrowing of each origin through the LIVE policy. That control
+        # moves the counters and writes rows, so it saves them and writes them
+        # back: an instrument whose own self-check appeared in the denominator
+        # would be reporting a rate about itself.
         state.eager_status = _tripwire.arm_eager()
         if not state.eager_status.armed and state.role == "single":
             raise pytest.UsageError(
@@ -514,9 +519,6 @@ def _merge_eager(into: dict | None, payload: dict) -> dict:
     merged["truncations"] = merged.get("truncations", 0) + payload.get("truncations", 0)
     merged["suppressed_jax"] = merged.get("suppressed_jax", 0) + payload.get(
         "suppressed_jax", 0
-    )
-    merged["inconclusive"] = merged.get("inconclusive", 0) + payload.get(
-        "inconclusive", 0
     )
     merged["internal_errors"] = merged.get("internal_errors", 0) + payload.get(
         "internal_errors", 0

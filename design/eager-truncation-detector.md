@@ -134,16 +134,43 @@ eagerly; the mask reaches this hook as a written scalar; and the version without
 a filter raised `EagerTruncationError(4294967295 -> -1, int32)` **inside jax's
 own PRNG**. Measured on jax 0.11.0 and 0.10.2:
 
-| configuration | fires, 33-workload census | what fired |
-| --- | --- | --- |
-| `jit` on, before and after | 1 | the control that must fire |
-| `JAX_DISABLE_JIT=1`, before | 9 | the control, plus **8 in jax's PRNG**: `jax.random`, flax linen, flax nnx, equinox, diffrax, jax_md, e3nn_jax |
-| `JAX_DISABLE_JIT=1`, after | 2 | the control, plus the one disclosed coincidence below |
+Re-derived for this batch over a **32-workload** census across 24 third-party
+packages, on jax 0.11.0 and 0.10.2, **byte-identically on both**:
+
+| configuration | conversions | truncations | suppressed | fires | what fired |
+| --- | --- | --- | --- | --- | --- |
+| `jit` on, before | 100 | 2 | 0 | 2 | the control, **plus chex's `fake_jit`** |
+| `jit` on, after | 101 | 2 | 1 | **1** | the control that must fire |
+| `JAX_DISABLE_JIT=1`, before | 245 | 9 | 0 | 9 | the control, plus **8 in jax's PRNG**: `jax.random` ×4, flax linen, flax nnx, equinox, `chex.fake_jit` |
+| `JAX_DISABLE_JIT=1`, after | 270 | 9 | 8 | **1** | the control that must fire |
+
+**READ THE TRUNCATION COLUMN AND NOT THE CONVERSION COLUMN, and the previous
+version of this table did not say so.** It printed `686` and `1225` conversions
+side by side as though they were comparable exposures. They are not: **the
+alarm is a `BaseException`, so a fire kills the rest of its workload and stops
+that workload's later conversions being counted.** A tree that fires nine times
+therefore reports a *smaller* denominator than the same tree that fires once,
+for the same programs, and a rate computed across the two columns means
+nothing. The comparable figures are the truncations — **9 both ways** — and the
+fires: **9 → 1**.
+
+The "before" rows are an EQUALITY CONTROL rather than a different checkout:
+`eager._origin` is forced to return `ORIGIN_USER`, which is exactly what the
+tree without an origin filter did, over the same workloads in the same
+process shape. It reproduces the pre-filter tree's figures exactly, which is
+what makes it usable as a control.
+
+**And the `jit`-on row is not the quiet one it looks like.** `chex.fake_jit()`
+installs `jax.disable_jit()` for the duration of a test, so a workload that
+uses it meets jax's eager mask **in the DEFAULT configuration**. The origin
+question is not a `JAX_DISABLE_JIT=1` special case; it is reachable through a
+public chex API with jax's own defaults untouched.
 
 `jax.disable_jit()` is jax's own documented debugging workflow and is what the
 public `chex.fake_jit()` and `chex.fake_pmap_and_jit()` install: chex's own
 installed suite went from **2 failed, 32 passed** to **34 passed** with the
-detector armed over `chex/_src/fake_test.py`. And the message prescribed an
+detector armed over `chex/_src/fake_test.py` — re-derived on this design, still
+34 passed. And the message prescribed an
 impossible remedy — the user never wrote `4294967295`, for flax nnx the line it
 named was inside `flax/nnx/rnglib.py`, and `except Exception:` could not
 contain it. The only escapes were wrapping every `jax.random` call in
@@ -165,35 +192,113 @@ here. Measured, there is no frame shape to key on either — `jnp.full((), 256,
 jnp.int8)` and `jax.random.key(0)` both present as a user frame with nothing but
 jax frames beneath it.
 
-So `eager._origin` asks the same question of the DATA:
+### A GENERAL PREDICATE WAS THE FIRST ANSWER AND IT WAS WRONG IN BOTH DIRECTIONS
+
+What shipped in the first fixup asked the same question of the DATA:
 
 > is the narrowed integer among the arguments of the call that crossed out of
 > non-jax code into jax?
 
-`256` crossed as `full`'s `fill_value`; `4294967295` was manufactured nine
-frames below `random.key` and is in nothing the caller handed over. **A call
-boundary exists whether or not a trace is in progress, which is why this answer
-does not depend on `jit`** — driven as an equality in
-`test_the_origin_answer_does_not_depend_on_a_trace_being_in_progress`, which
-runs the same four programs with `jit` on and off and requires the same verdict.
+It is a reasonable proxy and it failed twice, measured:
 
-Suppression requires POSITIVE evidence — a jax boundary, and a scan of its
-arguments (`record.carries`) that COMPLETED and found nothing. A scan cut short
-by its own limits returns `None`, is counted in `eager.INCONCLUSIVE`, and is
-attributed to the user: over-reporting is visible to a reader holding the quoted
-line and a suppression is not, which is the direction `record.attribute`'s own
-fallback leans. Everything suppressed is counted in `eager.SUPPRESSED` and
-printed with its site, exactly as the tripwire's `suppressed_jax` is.
+* **A MISSED NARROWING, in the DEFAULT `jit`-on configuration, on idiomatic
+  jax.** A constant the author really wrote is not in the boundary call's
+  arguments when the call carries it in a `functools.partial`, a
+  `jax.tree_util.Partial`, a bound method, a closure cell or a
+  registered-dataclass pytree — so `jax.tree.map(partial(jnp.full_like,
+  fill_value=300), tree)` was SUPPRESSED, silently, under `jit`, `vmap`,
+  `tree.map`, `lax.map`, `lax.scan` and `lax.fori_loop` alike. That is
+  `SOUNDNESS.md`'s integer-literal-wrap entry, reintroduced by the filter meant
+  to make the tool usable, and it was a regression against the tree before the
+  filter existed.
+* **A FALSE ALARM, in the mode the filter was built for.** The scan has a
+  depth, a breadth and a budget; a scan that ran out returned "not established"
+  and therefore "the user's", so a params-shaped five-level pytree under
+  `tree.map(jax.random.key, ...)` re-raised the exact PRNG alarm above.
 
-**Its two edges lean opposite ways and both are disclosed.** A constant that
-reaches jax inside a custom object rather than a plain value, tuple, list or
-dict is not found by the scan, so it is attributed to jax and does NOT raise —
-the one missed narrowing this rule can produce. And a constant jax wrote that
-happens to EQUAL something passed at the same call IS attributed to the caller
-and raises: measured in the census, `jax.random.PRNGKey(2**32 - 1)`, where jax's
-threefry mask and the seed are both 4294967295. That one is the remaining fire
-in the table above; the remedy for it is `expected_truncation`, not
-`intentional_wrap`, because the declared value would change the program.
+**And the problem it generalises over has ONE INSTANCE.** Measured twice,
+independently. A hand sweep of 649 scalar integer conversions across
+`jax.random.*` and `jnp`'s integer ops over six integer dtypes, under
+`JAX_DISABLE_JIT=1`, finds **exactly one** eager truncation of jax's own in
+existence — the threefry mask — byte-identically on jax 0.11.0 and 0.10.2.
+`_adapter_jax.eager_jax_constant_sweep` then re-derives it as SHIPPED CODE
+over a wider surface — every key implementation and seed spelling as well —
+and sees 675 conversions and 13 truncation events, all 13 of them that one
+row, again byte-identically on both series. A predicate is the right shape for
+a class. This is not a class; it is a list of length one.
+
+### THE ANSWER THAT SHIPPED: AN ENUMERATION, AT JAX'S OWN SITE
+
+`_adapter_jax._JAX_EAGER_CONSTANTS` records what jax writes, keyed on the jax
+FUNCTION that writes it and on the exact value and dtype:
+
+```
+("_src/random/threefry2x32.py", "_threefry_seed"): ((4294967295, "int32", ...),)
+```
+
+`eager._origin` suppresses when, and only when, some frame in the **unbroken
+run of jax frames** beneath the caller's line is a site with a row, and the
+observed `(value, dtype)` is that row's. Everything else is the caller's.
+
+That shape is this repository's own: `_KNOWN_HASHES`, in the same file, is a
+narrow map plus a canary that reddens when it is incomplete, and the argument
+for a map over a set — it can say WHICH release, it can say "never read", a
+missing row is a failure rather than a shrug — is already written there.
+
+Four properties follow, and each is driven:
+
+* **It is EXACT where the predicate was a proxy.** The row is not a guess
+  about a class of constants; it is the one constant, at the one function.
+  Keyed on `_threefry_seed` and not on `promote_dtypes`, which is where the
+  narrowing physically happens four frames lower and which every `jnp` binary
+  op reaches — a row there would suppress a user's own
+  `jnp.bitwise_and(x, 4294967295)`.
+* **It FAILS CLOSED.** A jax release that adds a second internal eager
+  truncation has no row, is therefore the caller's, and RAISES — loudly, at a
+  line inside jax. That is a real cost and it is audit 1's finding in
+  miniature; it is the direction an instrument must fail in, because an
+  over-report is visible to a reader holding the quoted line and a suppression
+  is not. Three things arrive before a user does: the sweep runs as a test in
+  both jax lanes, `eager._origin_control` drives the row at ARM time and
+  refuses to attach if it stops holding, and the alarm's own message prints
+  jax's frames and tells a reader who did not write the constant to report it.
+* **A user callback breaks a match by construction.** The run of frames
+  searched stops at the first non-jax, non-stelling frame, so a constant
+  narrowed inside a function *the user* handed to jax has the user's own frame
+  between it and any jax function above.
+* **It needs no container scan**, so there is no depth, no breadth, no budget
+  and no third "inconclusive" state — the three undisclosed constants the
+  audit found, and the paragraph they contradicted, are gone rather than
+  documented.
+
+**The `jit` claim is now the narrow one, and it is true as stated.** What stood
+here was *"a call boundary exists whether or not a trace is in progress, which
+is why this answer does not depend on `jit`"*, and it was false: widened from
+four programs to fourteen, `jax.jit(partial(jnp.full_like, fill_value=300))(x)`
+gave **no alarm with `jit` on and raised with it off**, on the same observed
+conversion, because the identity of "the outermost jax frame" depends on how
+many wrapper frames jax installs. The verdict now depends on three things —
+the written value, the target dtype, and which jax functions are in the run
+beneath the caller — and `jit` changes none of them, because the decision is an
+EXISTENCE test over that run rather than a question about which of its frames
+is outermost. Driven as an equality over **19 programs**, covering `jit`,
+`vmap`, `tree.map`, `lax.map`, `lax.scan` and `lax.fori_loop`, five carrier
+shapes, two pytrees big enough to have exhausted the old scan's budget, and
+jax's own PRNG: 0 of 19 verdicts differ.
+
+What `jit` does change is a different sentence, and it is about the POPULATION
+rather than the verdict: with `jit` on, jax's mask is traced and never reaches
+this hook at all, so there is nothing to attribute.
+
+Everything suppressed is counted in `eager.SUPPRESSED` and printed with its
+site, the jax function that wrote it and what the constant IS, exactly as the
+tripwire's `suppressed_jax` is.
+
+**One residue the enumeration REMOVED, worth naming because it was disclosed
+here.** The predicate raised on `jax.random.PRNGKey(2**32 - 1)`, where jax's
+mask and the caller's seed are the same integer; it was the second fire in the
+table above. A lookup on the SITE does not have that edge: the mask is jax's
+wherever the seed came from, and that program is now silent.
 
 **The cost, stated rather than discovered.** `finally:` blocks still run and
 context managers still exit, so ordinary cleanup is unaffected. Cleanup written
@@ -225,12 +330,14 @@ dtype, the same result, the same frame. They differ only in source TEXT.
 **And the text IS reachable** — `record.source_line(file, line)` returns it and
 `eager._message` calls it three statements later, so "not available at the point
 the decision has to be made" was false about this repository's own code and is
-withdrawn. The ruling stands on its other leg, which cannot be argued away: a
-variable, an imported constant, a computed value and a constant defined in
-another module carry no text at the site at all, so a rule that reads the line
-works for literals and abstains for everything else — and `jnp.full(shape, MASK,
-jnp.int8)` with `MASK = 0xFF` one module over is the mask idiom the rule was
-supposed to recognise. Intent is not a function of `(value, dtype, result)`, and
+withdrawn. The leg it stands on is about the NUMERAL and not about the text,
+which is the second correction this paragraph has needed: with `MASK = 0xFF`
+one module over, `jnp.full(shape, MASK, jnp.int8)` has a line, `eager._message`
+quotes it, and what the line says is `MASK`. A variable, an imported constant,
+a computed value and a constant defined in another module all reach the site
+with the NUMERAL absent from it, so a rule that reads the line reads a name and
+has nothing to score — it works for literals and abstains for everything else,
+and `MASK` is exactly the mask idiom such a rule was supposed to recognise. Intent is not a function of `(value, dtype, result)`, and
 not a function of the line either.
 
 Two candidate rules, driven over a corpus of real narrowings:
@@ -410,12 +517,23 @@ two so a third cannot join them quietly.
 `disable_jit` bullet above is about; outside one, jax traces them and the
 constant never arrives here as a written integer.)
 
-**And the origin filter's own two edges**, which are new with it and lean
-opposite ways: a constant reaching jax inside a custom object is attributed to
-jax and does not raise (the only missed narrowing this rule produces), and a
-constant jax wrote that equals something passed at the same call is attributed
-to the caller and does raise (`jax.random.PRNGKey(2**32 - 1)`). Both are in
-`report.EAGER_UNCOVERED` and both are driven.
+**And the origin lookup's own residue**, which is new with it and has ONE
+direction rather than two: an eager truncation jax performs that
+`_JAX_EAGER_CONSTANTS` has no row for is attributed to whoever called jax and
+RAISES, at a line inside jax they did not write. It is in
+`report.EAGER_UNCOVERED`, it is driven by taking the one row away and watching
+`jax.random.key(0)` raise, and three things reach a maintainer before a user
+does: the sweep test in both jax lanes, the arm-time control, and the alarm's
+own message, which prints jax's frames and asks the reader to report it.
+
+The general predicate this replaced had two edges leaning opposite ways — a
+constant reaching jax inside a custom object was attributed to jax and did not
+raise, and a constant jax wrote that equalled something passed at the same
+call was attributed to the caller and did. **Both are gone**: the first was
+the same defect as the `partial` suppression above, and the second cannot
+arise from a lookup on the SITE, since jax's mask is jax's wherever the seed
+came from. `jax.random.PRNGKey(2**32 - 1)` is silent now, and it is in the
+19-program equality basis as a row.
 
 ## The numpy fence, abandoned by ruling
 

@@ -35,6 +35,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
+import functools
 import subprocess
 import sys
 import textwrap
@@ -363,12 +365,52 @@ def test_a_declaration_at_a_DIFFERENT_DTYPE_is_CAUGHT_or_SILENT_and_both_happen(
         f"{silent} of {pairs} (declaration, misuse) pairs pass silently; "
         "eager.py's docstring quotes these two numbers"
     )
-    assert all(
-        record.in_range(record.narrow(value, dtype), other)
-        for value, dtype in WRAP_GRID
-        for other in record.INT_DTYPES
-        if other != dtype and record.in_range(record.narrow(value, dtype), other)
-    ), "a silent case that is nevertheless out of range at the new dtype"
+    # ...AND THE TWO HALVES ARE MEASURED AGAINST JAX, not restated. What
+    # stood here was `assert all(in_range(...) for ... if in_range(...))` --
+    # an assertion over the set its own condition defines, which cannot fail
+    # and therefore measured nothing. The claim the ruling actually rests on
+    # is that in every SILENT case the site performs no narrowing at all, and
+    # the only witness for that is the array jax builds: it has to hold the
+    # declared value, and the armed detector has to say nothing about it.
+    # The CAUGHT half is driven in the same loop, because "both happen" is
+    # half of this test's name.
+    #
+    # The 64-bit dtypes are out of the construction half for the reason given
+    # above; the arithmetic ratio just asserted covers all eight.
+    constructible = ("int8", "uint8", "int16", "uint16", "int32", "uint32")
+    silent_pairs = caught_pairs = 0
+    for value, dtype in WRAP_GRID:
+        wrapped = record.narrow(value, dtype)
+        for other in constructible:
+            if other == dtype:
+                continue
+            fired = None
+            built = None
+            try:
+                built = int(jnp.full((), wrapped, jnp.dtype(other)))
+            except stelling.EagerTruncationError as exc:
+                fired = exc
+            if record.in_range(wrapped, other):
+                silent_pairs += 1
+                assert fired is None, (
+                    f"declaring {value} for {dtype} and misusing it at {other} "
+                    f"fired, and {wrapped} is in range there"
+                )
+                assert built == wrapped, (
+                    f"jax made {built} of {wrapped} at {other}, so the site "
+                    "DID narrow and the silence hid a truncation"
+                )
+            else:
+                caught_pairs += 1
+                assert fired is not None, (
+                    f"declaring {value} for {dtype} and misusing it at {other} "
+                    f"was silent, and {wrapped} does not fit {other}"
+                )
+                assert fired.written == wrapped and fired.to_dtype == other
+    assert (silent_pairs, caught_pairs) == (34, 38), (
+        f"{silent_pairs} silent and {caught_pairs} caught over the six "
+        "constructible dtypes"
+    )
 
 
 def test_a_declaration_produces_the_same_program_as_no_declaration_at_all(unarmed):
@@ -1165,23 +1207,128 @@ def test_the_origin_filter_keeps_JAX_S_OWN_constants_out_of_the_alarm(armed, jit
         assert "4294967295 -> -1 (int32)" in lines
 
 
-def test_the_origin_answer_does_not_depend_on_a_trace_being_in_progress(armed):
-    """The property the fix is built on, driven as an equality.
+#: The basis the ``jit``-independence claim is driven over. It was FOUR
+#: programs and four was too few: widened to these, an audit found one that
+#: genuinely flipped -- ``jit(partial(jnp.full_like, fill_value=300))(x)``
+#: gave no alarm with ``jit`` on and raised with it off, on the SAME observed
+#: conversion, because the predicate of the day keyed on the identity of "the
+#: outermost jax frame" and how many wrapper frames jax installs is exactly
+#: what ``jit`` changes.
+#:
+#: The carriers are the point of the list. A constant reaches jax through a
+#: ``functools.partial``, a ``jax.tree_util.Partial``, a bound method, a
+#: closure cell and a registered-dataclass pytree carry, under every
+#: higher-order entry point jax offers -- ``jit``, ``vmap``, ``tree.map``,
+#: ``lax.map``, ``lax.scan`` and ``lax.fori_loop`` -- and NONE of them is a
+#: constant the caller can be said not to have written.
+def _jit_equality_basis():
+    i8, u8 = jnp.int8, jnp.uint8
+    flat = jnp.zeros((2,), i8)
+    batched = jnp.zeros((3, 2), i8)
+    tree = {"a": jnp.zeros((2,), i8)}
+    partial300 = functools.partial(jnp.full_like, fill_value=300)
 
-    ``record.attribute`` keys the origin question on the trace boundary. There
-    is no trace boundary here, so ``eager._origin`` keys it on the data: did
-    this integer cross the call the user made? A call boundary exists either
-    way -- so the same program must get the same verdict with ``jit`` on and
-    with it off, for jax's constants AND for the user's.
+    class Maker:
+        """A user callable carrying the constant on itself."""
+
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, leaf):
+            return jnp.full_like(leaf, self.value)
+
+    def scan_body(carry, _):
+        return _ScanCarry(jnp.full_like(carry.value, carry.fill), carry.fill), None
+
+    return (
+        # --- the four the fix was originally sold on ---
+        ("jax's own: random.key", "no alarm", lambda: jax.random.key(11)),
+        ("yours: full 300 int8", "raised 300 -> 44",
+         lambda: jnp.full((2,), 300, i8)),
+        ("yours: fill_value=-1 uint8", "raised -1 -> 255",
+         lambda: jnp.full((2,), -1, u8)),
+        ("in range: full 44 int8", "no alarm", lambda: jnp.full((2,), 44, i8)),
+        # --- the carriers, under every higher-order entry point ---
+        ("jit(partial)", "raised 300 -> 44", lambda: jax.jit(partial300)(flat)),
+        ("vmap(partial)", "raised 300 -> 44", lambda: jax.vmap(partial300)(batched)),
+        ("tree.map(partial)", "raised 300 -> 44",
+         lambda: jax.tree.map(partial300, tree)),
+        ("lax.map(partial)", "raised 300 -> 44",
+         lambda: lax.map(functools.partial(jnp.full_like, fill_value=300, dtype=i8),
+                         batched)),
+        ("tree.map(tree_util.Partial)", "raised 300 -> 44",
+         lambda: jax.tree.map(
+             jax.tree_util.Partial(jnp.full_like, fill_value=300), tree)),
+        ("tree.map(bound method)", "raised 300 -> 44",
+         lambda: jax.tree.map(Maker(300).__call__, tree)),
+        ("tree.map(callable object)", "raised 300 -> 44",
+         lambda: jax.tree.map(Maker(300), tree)),
+        ("lax.scan(dataclass carry)", "raised 300 -> 44",
+         lambda: lax.scan(scan_body, _ScanCarry(jnp.zeros((2,), i8)), None, length=2)),
+        ("lax.fori_loop(closure)", "raised 300 -> 44",
+         lambda: lax.fori_loop(0, 2, lambda i, c: jnp.full_like(c, 300),
+                               jnp.zeros((2,), i8))),
+        ("jit(lambda writing 300)", "raised 300 -> 44",
+         lambda: jax.jit(lambda x: jnp.full((2,), 300, i8))(flat)),
+        # --- pytrees big enough to have exhausted the old scan's budget ---
+        ("tree.map(PRNGKey, five levels deep)", "no alarm",
+         lambda: jax.tree.map(jax.random.PRNGKey, (((((0,),),),),))),
+        ("tree.map(PRNGKey, 9000 leaves)", "no alarm",
+         lambda: jax.tree.map(jax.random.PRNGKey, list(range(9000)))),
+        # --- jax's mask and the caller's seed, the same integer ---
+        ("random.PRNGKey(2**32 - 1)", "no alarm",
+         lambda: jax.random.PRNGKey(2 ** 32 - 1)),
+        # --- narrowings reached by their own routes ---
+        ("arange(2**40, 2**40+3)", "raised 1099511627776 -> 0",
+         lambda: jnp.arange(2 ** 40, 2 ** 40 + 3)),
+        ("at[9].get(fill_value=-1) uint8", "raised -1 -> 255",
+         lambda: jnp.arange(4, dtype=u8).at[9].get(mode="fill", fill_value=-1)),
+    )
+
+
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass
+class _ScanCarry:
+    """A registered-dataclass pytree carrying a constant as a STATIC field.
+
+    The audit's U1 named this shape: the constant never appears in the
+    arguments of the jax call, so a rule that scanned those arguments
+    suppressed the narrowing it produces.
     """
+
+    value: object
+    fill: int = dataclasses.field(default=300, metadata={"static": True})
+
+
+def test_the_origin_answer_does_not_depend_on_a_trace_being_in_progress(armed):
+    """The property the design is built on, driven as an equality on 19 programs.
+
+    THE CLAIM IS NARROWER THAN THE ONE IT REPLACES, and that is the point.
+    What stood here was *"a call boundary exists whether or not a trace is in
+    progress, which is why this answer does not depend on ``jit``"* -- and it
+    was false, measured: ``jit(partial(jnp.full_like, fill_value=300))(x)``
+    gave no alarm with ``jit`` on and raised with it off, on the same observed
+    conversion, because which frame is "the outermost jax frame" depends on
+    how many wrapper frames jax installs and that is what ``jit`` changes.
+
+    What is true of the design that replaced it: the verdict is a function of
+    the written VALUE, the target DTYPE, and WHICH jax functions are in the
+    unbroken run of jax frames beneath the caller. ``jit`` changes none of the
+    three -- the decision is an existence test over that run, not a question
+    about which of its frames is outermost.
+
+    WHAT ``jit`` DOES CHANGE, and it is a different sentence: which narrowings
+    happen eagerly at all. With ``jit`` on, jax's threefry mask is traced and
+    never arrives here, so there is nothing to attribute; with it off it
+    arrives and is attributed. That is a statement about the POPULATION of
+    observations, not about the verdict on a member of it, and this test
+    measures the second.
+    """
+    basis = _jit_equality_basis()
+
     def verdicts():
         out = {}
-        for name, body in (
-            ("jax's own: jax.random.key", lambda: jax.random.key(11)),
-            ("yours: jnp.full 300 int8", lambda: jnp.full((2,), 300, jnp.int8)),
-            ("yours: fill_value=-1 uint8", lambda: jnp.full((2,), -1, jnp.uint8)),
-            ("in range: jnp.full 44 int8", lambda: jnp.full((2,), 44, jnp.int8)),
-        ):
+        for name, _expected, body in basis:
             assert _tripwire.evict_trace_caches() == "evicted"
             try:
                 body()
@@ -1193,12 +1340,42 @@ def test_the_origin_answer_does_not_depend_on_a_trace_being_in_progress(armed):
     with_jit = verdicts()
     with jax.disable_jit():
         without_jit = verdicts()
-    assert with_jit == without_jit, (
-        f"the origin decision changed when jit went away: {with_jit} vs "
-        f"{without_jit}"
-    )
-    assert with_jit["jax's own: jax.random.key"] == "no alarm"
-    assert with_jit["yours: jnp.full 300 int8"] == "raised 300 -> 44"
+    differ = {k: (with_jit[k], without_jit[k])
+              for k in with_jit if with_jit[k] != without_jit[k]}
+    assert not differ, f"the origin decision changed when jit went away: {differ}"
+    # ...and the verdicts are the RIGHT ones, not merely equal: a rule that
+    # suppressed everything would pass the equality above with 19 "no alarm"s.
+    assert with_jit == {name: expected for name, expected, _ in basis}
+
+
+def test_the_carriers_that_a_DATA_SCAN_missed_all_raise(armed):
+    """U1, the regression that made the enumeration necessary, driven.
+
+    A general predicate over the boundary call's arguments -- *"is the
+    narrowed integer among the arguments of the call that crossed out of
+    non-jax code into jax?"* -- cannot see a constant carried in a
+    ``functools.partial``, a ``jax.tree_util.Partial``, a bound method, a
+    closure cell or a registered-dataclass pytree, because none of those puts
+    the integer in the argument list. It therefore SUPPRESSED them: a missed
+    narrowing, in the DEFAULT ``jit``-on configuration, on idiomatic jax, and
+    a regression against the tree before the filter existed.
+
+    Every one of them is a constant the caller really wrote, so every one of
+    them must raise. This is the same set the equality above drives; it is
+    asserted separately because "they agree with each other" and "they are
+    right" are different claims and only the second one is soundness.
+    """
+    carried = [
+        (name, expected, body)
+        for name, expected, body in _jit_equality_basis()
+        if expected.startswith("raised 300")
+    ]
+    assert len(carried) >= 9, "the carrier basis shrank"
+    for name, _expected, body in carried:
+        assert _tripwire.evict_trace_caches() == "evicted"
+        with pytest.raises(stelling.EagerTruncationError) as caught:
+            body()
+        assert caught.value.written == 300, name
 
 
 def test_the_user_s_own_constants_still_fire_with_jit_OFF(armed):
@@ -1256,6 +1433,243 @@ def test_a_constant_the_user_really_wrote_fires_with_jit_ON_or_OFF(armed, name, 
     assert caught.value.file == __file__, (
         f"attributed to {caught.value.file}:{caught.value.line} rather than "
         "to the line in this file that wrote it"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The enumeration itself: re-derived, driven at arm time, and its residue
+# measured rather than asserted.
+# ---------------------------------------------------------------------------
+
+
+def test_the_enumeration_of_jax_s_own_eager_truncations_is_RE_DERIVED(armed):
+    """THE CANARY. A jax release that adds a second one turns this red.
+
+    ``_adapter_jax._JAX_EAGER_CONSTANTS`` is what decides a suppression, and a
+    map is only as good as the reading behind it. So the reading is REDONE
+    here rather than trusted: ``eager_jax_constant_sweep`` runs jax's own
+    integer surface -- every key implementation and seed spelling, then
+    ``jax.random``'s consumers and ``jnp``'s integer ops over six integer
+    dtypes -- under ``jax.disable_jit()``, which is the mode in which jax
+    evaluates its own constants eagerly and this hook can see them.
+
+    EVERY VALUE THE SWEEP HANDS JAX IS IN RANGE, so every truncation it
+    observes is jax's own. That is what makes the result comparable to the map
+    by equality rather than by inspection:
+
+    * ``unmatched`` must be empty -- jax performs no eager truncation this
+      repository has not read. It is measured at 649-729 conversions (the
+      figure moves with ``jax_enable_x64``, which changes how many promotions
+      happen, not how many truncations do) and, at x64 off, **13 truncation
+      events, all of them one row**: the threefry mask, identically on jax
+      0.11.0 and 0.10.2.
+    * every row in the map must have been EXERCISED -- a row that has stopped
+      being real is a suppression waiting for a value that never comes, and
+      the map is the thing this test exists to keep honest.
+
+    IT IS A SAMPLE AND NOT A PROOF, and the design says so: it establishes
+    that no second eager truncation exists on the surface it covers, not that
+    none exists in jax. What covers the rest is the direction the design fails
+    in, which the test below measures.
+
+    THE DENOMINATOR IS ASSERTED FIRST. "0 unmatched" is also what a sweep that
+    never reached the hook reports, and that is the shape of vacuous control
+    this repository keeps having to withdraw.
+    """
+    assert _tripwire.evict_trace_caches() == "evicted"
+    swept = adapter.eager_jax_constant_sweep()
+    assert swept["code"] == "swept", swept
+    assert swept["conversions"] > 500, (
+        f"the sweep saw only {swept['conversions']} conversions, so it is "
+        "measuring something other than jax's integer surface"
+    )
+    assert swept["unmatched"] == (), (
+        "jax performs an eager truncation of its own that "
+        "`_adapter_jax._JAX_EAGER_CONSTANTS` has no row for. Until somebody "
+        "reads it and writes a row down, the detector attributes it to "
+        "whoever called jax and RAISES there: " + repr(swept["unmatched"])
+    )
+    exercised = {(file, func) for file, func, _w, _d in swept["matched"]}
+    if jax.config.jax_enable_x64:
+        # x64 ON widens jax's mask to int64, which holds it, so there is no
+        # truncation to attribute and nothing to exercise. That is not a hole
+        # -- it is the row being unreachable rather than wrong -- and the
+        # `unmatched` half above is the half that still means something here.
+        assert not exercised
+        return
+    assert exercised == set(adapter._JAX_EAGER_CONSTANTS), (
+        "a row in the map was not exercised by the sweep, so it is a "
+        "suppression this repository can no longer show is real: "
+        f"{sorted(set(adapter._JAX_EAGER_CONSTANTS) - exercised)}"
+    )
+    assert swept["truncations"] > 0
+
+
+def test_an_UNENUMERATED_constant_of_jax_s_own_RAISES_rather_than_hiding(armed):
+    """The residue of an enumeration, measured in the direction it fails.
+
+    A map cannot know a row nobody has written. The question is what happens
+    then, and the answer this design chose is the LOUD one: no row means the
+    narrowing is the caller's, and the caller's narrowings raise. That costs a
+    false alarm at a line inside jax on the day a release adds a constant --
+    which is audit 1's finding, and it is the direction an instrument must
+    fail in, because an over-report is visible to a reader holding the quoted
+    line and a suppression is not.
+
+    Driven by taking the one row away, which is exactly what a release that
+    moved the site would do.
+    """
+    assert _tripwire.evict_trace_caches() == "evicted"
+    saved = dict(eager._JAX_CONSTANTS)
+    eager._JAX_CONSTANTS.clear()
+    try:
+        with jax.disable_jit():
+            with pytest.raises(stelling.EagerTruncationError) as caught:
+                jax.random.key(0)
+    finally:
+        eager._JAX_CONSTANTS.clear()
+        eager._JAX_CONSTANTS.update(saved)
+    assert (caught.value.written, caught.value.became) == (4294967295, -1)
+    # ...and the message tells the reader who did NOT write it what to do,
+    # which is the only thing that turns this into a row somebody adds.
+    text = str(caught.value)
+    assert "not one of the constants stelling records jax as writing ITSELF" in text
+    assert "_threefry_seed()" in text, (
+        "the alarm does not name the jax function that WROTE the constant, "
+        "so a reader who did not write it has nothing to report. It is five "
+        "frames below the narrowing, which is what eager.MAX_JAX_FRAMES is "
+        "sized for"
+    )
+    # ...and with the row back, the same program is silent again.
+    assert _tripwire.evict_trace_caches() == "evicted"
+    with jax.disable_jit():
+        jax.random.key(0)
+
+
+def test_ARMING_drives_the_origin_decision_in_BOTH_directions(unarmed):
+    """F3. The self-check never reaches ``observe``, so arming proves nothing
+    about what decides a raise.
+
+    ``eager_selfcheck`` swaps a collector in for the observer. That is
+    deliberate -- it keeps a self-check out of the user's denominator -- and
+    it means every route it drives bypasses :func:`eager.observe` and
+    therefore :func:`eager._origin`. A detector whose origin rule suppressed
+    everything passes every route probe there is.
+
+    So arming also drives one narrowing of each origin through the live
+    policy, and the status says which legs ran.
+    """
+    assert not eager._JAX_CONSTANTS, (
+        "an unarmed process is carrying the map that decides suppressions"
+    )
+    status = _tripwire.arm_eager()
+    try:
+        assert status.armed, status.code
+        assert "origin-checked" in (status.detail or ""), status.detail
+        if not jax.config.jax_enable_x64:
+            assert "both directions" in status.detail, (
+                "the jax leg did not run, so arming did not establish that "
+                "jax's own mask is still attributed to jax"
+            )
+        assert eager._JAX_CONSTANTS == adapter.jax_eager_constants()
+    finally:
+        _tripwire.disarm_eager()
+    assert not eager._JAX_CONSTANTS, (
+        "disarming left the map behind, so a process that believes nothing "
+        "is attached would go on suppressing at jax's sites"
+    )
+
+
+def test_arming_REFUSES_when_the_jax_leg_of_that_control_stops_holding(unarmed, monkeypatch):
+    """...and it refuses, rather than attaching with a broken attribution.
+
+    The same argument ``route-blind`` refuses on. A map that no longer names
+    jax's mask is a detector that is about to raise inside jax's own PRNG at a
+    line the user cannot edit -- audit 1's finding, exactly -- and the remedy
+    is one row. Refusing names the row; attaching would name a user.
+    """
+    if jax.config.jax_enable_x64:
+        pytest.skip("with x64 on jax's mask does not narrow, so there is no leg")
+    monkeypatch.setattr(adapter, "_JAX_EAGER_CONSTANTS", {})
+    status = _tripwire.arm_eager()
+    try:
+        assert not status.armed, "it attached with no row for jax's own mask"
+        assert status.code.startswith("origin-blind:jax-attributed-to-you"), status.code
+        assert not eager.is_armed(), "it refused and left the hook attached"
+        assert not eager._JAX_CONSTANTS, "a refused arm left its map loaded"
+    finally:
+        if eager.is_armed():  # pragma: no cover - defensive
+            _tripwire.disarm_eager()
+
+
+def test_arming_REFUSES_when_the_user_leg_of_that_control_stops_holding(unarmed, monkeypatch):
+    """The other direction, and it is the one a suppress-everything rule takes.
+
+    A rule that attributed the user's own constants to jax would be silent,
+    which is the defect this whole instrument exists to end. Simulated by
+    giving the map a row for the probe's own constant at the jax function the
+    probe's construction goes through.
+    """
+    written = adapter.EAGER_OVER
+    # The jax function `jnp.full((), 256, int8)` reaches -- read off the live
+    # run rather than typed, so this cannot go stale against a jax release.
+    seen = {}
+
+    def spy(value, to_dtype):
+        seen.setdefault("run", eager.jax_segment(1))
+
+    probe_status = _tripwire.arm_eager()
+    assert probe_status.armed, probe_status.code
+    saved_observer = adapter._eager_installed.get("observer")
+    adapter._eager_installed["observer"] = spy
+    try:
+        jnp.full((), written, jnp.int8)
+    finally:
+        adapter._eager_installed["observer"] = saved_observer
+        _tripwire.disarm_eager()
+    run = seen["run"]
+    assert run, "no jax frame beneath a jnp.full: the walk is measuring nothing"
+
+    monkeypatch.setattr(
+        adapter,
+        "_JAX_EAGER_CONSTANTS",
+        {run[0]: ((written, adapter.EAGER_DTYPE, "a row that must not exist"),)},
+    )
+    status = _tripwire.arm_eager()
+    try:
+        assert not status.armed, "it attached with the user's own constant suppressed"
+        assert status.code == "origin-blind:user-not-raised", status.code
+        assert not eager.is_armed()
+        assert not eager._JAX_CONSTANTS, (
+            "a refused arm left a STAND-IN map loaded, which would decide "
+            "suppressions for every later test in this session"
+        )
+    finally:
+        if eager.is_armed():  # pragma: no cover - defensive
+            _tripwire.disarm_eager()
+
+
+def test_that_arm_time_control_leaves_the_counters_EXACTLY_as_it_found_them(unarmed):
+    """A self-check that appeared in the denominator would be a rate about itself.
+
+    The control runs the REAL ``observe``, so it moves every counter and
+    writes rows. They are saved and written back rather than reset, because
+    ``arm_eager()`` can be called part-way through a session that already has
+    figures and ``reset_counters()`` would take those with it.
+    """
+    eager.reset_counters()
+    eager.observe(300, "int16")  # in range: one conversion, no truncation
+    before = eager.snapshot()
+    assert before["conversions"] == 1
+    status = _tripwire.arm_eager()
+    try:
+        assert status.armed, status.code
+        after = eager.snapshot()
+    finally:
+        _tripwire.disarm_eager()
+    assert after == before, (
+        "arming moved the user's figures: " +
+        repr({k: (before[k], after[k]) for k in before if before[k] != after[k]})
     )
 
 

@@ -112,6 +112,13 @@ those runs really printed are still read, now as a control on the parse.
   1  `eager:unknown-state` — the eager control, or its hash, reported a state
      this script has no answer for. Unreachable without editing this
      repository, and fatal for the reason `control:unknown-state` is.
+  1  `eager:unenumerated-jax-constant` — the sweep found jax performing an
+     eager truncation of its OWN that `_adapter_jax._JAX_EAGER_CONSTANTS` has
+     no row for. Until a row is written, that narrowing is attributed to
+     whoever called jax and RAISES at a line inside jax they did not write.
+     Unlike a rowless RELEASE at the hash map — which is loud and exits 0 —
+     this one is already producing wrong alarms, so it pages. See
+     `_eager_sweep_row`.
   0  anything else. That includes NOT ARMED without ``--require`` — the shape
      a human wants when running this by hand to see what a given jax does —
      a release with NO ROW in the version -> hash map, which is loud on
@@ -364,6 +371,84 @@ def _eager_reasons(status, control_state, control, displaced, require):
     return reasons
 
 
+def _eager_sweep_row(armed, enabled=True) -> tuple[str, tuple[str, str] | None]:
+    """``(what to print, the reason to exit 1 or None)`` for the constant sweep.
+
+    THE OTHER MAP THIS HOOK CARRIES, and the one that decides a SUPPRESSION.
+    ``_adapter_jax._JAX_EAGER_CONSTANTS`` records the eager truncations jax
+    performs itself -- one row today, the threefry PRNG mask -- and a
+    narrowing that matches none of them is attributed to whoever called jax
+    and RAISES. That is the direction the design fails in on purpose, and it
+    means a jax release that adds a second internal eager truncation turns
+    into a false alarm inside jax, in every user's code, on the day it ships.
+
+    So the map is RE-DERIVED here rather than trusted, by the shipped sweep
+    the suite drives: every key implementation and seed spelling, then
+    ``jax.random``'s consumers and ``jnp``'s integer ops over six integer
+    dtypes, under ``jax.disable_jit()``, with every value handed in IN RANGE
+    -- so every truncation observed is jax's own.
+
+    IT PAGES, unlike :func:`_eager_hash_row`'s ``never-read``, and the
+    difference is what the two states mean. A rowless RELEASE is an expected
+    state that costs nothing until somebody reads it; an unenumerated jax
+    CONSTANT is already producing wrong alarms. This job's control leg meets a
+    new release before any CI lane does, which is the earliest anyone can be
+    told.
+
+    Everything that is not a measurement is a note: with no jax, with the hook
+    not attached, or with ``--no-sweep``, there is nothing to sweep and
+    nothing to say.
+
+    ``--no-sweep`` EXISTS FOR ONE CALLER AND IT IS NOT A WORKFLOW. The sweep
+    runs ~700 jax operations and costs about twelve seconds; this repository's
+    own exit-code battery drives this script in a subprocess a dozen times to
+    check which reason produced which status, and paying for twelve identical
+    sweeps to learn nothing new is waste. It is DEFAULT-ON, so a workflow that
+    says nothing gets it, and
+    ``tests/test_tripwire_record.py::test_the_nightly_workflow_still_runs_the_canary``
+    asserts neither leg passes it.
+    """
+    if not enabled:
+        return "not run -- --no-sweep", None
+    if not armed:
+        return "not run -- the eager hook is not attached", None
+    try:
+        # IMPORTED HERE AND NOT AT MODULE SCOPE, like every other stelling
+        # import in this file: it must be importable in a lane with no jax,
+        # and `main()` is where the environment has been established.
+        from stelling._tripwire import _adapter_jax as adapter
+
+        swept = adapter.eager_jax_constant_sweep()
+    except Exception as exc:  # noqa: BLE001 - a canary may not raise
+        return f"could not run -- {type(exc).__name__}: {exc}", None
+    code = swept.get("code")
+    if code != "swept":
+        return f"not run -- {code}", None
+    conversions = swept.get("conversions", 0)
+    unmatched = swept.get("unmatched") or ()
+    matched = swept.get("matched") or ()
+    summary = (
+        f"{conversions} conversion(s), {swept.get('truncations', 0)} "
+        f"truncation(s) of jax's own, {len(matched)} row(s) exercised"
+    )
+    if unmatched:
+        return (
+            f"{summary} -- {len(unmatched)} UNENUMERATED",
+            (
+                "eager:unenumerated-jax-constant",
+                "jax performs an eager truncation of its OWN that "
+                "`_adapter_jax._JAX_EAGER_CONSTANTS` has no row for: "
+                f"{unmatched!r}. Until somebody reads it and adds a row, the "
+                "eager detector attributes it to whoever called jax and "
+                "RAISES there, at a line inside jax they did not write -- "
+                "which is the failure the origin question was built to end. "
+                "Read the jax frames named above, write the row, and say what "
+                "the constant is.",
+            ),
+        )
+    return summary, None
+
+
 def _eager_hash_row(status) -> tuple[str, tuple[str, str] | None]:
     """``(what to print beside the sha1, the reason to exit 1 or None)``.
 
@@ -518,6 +603,15 @@ def main() -> int:
         action="store_true",
         help="exit non-zero if the tripwire could not arm (what the canary uses)",
     )
+    # DEFAULT-ON, and the opt-out is for this repository's own exit-code
+    # battery rather than for a workflow: see `_eager_sweep_row`.
+    parser.add_argument(
+        "--no-sweep",
+        dest="sweep",
+        action="store_false",
+        help="skip re-deriving the map of jax's own eager truncations "
+             "(~700 jax ops, about twelve seconds)",
+    )
     args = parser.parse_args()
 
     from stelling import _tripwire
@@ -653,6 +747,15 @@ def main() -> int:
             eager_control_state = "raised"
             eager_control = f"raised {type(exc).__name__}: {exc}"
 
+    # THE OTHER MAP, RE-DERIVED, AND IT RUNS WHILE THE HOOK IS STILL LIVE.
+    # `_eager_sweep_row` needs the attached wrapper -- it swaps a collector in
+    # for the observer and puts it back -- so it cannot go after the disarm
+    # below. It displaces nothing, which is why the one displacement question
+    # underneath it still answers for both hooks.
+    eager_sweep_note, eager_sweep_reason = _eager_sweep_row(
+        eager_status.armed, args.sweep
+    )
+
     # ONE QUESTION, BOTH HOOKS, and it is asked BEFORE either disarm because
     # disarming empties the record the question is asked of: afterwards there
     # is no armed hook left to be displaced. `_tripwire.displaced()` reports
@@ -696,6 +799,8 @@ def main() -> int:
     )
     if eager_hash_reason is not None:
         reasons.append(eager_hash_reason)
+    if eager_sweep_reason is not None:
+        reasons.append(eager_sweep_reason)
 
     rows = [
         ("status", status.code),
@@ -718,6 +823,7 @@ def main() -> int:
         ("eager status", eager_status.code),
         ("eager site", eager_status.rule_name or "?"),
         ("eager site sha1", f"{eager_status.rule_hash or '?'} ({eager_hash_note})"),
+        ("eager jax constants", eager_sweep_note),
         ("eager control state", eager_control_state),
         ("eager live control", eager_control),
         ("displaced hooks", ", ".join(displaced) or "none"),

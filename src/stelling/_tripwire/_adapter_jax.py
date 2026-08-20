@@ -1140,6 +1140,109 @@ _KNOWN_EAGER_HASHES: dict[str, str] = {
     "0.11.1": "17355ab7e4e1",
 }
 
+#: THE EAGER TRUNCATIONS JAX ITSELF PERFORMS, ENUMERATED BY SITE AND VALUE.
+#:
+#: ``(jax-relative source file, function name) -> ((written, dtype, what it
+#: is), ...)``. ``eager._origin`` suppresses a narrowing when, and only when,
+#: one of these rows names a frame in the unbroken run of jax frames beneath
+#: the construction site AND the observed ``(written, dtype)`` is that row's.
+#: Everything else is the caller's and raises.
+#:
+#: WHY A MAP AND NOT A PREDICATE, WHICH IS THE SAME ARGUMENT
+#: :data:`_KNOWN_HASHES` MAKES ONE SCREEN UP. The revision this replaces asked
+#: a general question of the data -- *"is the narrowed integer among the
+#: arguments of the call that crossed out of non-jax code into jax?"* -- and
+#: suppressed when the answer was no. It is a reasonable proxy and it was
+#: wrong in both directions, measured:
+#:
+#: * MISSED NARROWINGS. A constant the user really wrote does not appear in
+#:   the boundary call's arguments when it is carried in a
+#:   ``functools.partial``, a ``jax.tree_util.Partial``, a bound method or a
+#:   registered-dataclass pytree carry -- so ``jax.tree.map(partial(full_like,
+#:   fill_value=300), tree)`` was SUPPRESSED, silently, in the DEFAULT
+#:   ``jit``-on configuration, on idiomatic jax. That is the defect
+#:   ``SOUNDNESS.md``'s integer-literal-wrap entry is about, reintroduced by
+#:   the filter meant to make the tool usable.
+#: * FALSE ALARMS. The scan has a depth, a breadth and a budget, and a scan
+#:   that ran out returned "not established" and therefore "the user's" -- so
+#:   a params-shaped five-level pytree under ``tree.map(random.key, ...)``
+#:   re-raised the very PRNG alarm the filter was built to stop.
+#:
+#: **AND THE PROBLEM IT GENERALISES OVER HAS ONE INSTANCE.** Measured twice,
+#: independently. A hand sweep of 649 scalar integer conversions across
+#: ``jax.random.*`` and ``jnp``'s integer ops over six integer dtypes, under
+#: ``JAX_DISABLE_JIT=1``, found **exactly one** eager truncation of jax's own
+#: in existence. :func:`eager_jax_constant_sweep` below re-derives it as
+#: shipped code, over a wider surface -- every key IMPLEMENTATION and seed
+#: spelling as well -- and gets 675 conversions and 13 truncation events, all
+#: 13 of them the one row below, byte-identically on jax 0.11.0 and 0.10.2.
+#: A predicate is the right shape for a class; this is not a class, it is a
+#: list of length one, and a list is exact where a predicate is a proxy.
+#:
+#: IT FAILS CLOSED, AND THAT IS A COST AS WELL AS A PROPERTY. A jax release
+#: that adds a SECOND internal eager truncation is not silently suppressed --
+#: it is attributed to the caller and RAISES, at a line inside jax that they
+#: did not write, in exactly the shape of the first audit's finding. That is
+#: the direction this instrument must fail in: an over-report is visible to a
+#: reader holding the quoted line and a suppression is not. The remedy is one
+#: row, and three things arrive before a user does:
+#: :func:`eager_jax_constant_sweep` runs as a test in both jax lanes and as a
+#: row on the nightly canary, ``eager._origin_control`` drives this row at ARM
+#: time through :func:`eager_origin_probes` and refuses to attach if it stops
+#: holding, and the alarm's own message prints jax's frames and tells a reader
+#: who did not write the constant to report it.
+#:
+#: KEYED ON THE FUNCTION THAT WRITES THE CONSTANT, not on the frame that
+#: performs the narrowing. Measured (jax 0.11.0 and 0.10.2, x64 off,
+#: ``jax.disable_jit()``), the mask is narrowed four frames below the line
+#: that spells it::
+#:
+#:     _src/numpy/util.py         promote_dtypes()     <- the narrowing
+#:     _src/numpy/util.py         promote_args()
+#:     _src/numpy/ufuncs.py       bitwise_and()
+#:     _src/numpy/ufunc_api.py    __call__()
+#:     _src/random/threefry2x32.py  _threefry_seed()   <- the row, and the
+#:                                                       line a reader goes
+#:                                                       and looks at
+#:
+#: ``promote_dtypes`` is jax's general-purpose promotion helper and every
+#: ``jnp`` binary op reaches it, so a row keyed there would suppress a user's
+#: ``jnp.bitwise_and(x, 4294967295)`` too. ``_threefry_seed`` is the PRNG and
+#: nothing else.
+#:
+#: A USER CALLBACK BREAKS THE MATCH BY CONSTRUCTION. The run of frames
+#: searched stops at the first non-jax, non-stelling frame, so a constant
+#: narrowed inside a function *the user* passed into jax is never matched by
+#: a row above it -- the user's own frame ends the run.
+#:
+#: NOT REACHABLE AT ``jax_enable_x64=True``, and the row is still correct
+#: there: with x64 on, ``promote_dtypes`` widens the mask to ``int64``, which
+#: holds it, and there is no truncation to attribute at all. Driven both
+#: ways.
+_JAX_EAGER_CONSTANTS: dict[tuple[str, str], tuple[tuple[int, str, str], ...]] = {
+    ("_src/random/threefry2x32.py", "_threefry_seed"): (
+        (
+            4294967295,
+            "int32",
+            "the threefry PRNG's 32-bit mask -- `jnp.bitwise_and(seed, "
+            "np.uint32(0xFFFFFFFF))` -- which x64-off dtype promotion "
+            "narrows to int32, making it -1",
+        ),
+    ),
+}
+
+
+def jax_eager_constants() -> dict:
+    """:data:`_JAX_EAGER_CONSTANTS` as plain data, for :mod:`eager`.
+
+    A dict of tuples of ``(int, str, str)``: no jax objects, no jax names in
+    the CALLER. ``eager.py`` may not spell a private jax module and does not;
+    it is handed this at :func:`eager.arm` time exactly as it is handed
+    :func:`jax_root`, and consults it by frame rather than by import.
+    """
+    return {key: tuple(rows) for key, rows in _JAX_EAGER_CONSTANTS.items()}
+
+
 #: What this process installed over :data:`EAGER_ATTR`, or empty. Separate
 #: from :data:`_installed` because the two hooks arm, disarm and fail
 #: independently: a user may want the eager detector and not the tripwire, and
@@ -1673,6 +1776,241 @@ def eager_selfcheck() -> str:
         return "armed"
     finally:
         _eager_installed["observer"] = saved
+
+
+def eager_origin_probes():
+    """``(name, drive)`` for one narrowing of each ORIGIN, driven for real.
+
+    THE SELF-CHECK ABOVE CANNOT ANSWER FOR ``_origin``, and that is why this
+    exists. :func:`eager_selfcheck` swaps a collector in for the observer, so
+    arming drives every construction route for reachability and for
+    arithmetic and **never reaches** :func:`eager.observe` -- which is the
+    function that decides whether a narrowing is yours. A hook can pass every
+    route probe with an origin rule that suppresses everything.
+
+    So arming also drives one narrowing of each origin through the LIVE
+    policy:
+
+    ``user``
+        an out-of-range construction written in :mod:`_probe`, at no
+        enumerated jax site. It must be attributed to the caller and must
+        RAISE.
+    ``jax``
+        ``jax.random.key(0)`` inside ``jax.disable_jit()`` -- the exact
+        program the first audit found raising inside jax's own PRNG, in eight
+        real workloads and in chex's own suite. It must be attributed to jax
+        by a row of :data:`_JAX_EAGER_CONSTANTS`, or produce no truncation at
+        all (which is what ``jax_enable_x64=True`` does: the mask is widened
+        to int64 and there is nothing to attribute).
+
+    ``disable_jit()`` IS ENTERED AND LEFT AROUND ONE CALL. It is jax's own
+    context manager over jax's own config, so the caller's setting is
+    restored whatever it was, and ``jax.random.key`` under it binds primitives
+    eagerly rather than compiling, so no jit cache is warmed by this.
+    """
+    from stelling._jax_compat import jax as _jax
+    from stelling._jax_compat import jnp as _jnp
+    from stelling._tripwire import _probe
+
+    def user():
+        return _probe.construct_over(_jnp)
+
+    def jax_own():
+        with _jax.disable_jit():
+            return _jax.random.key(0)
+
+    return (("user", user), ("jax", jax_own))
+
+
+def _eager_sweep_programs():
+    """The programs :func:`eager_jax_constant_sweep` runs. THE LIST IS THE BASIS.
+
+    ``jax.random.*`` because that is where the one known instance lives, and
+    ``jnp``'s integer surface over six integer dtypes because a constant jax
+    writes into a narrow integer type has to be written by *something* that
+    handles narrow integer types. Every value handed in is IN RANGE for the
+    dtype it is handed to, so **every truncation this sweep sees is jax's
+    own** -- that is what makes the result an enumeration rather than a
+    mixture, and it is why the sweep can be compared against a map by
+    equality.
+
+    IT IS A SAMPLE AND NOT A PROOF, said plainly: it establishes that no
+    SECOND internal eager truncation exists on the surface it covers, not
+    that none exists in jax. The fail-closed direction is what covers the
+    rest -- an unenumerated one raises rather than hiding.
+    """
+    from stelling._jax_compat import jax as _jax
+    from stelling._jax_compat import jnp as _jnp
+
+    numpy = importlib.import_module("numpy")
+    key = _jax.random.PRNGKey(0)
+    dtypes_ = (_jnp.int8, _jnp.uint8, _jnp.int16, _jnp.uint16,
+               _jnp.int32, _jnp.uint32)
+
+    # SEEDING A KEY IS THE FIRST FAMILY AND IT IS NOT DECORATION: the one
+    # truncation this whole map is about happens while a seed becomes a key,
+    # and every other `jax.random` entry point below consumes a key that
+    # already exists. A sweep without these rows finds nothing and reports a
+    # clean bill of health for a map it never exercised -- measured, on the
+    # first draft of this function: 660 conversions, 0 truncations.
+    programs = [
+        ("random.key(0)", lambda: _jax.random.key(0)),
+        ("random.PRNGKey(0)", lambda: _jax.random.PRNGKey(0)),
+        ("random.key(2**32-1)", lambda: _jax.random.key(2 ** 32 - 1)),
+        ("random.PRNGKey(2**32-1)", lambda: _jax.random.PRNGKey(2 ** 32 - 1)),
+        ("random.key(2**31)", lambda: _jax.random.key(2 ** 31)),
+        ("random.PRNGKey(-1)", lambda: _jax.random.PRNGKey(-1)),
+        ("random.split(key(1))", lambda: _jax.random.split(_jax.random.key(1), 3)),
+        ("random.fold_in(key(1))", lambda: _jax.random.fold_in(_jax.random.key(1), 3)),
+        ("random.wrap_key_data", lambda: _jax.random.wrap_key_data(
+            _jax.random.key_data(_jax.random.key(2)))),
+    ]
+    # ...and the same seeding through every key IMPLEMENTATION this jax
+    # offers, because each one is a different constant-writing function and
+    # `threefry2x32` is only the default.
+    for impl in ("threefry2x32", "rbg", "unsafe_rbg"):
+        programs.append(
+            (f"random.key(0, impl={impl})",
+             lambda i=impl: _jax.random.key(0, impl=i))
+        )
+    for dtype in dtypes_:
+        name = numpy.dtype(dtype).name
+        info = numpy.iinfo(name)
+        x = _jnp.arange(8, dtype=dtype)
+        for label, program in (
+            ("random.randint", lambda d=dtype: _jax.random.randint(key, (4,), 0, 5, dtype=d)),
+            ("random.randint-full", lambda d=dtype, i=info: _jax.random.randint(key, (4,), i.min, i.max, dtype=d)),
+            ("random.bits", lambda d=dtype: _jax.random.bits(key, (4,), dtype=d)),
+            ("random.choice", lambda d=dtype: _jax.random.choice(key, _jnp.arange(4, dtype=d), (2,))),
+            ("random.permutation", lambda d=dtype: _jax.random.permutation(key, _jnp.arange(4, dtype=d))),
+            ("random.rademacher", lambda d=dtype: _jax.random.rademacher(key, (3,), dtype=d)),
+            ("random.categorical", lambda: _jax.random.categorical(key, _jnp.zeros((3,)))),
+            ("random.fold_in", lambda: _jax.random.fold_in(key, 3)),
+            ("random.split", lambda: _jax.random.split(key, 3)),
+            ("random.gumbel", lambda: _jax.random.gumbel(key, (3,))),
+            ("random.poisson", lambda: _jax.random.poisson(key, 1.0, (3,))),
+            ("random.bernoulli", lambda: _jax.random.bernoulli(key, 0.5, (3,))),
+            ("random.uniform", lambda: _jax.random.uniform(key, (3,))),
+            ("random.normal", lambda: _jax.random.normal(key, (3,))),
+            ("jnp.cumsum", lambda v=x: _jnp.cumsum(v)),
+            ("jnp.cumprod", lambda v=x: _jnp.cumprod(v)),
+            ("jnp.bincount", lambda v=x: _jnp.bincount(v.astype(_jnp.int32), length=4)),
+            ("jnp.unique", lambda v=x: _jnp.unique(v, size=4)),
+            ("jnp.sort", lambda v=x: _jnp.sort(v)),
+            ("jnp.argsort", lambda v=x: _jnp.argsort(v)),
+            ("jnp.searchsorted", lambda v=x: _jnp.searchsorted(v, v)),
+            ("jnp.clip", lambda v=x: _jnp.clip(v, 1, 3)),
+            ("jnp.take-fill", lambda v=x: _jnp.take(v, _jnp.array([9]), mode="fill")),
+            ("at[].get-fill", lambda v=x: v.at[9].get(mode="fill")),
+            ("at[].set", lambda v=x: v.at[1].set(2)),
+            ("jnp.pad", lambda v=x: _jnp.pad(v, (1, 1))),
+            ("jnp.roll", lambda v=x: _jnp.roll(v, -1)),
+            ("jnp.where", lambda v=x: _jnp.where(v > 2, v, 0)),
+            ("jnp.packbits", lambda: _jnp.packbits(_jnp.zeros((8,), _jnp.uint8))),
+            ("jnp.unpackbits", lambda: _jnp.unpackbits(_jnp.zeros((2,), _jnp.uint8))),
+            ("invert", lambda v=x: ~v),
+            ("negate", lambda v=x: -v),
+            ("shift", lambda v=x: v << 2),
+            ("iinfo.max into full", lambda d=dtype, i=info: _jnp.full((2,), i.max, d)),
+            ("jnp.histogram", lambda v=x: _jnp.histogram(v.astype(_jnp.float32), bins=4)),
+            ("jnp.diff", lambda v=x: _jnp.diff(v)),
+            ("jnp.repeat", lambda v=x: _jnp.repeat(v, 2)),
+            ("jnp.tile", lambda v=x: _jnp.tile(v, 2)),
+            ("jnp.nonzero", lambda v=x: _jnp.nonzero(v, size=4)),
+            ("jnp.argmax", lambda v=x: _jnp.argmax(v)),
+            ("jnp.mod", lambda v=x: _jnp.mod(v, 3)),
+            ("floordiv", lambda v=x: v // 3),
+            ("astype", lambda d=dtype: _jnp.arange(8, dtype=_jnp.int32).astype(d)),
+            ("nn.one_hot", lambda d=dtype: _jax.nn.one_hot(_jnp.array([0, 1]), 3, dtype=d)),
+            ("jnp.eye", lambda d=dtype: _jnp.eye(3, dtype=d)),
+            ("jnp.tri", lambda d=dtype: _jnp.tri(3, dtype=d)),
+            ("jnp.indices", lambda d=dtype: _jnp.indices((2, 2), dtype=d)),
+            ("jnp.arange", lambda d=dtype: _jnp.arange(4, dtype=d)),
+            ("jnp.linspace", lambda d=dtype: _jnp.linspace(0, 4, 3, dtype=d)),
+        ):
+            programs.append((f"{label}[{name}]", program))
+    return tuple(programs)
+
+
+def eager_jax_constant_sweep() -> dict:
+    """Re-derive :data:`_JAX_EAGER_CONSTANTS` from jax, rather than trusting it.
+
+    Runs :func:`_eager_sweep_programs` under ``jax.disable_jit()`` -- the mode
+    in which jax evaluates its own constants eagerly and this hook can see
+    them -- with a COLLECTOR in place of the observer, so nothing here reaches
+    :func:`eager.observe`, nothing raises, and no user counter moves.
+
+    Returns primitives only::
+
+        {"code": "swept" | "not-armed" | "unexpected:<Type>",
+         "conversions": int,          # the denominator: 0 means it went blind
+         "truncations": int,
+         "unmatched": ((written, dtype, ((file, func), ...)), ...),
+         "matched": ((file, func, written, dtype), ...)}
+
+    ``unmatched`` non-empty is the signal: jax performs an eager truncation
+    this repository has not read and has no row for, and until someone reads
+    it and writes one down the detector will attribute it to whoever called
+    jax. ``matched`` missing a row that :data:`_JAX_EAGER_CONSTANTS` carries
+    is the other signal -- a row that has stopped being real, which at x64 off
+    means the site moved.
+    """
+    # THE ARMED CHECK COMES BEFORE THE IMPORT, and that ordering is the
+    # difference between "not armed" and a traceback: this function is called
+    # by the nightly canary, which also runs in a lane with no jax at all, and
+    # `_jax_compat` raises there. Nothing is armed in that lane either, so the
+    # honest answer is reachable without importing anything.
+    if not _eager_installed:
+        return {"code": "not-armed", "conversions": 0, "truncations": 0,
+                "unmatched": (), "matched": ()}
+    from stelling._jax_compat import jax as _jax
+    from stelling._tripwire import eager
+
+    saved = _eager_installed.get("observer")
+    counters = [0, 0]
+    unmatched: dict = {}
+    matched: set = set()
+
+    def collect(written, to_dtype):
+        counters[0] += 1
+        if record.in_range(written, to_dtype):
+            return
+        counters[1] += 1
+        segment = eager.jax_segment(1)
+        row = eager.jax_constant(written, to_dtype, segment)
+        if row is None:
+            unmatched[(written, to_dtype, segment)] = True
+        else:
+            matched.add((row[0], row[1], written, to_dtype))
+
+    _eager_installed["observer"] = collect
+    try:
+        # BUILT INSIDE THE BLOCK, and that is load-bearing rather than tidy:
+        # `_eager_sweep_programs` seeds a key and builds six integer arrays
+        # while it runs, and a key seeded with `jit` on is a key seeded where
+        # this hook cannot see the constant that made it.
+        with _jax.disable_jit():
+            for _name, program in _eager_sweep_programs():
+                try:
+                    program()
+                except Exception:  # noqa: BLE001 - a probe may not raise
+                    # A program jax refuses is a program that measured
+                    # nothing, not a failure of the sweep: the surface is
+                    # swept across six dtypes and not every op accepts every
+                    # one of them.
+                    pass
+    except Exception as exc:  # noqa: BLE001 - a probe may not raise
+        return {"code": f"unexpected:{type(exc).__name__}", "conversions": counters[0],
+                "truncations": counters[1], "unmatched": (), "matched": ()}
+    finally:
+        _eager_installed["observer"] = saved
+    return {
+        "code": "swept",
+        "conversions": counters[0],
+        "truncations": counters[1],
+        "unmatched": tuple(sorted(unmatched, key=repr)),
+        "matched": tuple(sorted(matched)),
+    }
 
 
 def displacement_check() -> tuple[tuple[str, str], ...]:

@@ -151,30 +151,75 @@ SPDX-License-Identifier: Apache-2.0
   residue. `EAGER_COVERAGE`, beside `GATE_COVERAGE`, is the measured
   inventory and a test holds the residue to exactly those two.
 
-  **It carries an ORIGIN FILTER, and the first version of this entry said it
+  **It carries an ORIGIN QUESTION, and the first version of this entry said it
   needed none.** With `jit` on, jax's own threefry PRNG mask reaches the
   const-fold site and not this one, which is what that claim was measured on.
   With `jit` OFF — `jax.disable_jit()`, `JAX_DISABLE_JIT=1`, and the public
   `chex.fake_jit()` / `chex.fake_pmap_and_jit()` that install it — jax
   evaluates the mask eagerly and it arrives here as a written scalar, and the
   detector raised `4294967295 -> -1 (int32)` **inside jax's own PRNG**,
-  naming a line the user never wrote a constant on. Measured on jax 0.11.0
-  and 0.10.2, `JAX_DISABLE_JIT=1` over a 33-workload census across 24
-  third-party packages: **9 fires before (8 of them jax's own: `jax.random`,
-  flax linen, flax nnx, equinox, diffrax, jax_md, e3nn_jax) and 2 after**, one
-  of which is the control that must fire and the other the disclosed
-  coincidence below. With `jit` on the count is 1 before and 1 after, and it
-  is that control both times. Over chex's own installed `fake_test.py`: **2 failed / 32 passed
-  before, 34 passed after.**
+  naming a line the user never wrote a constant on. Measured on jax 0.11.0 and
+  0.10.2, byte-identically, over a 32-workload census across 24 third-party
+  packages: with `JAX_DISABLE_JIT=1`, **9 truncations, 9 fires before and 1
+  after** (8 of them jax's own: `jax.random` ×4, flax linen, flax nnx,
+  equinox, `chex.fake_jit`); with `jit` ON and jax's defaults untouched, **2
+  truncations, 2 fires before and 1 after** — because `chex.fake_jit()`
+  installs `disable_jit` around a test body, so this is reachable in the
+  DEFAULT configuration through a public API. The one remaining fire in every
+  row is a control of this repository's own that must fire. Over chex's own
+  installed `fake_test.py`: **2 failed / 32 passed before, 34 passed after.**
 
-  `eager._origin` answers the question `record.attribute` answers for the
-  other hook — *did the user write this constant, or did jax?* — from the
-  DATA rather than the frames, because at an eager narrowing the two cases
-  have the same frame shape: *is the narrowed integer among the arguments of
-  the call that crossed out of non-jax code into jax?* A call boundary exists
-  whether or not a trace is in progress, which is why the answer does not
-  depend on `jit`, and a test drives the same programs both ways and requires
-  the same verdict. Suppressions are counted and printed with their sites.
+  **The answer is a LOOKUP, not a predicate, and that is the second attempt.**
+  The first asked a general question of the data — *is the narrowed integer
+  among the arguments of the call that crossed out of non-jax code into jax?*
+  — and an audit found it wrong in both directions: it **suppressed a constant
+  the user really wrote** whenever the call carried it in a `functools.partial`,
+  a `jax.tree_util.Partial`, a bound method, a closure cell or a
+  registered-dataclass pytree — silently, in the DEFAULT `jit`-on
+  configuration, on `jax.tree.map(partial(jnp.full_like, fill_value=300),
+  tree)` and under `jit`, `vmap`, `lax.map`, `lax.scan` and `lax.fori_loop`
+  alike — and it **raised on jax's own mask** whenever its container scan hit
+  a depth, breadth or budget limit, which a params-shaped pytree does.
+
+  A sweep of 649 conversions across `jax.random.*` and `jnp`'s integer ops
+  over six integer dtypes, under `JAX_DISABLE_JIT=1`, finds **exactly one**
+  eager truncation of jax's own in existence — re-derived as shipped code by
+  `_adapter_jax.eager_jax_constant_sweep`, over a wider surface, at 675
+  conversions and 13 truncation events all of which are that one row, on both
+  jax series. So the one thing jax writes is
+  written down, at jax's own site, in `_adapter_jax._JAX_EAGER_CONSTANTS`:
+  `("_src/random/threefry2x32.py", "_threefry_seed") -> 4294967295 into
+  int32`. A narrowing is jax's when one of those functions is in the unbroken
+  run of jax frames beneath the caller AND the value and dtype are that row's.
+  Everything else is the caller's. That is the same shape — a narrow map plus
+  a canary that reddens when it is incomplete — that `_KNOWN_HASHES` already
+  argues for one screen up in the same file.
+
+  It **fails closed**: a jax release that adds a second internal eager
+  truncation has no row, is therefore the caller's, and RAISES at a line
+  inside jax rather than disappearing. Three things arrive first — the sweep
+  runs as a test on both jax series, arming drives the row and reports
+  `origin-blind:jax-attributed-to-you` rather than attaching if it stops
+  holding, and the alarm prints jax's own frames and asks the reader to report
+  it. It needs no container scan, so the depth, breadth and budget constants
+  and the "inconclusive" bucket are gone rather than documented; and it
+  removes the previously-disclosed false alarm on `jax.random.PRNGKey(2**32 -
+  1)`, where jax's mask and the caller's seed are the same integer.
+
+  **The `jit` claim is now the narrow one.** *"A call boundary exists whether
+  or not a trace is in progress, which is why the answer does not depend on
+  `jit`"* was **false**: widened from four programs to fourteen,
+  `jax.jit(partial(jnp.full_like, fill_value=300))(x)` gave no alarm with
+  `jit` on and raised with it off, on the same observed conversion, because
+  which frame is "the outermost jax frame" depends on how many wrapper frames
+  jax installs. What is true of the lookup: the verdict depends on the written
+  value, the target dtype and which jax functions are in the run beneath the
+  caller, and `jit` changes none of the three. Driven as an equality over **19
+  programs** covering `jit`, `vmap`, `tree.map`, `lax.map`, `lax.scan`,
+  `lax.fori_loop`, five carrier shapes and two pytrees big enough to have
+  exhausted the old scan's budget: 0 of 19 verdicts differ. Suppressions are
+  counted and printed with their sites, the jax function that wrote them and
+  what the constant is.
 
   **Off by default, and NOT turned on by `--stelling-overflow`.** Two dials,
   because the tripwire is a report over a session and this is a rule: a
@@ -205,11 +250,14 @@ SPDX-License-Identifier: Apache-2.0
   scalar integer conversions, 0 truncations) and 33 real workloads across 24
   third-party packages (264 conversions, 1 truncation — a control of this
   project's own that must fire and does) give **0 fires in any third-party
-  workload with `jit` on**, every figure identical on jax 0.11.0 and 0.10.2. With `JAX_DISABLE_JIT=1` the same 33 workloads see 1225 conversions
-  and 14 truncations, of which 12 are jax's own and are attributed and counted
-  rather than raised on; the one remaining fire is `jax.random.PRNGKey(2**32 -
-  1)`, where jax's mask and the seed are the same integer, and it is the
-  disclosed lenient edge of the origin filter.
+  workload with `jit` on**, every figure identical on jax 0.11.0 and 0.10.2.
+  With `JAX_DISABLE_JIT=1`, a 32-workload re-derivation sees 9 truncations, 8
+  of them jax's own, attributed and counted rather than raised on, and the one
+  remaining fire is that same control. **Compare truncations and not
+  conversions across those rows**: the alarm is a `BaseException`, so a fire
+  kills the rest of its workload and stops its later conversions being
+  counted, and a tree that fires nine times therefore reports a smaller
+  denominator than the same tree that fires once.
 
   **There is no value-based carve-out and there will not be one.**
   `jnp.full((4,), 0xFF, jnp.int8)` and `jnp.full((4,), 255, jnp.int8)`
@@ -260,9 +308,20 @@ SPDX-License-Identifier: Apache-2.0
   parameters, and then drives EVERY construction route it claims in both
   directions. A route that stops reaching the site — the silent failure a jax
   release actually produces — is `route-blind:<route>` and it refuses to
-  attach. Four new failure codes: `no-site-module`, `no-site`,
-  `signature-drift`, `route-blind`. The nightly jax canary arms it, drives a
-  live control both ways, and checks its own per-release source-hash map.
+  attach. Failure codes: `no-site-module`, `no-site`, `signature-drift`,
+  `route-blind`, and `origin-blind:<leg>`. The nightly jax canary arms it,
+  drives a live control both ways, and checks its own per-release source-hash
+  map.
+
+  **Arming drives the ATTRIBUTION too**, which the route probes cannot: they
+  swap a collector in for the observer, so they exercise every route for
+  reachability and arithmetic and never reach the function that decides
+  whether a narrowing raises. A detector whose origin rule suppressed
+  everything passed all of them. One narrowing of each origin now goes through
+  the live policy at arm time — a constant at no enumerated jax site, which
+  must raise, and `jax.random.key(0)` under `jax.disable_jit()`, which must be
+  attributed to jax — and the control puts the user's counters back exactly as
+  it found them, so a self-check can never appear in a denominator.
 
 ### Verification pipeline
 

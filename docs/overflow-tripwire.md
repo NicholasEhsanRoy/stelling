@@ -373,15 +373,38 @@ sits where that happens. Its threefry PRNG mask is `4294967295 -> -1` at
 `int32`, and a rule that raised on it would stop every test that touches
 `jax.random` under `jax.disable_jit()`, `JAX_DISABLE_JIT=1` or
 `chex.fake_jit()` — and would ask you to declare a constant you never wrote,
-sometimes at a line inside a library you cannot edit. So the detector asks
-where the constant came from: **it raises only on a value that crossed from
-your code into jax as an argument of the call you made.** Everything else is
-attributed to jax, counted, and printed with the site of your call and the jax
-function underneath it. Two edges are disclosed in the section's own coverage
-list: a constant reaching jax inside a custom object is attributed to jax and
-does not raise, and a constant jax wrote that happens to equal something you
-passed at the same call is attributed to you and does — measured,
-`jax.random.PRNGKey(2**32 - 1)`.
+sometimes at a line inside a library you cannot edit.
+
+So the detector does not GUESS whether a constant is jax's. **It looks it up.**
+A map records what jax writes, keyed on the jax function that writes it and the
+exact value and dtype:
+
+```
+("_src/random/threefry2x32.py", "_threefry_seed"): 4294967295 -> int32
+```
+
+A narrowing is attributed to jax when, and only when, one of those functions is
+in the unbroken run of jax frames beneath your line AND the value and dtype are
+that row's. **Everything else is yours and raises.** Each suppression is
+counted and printed with the site of your call, the jax function that wrote the
+constant, and what the constant is.
+
+That map has **one row**, and that is the measurement rather than an omission.
+A sweep of jax's own integer surface under `disable_jit` — every key
+implementation and seed spelling, then `jax.random`'s consumers and `jnp`'s
+integer ops over six integer dtypes — sees 675 conversions and 13 truncations
+of jax's own, and **all 13 are that one row**, identically on jax 0.11.0 and
+0.10.2. It is shipped code, not a note: it runs as a test on both jax series,
+so a release that adds a second one turns a lane red, and the nightly jax
+canary runs it too, on the leg that meets a new release first.
+
+**The residue is the one an enumeration has, and it is loud.** A jax release
+that adds an internal eager truncation nobody has written a row for is
+attributed to *whoever called jax* and raises, at a line inside jax you did not
+write. The alarm says so in its own message and prints jax's own frames beneath
+your line, so a report is one paste away. That is the direction this instrument
+fails in on purpose: an over-report is visible to you, holding the quoted line;
+a suppression is not.
 
 ### It fails closed
 
@@ -393,6 +416,16 @@ every construction route it claims, in both directions**. If one route stops
 reaching the site — the silent failure a jax release actually produces — it
 reports `route-blind:<route>` and does not attach. Keeping five routes and
 losing one quietly is not a trade the tool makes on your behalf.
+
+Arming also drives **the attribution itself**, which the route probes cannot:
+they swap in a collector, so they never reach the function that decides whether
+a narrowing raises. One narrowing of each origin goes through the live policy —
+a constant written at no enumerated jax site, which must raise, and
+`jax.random.key(0)` under `jax.disable_jit()`, which must be attributed to jax.
+If the second one stops holding, the map no longer names jax's own mask, the
+next `jax.random` call under `disable_jit` would raise inside jax, and arming
+reports `origin-blind:jax-attributed-to-you` and does not attach. The control
+leaves your counters exactly as it found them.
 
 The nightly jax canary arms it, drives a live control both ways, and checks
 the site's source hash against a per-release map (`_KNOWN_EAGER_HASHES`, keyed

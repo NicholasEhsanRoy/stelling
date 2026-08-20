@@ -72,12 +72,21 @@ on**: 174 scalar integer conversions and 0 truncations over the imports, then
 264 conversions and exactly 1 truncation over the workloads, and that one is a
 control of this project's own that must fire and does. Every one of those
 figures is identical on jax 0.11.0 and 0.10.2. So the radius in which the
-choice matters
-at all is small. **THAT FIGURE IS FOR ``jit`` ON AND THAT QUALIFIER IS
-LOAD-BEARING**, which the paragraph below is about: with ``JAX_DISABLE_JIT=1``
-the same 33 workloads see 1225 conversions and 14 truncations, twelve of them
-jax's own. The census is in ``design/eager-truncation-detector.md`` and is
-driven by ``tests/test_tripwire_eager.py``.
+choice matters at all is small. **THAT FIGURE IS FOR ``jit`` ON AND THAT
+QUALIFIER IS LOAD-BEARING**, which the paragraph below is about: with
+``JAX_DISABLE_JIT=1`` a 32-workload re-derivation of the same census sees
+**9 truncations, 8 of them jax's own**, and the tree without an origin
+question fires on all nine.
+
+**COMPARE TRUNCATIONS AND NOT CONVERSIONS ACROSS TWO OF THESE ROWS**, because
+the alarm is a ``BaseException``: a fire kills the rest of its workload, and
+the conversions that workload would have gone on to make are never counted. A
+tree that fires nine times therefore reports a SMALLER denominator than the
+same tree that fires once. An earlier version of the design note put ``686``
+and ``1225`` side by side as comparable exposures; they are not, and the
+honest figure over one exposure is 9 fires -> 1, over the same 9 truncations.
+The census is in ``design/eager-truncation-detector.md`` and is driven by
+``tests/test_tripwire_eager.py``.
 
 **IT NEEDS AN ORIGIN FILTER, AND THE FIRST VERSION OF THIS PARAGRAPH SAID IT
 DID NOT.** What it said was that the const-fold tripwire fires on JAX'S OWN
@@ -88,22 +97,54 @@ deliberately turn on.** Under ``jax.disable_jit()`` jax evaluates the
 threefry mask eagerly, it reaches this site as a written scalar, and the
 version without a filter raised ``EagerTruncationError(4294967295 -> -1,
 int32)`` inside jax's own PRNG. Measured on jax 0.11.0 and 0.10.2: every
-``jax.random.*`` entry point, and EIGHT of the thirty-three workloads in this
-project's census under ``JAX_DISABLE_JIT=1`` -- the roster and the numbers are
-in ``design/eager-truncation-detector.md``, and they include one library's
-whole test suite, reached through a public API that installs
-``jax.disable_jit()`` for the duration of a test. The message then asked the
+``jax.random.*`` entry point, and EIGHT of the thirty-two workloads in this
+project's re-derived census under ``JAX_DISABLE_JIT=1`` -- the roster and the
+numbers are in ``design/eager-truncation-detector.md``, and they include one
+library's whole test suite, reached through a public API that installs
+``jax.disable_jit()`` for the duration of a test. **AND ONE OF THE EIGHT
+REACHES IT WITH ``jit`` ON**, which is the sentence that stops this being a
+``JAX_DISABLE_JIT=1`` special case: ``chex.fake_jit()`` installs
+``jax.disable_jit()`` around a test body, so a workload using that public API
+meets jax's eager mask in the DEFAULT configuration. Measured: with jax's own
+defaults untouched, the tree without an origin question fires twice over this
+census and one of the two is chex's. The message then asked the
 user to declare a constant they never wrote, at a line inside a third-party
 library they cannot edit, and ``except Exception:`` could not contain it.
 
-So :func:`_origin` answers the origin question here, and it answers it from
-the DATA rather than from the frames, because at this site the frames cannot:
+So :func:`_origin` answers the origin question here, and it answers it with a
+LOOKUP rather than a rule, because at this site the frames cannot:
 ``jnp.full((), 256, jnp.int8)`` and ``jax.random.key(0)`` present the same
-stack shape. The rule is *"is the narrowed integer among the arguments of the
-call that crossed out of non-jax code into jax?"*, it is the same question
-``record.attribute`` asks at the other hook, and it does not depend on a trace
-being in progress. Suppressions are counted in :data:`SUPPRESSED` and printed
-with their sites; a filter nobody can see is the same defect as a silence.
+stack shape. **A sweep of 649 conversions across ``jax.random.*`` and
+``jnp``'s integer ops over six integer dtypes, under ``JAX_DISABLE_JIT=1``,
+finds exactly ONE eager truncation of jax's own in existence** — that mask,
+byte-identically on jax 0.11.0 and 0.10.2. So the answer is not inferred from
+a general property of the data; the one thing jax writes is written down, at
+jax's own site, in ``_adapter_jax._JAX_EAGER_CONSTANTS``, and everything else
+is the caller's. That map carries the rows, the sweep that re-derives them,
+and the argument for a map over a predicate — which is the argument
+``_KNOWN_HASHES`` in the same file already makes at length.
+
+A GENERAL PREDICATE STOOD HERE FOR ONE REVISION AND WAS WRONG IN BOTH
+DIRECTIONS. It asked *"is the narrowed integer among the arguments of the
+call that crossed out of non-jax code into jax?"* and suppressed when the
+answer was no. It MISSED a constant the user really wrote whenever the call
+carried it in a ``functools.partial``, a ``jax.tree_util.Partial``, a bound
+method or a registered-dataclass pytree — silently, in the DEFAULT ``jit``-on
+configuration, on ``jax.tree.map(partial(jnp.full_like, fill_value=300),
+tree)``, which is idiomatic jax — and it RAISED on jax's own mask whenever
+its container scan hit a depth, breadth or budget limit, which a
+params-shaped pytree does. A proxy for a class with one member is a proxy
+with two failure directions and no upside.
+
+Suppressions are counted in :data:`SUPPRESSED` and printed with their sites,
+naming the jax function and what the constant is; a filter nobody can see is
+the same defect as a silence. And the enumeration FAILS CLOSED: a jax release
+that adds a second internal eager truncation gets no row, is therefore the
+caller's, and RAISES — loudly, at a line inside jax — rather than
+disappearing. That is the direction this instrument must fail in, it is
+disclosed in ``report.EAGER_UNCOVERED``, the alarm's own message tells the
+reader to report it, :func:`arm` drives the row it has and refuses to attach
+if it stops holding, and the sweep runs as a test in both jax lanes.
 
 **WHAT IT COSTS, said plainly.** ``finally:`` blocks still run and context
 managers' ``__exit__`` still runs, so ordinary resource cleanup is unaffected.
@@ -132,14 +173,17 @@ source TEXT.
 **And the source text IS reachable** -- ``record.source_line(file, line)``
 returns it and :func:`_message` calls it three statements later, so the
 sentence this paragraph used to carry ("not available as data at the point the
-decision has to be made") was false about this module's own code. The ruling
-stands on its other leg, which is the one that cannot be argued away: a
-variable, an imported constant, a computed value and a constant defined in
-another module carry NO text at the site at all, so a rule that reads the line
-is a rule that works for literals and abstains for everything else -- and
-``jnp.full(shape, MASK, jnp.int8)`` with ``MASK = 0xFF`` one module over is
-the mask idiom the rule was supposed to recognise. Intent is therefore not a
-function of ``(value, dtype, result)``, and not a function of the line either.
+decision has to be made") was false about this module's own code. THE LEG IT
+STANDS ON IS ABOUT THE NUMERAL AND NOT ABOUT THE TEXT, which is the second
+correction this paragraph has needed: with ``MASK = 0xFF`` one module over,
+``jnp.full(shape, MASK, jnp.int8)`` has a line, this module quotes it, and
+what the line says is ``MASK``. A variable, an imported constant, a computed
+value and a constant defined in another module all reach the site with the
+NUMERAL absent from it, so a rule that reads the line reads a name and has
+nothing to score -- it works for literals and abstains for everything else,
+and ``MASK`` is exactly the mask idiom such a rule was supposed to recognise.
+Intent is therefore not a function of ``(value, dtype, result)``, and not a
+function of the line either.
 
 Two candidate rules were driven over a corpus of real narrowings:
 
@@ -301,7 +345,9 @@ PERMITTED: dict[tuple[str, int], list] = {}
 #: ``(file, line)`` -> ``[count, text]`` for every narrowing :func:`_origin`
 #: attributed to JAX ITSELF rather than to the code that called it. The site
 #: is the user's own call, because that is the line a reader recognises; the
-#: text names the jax function underneath it.
+#: text names the enumerated jax site the constant was written at and says
+#: what the constant IS, so a reader can check the attribution rather than
+#: take it.
 #:
 #: DISCLOSED, EXACTLY AS THE CONST-FOLD TRIPWIRE'S ``suppressed_jax`` IS.
 #: A filter that only ever speaks up when it catches nothing is
@@ -311,12 +357,6 @@ SUPPRESSED: dict[tuple[str, int], list] = {}
 
 #: How many out-of-range narrowings :func:`_origin` attributed to jax.
 SUPPRESSED_JAX = 0
-
-#: How many origin decisions were made on an INCOMPLETE scan of the boundary
-#: call's arguments and therefore fell back to "the user's" (``record.carries``
-#: returning None). Printed when non-zero: it is the count of alarms this
-#: instrument raised without having established the thing it says.
-INCONCLUSIVE = 0
 
 #: How many scalar integer->integer conversions the hook has seen, in total.
 #: THE DENOMINATOR, and it is printed whether or not anything fired: "0
@@ -513,6 +553,21 @@ _STELLING_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + o
 #: this module must not learn what jax is.
 _JAX_ROOT = ""
 
+#: THE EAGER TRUNCATIONS JAX ITSELF PERFORMS, enumerated:
+#: ``(jax-relative file, function name) -> ((written, dtype, what it is), ...)``.
+#:
+#: Set at :func:`arm` time from ``_adapter_jax.jax_eager_constants()``, which
+#: is where the rows and the argument for them live, because that file is the
+#: only one in this repository allowed to name a private jax module and every
+#: key here is one. What arrives is plain data — strings and integers — so
+#: this module still knows nothing about jax and still runs in an interpreter
+#: that has none.
+#:
+#: EMPTY UNTIL ARMED, and empty is the fail-closed value: with no rows,
+#: :func:`jax_constant` answers ``None`` for everything and every truncation
+#: is the caller's.
+_JAX_CONSTANTS: dict = {}
+
 
 def _in_jax(name: str) -> bool:
     absolute = os.path.abspath(name) if os.path.sep in name else name
@@ -524,8 +579,20 @@ def _in_stelling(name: str) -> bool:
     return absolute.startswith(_STELLING_ROOT)
 
 
+def _jax_relative(name: str) -> str:
+    """A jax frame's file, relative to the jax package and ``/``-separated.
+
+    The key half of a :data:`_JAX_CONSTANTS` row. Relative, because the
+    absolute path contains a virtualenv, a Python version and an
+    installation layout, none of which a row may depend on; ``/``-separated
+    so that one row is one row on every platform.
+    """
+    absolute = os.path.abspath(name) if os.path.sep in name else name
+    return absolute[len(_JAX_ROOT):].replace(os.sep, "/")
+
+
 def _walk(skip: int):
-    """One walk out from the hook: ``(writer, boundary)``.
+    """One walk out from the hook: ``(writer, jax_run)``.
 
     ``writer`` is ``(file, line, func)`` for the innermost frame outside jax
     and outside stelling — *the innermost frame OUTSIDE JAX, your own code or
@@ -537,18 +604,26 @@ def _walk(skip: int):
     nothing: an alarm that cannot say where is still an alarm, and
     ``<unknown>:0`` in a message is a defect a reader can report.
 
-    ``boundary`` is the **outermost jax frame inside that writer** — the jax
-    function the writer actually called — or None if there is no jax frame
-    between the hook and the writer at all, which is what a direct call to
-    :func:`observe` looks like. It is a frame OBJECT and it does not leave
-    this module: :func:`_origin` reads its arguments, decides, and drops it.
+    ``jax_run`` is the UNBROKEN RUN of jax frames between the hook and that
+    writer, innermost first, as ``(jax-relative file, function name)`` pairs.
+    Stelling's own frames are stepped over rather than ending the run — this
+    module's wrapper sits inside jax's call chain and would otherwise cut it
+    at frame zero — and the run ends at the first frame that is neither.
+
+    THAT IT IS UNBROKEN IS THE PROPERTY :func:`_origin` RESTS ON. A constant
+    narrowed inside a function the USER handed to jax has the user's own
+    frame between it and any jax function above, so the run stops there and
+    no row above can claim it. Nothing else about the run's length matters:
+    the decision is an existence test over an enumerated set, not a rule
+    about which frame is outermost, which is what made the previous revision
+    depend on how many wrapper frames ``jit`` happens to install.
     """
     try:
         frame = sys._getframe(skip + 1)
     except ValueError:  # pragma: no cover - defensive
-        return ("<unknown>", 0, "?"), None
+        return ("<unknown>", 0, "?"), ()
     last = ("<unknown>", 0, "?")
-    boundary = None
+    run: list[tuple[str, str]] = []
     while frame is not None:
         name = frame.f_code.co_filename
         last = (name, frame.f_lineno, frame.f_code.co_name)
@@ -556,11 +631,11 @@ def _walk(skip: int):
             frame = frame.f_back
             continue
         if _in_jax(name):
-            boundary = frame
+            run.append((_jax_relative(name), frame.f_code.co_name))
             frame = frame.f_back
             continue
-        return (name, frame.f_lineno, frame.f_code.co_name), boundary
-    return last, boundary
+        return (name, frame.f_lineno, frame.f_code.co_name), tuple(run)
+    return last, tuple(run)
 
 
 def _writer_frame(skip: int) -> tuple[str, int, str]:
@@ -568,29 +643,38 @@ def _writer_frame(skip: int) -> tuple[str, int, str]:
     return _walk(skip + 1)[0]
 
 
-def _argument_values(frame) -> list:
-    """Exactly the values the caller handed this frame: its parameters.
+def jax_segment(skip: int) -> tuple:
+    """The unbroken run of jax frames beneath the caller. Adapter support.
 
-    Parameters and not ``f_locals``, which by the time the hook runs also
-    holds whatever the function has computed since — including, in a jax
-    entry point, constants of jax's own. What crossed the boundary is the
-    argument list, so the argument list is what is read.
+    The sweep in ``_adapter_jax.eager_jax_constant_sweep`` asks the same
+    question of the same stack this module's own decision is taken over, so
+    it asks it with this function rather than with a second walk that could
+    drift from this one.
     """
-    code = frame.f_code
-    count = code.co_argcount + code.co_kwonlyargcount
-    names = list(code.co_varnames[:count])
-    index = count
-    if code.co_flags & 0x04:  # CO_VARARGS
-        names.append(code.co_varnames[index])
-        index += 1
-    if code.co_flags & 0x08:  # CO_VARKEYWORDS
-        names.append(code.co_varnames[index])
-    local = frame.f_locals
-    return [local[name] for name in names if name in local]
+    return _walk(skip + 1)[1]
 
 
-def _origin(written: int, skip: int):
-    """Did the USER write this constant, or did jax? ``(origin, writer, where, scan)``.
+def jax_constant(written: int, to_dtype: str, jax_run) -> tuple | None:
+    """The enumerated row naming this narrowing as JAX'S OWN, or ``None``.
+
+    ``(file, function, what it is)`` when some frame in ``jax_run`` is a site
+    :data:`_JAX_CONSTANTS` records, AND the pair actually observed is the
+    pair that row records. Both halves are required: a row is a statement
+    about one constant at one site, not a licence for the function it names.
+
+    ``None`` is the answer for everything else, including every narrowing
+    seen before :func:`arm` has filled the map in — which is the direction
+    that fails closed.
+    """
+    for file, func in jax_run:
+        for value, dtype, what in _JAX_CONSTANTS.get((file, func), ()):
+            if value == written and dtype == to_dtype:
+                return file, func, what
+    return None
+
+
+def _origin(written: int, to_dtype: str, skip: int):
+    """Did the USER write this constant, or did jax? ``(origin, writer, where, run)``.
 
     THE QUESTION ``record.attribute`` ANSWERS FOR THE OTHER HOOK, ASKED WHERE
     ITS EVIDENCE DOES NOT EXIST. ``attribute`` keys on the trace boundary: the
@@ -604,50 +688,65 @@ def _origin(written: int, skip: int):
     At an EAGER narrowing there is no trace boundary to key on, and measured
     (jax 0.11.0, ``jax.disable_jit()``) there is no frame shape to key on
     either: ``jnp.full((), 256, jnp.int8)`` and ``jax.random.key(0)`` both
-    present as a user frame with nothing but jax frames beneath it. The two
-    stacks are printed side by side in ``record.carries``.
+    present as a user frame with nothing but jax frames beneath it.
 
-    So the evidence is the DATA. ``256`` crossed out of the user's frame as an
-    argument of the call they made; ``4294967295`` was manufactured nine
-    frames below that call and is in nothing they handed over. The question
-    asked here is therefore:
+    SO THE ANSWER IS NOT INFERRED AT ALL. It is looked up:
 
-        is the narrowed integer among the arguments of the call that crossed
-        out of non-jax code into jax?
+        is this exact ``(value, dtype)`` one that jax is RECORDED as writing,
+        at one of the jax functions in the unbroken run of jax frames beneath
+        the line that made the call?
 
-    and a call boundary exists whether or not a trace is in progress, which is
-    exactly why this answer **does not depend on ``jit``**. Under ``jit`` the
-    same test gives the same answers on the same programs; under
-    ``jax.disable_jit()``, ``JAX_DISABLE_JIT=1``, ``chex.fake_jit()`` and
-    ``chex.fake_pmap_and_jit()`` it keeps giving them, which the version this
-    replaces did not: it raised inside jax's own PRNG in eight of the
-    workloads in this project's census.
+    ``ORIGIN_JAX`` only for a row of :data:`_JAX_CONSTANTS`; ``ORIGIN_USER``
+    for everything else, with no third state to lean in a direction.
 
-    ``ORIGIN_JAX`` — the suppression — requires POSITIVE evidence: a jax
-    boundary, and a scan of its arguments that COMPLETED and found nothing.
-    Everything else is ``ORIGIN_USER``, including a scan that ran out of
-    budget (``scan is None``, counted in :data:`INCONCLUSIVE`) and the case
-    with no jax frame at all. Over-reporting is visible to a reader who has
-    the quoted line; a suppressed narrowing is not — the same direction
-    ``record.attribute``'s own fallback leans, for the same stated reason.
+    WHY A LOOKUP AND NOT A PREDICATE. Because the general predicate that
+    stood here was a proxy for a class with one member. It asked *"is the
+    narrowed integer among the arguments of the call that crossed out of
+    non-jax code into jax?"* and it was measurably wrong in both directions:
+    it MISSED a constant the user really wrote whenever the call carried it
+    in a ``functools.partial``, a bound method or a dataclass pytree — a
+    silent suppression, in the default ``jit``-on configuration, on
+    ``jax.tree.map(partial(jnp.full_like, fill_value=300), tree)`` — and it
+    RAISED on jax's own mask whenever its container scan ran out of budget on
+    a params-shaped pytree. A sweep of 649 conversions across
+    ``jax.random.*`` and ``jnp``'s integer ops over six integer dtypes found
+    **exactly one** eager truncation of jax's own in existence. One is not a
+    class; ``_adapter_jax._JAX_EAGER_CONSTANTS`` carries the row, the
+    measurement and the whole argument.
 
-    THE RESIDUE, AND IT IS THE PRICE OF A VALUE TEST: a constant jax wrote
-    that happens to EQUAL something you passed at that call is attributed to
-    you. Measured: ``jax.random.PRNGKey(4294967295)`` fires, because jax's
-    threefry mask is 4294967295 and so is the seed. That is the lenient
-    direction and it is disclosed in ``report.EAGER_UNCOVERED``.
+    THE VERDICT ON ONE OBSERVATION IS THE SAME WITH ``jit`` ON AND OFF, and
+    that is a NARROWER claim than the one it replaces. What stood here was
+    *"a call boundary exists whether or not a trace is in progress, which is
+    why this answer does not depend on ``jit``"*, and an audit falsified it:
+    ``jax.jit(partial(jnp.full_like, fill_value=300))(x)`` gave no alarm with
+    ``jit`` on and raised with it off, on the same observed conversion,
+    because the identity of "the outermost jax frame" depends on how many
+    wrapper frames jax installs.
+
+    What this reads is the written value, the target dtype, and which jax
+    functions are in the run beneath the caller, and ``jit`` changes none of
+    the three: the decision is an EXISTENCE test over the run, not a question
+    about which of its frames is outermost. Driven as an equality over 19
+    programs in ``tests/test_tripwire_eager.py``.
+
+    What ``jit`` DOES change is a different sentence, about the population
+    rather than the verdict: with it on, jax's mask is traced and never
+    arrives here at all, so there is nothing to attribute.
+
+    THE RESIDUE, AND IT IS THE PRICE OF AN ENUMERATION: a jax release that
+    adds a second internal eager truncation has no row, so it is the
+    caller's, and it RAISES at a line inside jax they did not write. That is
+    the loud direction and it is the one an instrument must fail in;
+    ``report.EAGER_UNCOVERED`` discloses it, the alarm's own message tells
+    the reader what to do about it, a sweep drives it in both jax lanes, and
+    :func:`arm` refuses to attach if the row it has stops holding.
     """
-    writer, boundary = _walk(skip + 1)
-    if boundary is None:
-        return record.ORIGIN_USER, writer, "", True
-    where = (
-        f"{boundary.f_code.co_filename}:{boundary.f_lineno}"
-        f", in {boundary.f_code.co_name}()"
-    )
-    scan = record.carries(_argument_values(boundary), written)
-    if scan is False:
-        return record.ORIGIN_JAX, writer, where, scan
-    return record.ORIGIN_USER, writer, where, scan
+    writer, jax_run = _walk(skip + 1)
+    row = jax_constant(written, to_dtype, jax_run)
+    if row is None:
+        return record.ORIGIN_USER, writer, "", jax_run
+    file, func, what = row
+    return record.ORIGIN_JAX, writer, f"{file}, in {func}(): {what}", jax_run
 
 
 def observe(written: int, to_dtype: str) -> None:
@@ -670,16 +769,14 @@ def observe(written: int, to_dtype: str) -> None:
     case, including when a declaration or the origin filter covers it: nothing
     is silently dropped, and every bucket is counted and printed.
     """
-    global CONVERSIONS, TRUNCATIONS, SUPPRESSED_JAX, INCONCLUSIVE
+    global CONVERSIONS, TRUNCATIONS, SUPPRESSED_JAX
 
     CONVERSIONS += 1
     if record.in_range(written, to_dtype):
         return
     TRUNCATIONS += 1
 
-    origin, (file, line, func), where, scan = _origin(written, 1)
-    if scan is None:
-        INCONCLUSIVE += 1
+    origin, (file, line, func), where, jax_run = _origin(written, to_dtype, 1)
     if origin == record.ORIGIN_JAX:
         SUPPRESSED_JAX += 1
         entry = SUPPRESSED.setdefault((file, line), [0, ""])
@@ -687,7 +784,7 @@ def observe(written: int, to_dtype: str) -> None:
         entry[1] = _join_reason(
             entry[1],
             f"{written} -> {record.narrow(written, to_dtype)} ({to_dtype}), "
-            f"written by jax below your call to {where}",
+            f"written by jax at {where}",
         )
         return
 
@@ -701,7 +798,7 @@ def observe(written: int, to_dtype: str) -> None:
 
     became = record.narrow(written, to_dtype)
     raise EagerTruncationError(
-        _message(written, to_dtype, became, file, line, func),
+        _message(written, to_dtype, became, file, line, func, jax_run),
         written=written,
         to_dtype=to_dtype,
         became=became,
@@ -714,6 +811,15 @@ def observe(written: int, to_dtype: str) -> None:
 #: How many distinct reasons one PERMITTED row keeps before it stops adding.
 #: A row is a line in a report, not a log.
 MAX_REASONS = 4
+
+#: How many of jax's own frames the alarm prints beneath the attributed line.
+#: SIX, and the number is measured rather than chosen: the one narrowing jax
+#: is known to perform eagerly reaches this hook FIVE frames below the
+#: function that writes it (``promote_dtypes`` <- ``promote_args`` <-
+#: ``bitwise_and`` <- ``__call__`` <- ``_threefry_seed``), so a shorter list
+#: would print the promotion helper and stop before the PRNG -- which is the
+#: one line a reader who did not write the constant needs to see.
+MAX_JAX_FRAMES = 6
 
 
 def _join_reason(existing: str, reason: str) -> str:
@@ -728,7 +834,7 @@ def _join_reason(existing: str, reason: str) -> str:
     return " | ".join(reasons + [reason])
 
 
-def _message(written, to_dtype, became, file, line, func) -> str:
+def _message(written, to_dtype, became, file, line, func, jax_run=()) -> str:
     """The alarm, in the shape ``report.py`` argues every finding must have.
 
     Both halves observed, the arithmetic a reader can check with a pencil, the
@@ -770,6 +876,29 @@ def _message(written, to_dtype, became, file, line, func) -> str:
         f"{written} written as a mask and {written} written by accident are "
         "the same event at this point in jax, differing only in source text.",
     ]
+    # THE ATTRIBUTION, AND HOW TO REPORT IT WRONG. This alarm names a line
+    # because a LOOKUP said the narrowing is not one jax is recorded as
+    # performing itself. That lookup is an enumeration, so it fails closed: a
+    # jax release that adds an internal eager truncation nobody has read yet
+    # lands HERE, on a reader who did not write the constant -- and the only
+    # thing that turns that into a row somebody adds is their being told it
+    # is worth reporting.
+    if jax_run:
+        lines += [
+            "",
+            f"If you did not write {written} anywhere near that line, this "
+            "attribution is wrong and it is stelling's to fix. It names your "
+            f"line because {written} at {to_dtype} is not one of the "
+            "constants stelling records jax as writing ITSELF, and that list "
+            "is an enumeration rather than a rule -- so a jax release that "
+            "adds one lands here. The jax frames it happened under, "
+            "innermost first, are what a report needs:",
+        ]
+        lines += [
+            f"      {func}()  ({file})" for file, func in jax_run[:MAX_JAX_FRAMES]
+        ]
+        if len(jax_run) > MAX_JAX_FRAMES:
+            lines.append(f"      ... and {len(jax_run) - MAX_JAX_FRAMES} more")
     return "\n".join(lines)
 
 
@@ -792,11 +921,10 @@ def reset_counters() -> None:
     can say its figures are partial rather than quietly presenting a fragment
     as a total.
     """
-    global CONVERSIONS, TRUNCATIONS, RESETS, SUPPRESSED_JAX, INCONCLUSIVE
+    global CONVERSIONS, TRUNCATIONS, RESETS, SUPPRESSED_JAX
     CONVERSIONS = 0
     TRUNCATIONS = 0
     SUPPRESSED_JAX = 0
-    INCONCLUSIVE = 0
     RESETS += 1
     DECLARED.clear()
     PERMITTED.clear()
@@ -825,7 +953,6 @@ def snapshot() -> dict:
         "conversions": CONVERSIONS,
         "truncations": TRUNCATIONS,
         "suppressed_jax": SUPPRESSED_JAX,
-        "inconclusive": INCONCLUSIVE,
         "resets": RESETS,
         "internal_errors": internal_errors(),
         "declared": {
@@ -893,29 +1020,161 @@ def arm():
         if installed not in ("installed", "already-armed"):
             return status(installed)
 
+        # THE MAP IS PART OF THE ARMED STATE and is cleared with it on every
+        # way out below. It has to be, in both directions: `_origin_control`
+        # needs it loaded before it can drive it, and a map left behind by a
+        # REFUSED arm would go on deciding suppressions in a process that
+        # believes nothing is attached.
+        _JAX_CONSTANTS.clear()
+        _JAX_CONSTANTS.update(adapter.jax_eager_constants())
+
         probe = adapter.eager_selfcheck()
         if probe != "armed":
             adapter.eager_restore()
+            _JAX_CONSTANTS.clear()
             return status(probe)
-        return status("armed", "the eager construction-site detector is live")
+
+        origin = _origin_control(adapter)
+        if not origin.startswith("origin-checked"):
+            adapter.eager_restore()
+            _JAX_CONSTANTS.clear()
+            return status(origin)
+        return status(
+            "armed",
+            f"the eager construction-site detector is live; {origin}",
+        )
     except Exception as exc:  # noqa: BLE001 - a guardrail may not raise
         try:
             adapter.eager_restore()
         except Exception:  # noqa: BLE001  # pragma: no cover - defensive
             pass
+        _JAX_CONSTANTS.clear()
         from stelling import _tripwire as _tw
 
         return _tw.Status(code=f"unexpected:{type(exc).__name__}", detail=str(exc)[:200])
 
 
+def _origin_control(adapter) -> str:
+    """Drive one narrowing of each ORIGIN through the LIVE policy, at arm time.
+
+    THE SELF-CHECK CANNOT ANSWER FOR THIS, and that gap is why this function
+    exists. ``adapter.eager_selfcheck`` swaps a collector in for the observer,
+    so arming drives every construction route for reachability and for
+    arithmetic and **never reaches** :func:`observe` — which is the function
+    that decides whether a narrowing raises. A hook whose origin rule
+    suppressed everything would pass every route probe there is.
+
+    So this runs both directions through the real thing:
+
+    * a narrowing written at no enumerated jax site must come back
+      ``ORIGIN_USER`` and must RAISE — only ``ORIGIN_USER`` reaches the raise,
+      so the raise IS the attribution;
+    * jax's own — ``jax.random.key(0)`` under ``jax.disable_jit()``, the exact
+      program the first audit found raising inside jax's PRNG in eight real
+      workloads and in chex's own suite — must be attributed to jax, or must
+      produce no truncation at all. The second case is not a hole: with
+      ``jax_enable_x64=True`` jax widens the mask to ``int64``, it fits, and
+      there is nothing to attribute. What is refused is the third case, where
+      the truncation still happens and the map no longer names it.
+
+    IT REFUSES TO ARM WHEN EITHER LEG FAILS, on the same argument
+    ``route-blind`` refuses: a detector whose origin decision has gone wrong
+    is not a detector with one feature missing. The jax leg failing means the
+    alarm is about to fire inside jax's own PRNG at a line the user cannot
+    edit, which is audit 1's finding exactly; the user leg failing means it
+    has stopped firing at all. Both are one row or one line away from fixed,
+    and the status code says which.
+
+    **IT LEAVES THE COUNTERS EXACTLY AS IT FOUND THEM.** It runs the real
+    :func:`observe`, so it moves ``CONVERSIONS``, ``TRUNCATIONS`` and the
+    tables; a self-check that appeared in a user's denominator would make
+    every rate this instrument prints a rate about itself. They are saved and
+    written back rather than reset, because ``arm_eager()`` may be called
+    part-way through a session that already has figures and
+    :func:`reset_counters` would take those with it.
+
+    Returns a sentence beginning ``origin-checked`` when both legs hold — it
+    goes in the status detail, so a reader can see WHICH legs ran — and a
+    status code otherwise.
+    """
+    global CONVERSIONS, TRUNCATIONS, SUPPRESSED_JAX
+    saved = (
+        CONVERSIONS,
+        TRUNCATIONS,
+        SUPPRESSED_JAX,
+        dict(DECLARED),
+        dict(PERMITTED),
+        dict(SUPPRESSED),
+    )
+    # A region open around `arm_eager()` would PERMIT the user leg's
+    # truncation instead of raising it, and a control a caller's context can
+    # switch off is not a control. The token puts the stack back.
+    token = _REGIONS.set(())
+    try:
+        try:
+            probes = dict(adapter.eager_origin_probes())
+        except Exception as exc:  # noqa: BLE001 - a guardrail may not raise
+            return f"origin-control-unbuildable:{type(exc).__name__}"
+
+        try:
+            probes["user"]()
+        except EagerTruncationError:
+            pass
+        except Exception as exc:  # noqa: BLE001
+            return f"origin-control-raised:{type(exc).__name__}"
+        else:
+            return "origin-blind:user-not-raised"
+
+        before = (TRUNCATIONS, SUPPRESSED_JAX)
+        try:
+            probes["jax"]()
+        except EagerTruncationError as exc:
+            return (
+                "origin-blind:jax-attributed-to-you"
+                f"[{exc.written}->{exc.to_dtype}]"
+            )
+        except Exception as exc:  # noqa: BLE001
+            return f"origin-control-raised:{type(exc).__name__}"
+        if TRUNCATIONS == before[0]:
+            return "origin-checked (jax writes nothing narrow here at this x64 setting)"
+        if SUPPRESSED_JAX == before[1]:  # pragma: no cover - defensive
+            return "origin-blind:jax-not-attributed"
+        return "origin-checked (both directions)"
+    finally:
+        _REGIONS.reset(token)
+        (
+            CONVERSIONS,
+            TRUNCATIONS,
+            SUPPRESSED_JAX,
+            declared,
+            permitted,
+            suppressed,
+        ) = saved
+        DECLARED.clear()
+        DECLARED.update(declared)
+        PERMITTED.clear()
+        PERMITTED.update(permitted)
+        SUPPRESSED.clear()
+        SUPPRESSED.update(suppressed)
+
+
 def disarm() -> str:
-    """Put jax's own constructor back, by identity. Never raises."""
+    """Put jax's own constructor back, by identity. Never raises.
+
+    :data:`_JAX_CONSTANTS` goes with it. The map is part of the armed state,
+    not a cache: a disarmed process that kept it would go on suppressing
+    narrowings at jax's sites if anything called :func:`observe` directly,
+    and a test that loaded a stand-in map would leak it into every later test
+    in the session.
+    """
     try:
         from stelling._tripwire import _adapter_jax as adapter
 
         return adapter.eager_restore()
     except Exception as exc:  # noqa: BLE001
         return f"unexpected:{type(exc).__name__}"
+    finally:
+        _JAX_CONSTANTS.clear()
 
 
 def is_armed() -> bool:
