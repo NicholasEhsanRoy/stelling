@@ -5169,9 +5169,16 @@ def test_the_DOCSTRING_and_CHANGELOG_battery_SIZE_is_the_one_that_RAN():
     noticing; the sentence around it is what a later round has to re-measure
     deliberately, and the two need different mechanisms."""
     size = len(_mutations())
+    from _release_record import release_prose
+
+    # THE RELEASE RECORD, not one file of it — batch B8c. This sentence
+    # lived in `CHANGELOG.md` until the 0.2.0 routing moved the soundness
+    # detail into `SOUNDNESS.md`; the digit is still published and still
+    # has to match, and reading only the changelog would have made this a
+    # check on which file the paragraph is filed in.
     for where, text in (
         ("this module's docstring", __doc__),
-        (f"{_CHANGELOG.name}", _CHANGELOG.read_text(encoding="utf-8")),
+        ("the release record (CHANGELOG.md + SOUNDNESS.md)", release_prose()),
     ):
         match = _BAR_BATTERY_SIZE_RE.search(text)
         assert match is not None, (

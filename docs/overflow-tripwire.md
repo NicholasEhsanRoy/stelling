@@ -330,12 +330,25 @@ expression it is written in.
 
 ### What it closes, and what it does not
 
-Six of the seven `unwatched` routes in
+Six of the **eight** `unwatched` routes in
 `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` move from "silently
 certifies a destroyed constant" to "cannot be traced at all": `jnp.full`,
 `jnp.full_like`, `lax.full`, `lax.full_like`, `lax.convert_element_type` and
-`jnp.stack`-of-`full`, plus `lax.select`-of-`full` and `jnp.take`'s
-`fill_value`. A scoped `with jax.disable_jit():` closes too, and for the same
+`jnp.stack`-of-`full`.
+
+*This page said "six of the seven" until 2026-08-20, in a paragraph whose
+next line says two routes remain — 6 + 2 is 8, and the denominator was
+simply never re-read after `fc98241` made `jnp.stack`-of-`full` the eighth
+`unwatched` row. It is measured now: `GATE_COVERAGE` carries 33 routes, 17
+`watched`, 8 `unwatched`, 3 `loud`, 5 `deferred`, and the eager detector's
+test asserts the denominator as well as the six.*
+
+`lax.select`-of-`full` and `jnp.take`'s `fill_value` close too, and they
+are named separately because they are **not rows of either inventory**:
+they build on `full`, so they raise for the reason `full` does, and driven
+on jax 0.11.0 with the detector armed both raise `EagerTruncationError` at
+the writing line. That is a measurement, not a row — nothing goes red if a
+jax release changes it. A scoped `with jax.disable_jit():` closes too, and for the same
 reason: the constant it wraps is narrowed at this very site on the way in.
 
 Two named routes remain, and both are numpy finishing before jax is reached:
@@ -352,7 +365,7 @@ Both are declared `unwatched` in `GATE_COVERAGE`, declared `silent` in
 two — so a third cannot join them quietly.
 
 **And most of the table above is untouched by this**, which is worth saying
-plainly because "six of seven" invites the wrong reading. The rows this
+plainly because "six of eight" invites the wrong reading. The rows this
 detector does NOT close, each re-measured with it armed:
 
 * **eager execution of the inline door** — `a + 256` outside `jit` still

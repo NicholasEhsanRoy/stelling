@@ -27,11 +27,19 @@ Nothing downstream can tell that the `0` in the jaxpr was written as a `256`.
 is a **wrong VERIFIED**: a harness whose obligation is false at all eleven
 declared points, certified.
 
-`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` enumerated 32
-construction routes — 17 watched, 7 unwatched, 3 loud, 5 deferred. **Six of the
-seven unwatched routes narrow at that one line**, each reaching it with the
-written value intact, on both series. The seventh, `np.asarray(N).astype(dt)`,
-never reaches jax at all.
+`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` enumerates 33
+construction routes — 17 watched, 8 unwatched, 3 loud, 5 deferred. **Six of the
+eight unwatched routes narrow at that one line**, each reaching it with the
+written value intact, on both series. The other two,
+`np.asarray(N).astype(dt)` and `jnp.asarray(np.array(N), dtype=dt)`, never
+reach jax at all.
+
+*This paragraph read "32 … 7 unwatched … The seventh" until 2026-08-20, and
+contradicted this file's own "Closed / Not closed" section below, which says
+six closed and **two** numpy routes remaining. The dict has had 33 rows and 8
+`unwatched` since `fc98241` added `jnp.stack`-of-`full`; the count was
+re-derived at `8f0adf2` and `tests/test_tripwire_gate_coverage.py` now
+asserts the bucket's size, not only the six of it this detector closes.*
 
 ## Why a hook on a private function, and not something public
 
@@ -61,6 +69,16 @@ events. It raises at the construction site, in the frame that wrote the
 constant, while that frame is still on the stack. That is the whole argument
 for building the second one first: it is the one whose correctness does not
 depend on a heuristic.
+
+**It ships OFF, and this document did not say so anywhere** (added
+2026-08-20). Mode 2 is opt-in — `pytest --stelling-eager-truncation=error` —
+and `-p stelling.overflow` does **not** turn it on: they are two dials because
+they are two instruments, one a report over a session and one a rule. With the
+flag absent nothing about a program changes, no verdict moves, and this
+detector is not attached. Every "raises" and "every truncation" below is a
+statement about the armed state, including the heading *Once armed, error on
+every truncation*, which read *"Error by default on every truncation"* until it
+was noticed to read against the default it does not have.
 
 ## Why the exception inherits from `BaseException`
 
@@ -401,7 +419,7 @@ the alarm been an `Exception`, that helper would have gone on returning a
 confident answer about a door it never drove. The `BaseException` choice is
 what makes the missing declaration visible there.
 
-## Error by default on every truncation, and no value-based carve-out
+## Once armed, error on every truncation — and no value-based carve-out
 
 The obvious refinement is to guess intent from the numbers: let `0xFF` into
 `int8` through as a mask idiom and stop `300` into `int8` as an accident. It
@@ -578,7 +596,7 @@ being fixed.
 **Cost:** no measurable change across four full suite runs (8m52s baseline,
 8m47s instrumented).
 
-**Closed:** six of seven `unwatched` routes, plus `lax.select`-of-`full` and
+**Closed:** six of the EIGHT `unwatched` routes, plus `lax.select`-of-`full` and
 `jnp.take`'s `fill_value`, plus `report.UNCOVERED`'s scoped
 `with jax.disable_jit():` bullet — that one because the reason the const-fold
 rule is handed `-56` instead of `200` is that the constant was narrowed at this

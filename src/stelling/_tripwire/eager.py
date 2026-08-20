@@ -18,8 +18,13 @@ array construction, inside the private jax function ``_adapter_jax`` hooks
 name and does not, which is ``design/private-jax-boundary.md``'s rule), in its
 ``if type(operand) is int`` branch, by ``np.asarray(operand).astype(new_dtype)``
 — and nothing downstream can tell that the 0 in the jaxpr was written as a 256.
-``tests/test_tripwire_gate_coverage.py::GATE_COVERAGE`` enumerates the routes;
-six of the seven unwatched ones narrow at that one line.
+``tests/test_tripwire_gate_coverage.py::GATE_COVERAGE`` enumerates the
+routes; six of the EIGHT unwatched ones narrow at that one line, and the
+other two are numpy's and are named in ``report.EAGER_UNCOVERED``. This
+read *"six of the seven"* until 2026-08-20: the dict has eight
+``unwatched`` rows and has had eight since ``fc98241`` added
+``jnp.stack``-of-``full``, and 6 closed + 2 residue was already 8 in the
+sentence beside it.
 
 THE TWO MODES, AND THIS IS THE SECOND. Mode 1 would record the eager narrowing
 and refuse the verdict from inside ``preconditions.check()``'s trace gate, which

@@ -81,11 +81,11 @@ different claims and only the second one licenses a VERIFIED.
 
 So a VERIFIED with the tripwire armed says the property holds AND that no
 narrowing was seen on any route the tripwire watches. **That last clause is
-load-bearing and the watched set is finite**: constants that numpy destroys
-before jax is involved — `jnp.full(shape, N, dt)` is the one to know — are
-narrowed where nothing can see it. The watched and unwatched routes are
-enumerated door by door, and the enumeration is measured rather than
-asserted, in
+load-bearing and the watched set is finite**: constants destroyed at array
+CONSTRUCTION — `jnp.full(shape, N, dt)` is the one to know — are narrowed
+before any primitive is bound, where this hook cannot see them. The watched
+and unwatched routes are enumerated door by door, and the enumeration is
+measured rather than asserted, in
 [`docs/overflow-tripwire.md`](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md).
 
 ---

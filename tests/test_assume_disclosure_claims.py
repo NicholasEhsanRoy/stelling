@@ -39,6 +39,7 @@ from stelling import smt  # noqa: E402
 from stelling import verdict as V  # noqa: E402
 from stelling._jax_compat import transcribe  # noqa: E402
 from stelling.harness import any_array, assert_, assume  # noqa: E402
+from _release_record import release_prose
 from stelling.preconditions import check  # noqa: E402
 
 
@@ -175,7 +176,18 @@ def test_a_pre_dispatch_refusal_produces_no_per_assume_skip_reason():
 
 
 def test_the_changelog_scopes_the_disclosure_claim_to_the_dispatch_path():
-    text = (_REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+    """The scoped claim is somewhere in the release record, and the wide one
+    is nowhere in it.
+
+    READS BOTH FILES (B8c). The 0.2.0 routing moved this entry's detail out
+    of `CHANGELOG.md` and into `SOUNDNESS.md`, and the two legs below
+    answered very differently: the ABSENCE leg stayed green — the wide claim
+    was gone because the paragraph was gone — while the PRESENCE leg went
+    red and is the only reason anyone looked. That asymmetry is the defect
+    class this suite keeps closing, so the presence leg reads the whole
+    record rather than one file of it.
+    """
+    text = release_prose()
     assert "Every skipped assume is disclosed** in the verdict notes" not in text
     assert "every assume the slice declines to state" in text
 

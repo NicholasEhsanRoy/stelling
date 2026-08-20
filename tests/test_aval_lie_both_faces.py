@@ -1462,18 +1462,37 @@ def test_the_element_count_census_covers_propagate_TOO():
     ], off_ir
 
     # THE RECORD MUST NAME THEM. A claim of totality a `grep` refutes is
-    # worse than no claim, and the CHANGELOG carried the UNSCOPED version
+    # worse than no claim, and the record carried the UNSCOPED version
     # — the sentence a reader quotes.
-    import pathlib
+    #
+    # READS THE WHOLE RELEASE RECORD (B8c). This entry's detail lived in
+    # `CHANGELOG.md` until the 0.2.0 routing moved it into `SOUNDNESS.md`,
+    # leaving a one-liner behind. Anchoring on one file made this test a
+    # check on WHERE the entry is filed rather than on WHAT it says, and
+    # the entry still says it — in the ledger.
+    from _release_record import release_prose
 
-    changelog = (pathlib.Path(__file__).resolve().parent.parent
-                 / "CHANGELOG.md").read_text(encoding="utf-8")
+    record = release_prose()
     anchor = "AN ELEMENT COUNT COMES FROM `__index__`"
-    assert anchor in changelog, anchor
-    entry = changelog[changelog.index(anchor):]
-    entry = entry[:entry.index("\n- **")]
+    assert anchor in record, (
+        f"{anchor!r} is in neither CHANGELOG.md nor SOUNDNESS.md. The "
+        f"entry naming these three sites is gone from the release record, "
+        f"which is not the same thing as the claim being scoped."
+    )
+    # the DETAIL entry, not the one-liner: take the longest occurrence.
+    entries = []
+    for start in range(len(record)):
+        start = record.find(anchor, start)
+        if start < 0:
+            break
+        stop = record.find("\n#### ", start)
+        cut = record.find("\n- **", start)
+        if cut > 0 and (stop < 0 or cut < stop):
+            stop = cut
+        entries.append(record[start:stop if stop > 0 else len(record)])
+    entry = max(entries, key=len)
     assert "no caller anywhere" not in entry.lower(), (
-        "the CHANGELOG still makes the UNSCOPED claim; `propagate` does "
+        "the record still makes the UNSCOPED claim; `propagate` does "
         "not call `_size` and carries six raw products of its own"
     )
     for name in off_ir:

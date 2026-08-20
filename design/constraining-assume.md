@@ -105,9 +105,17 @@ certified `assume(x >= 0.9)`:
 
 Eight cells, all sound. The VERIFIED is the conditional claim and stamps
 itself as one (`constrained assume at ...: the verdict holds where the
-precondition holds — narrowed var 2 to [0.9, 1.0]`), so nothing here is
+precondition holds — narrowed x0 (IR var 1) to [0.9, 1.0]`), so nothing
+here is
 a wrong VERIFIED; what the position moves is only how much the checker
 could decide, and it moves it in both directions.
+
+That quotation read `narrowed var 2` until 2026-08-20. The message now
+names a declared input the way the witness does, so the text above is
+what jax 0.11.0 prints today; and driven at `aabb58d`, the commit before
+that change, the same harness printed `narrowed var 1`. The digit was
+wrong when it was written, not made wrong by the change — see the
+2026-08-08 SOUNDNESS entry, corrected with it.
 
 ## The empty region — the empty-set bug, one level up
 

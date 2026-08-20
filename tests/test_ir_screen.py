@@ -500,6 +500,16 @@ def test_the_entry_names_the_screens_blind_classes():
 
 CHANGELOG = REPO / "CHANGELOG.md"
 
+# READ THE WHOLE RELEASE RECORD, not one file of it — batch B8c. The three
+# checks below pin an attribution table, its census method and the R1c
+# exhibit; all three lived in `CHANGELOG.md` until the 0.2.0 routing moved
+# the soundness detail into `SOUNDNESS.md` under
+# `DOCUMENTATION_ARCHITECTURE.md` §8.3. Anchoring on one file turned these
+# into checks on where an entry is FILED; what they are about is whether it
+# is PUBLISHED, and it is. `_release_record.release_prose()` is the
+# concatenation, and it still reds if the table is deleted from both.
+from _release_record import release_prose  # noqa: E402
+
 
 def test_the_batch_ships_an_attribution_table_that_adds_up():
     """AUDIT 0.2.0 B6 AUDIT 3, F5 — the batch claimed *"every code change
@@ -520,7 +530,7 @@ def test_the_batch_ships_an_attribution_table_that_adds_up():
     GUARD rather than claimed. `docs/norms.md` forbids proving guard
     coverage by construction; a batch that says "each change reds a test"
     with one such site in it has done exactly that."""
-    text = CHANGELOG.read_text(encoding="utf-8")
+    text = release_prose()
     assert "CENSUS METHOD" in text, "the census method is not published"
     for phrase in ("SEMANTIC", "PROSE", "docstring-stripped AST",
                    "UNREACHABLE AS A GUARD", "git clone"):
@@ -664,7 +674,7 @@ def test_an_attribution_row_may_not_quote_a_test_that_does_not_exist():
     when BOTH fail. That is why `F3`'s `the three ..._hostile___repr__ /
     tests, one per module` is not a false positive.
     """
-    text = CHANGELOG.read_text(encoding="utf-8")
+    text = release_prose()
     live = _live_test_names()
     assert len(live) > 1000, len(live)
     blocks = _table_blocks(text)
@@ -786,7 +796,7 @@ def test_the_R1c_disclosure_EXHIBITS_its_pre_emption():
         "which is every guard in this codebase"
     )
     assert "PRE-EMPTED, and the pre-emption is" in norms, norms[:0]
-    changelog = CHANGELOG.read_text(encoding="utf-8")
+    changelog = release_prose()
     assert "THE PRE-EMPTION IS NOW EXHIBITED" in changelog
     assert f"obligation.py:{budget_line} in slice" in changelog, (
         f"the R1c exhibit quotes a call site that is no longer the "

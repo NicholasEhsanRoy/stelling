@@ -583,8 +583,36 @@ _FALSE_SENTENCE = re.compile(
 
 _DISCLOSURE_PAGES = (
     "SOUNDNESS.md",
+    "CHANGELOG.md",
     "tests/test_aval_lie_both_faces.py",
 )
+
+# The sentence is allowed in ONE shape: quoted, inside `*"..."*`, in a
+# paragraph that also says how many routes there really are. That is how
+# this project records a claim it has retracted, and a check that forbade
+# the words outright would forbid saying that they were wrong.
+#
+# `CHANGELOG.md` JOINED THE LIST ABOVE FOR A REASON — batch B8c. The
+# falsified sentence was quoted in `CHANGELOG.md`, which this check did
+# not read, and the 0.2.0 documentation routing moved that quotation into
+# `SOUNDNESS.md`, which it did. The check went red at a sentence that had
+# been sitting unexamined in a shipped page all along: a page-list guard
+# is only as wide as its list. Both pages are read now, and the shape is
+# checked rather than the words banned.
+_RETRACTED = re.compile(
+    r"\*\"[^\"]*only an\s+`?object\.__setattr__`?[^\"]*\"\*"
+    r"(?:.{0,400}?)(?:three|3)\s+routes?|"
+    r"named one route where there are three",
+    re.S,
+)
+
+
+def _enclosing_block(text: str, index: int) -> str:
+    """The blank-line-delimited paragraph containing `index`."""
+    start = text.rfind("\n\n", 0, index)
+    start = 0 if start < 0 else start + 2
+    end = text.find("\n\n", index)
+    return text[start:len(text) if end < 0 else end]
 
 
 def test_the_DISCLOSURES_name_exactly_these_routes():
@@ -604,11 +632,16 @@ def test_the_DISCLOSURES_name_exactly_these_routes():
         path = _REPO / rel
         assert path.is_file(), rel
         text = path.read_text(encoding="utf-8")
-        assert not _FALSE_SENTENCE.search(text), (
-            f"{rel} still claims that only an `object.__setattr__` reaches "
-            f"the residue; this file drives {len(ROUTES)} routes that do "
-            f"not"
-        )
+        for match in _FALSE_SENTENCE.finditer(text):
+            block = _enclosing_block(text, match.start())
+            assert _RETRACTED.search(block), (
+                f"{rel} states that only an `object.__setattr__` reaches "
+                f"the residue, and this file drives {len(ROUTES)} routes "
+                f"that do not. The sentence is permitted ONLY as a QUOTED "
+                f"RETRACTION — inside `*\"...\"*` and in a paragraph that "
+                f"says how many routes there really are. This occurrence "
+                f"does neither:\n{block[:400]}"
+            )
 
     soundness = (_REPO / "SOUNDNESS.md").read_text(encoding="utf-8")
     missing = [phrase for _key, phrase in ROUTES if phrase not in soundness]

@@ -666,12 +666,20 @@ def test_the_unwatched_routes_the_eager_detector_cannot_close_are_the_two_named_
     """The residue is EXACTLY two routes, and both are disclosed.
 
     This is the assertion that keeps the ``unwatched`` bucket from quietly
-    growing a third member. Before the eager detector there were seven
-    unwatched routes and one disclosure covering all of them; six are now
+    growing a third member. There are **eight** unwatched routes; six are
     closed by an opt-in flag and two remain, and the two that remain are the
     ones numpy destroys before jax is reached. A route added to ``unwatched``
     that the detector does not close has to be argued into
     ``report.EAGER_UNCOVERED`` here, in the same commit.
+
+    **THE DENOMINATOR IS ASSERTED NOW, AND IT IS WHY THIS DRIFTED.** This
+    test pinned the NUMERATOR alone — ``len(closed) == 6`` — and six was
+    always right, so six places in the prose could say *"six of the SEVEN
+    unwatched routes"* against a dict holding eight, from ``fc98241`` (which
+    added ``jnp.stack``-of-``full`` as the eighth) until 2026-08-20. A count
+    that is checked at one end is not checked: the closed set, the residue
+    and the whole ``unwatched`` bucket are all asserted here, so the
+    fraction has no unpinned half left.
 
     Reads the DECLARATIONS rather than re-measuring, on purpose: the
     measurement is the test above, and a second copy of it here would be a
@@ -689,9 +697,17 @@ def test_the_unwatched_routes_the_eager_detector_cannot_close_are_the_two_named_
         "`report.UNCOVERED`'s pre-narrowed bullet; anything else here is a "
         "hole the reader is not told about."
     )
+    assert len(unwatched) == 8, (
+        f"the `unwatched` bucket holds {len(unwatched)} route(s), not 8: "
+        f"{sorted(unwatched)}. This is the DENOMINATOR six documents state "
+        f"a fraction over — `docs/overflow-tripwire.md`, `docs/quickstart.md`,"
+        f" `design/eager-truncation-detector.md`, `src/stelling/_tripwire/"
+        f"eager.py`, `CHANGELOG.md` and `SOUNDNESS.md` — and it went unread "
+        f"once already. Move the bucket and move all six."
+    )
     closed = unwatched - residue
     assert len(closed) == 6, (
-        f"six of the seven unwatched routes were closed by the eager "
+        f"six of the eight unwatched routes were closed by the eager "
         f"detector and now {len(closed)} are: {sorted(closed)}"
     )
     text = " ".join(report.EAGER_UNCOVERED)
