@@ -317,9 +317,16 @@ def _declaration_names(jaxpr: ir.Jaxpr) -> dict[tuple, str] | None:
     transparent wrapper IN PLACE; :attr:`stelling.obligation.SliceInput.name`
     is :func:`stelling.coverage.declaration_name` of that index. This
     function performs the identical walk over the identical wrapper set and
-    counts the identical equations, so the name it hands a message is the
-    name the witness will carry — and it is derived from the IR alone, so no
-    message can be aimed by anything a caller supplies.
+    counts the identical equations, so the INDEX it hands a message is the
+    index the witness will carry — and it is derived from the IR alone, so
+    no message can be aimed by anything a caller supplies.
+
+    IT IS A PREFIX, NOT ALWAYS THE WHOLE NAME (audit 0.2.0 B8a FIXUP). For
+    a scalar declaration the witness constant is `x{k}` and the two agree
+    exactly. For an ARRAY declaration the emission mints one constant per
+    flat element, `x{k}_{i}`, and there is no single value for a message to
+    name — the message names the declaration, `x{k}`, which is the common
+    prefix of every element's name and is what a reader needs to find them.
 
     Where the two walks COULD diverge, this returns ``None`` and every
     message falls back to the internal id, spelled so that it cannot be read
@@ -336,10 +343,13 @@ def _declaration_names(jaxpr: ir.Jaxpr) -> dict[tuple, str] | None:
       SLICER's test abandons the numbering here too — this walk uses the
       strict test on purpose, and disagreeing with the propagator's descent
       is exactly what it is detecting.
-    * two declarations reachable at the same ``(scope, id)`` key. Ids are
-      unique per jaxpr under transcription and are whatever a document says
-      under ``from_dict``; a collision means the key does not identify a
-      declaration, so nothing is named.
+    * a declaration's ``(scope, id)`` key bound TWICE in that scope — by a
+      second declaration or by any ordinary equation, invar or constvar.
+      Ids are unique per jaxpr under transcription and are whatever a
+      document says under ``from_dict``; a key two bindings share does not
+      identify a declaration, and :meth:`_Propagator._name_of_id` would
+      hand the name to whichever value was written there last, so nothing
+      is named.
 
     Keyed by SCOPE PATH AND ID, never by id alone, for the reason
     :data:`ScopePath` gives: an inner scope's ids are not the outer scope's,
@@ -347,13 +357,34 @@ def _declaration_names(jaxpr: ir.Jaxpr) -> dict[tuple, str] | None:
     rather than to nothing.
     """
     names: dict[tuple, str] = {}
+    bound: set[tuple] = set()
     count = 0
+
+    def collides(key: tuple, *, declaring: bool) -> bool:
+        """Whether binding ``key`` here would make a published name a guess.
+
+        A scope binds each id exactly once under transcription, so this is
+        a ``from_dict``/hand-built-IR question only. Where a document binds
+        one id twice, :meth:`_Propagator._name_of_id` — which resolves
+        ``(scope, id)`` and nothing else — hands the declaration's name to
+        whichever value the walk wrote there LAST. So a declaration binding
+        an id this scope already binds is a collision, and so is any later
+        binding of an id a declaration already holds. Two non-declaration
+        bindings that meet name nothing between them and are left alone."""
+        return key in bound and (declaring or key in names)
 
     def walk(j: ir.Jaxpr, path: tuple) -> bool:
         nonlocal count
+        # ids this scope binds before its first equation: an invar or a
+        # constvar sharing a declaration's id is the same ambiguity as a
+        # rebinding equation, and reads the same way in a message.
+        for v in (*j.constvars, *j.invars):
+            if isinstance(v, ir.Var):
+                bound.add((path, v.id))
         for pos, e in enumerate(j.eqns):
-            if e.primitive in DEFAULT_TRANSPARENT:
-                inner = call_body(e)
+            transparent = e.primitive in DEFAULT_TRANSPARENT
+            inner = call_body(e) if transparent else None
+            if transparent:
                 if (
                     inner is None
                     or len(inner.jaxpr.invars) != len(e.invars)
@@ -364,26 +395,40 @@ def _declaration_names(jaxpr: ir.Jaxpr) -> dict[tuple, str] | None:
                     # may still descend it — the two counts can differ from
                     # here on, so neither is a name
                     return False
-                if not walk(inner.jaxpr, path + (("call", pos),)):
-                    return False
-                continue
-            if _holds_a_declaration(e):
+            elif _holds_a_declaration(e):
                 # a declaration this walk cannot reach and the slicer
                 # cannot name: a `cond` branch (the propagator descends,
                 # the slicer does not), a `scan`/`while_loop` body, or any
                 # other sub-jaxpr that is not an inlinable wrapper. Which
                 # of the survivors is #0 is then a guess.
                 return False
-            if e.primitive != "stelling_any" or not e.outvars:
-                continue
-            out = e.outvars[0]
-            if not isinstance(out, ir.Var):
+            declares = (
+                not transparent
+                and e.primitive == "stelling_any"
+                and bool(e.outvars)
+            )
+            # EVERY outvar this equation binds in this scope is recorded,
+            # declaration or not (audit 0.2.0 B8a fixup, item 1): keying the
+            # collision test on declarations alone left a declaration's id
+            # reused by an ordinary equation undetected, and the message
+            # then named `-x0` as `x0`.
+            for i, out in enumerate(e.outvars):
+                naming = declares and i == 0
+                if not isinstance(out, ir.Var):
+                    if naming:
+                        return False
+                    continue
+                key = (path, out.id)
+                if collides(key, declaring=naming):
+                    return False
+                bound.add(key)
+                if naming:
+                    names[key] = declaration_name(count)
+                    count += 1
+            if transparent and not walk(
+                inner.jaxpr, path + (("call", pos),)
+            ):
                 return False
-            key = (path, out.id)
-            if key in names:
-                return False
-            names[key] = declaration_name(count)
-            count += 1
         return True
 
     return names if walk(jaxpr, ()) else None
@@ -715,8 +760,18 @@ class ObligationReport:
     # propagator for top-level and descended-into obligations; empty for
     # unexamined obligations (inside opaque sub-jaxprs).
     #
-    # A RECORD, AND NO LONGER AN INPUT TO ANY VERDICT — audit 0.2.0 B8a,
-    # item 4. Its one consumer was `verdict._apply_reachability_conjunct`,
+    # A RECORD KEPT FOR READERS, CONSUMED BY NOTHING — audit 0.2.0 B8a,
+    # item 4, and stated plainly here at the FIXUP's request because a
+    # field that is only written is easy to mistake for one that is used.
+    # It is set once, in this module's `stelling_assert` handler, and
+    # copied once, in `solvers.make_solver_verdict`'s re-statusing loop.
+    # Nothing in the library reads it: no transfer, judgment, status,
+    # counter, hash or message. It survives the removal of its one former
+    # consumer because it is the only place an obligation records WHICH
+    # values its predicate was about, which is what a human tracing a
+    # verdict back into the IR needs.
+    #
+    # That former consumer was `verdict._apply_reachability_conjunct`,
     # which read these ids against a TOP-LEVEL live set; that conjunct is
     # removed and the block comment where it stood says why. The ids are
     # scope-local, so a reader comparing them against another scope's is
@@ -7090,6 +7145,69 @@ EMPTY_UNIVERSAL_NOTE = (
 )
 
 
+def nonvacuity_summary(checks: tuple[ObligationReport, ...]) -> str:
+    """The stamp's one-line `nonvacuity` field for a run's membership
+    conditions — :attr:`stelling.verdict.Stamp.nonvacuity`, which the render
+    prints ABOVE the notes.
+
+    ONE MINTER, and that is the point. This sentence was spelled twice, in
+    :func:`stelling.verdict.make_verdict` and in
+    :func:`stelling.solvers.make_solver_verdict`, with a comment on the
+    second requiring the two to stay byte-identical. Two hand-kept copies of
+    a sentence that must not differ is the same shape of defect as the two
+    numberings of item 5 (M3): it holds until someone edits one. It is
+    derived in one place now, and the requirement is structural.
+
+    THE ZERO-ELEMENT CASE, and why it is not simply "checked" (audit 0.2.0
+    B8a FIXUP, item 2). A membership condition over a size-0 array is
+    discharged VACUOUSLY — `jnp.all` of an empty array is true because
+    there is no element — and the summary read
+
+        checked — 1 membership condition(s) definitely true
+        (the declared set contains the stated point)
+
+    for it. No point was tested and the parenthetical is FALSE: nothing
+    established that the declared set contains anything. Item 6 (M18) put
+    the disclosure BESIDE this line as a note; the line itself still said
+    the false thing, and it is the line a reader meets first.
+
+    So a run whose membership conditions are ALL vacuous does not say
+    "checked" — which also means
+    :func:`stelling.verdict.make_verdict`'s VERIFIED caveat, gated on that
+    prefix, now fires for it. A run with at least one non-vacuous condition
+    decided true HAS tied the declared set to a stated point, so it stays
+    "checked", with the vacuous ones counted out of the total rather than
+    silently folded into it."""
+    if not checks:
+        return "UNCHECKED — no membership conditions declared"
+    if all(c.status == "discharged" for c in checks):
+        n = len(checks)
+        vacuous = sum(1 for c in checks if c.detail == EMPTY_UNIVERSAL_DETAIL)
+        if vacuous == n:
+            return (
+                f"VACUOUS — {n} membership condition(s) hold over ZERO "
+                f"elements: no point was tested, so nothing ties the "
+                f"declared set to the incident's data"
+            )
+        if vacuous:
+            return (
+                f"checked in part — {n - vacuous} of {n} membership "
+                f"condition(s) definitely true (the declared set contains "
+                f"the stated point); the other {vacuous} hold VACUOUSLY "
+                f"over ZERO elements and tested no point"
+            )
+        return (
+            f"checked — {n} membership condition(s) definitely true "
+            f"(the declared set contains the stated point)"
+        )
+    if any(c.status == "violated-over-set" for c in checks):
+        return (
+            "FAILED — a membership condition is definitely false: the stated "
+            "point is NOT in the declared set (harness defect, not a box fact)"
+        )
+    return "undecided — a membership condition could not be decided"
+
+
 def _bool_status(b: iv.IntervalArray, *, constrained: bool = False) -> tuple[str, str]:
     """``(status, detail)`` for a judged boolean box.
 
@@ -7847,6 +7965,12 @@ class _Propagator:
         the internal id kept beside it so a reader tracing a note back into
         the IR still can. Anything else is named "IR var {id}", which cannot
         be read as a declaration index.
+
+        For an ARRAY declaration `x{k}` is the PREFIX of the witness's
+        names, not one of them: the emission mints `x{k}_{i}` per flat
+        element. The message is about the declaration — one box, one
+        assumed constraint — so the declaration's name is the right one to
+        print, and it is the prefix a reader searches the witness for.
 
         Audit 0.2.0 B8a, item 5 (M3): these messages used to say
         `var {atom.id}` flat, and that number is NOT the witness's. Measured

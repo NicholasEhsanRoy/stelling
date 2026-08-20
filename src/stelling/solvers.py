@@ -90,6 +90,7 @@ from stelling.propagate import (
     _query_float_formats,
     interval_env,
     ledger_covers,
+    nonvacuity_summary,
     query_identity,
     unaccounted_assumes,
     unpaired_propagation,
@@ -2833,24 +2834,6 @@ _DEVICE_CLASS_DEFAULT = (
 )
 
 
-def _nonvacuity_summary(checks: tuple[ObligationReport, ...]) -> str:
-    # mirrors make_verdict's wording exactly; the no-solver path must stay
-    # byte-identical, so the logic is replicated rather than refactored.
-    if not checks:
-        return "UNCHECKED — no membership conditions declared"
-    if all(c.status == "discharged" for c in checks):
-        return (
-            f"checked — {len(checks)} membership condition(s) definitely true "
-            f"(the declared set contains the stated point)"
-        )
-    if any(c.status == "violated-over-set" for c in checks):
-        return (
-            "FAILED — a membership condition is definitely false: the stated "
-            "point is NOT in the declared set (harness defect, not a box fact)"
-        )
-    return "undecided — a membership condition could not be decided"
-
-
 class _UnreadableBarDomain:
     """The sentinel `_bar_domain` returns when it cannot read the escalation.
 
@@ -3796,7 +3779,11 @@ def make_solver_verdict(
     else:
         status = "UNKNOWN"
 
-    nonvacuity = _nonvacuity_summary(propagation.nonvacuity_checks)
+    # the SAME minter `verdict.make_verdict` uses, not a second copy of
+    # its wording: the solver-assisted and no-solver paths must agree
+    # byte for byte, and this one was a replica kept by hand until
+    # audit 0.2.0 B8a FIXUP, item 2.
+    nonvacuity = nonvacuity_summary(propagation.nonvacuity_checks)
     notes = propagation.notes + escalation.notes
     for record in escalation.records:
         notes = notes + record.notes

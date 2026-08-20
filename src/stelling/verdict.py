@@ -43,6 +43,7 @@ from stelling.propagate import (
     Propagation,
     _query_float_formats,
     conditional_on_precondition,
+    nonvacuity_summary,
     query_identity,
     unpaired_propagation,
 )
@@ -1695,30 +1696,61 @@ def top_despite_coverage_note(propagation: Propagation) -> str | None:
 #   removing the seed downgrades real violations in the style almost every
 #   harness is written in). The reverse walk then makes every one of those
 #   asserts' INVARS live, and `ObligationReport.operand_var_ids` IS the
-#   assert equation's invars. So for any top-level assert
-#   `any(vid in live for vid in ob.operand_var_ids)` was true BY
-#   CONSTRUCTION and the downgrade was unreachable. Driven: over a query
-#   whose assert output is not returned and whose whole operand chain is
-#   otherwise dead, `live` still contains every operand id.
+#   assert equation's invars. So for any top-level assert WITH AN OUTVAR
+#   `any(vid in live for vid in ob.operand_var_ids)` held by construction
+#   and the downgrade was unreachable. Driven: over a query whose assert
+#   output is not returned and whose whole operand chain is otherwise dead,
+#   `live` still contains every operand id.
+#
+#   "WITH AN OUTVAR" IS THE WHOLE OF THE PROOF, and it is not a formality —
+#   see the third bullet. Both halves of `reaches_output` are quantified
+#   over `eqn.outvars`: the seed adds nothing for an empty tuple, and the
+#   reverse walk's `any(out.id in live for out in eqn.outvars)` is False
+#   over one. Jax always gives `stelling_assert` an outvar; `from_dict`
+#   does not require one, and round-trips a document without one.
 # * For an obligation from an inner scope the top-level walk cannot judge
 #   the ids at all, and the conjunct said so and failed safe.
-# * What was left was a VAR-ID COLLISION — an inner obligation's operand id
-#   equal to a dead top-level id — and there the downgrade is simply WRONG:
-#   two scopes' ids are not one variable. DRIVEN on `aabb58d`: a hand-built
-#   query whose `jit` body asserts `x < 0.5` over `x ∈ [1, 2]` reports
-#   REFUTED; adding one unrelated, unread `exp` equation at top level whose
-#   outvar id happens to equal the inner predicate's id turns the SAME
-#   query into UNKNOWN with "the violated variable does not reach any output
-#   of the harness function". A genuine refutation, silenced by an unrelated
-#   equation.
+# * TWO reachable inputs were left, and the downgrade is WRONG on both.
+#   DRIVEN on `aabb58d`, each against the same query with the defect
+#   removed:
+#     - A VAR-ID COLLISION — an inner obligation's operand id equal to a
+#       dead top-level id. A hand-built query whose `jit` body asserts
+#       `x < 0.5` over `x ∈ [1, 2]` reports REFUTED; adding one unrelated,
+#       unread `exp` equation at top level whose outvar id happens to equal
+#       the inner predicate's id turns the SAME query into UNKNOWN with
+#       "the violated variable does not reach any output of the harness
+#       function". Two scopes' ids are not one variable. A genuine
+#       refutation, silenced by an unrelated equation.
+#     - A ZERO-OUTVAR `stelling_assert` at TOP LEVEL, which needs no
+#       collision and no sub-jaxpr at all. `stelling_assert(pred)` with
+#       `outvars=()` over `x ∈ [1, 2] ⊢ x < 0.5`, the harness returning
+#       `x`: the seed loop adds no id, the reverse walk never lights the
+#       predicate, `operand_var_ids` IS in `defined_vars`, and the
+#       conjunct downgraded a `violated-over-set` obligation to `unknown`
+#       and REFUTED to UNKNOWN. Measured: REFUTED with the outvar, UNKNOWN
+#       without it, same declared box and same predicate.
 #
 # Repairing it rather than removing it would mean un-seeding the asserts,
 # which is reverting a correct decision; and the reachability question that
 # IS real here — an assert inside a branch the program may never take — is
 # already answered, by certificate rather than by dataflow, in
 # `propagate._withhold_uncertified_branch_refutations` and
-# `propagate.UNCERTIFIED_REACHABILITY_REFUSAL`. `stelling/reachability.py`
-# went with the conjunct: both of its functions existed only to serve it.
+# `propagate.UNCERTIFIED_REACHABILITY_REFUSAL`.
+#
+# THAT IS A SUBSTITUTION OF QUESTION, NOT AN EQUIVALENCE, and calling it
+# one would overstate the removal (audit 0.2.0 B8a FIXUP). The certificate
+# answers CONTROL-FLOW reachability of the OBLIGATION — whether the branch
+# carrying an assert is one the program can take — and it is keyed on
+# `(branch_path, id(eqn))`, never on a var id. The conjunct's own question,
+# whether a VIOLATION lands on a value the caller never observes, was
+# answered by nothing, before the removal or after. That is deliberate and
+# is what `design/finding-conjunction.md` already records stelling as
+# doing: `reaches-output` is ASSERTED of the harness contract (an assert is
+# live by intent) rather than mechanised. The conjunct was a mechanism that
+# did not implement that assertion and could only contradict it.
+#
+# `stelling/reachability.py` went with the conjunct: both of its functions
+# existed only to serve it.
 #
 # THE STANDING PROPERTY THIS LEAVES: no path in verdict assembly downgrades
 # a violated obligation on reachability grounds. Pinned in
@@ -1893,21 +1925,11 @@ def make_verdict(
 
     obligations = propagation.obligations
 
-    checks = propagation.nonvacuity_checks
-    if not checks:
-        nonvacuity = "UNCHECKED — no membership conditions declared"
-    elif all(c.status == "discharged" for c in checks):
-        nonvacuity = (
-            f"checked — {len(checks)} membership condition(s) definitely true "
-            f"(the declared set contains the stated point)"
-        )
-    elif any(c.status == "violated-over-set" for c in checks):
-        nonvacuity = (
-            "FAILED — a membership condition is definitely false: the stated "
-            "point is NOT in the declared set (harness defect, not a box fact)"
-        )
-    else:
-        nonvacuity = "undecided — a membership condition could not be decided"
+    # ONE MINTER for this sentence, shared with the solver-assisted
+    # assembly in `stelling.solvers` (audit 0.2.0 B8a FIXUP, item 2): the
+    # two paths must agree byte for byte, and two hand-kept copies is a
+    # requirement rather than a mechanism.
+    nonvacuity = nonvacuity_summary(propagation.nonvacuity_checks)
 
     notes = propagation.notes + undecided_cause_note(
         propagation.coverage, obligations

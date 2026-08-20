@@ -1074,17 +1074,26 @@ def _subjaxpr_disclosure():
 
     Audit 0.2.0 B8a, item 7 (a B5 follow-up scheduled there). The check
     below used to search the WHOLE of CHANGELOG.md for each member's name,
-    and `jit`, `remat2` and the two `custom_*_call`s are named all over a
-    changelog for a jax tool — so the assertion passed on any file that
-    mentioned them ANYWHERE, including a file from which this disclosure
-    had been deleted outright. A gate that cannot fail is not a gate, and
-    this one guards the sentence a user reads to learn that their `jit`
-    silently costs them the certificate.
+    and `jit` and `remat2` are named all over a changelog for a jax tool —
+    11 and 1 times respectively outside this bullet — so for those two the
+    assertion passed on any file that mentioned them ANYWHERE. A gate that
+    cannot fail is not a gate, and this one guards the sentence a user
+    reads to learn that their `jit` silently costs them the certificate.
+
+    IT WAS NOT BLIND TO EVERYTHING, and an earlier version of this
+    docstring said it was. Driven on `aabb58d`: deleting this bullet
+    outright REDDENED the whole-file check, because `custom_jvp_call` and
+    `custom_vjp_call` occur 0 times elsewhere in the file. What the
+    whole-file scope could not see was a bullet that still existed with a
+    member DROPPED from it — and for `jit`, the member the disclosure
+    exists to name, that is exactly the edit a rewrite makes.
 
     The slice is the markdown BULLET: from its opening marker to the next
     top-level `- ` bullet. Both ends are asserted, so a rewrite that moves
     the disclosure reddens here rather than passing on the surrounding
-    prose.
+    prose. The membership check narrows further still, to the ENUMERATION
+    inside it — see :func:`_transparent_enumeration` for why the bullet
+    alone is not enough either.
     """
     root = pathlib.Path(__file__).resolve().parents[1]
     raw = (root / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -1098,6 +1107,44 @@ def _subjaxpr_disclosure():
     return " ".join(raw[start:end].split())
 
 
+_ENUMERATION_OPENS = "`stelling.coverage.DEFAULT_TRANSPARENT` = "
+
+
+def _transparent_enumeration():
+    """THE ENUMERATION, not the bullet — audit 0.2.0 B8a FIXUP, item 3.
+
+    Scoping to the bullet did not achieve item 7's own stated purpose.
+    DRIVEN on `8772ced` and on `aabb58d` alike, by removing one member
+    from the `DEFAULT_TRANSPARENT = …` list and asking the bullet-scoped
+    check:
+
+        remove `custom_jvp_call`  -> REDDENS
+        remove `custom_vjp_call`  -> REDDENS
+        remove `remat2`           -> REDDENS
+        remove `jit`              -> PASSES
+
+    `jit` is named 5 times in this bullet and only ONE of them is the
+    enumeration, so dropping it from the list leaves 4 occurrences in the
+    surrounding prose and the check finds one of those instead. The member
+    the disclosure exists to name was the one member the check could not
+    hold — the same hole one scope in, and the stated purpose ("blind for
+    exactly the member the disclosure exists to name") was still not met.
+
+    The enumeration is the span between `DEFAULT_TRANSPARENT` = and the
+    em-dash that ends the list. Every member reddens on removal from it.
+    """
+    paragraph = _subjaxpr_disclosure()
+    start = paragraph.find(_ENUMERATION_OPENS)
+    assert start != -1, (
+        f"the disclosure bullet no longer enumerates the frozenset "
+        f"(looked for {_ENUMERATION_OPENS!r})"
+    )
+    start += len(_ENUMERATION_OPENS)
+    end = paragraph.find("—", start)
+    assert end != -1, "the enumeration does not end at an em-dash"
+    return paragraph[start:end].strip()
+
+
 def test_the_disclosure_names_EVERY_transparent_wrapper():
     """REDDENS ON REVERT of the CHANGELOG list, and on drift in either file.
 
@@ -1109,45 +1156,68 @@ def test_the_disclosure_names_EVERY_transparent_wrapper():
     Pinned to the code so the next member added to the frozenset cannot
     quietly fall out of the prose (B5 follow-up audit).
 
-    SCOPED TO THE DISCLOSURE PARAGRAPH, not to the file — see
-    :func:`_subjaxpr_disclosure` for what the whole-file version could not
-    detect.
+    SCOPED TO THE ENUMERATION, not to the paragraph and not to the file —
+    see :func:`_subjaxpr_disclosure` and :func:`_transparent_enumeration`
+    for what each wider scope could not detect. The bullet scope was blind
+    for `jit`, which is the member this test exists for.
+
+    The correspondence is checked in BOTH directions: a member missing
+    from the prose understates the limitation, and a name in the prose
+    that is no longer in the frozenset tells the reader they are paying a
+    cost they are not.
     """
-    paragraph = _subjaxpr_disclosure()
+    enumeration = _transparent_enumeration()
     for member in sorted(DEFAULT_TRANSPARENT):
-        assert f"`{member}`" in paragraph, (
+        assert f"`{member}`" in enumeration, (
             f"DEFAULT_TRANSPARENT member {member!r} is not named in the "
-            f"sub-jaxpr disclosure paragraph of CHANGELOG.md; the "
-            f"frozenset is {sorted(DEFAULT_TRANSPARENT)}"
+            f"`DEFAULT_TRANSPARENT = ...` enumeration of CHANGELOG.md's "
+            f"sub-jaxpr disclosure; the frozenset is "
+            f"{sorted(DEFAULT_TRANSPARENT)} and the enumeration reads "
+            f"{enumeration!r}"
         )
-    assert "`jit` is the one that matters in practice" in paragraph, (
-        "the disclosure no longer says which member the reader will hit"
+    named = {t.strip().strip("`") for t in enumeration.split(",")}
+    assert named == set(DEFAULT_TRANSPARENT), (
+        f"the enumeration and the frozenset disagree: prose names "
+        f"{sorted(named)}, code has {sorted(DEFAULT_TRANSPARENT)}"
     )
+    assert (
+        "`jit` is the one that matters in practice" in _subjaxpr_disclosure()
+    ), "the disclosure no longer says which member the reader will hit"
 
 
 def test_the_disclosure_scope_can_actually_fail():
-    """POSITIVE CONTROL for the scoping, and a measurement of what the
-    whole-file predecessor could and could not see.
+    """POSITIVE CONTROL for the scoping, and a measurement of what each
+    wider scope could and could not see.
 
-    Delete the disclosure paragraph and ask both questions of what is left.
-    MEASURED on this tree, occurrences OUTSIDE the disclosure:
+    Occurrences of ``\u0060{member}\u0060`` on this tree, MEASURED:
 
-        `jit`              11
-        `remat2`            1
-        `custom_jvp_call`   0
-        `custom_vjp_call`   0
+        member             whole file   bullet   enumeration
+        `jit`                      16        5             1
+        `remat2`                    2        1             1
+        `custom_jvp_call`           1        1             1
+        `custom_vjp_call`           1        1             1
 
-    So the whole-file check was blind for exactly the member the
-    disclosure exists to name: with the paragraph deleted it would still
-    have found `jit` eleven times in unrelated entries and reported that
-    the reader had been told.
+    Two edits, and the check must survive neither:
+
+    * DELETE THE BULLET. The whole-file scope reddens — on the two
+      `custom_*_call`s, which occur nowhere else — so the claim that it
+      "passed on a file from which this disclosure had been deleted
+      outright" was false. It stays blind for `jit` and `remat2`, which
+      is a real hole but a different one.
+    * DROP ONE MEMBER FROM THE ENUMERATION, the bullet still in place.
+      This is what a rewrite actually does, and the BULLET scope passes
+      for `jit`: four other occurrences of it survive inside the same
+      bullet. Only the enumeration scope reddens for every member.
     """
     paragraph = _subjaxpr_disclosure()
+    enumeration = _transparent_enumeration()
     whole_file = _changelog_text()
-    assert paragraph in whole_file
+    assert enumeration in paragraph and paragraph in whole_file
     assert len(paragraph) < len(whole_file) / 10, (
         "the 'paragraph' is most of the file, so scoping bought nothing"
     )
+
+    # -- edit 1: the whole bullet deleted
     without = whole_file.replace(paragraph, "")
     survives = {m for m in DEFAULT_TRANSPARENT if f"`{m}`" in without}
     assert "jit" in survives, (
@@ -1156,8 +1226,27 @@ def test_the_disclosure_scope_can_actually_fail():
         "this scoping needs a different argument"
     )
     assert survives == {"jit", "remat2"}, sorted(survives)
-    # ... and the SCOPED check cannot pass on that text: the anchor is gone
-    assert _SUBJAXPR_DISCLOSURE_OPENS not in without.replace(paragraph, "")
+    # ... so the whole-file check DID redden on this edit, via the other two
+    assert not {"custom_jvp_call", "custom_vjp_call"} & survives
+    # ... and the scoped checks cannot pass on that text: the anchor is gone
+    assert _SUBJAXPR_DISCLOSURE_OPENS not in without
+
+    # -- edit 2: one member dropped from the enumeration, bullet intact
+    blind_for_the_bullet = set()
+    for member in sorted(DEFAULT_TRANSPARENT):
+        token = f"`{member}`"
+        assert token in enumeration, member
+        cut = enumeration.replace(token + ", ", "", 1).replace(
+            ", " + token, "", 1
+        )
+        assert token not in cut, member
+        # the ENUMERATION scope reddens for every member — that is the fix
+        if token in paragraph.replace(enumeration, cut):
+            blind_for_the_bullet.add(member)
+    assert blind_for_the_bullet == {"jit"}, (
+        f"the bullet scope is blind for {sorted(blind_for_the_bullet)}; the "
+        f"item this test came from exists because it was blind for `jit`"
+    )
 
 
 def _jit_wrapped_sumsq_query(*, assume_inside):

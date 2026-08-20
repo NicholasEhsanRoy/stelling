@@ -38,6 +38,7 @@ from stelling.coverage import declaration_name
 from stelling.propagate import _declaration_names
 
 F64 = ir.Aval(kind="ShapedArray", shape=(), dtype="float64")
+BOOL = ir.Aval(kind="ShapedArray", shape=(), dtype="bool")
 
 
 def var(i, aval=F64):
@@ -115,6 +116,210 @@ def test_a_wrapper_the_slicer_will_not_inline_abandons_the_numbering():
         ),
     )
     assert _declaration_names(j) is None
+
+
+def _rebound(first_declares: bool):
+    """`x0` declared over [0, 1] at IR var 1, and an ordinary `neg`
+    equation binding IR var 1 as well — in either order."""
+    decl = any_eqn(var(1))
+    neg = ir.JaxprEqn(primitive="neg", invars=(var(1),), outvars=(var(1),))
+    eqns = (decl, neg) if first_declares else (neg, decl)
+    return ir.Jaxpr(
+        constvars=(), invars=(), outvars=(var(1),), eqns=eqns
+    )
+
+
+@pytest.mark.parametrize("first_declares", [True, False])
+def test_an_id_a_non_declaration_also_binds_abandons_the_numbering(
+    first_declares,
+):
+    """AUDIT 0.2.0 B8a FIXUP, ITEM 1 — the fourth divergence, and the one
+    this numbering made WORSE before it was found.
+
+    `_name_of_id` resolves `(scope, id)` and nothing else, so a declaration
+    whose id is REUSED by an ordinary equation hands that equation's value
+    the declaration's name. Driven on `8772ced`, on the query below plus an
+    `assume` reading the rebound id:
+
+        names: {((), 1): 'x0'}
+        x0 (IR var 1) has propagated interval [-1.0, -0.0], but the
+        assumed constraint requires x0 (IR var 1) > 5.0
+
+    `x0` is declared over [0, 1]; the value named is `-x0`. On `aabb58d`,
+    before the numbering existed, the same message said `var 1` — so the
+    change made this case MORE confidently wrong, which is the one thing a
+    fallback of this kind exists to prevent.
+
+    Reachable through `from_dict` / hand-built IR only (jax tracing is SSA)
+    and message-text only — no transfer, judgment, counter or hash reads
+    it. The collision test is keyed on every id the scope BINDS, so both
+    orders abandon."""
+    assert _declaration_names(_rebound(first_declares)) is None
+
+
+def test_an_invar_or_constvar_sharing_a_declarations_id_abandons_it():
+    """Same ambiguity, same scope, a different kind of binder: an invar or
+    a constvar holding the declaration's id names the same two values."""
+    for kind in ("invars", "constvars"):
+        j = ir.Jaxpr(
+            constvars=(var(1),) if kind == "constvars" else (),
+            invars=(var(1),) if kind == "invars" else (),
+            outvars=(var(1),),
+            eqns=(any_eqn(var(1)),),
+        )
+        assert _declaration_names(j) is None, kind
+
+
+def test_two_non_declarations_colliding_name_nothing_and_are_left_alone():
+    """THE OTHER DIRECTION, so the test above is not passing vacuously. A
+    collision between two ordinary equations puts no declaration's name on
+    a value it does not hold, so the numbering stands: this abandons on
+    AMBIGUITY, not on every malformed document."""
+    j = ir.Jaxpr(
+        constvars=(),
+        invars=(),
+        outvars=(var(7),),
+        eqns=(
+            any_eqn(var(1)),
+            ir.JaxprEqn(primitive="neg", invars=(var(1),), outvars=(var(7),)),
+            ir.JaxprEqn(primitive="exp", invars=(var(1),), outvars=(var(7),)),
+        ),
+    )
+    assert _declaration_names(j) == {((), 1): "x0"}
+
+
+def test_the_collision_test_follows_the_SCOPE_through_a_wrapper():
+    """The binder set is keyed by `(scope path, id)` like the names it
+    guards, so it must catch a collision INSIDE an inlined wrapper and a
+    wrapper OUTVAR that rebinds an outer declaration's id — and must not
+    confuse the inner scope's ids with the outer scope's."""
+    inner = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(var(20),),
+            outvars=(var(21),),
+            eqns=(
+                any_eqn(var(21)),
+                ir.JaxprEqn(
+                    primitive="neg", invars=(var(21),), outvars=(var(21),)
+                ),
+            ),
+        )
+    )
+    inside = ir.Jaxpr(
+        constvars=(),
+        invars=(),
+        outvars=(var(3),),
+        eqns=(
+            any_eqn(var(0), 1.0, 2.0),
+            ir.JaxprEqn(
+                primitive="jit",
+                invars=(var(0),),
+                outvars=(var(3),),
+                params=(("jaxpr", inner),),
+            ),
+        ),
+    )
+    assert _declaration_names(inside) is None
+
+    plain_body = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(var(20),),
+            outvars=(var(21),),
+            eqns=(
+                ir.JaxprEqn(
+                    primitive="neg", invars=(var(20),), outvars=(var(21),)
+                ),
+            ),
+        )
+    )
+    wrapper_rebinds = ir.Jaxpr(
+        constvars=(),
+        invars=(),
+        outvars=(var(0),),
+        eqns=(
+            any_eqn(var(0), 1.0, 2.0),
+            ir.JaxprEqn(
+                primitive="jit",
+                invars=(var(0),),
+                outvars=(var(0),),  # the wrapper rebinds the declaration
+                params=(("jaxpr", plain_body),),
+            ),
+        ),
+    )
+    assert _declaration_names(wrapper_rebinds) is None
+
+    # ... and the SAME ids in the two scopes are two variables, not one:
+    # an inner id equal to an outer declaration's is no collision at all
+    reused_body = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(var(0),),
+            outvars=(var(1),),
+            eqns=(
+                ir.JaxprEqn(
+                    primitive="neg", invars=(var(0),), outvars=(var(1),)
+                ),
+            ),
+        )
+    )
+    across_scopes = ir.Jaxpr(
+        constvars=(),
+        invars=(),
+        outvars=(var(3),),
+        eqns=(
+            any_eqn(var(1), 1.0, 2.0),
+            ir.JaxprEqn(
+                primitive="jit",
+                invars=(var(1),),
+                outvars=(var(3),),
+                params=(("jaxpr", reused_body),),
+            ),
+        ),
+    )
+    assert _declaration_names(across_scopes) == {((), 1): "x0"}
+
+
+def test_the_rebound_declaration_falls_back_in_the_message_itself():
+    """END TO END, zero-dep: the propagator's own message, not the map.
+
+    The `neg` rebinds the declaration's id, the `assume` reads it, and the
+    meet with `> 5.0` is empty over [-1, -0]. What the message must NOT say
+    is `x0`, for a value that is `-x0`."""
+    from stelling.propagate import UnsatisfiableAssumptionError, propagate
+
+    pred, apred, out = var(2, BOOL), var(3, BOOL), var(4, BOOL)
+    q = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(),
+            outvars=(out,),
+            eqns=_rebound(True).eqns
+            + (
+                ir.JaxprEqn(
+                    primitive="gt",
+                    invars=(var(1), ir.Literal(val=5.0, aval=F64)),
+                    outvars=(pred,),
+                ),
+                ir.JaxprEqn(
+                    primitive="stelling_assume",
+                    invars=(pred,),
+                    outvars=(apred,),
+                ),
+                ir.JaxprEqn(
+                    primitive="stelling_assert",
+                    invars=(apred,),
+                    outvars=(out,),
+                ),
+            ),
+        )
+    )
+    with pytest.raises(UnsatisfiableAssumptionError) as exc:
+        propagate(q)
+    message = str(exc.value)
+    assert "IR var 1" in message, message
+    assert "x0" not in message, message
 
 
 # -- the two walks agree, including through a transparent wrapper -------------

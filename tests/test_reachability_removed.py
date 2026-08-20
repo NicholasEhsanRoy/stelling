@@ -9,9 +9,11 @@ UNKNOWN when its `operand_var_ids` were in the top-level scope but not in
 `reachability.reaches_output`'s live set. It could not fire on a dead
 variable — `reaches_output` seeded every `stelling_assert`'s outvars, so the
 reverse walk made every assert's INVARS live, and `operand_var_ids` IS the
-assert equation's invars — and the one input that DID reach the downgrade
-was a var-id collision between an inner obligation's operand and a dead
-top-level id, where the downgrade silences a genuine REFUTED.
+assert equation's invars — and the TWO inputs that DID reach the downgrade
+both silence a genuine REFUTED: a var-id collision between an inner
+obligation's operand and a dead top-level id, and a top-level
+`stelling_assert` with NO OUTVARS, for which both halves of `reaches_output`
+are quantified over an empty tuple and light nothing.
 
 So the file no longer unit-tests `reaches_output` and `defined_vars` (both
 gone with the conjunct). What it tests is the standing property:
@@ -136,6 +138,89 @@ def test_an_unrelated_dead_equation_cannot_silence_a_violation():
     for v in verdicts.values():
         assert not any("does not reach any output" in n for n in v.notes)
         assert v.obligations[0].status == "violated-over-set"
+
+
+def _zero_outvar_assert_query(*, with_outvar: bool):
+    """`x in [1, 2] |- x < 0.5`, the harness returning `x` — a genuine
+    REFUTED — with the `stelling_assert` given an outvar or none.
+
+    No collision, no sub-jaxpr, nothing dead. `reaches_output` seeded the
+    live set with `for out in eqn.outvars` and walked backwards under
+    `any(out.id in live for out in eqn.outvars)`; over `outvars=()` the
+    first adds nothing and the second is False, so the predicate never
+    became live while `operand_var_ids` was still squarely inside
+    `defined_vars`. Jax always gives the assert an outvar; `from_dict`
+    does not require one and round-trips a document without one.
+    """
+    x, pred, out = var(0), var(1, BOOL), var(2, BOOL)
+    return close(
+        [
+            any_eqn(x, 1.0, 2.0),
+            ir.JaxprEqn(
+                primitive="lt",
+                invars=(x, ir.Literal(val=0.5, aval=F64)),
+                outvars=(pred,),
+            ),
+            ir.JaxprEqn(
+                primitive="stelling_assert",
+                invars=(pred,),
+                outvars=(out,) if with_outvar else (),
+            ),
+        ],
+        (x,),  # the assert's own outvar is the only thing that could make
+    )      # the predicate live, which is the point of the case
+
+
+def test_an_assert_without_an_outvar_cannot_silence_a_violation():
+    """THE SECOND REACHABLE INPUT — audit 0.2.0 B8a FIXUP.
+
+    The removal's argument was that the downgrade held "BY CONSTRUCTION"
+    for any top-level assert. It held only for a top-level assert WITH AN
+    OUTVAR. Measured on `aabb58d`, with the conjunct in place:
+
+        assert WITH an outvar    ->  STATUS: REFUTED
+        assert with ZERO outvars ->  STATUS: UNKNOWN
+            obligation #0: violated-over-set -> unknown
+            note: "obligation #0 is violated but the violated variable does
+                   not reach any output of the harness function"
+
+    Same declared box, same predicate, same violation, no collision and no
+    inner scope — so this reached the downgrade on its own, and the
+    strengthened case for the removal rests on it.
+    """
+    verdicts = {}
+    for with_outvar in (True, False):
+        closed = _zero_outvar_assert_query(with_outvar=with_outvar)
+        p = propagate(closed)
+        assert [o.status for o in p.obligations] == ["violated-over-set"], (
+            "the propagation itself must see the violation in both queries"
+        )
+        assert p.obligations[0].operand_var_ids == (1,)
+        verdicts[with_outvar] = make_verdict(
+            closed,
+            p,
+            stelling_version="test",
+            jax_version="none: hand-built IR",
+            precision_config="jax_enable_x64=True (hand-built f64 IR)",
+        )
+    assert verdicts[True].status == "REFUTED"
+    assert verdicts[False].status == "REFUTED", (
+        "a top-level assert with no outvar silenced a genuine REFUTED"
+    )
+    for v in verdicts.values():
+        assert not any("does not reach any output" in n for n in v.notes)
+        assert v.obligations[0].status == "violated-over-set"
+
+
+def test_the_zero_outvar_assert_is_a_document_from_dict_accepts():
+    """The case above is only worth pinning if the IR it needs is IR the
+    library will load. It round-trips through `to_dict`/`from_dict` with
+    the empty `outvars` intact."""
+    closed = _zero_outvar_assert_query(with_outvar=False)
+    back = ir.ClosedJaxpr.from_dict(closed.to_dict())
+    eqn = back.jaxpr.eqns[-1]
+    assert eqn.primitive == "stelling_assert"
+    assert eqn.outvars == ()
 
 
 # -- THE RETURN CONVENTION DOES NOT MOVE A VERDICT ----------------------------

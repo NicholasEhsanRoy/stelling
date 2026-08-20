@@ -10509,8 +10509,10 @@ in place and marked.*
   `escalate`, `refine_propagation`, `make_verdict`, and the `inductive`,
   `vacuity` and `reachability` paths. Three of those six consume no
   propagation at all — `stelling/inductive.py`, `stelling/vacuity.py` and
-  `stelling/reachability.py` contain no reference to the type — and two
-  real sites were missing (`slice_unknown_obligations` and
+  `stelling/reachability.py` contained no reference to the type (that
+  third module no longer exists: 0.2.0 B8a item 4 removed it with the
+  reaches-output conjunct it served, so only the first two can be re-read
+  today) — and two real sites were missing (`slice_unknown_obligations` and
   `make_solver_verdict`, the latter being where the false VERIFIED was
   measured). The list above is (1) an AST pass over every module-level
   function in `stelling/` taking both a query and a propagation, and (2) a
