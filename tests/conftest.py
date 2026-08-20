@@ -1247,3 +1247,77 @@ def xdist_plugin_args() -> tuple[str, ...]:
     if os.environ.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD"):
         return ("-p", "xdist")
     return ()
+
+
+# ---------------------------------------------------------------------------
+# The process-global state guard, registered here because an autouse fixture
+# has to live in a conftest to reach the whole tree.
+# ---------------------------------------------------------------------------
+#
+# `tests/_state_guard.py` holds the inventory, the readers, the exemption list
+# and the decision; this file holds one line of wiring, so that the guard can
+# also be loaded as a plugin (`-p _state_guard`) by the nested sessions in
+# `tests/test_state_guard.py` that prove it fires. Same module, both routes:
+# a copy of the fixture living in a test's temporary tree would be proving
+# things about the copy.
+#
+# LOADED BY PATH RATHER THAN BY NAME. `import _state_guard` works only once
+# pytest has put `tests/` on `sys.path`, which it does for test modules and
+# for this conftest — but relying on that would make the import order part of
+# the contract, and `sys.path` is itself process-global state this file has
+# opinions about. The path is right here next to us.
+
+def _load_sibling(name: str):
+    import importlib.util
+
+    path = _TESTS / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader, f"cannot load {path}"
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault(name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+_state_guard_module = _load_sibling("_state_guard")
+
+#: The autouse fixture itself, re-exported into this conftest's namespace so
+#: pytest registers it for `tests/` and everything below it. See
+#: `tests/_state_guard.py` for what it watches and what it does not.
+state_guard = _state_guard_module.state_guard
+
+
+def deterministic_order_args() -> tuple[str, ...]:
+    """``("-p", "no:randomly")`` — what a NESTED session must always carry.
+
+    A nested session is not a small copy of the outer one. The sessions this
+    suite spawns plant two or three tests whose ORDER is the property being
+    measured — ``test_tripwire_plugin.py``'s ``DETACHES_MIDWAY`` arms, detaches
+    in test 2, and asserts that test 3's constant is not reported; the
+    miniature sessions in ``test_skip_inventory.py`` assert which test the
+    completeness pin runs after. Shuffling those does not test anything
+    harder; it destroys the fixture.
+
+    AND THE OUTER SESSION'S ``-p no:randomly`` DOES NOT REACH THEM.
+    ``pytester.runpytest`` builds a fresh ``Config`` and autoloads entry-point
+    plugins, and ``runpytest_subprocess`` starts a fresh interpreter, so an
+    installed ``pytest-randomly`` is active in the child whatever the parent
+    was told. MEASURED, in a venv with ``pytest-randomly`` 4.1.0 installed and
+    ``-p no:randomly`` on the OUTER command, three consecutive runs of
+    ``tests/test_tripwire_plugin.py`` alone::
+
+        2 failed, 17 passed
+        2 failed, 17 passed
+        1 failed, 18 passed
+
+    — and 19 passed, every time, in a venv without it. This is what the
+    `random-order` lane in ci.yml would otherwise have reported as an
+    order-dependent defect in stelling, and it is neither: it is the
+    randomiser reaching a session that is about ordering.
+
+    Always the flag and never a probe, unlike its two siblings above. ``-p
+    no:X`` BLOCKS a plugin name and does not require it to exist — driven with
+    ``pytest-randomly`` absent, exit 0 — so there is no question to ask the
+    environment and therefore no answer to get wrong.
+    """
+    return ("-p", "no:randomly")

@@ -79,6 +79,7 @@ from stelling.falsify import (  # noqa: E402
 )
 from stelling.harness import any_array, assert_, assume  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
+from _solver_gate import need_solver  # noqa: E402
 
 PROBE_SRC = pathlib.Path(stelling.__file__).resolve().parent / "falsify.py"
 
@@ -156,6 +157,7 @@ def test_the_kahan_compensation_shape_is_not_a_soundness_event(name, op):
     )
 
 
+@need_solver
 def test_the_full_check_returns_a_VERIFIED_rather_than_raising():
     """And it must not raise through the public door either.
 

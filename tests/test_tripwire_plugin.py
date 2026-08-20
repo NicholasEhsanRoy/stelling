@@ -28,12 +28,15 @@ pytest_plugins = ["pytester"]
 jax = pytest.importorskip("jax")
 
 from conftest import TRIPWIRE_PLUGIN as PLUGIN
-from conftest import tripwire_plugin_args
+from conftest import deterministic_order_args, tripwire_plugin_args
 
 # `("-p", PLUGIN)` where the distribution is not installed, `()` where it is
 # and the `pytest11` entry point has already registered the module. Adding
 # both is a hard error -- see `conftest.tripwire_plugin_args`.
 PLUGIN_ARGS = tripwire_plugin_args()
+#: Every nested session in this file plants tests whose ORDER is the
+#: property. See `deterministic_order_args` in tests/conftest.py.
+ORDER_ARGS = deterministic_order_args()
 OPT_IN = "stelling.overflow"
 
 WRAPPING_TEST = """
@@ -78,7 +81,7 @@ def _isolate(pytester, monkeypatch):
 
 
 def _run(pytester, *args):
-    return pytester.runpytest(*PLUGIN_ARGS, "-p", "no:cacheprovider", *args)
+    return pytester.runpytest(*PLUGIN_ARGS, *ORDER_ARGS, "-p", "no:cacheprovider", *args)
 
 
 # --- the opt-in -------------------------------------------------------------
@@ -317,7 +320,7 @@ def test_a_registry_rebind_surfaces_as_foreign_patch_IN_THE_REPORT(pytester):
         """
     )
     result = pytester.runpytest_subprocess(
-        *PLUGIN_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=require"
+        *PLUGIN_ARGS, *ORDER_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=require"
     )
     result.assert_outcomes(passed=2)
     out = result.stdout.str()
@@ -403,13 +406,13 @@ def test_the_report_does_not_depend_on_the_order_the_findings_fired(pytester):
 
     forward = section(
         pytester.runpytest_subprocess(
-            *PLUGIN_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=auto",
+            *PLUGIN_ARGS, *ORDER_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=auto",
             f"{name}::test_a", f"{name}::test_b", f"{name}::test_c",
         )
     )
     reverse = section(
         pytester.runpytest_subprocess(
-            *PLUGIN_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=auto",
+            *PLUGIN_ARGS, *ORDER_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=auto",
             f"{name}::test_c", f"{name}::test_b", f"{name}::test_a",
         )
     )
@@ -502,7 +505,7 @@ def test_the_documented_spellings_work_WITHOUT_the_entry_point(pytester, monkeyp
     pytester.makepyfile(WRAPPING_TEST)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
 
-    result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", OPT_IN)
+    result = pytester.runpytest_subprocess(*ORDER_ARGS, "-p", "no:cacheprovider", "-p", OPT_IN)
     result.assert_outcomes(passed=1)
     assert "the constant written there is 300" in result.stdout.str(), (
         f"-p {OPT_IN} is a documented spelling and it did nothing at all "
@@ -510,7 +513,7 @@ def test_the_documented_spellings_work_WITHOUT_the_entry_point(pytester, monkeyp
     )
 
     pytester.makeconftest(f'pytest_plugins = ["{OPT_IN}"]')
-    result = pytester.runpytest_subprocess("-p", "no:cacheprovider")
+    result = pytester.runpytest_subprocess(*ORDER_ARGS, "-p", "no:cacheprovider")
     result.assert_outcomes(passed=1)
     assert "the constant written there is 300" in result.stdout.str(), (
         "the one line in conftest.py that the docs open with did nothing at "
@@ -524,7 +527,7 @@ def test_the_documented_spellings_work_WITHOUT_the_entry_point(pytester, monkeyp
     # this — a silent green is not.
     pytester.makeconftest("")
     flag_only = pytester.runpytest_subprocess(
-        "-p", "no:cacheprovider", "--stelling-overflow=require"
+        *ORDER_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=require"
     )
     assert flag_only.ret != 0
     assert "unrecognized arguments: --stelling-overflow" in (
@@ -534,7 +537,7 @@ def test_the_documented_spellings_work_WITHOUT_the_entry_point(pytester, monkeyp
     # THE CONTROL, and it is the half that a "just always register it" repair
     # would fail: with autoload disabled and no opt-in, the tripwire stays off
     # rather than arming because this module happened to get imported.
-    quiet = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", "no:randomly")
+    quiet = pytester.runpytest_subprocess(*ORDER_ARGS, "-p", "no:cacheprovider")
     assert "stelling overflow tripwire" not in quiet.stdout.str()
 
 

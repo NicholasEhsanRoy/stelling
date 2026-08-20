@@ -319,9 +319,9 @@ def test_the_cvc5_transcript_generator_still_draws_its_defect_shapes():
     **THIS IS THE FLAT LEG'S GENERATOR AND NOTHING ELSE.** ``CvcTransport``'s
     rules and its two kill points (``die_at_record_boundary``,
     ``die_mid_write``) have no shape floor at all — the state machine's only
-    anti-vacuity guard is the driven/definite/refused census in
-    ``test_the_state_machine_examined_the_protocol``, which is a floor on what
-    the PROPERTY examined, not on which shapes the rules produced. A mutation
+    anti-vacuity guard is the driven/definite/refused census that
+    ``test_cvc5_protocol.py``'s module finalizer requires, which is a floor on
+    what the PROPERTY examined, not on which shapes the rules produced. A mutation
     that stopped the machine drawing separator payloads would be caught here
     only because both legs share ``_PAYLOADS``; a mutation to a rule or to a
     kill point would not be caught anywhere.

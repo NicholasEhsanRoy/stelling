@@ -756,7 +756,7 @@ def test_f4wheel_every_healthy_shape_is_still_accepted(
 
 
 @pytest.mark.skipif(
-    not _optional.available("cvc5"), reason="needs the cvc5 wheel"
+    not _optional.available("cvc5"), reason="needs cvc5"
 )
 def test_f4wheel_the_real_driver_and_this_parser_agree_on_the_terminator(
     tmp_path,
@@ -983,7 +983,7 @@ def test_f4wheel2_printable_ascii_is_passed_through_untouched():
     assert _cvc5_driver._tail(" " + printable) == " " + printable
 
 
-@pytest.mark.skipif(not _optional.available("cvc5"), reason="needs the cvc5 wheel")
+@pytest.mark.skipif(not _optional.available("cvc5"), reason="needs cvc5")
 def test_f4wheel2_real_cvc5_emits_a_raw_separator_in_a_quoted_symbol():
     """REACHABILITY, measured on the real backend through the real driver.
 

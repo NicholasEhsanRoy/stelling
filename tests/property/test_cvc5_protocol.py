@@ -755,15 +755,30 @@ CvcTransport.TestCase.settings = _profiles.current().settings(
 TestCvcTransport = CvcTransport.TestCase
 
 
-def test_the_state_machine_examined_the_protocol():
+@pytest.fixture(scope="module", autouse=True)
+def _the_state_machine_examined_the_protocol():
     """The state machine's anti-vacuity floor, asserted rather than assumed.
 
     ``RuleBasedStateMachine`` gives no place to put a floor inside the run, so
-    it goes here — and this test is ordered after ``TestCvcTransport`` in the
-    file, which is the order pytest collects in. If it is ever reordered ahead,
-    it fails loudly (zero driven) rather than passing on an empty census, which
-    is the correct direction for a tripwire.
+    it goes at MODULE TEARDOWN — after every test in this file, whatever order
+    they ran in.
+
+    IT WAS A TEST, AND THE TEST WAS ORDER-DEPENDENT. Its docstring said so:
+    *"this test is ordered after ``TestCvcTransport`` in the file, which is the
+    order pytest collects in. If it is ever reordered ahead, it fails loudly
+    (zero driven) rather than passing on an empty census."* The direction was
+    right and the mechanism was a collection order nothing enforced — so the
+    first run of ci.yml's `random-order` lane failed on exactly it, and on
+    nothing else in 4136 tests. A floor that reports "the model collapsed"
+    when what happened is "pytest started somewhere else" is a false
+    accusation against innocent machinery, and a lane that is permanently red
+    for a known reason is a lane people learn to ignore.
+
+    A finalizer has the property the ordering was standing in for: it cannot
+    run before the tests it measures. The floor itself is unchanged, and so is
+    its direction — an empty census still fails it.
     """
+    yield
     # Measured at the `ci` profile (400 examples x 10 steps, derandomized):
     # driven=4133, refused=4107, definite=26. The definite floor is set at 10
     # rather than near 26 because it is a tripwire for the model collapsing,

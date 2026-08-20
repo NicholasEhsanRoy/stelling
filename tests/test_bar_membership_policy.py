@@ -158,6 +158,7 @@ from stelling.harness import any_array, assert_, trace  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
 from stelling.propagate import interval_env, propagate  # noqa: E402
 from stelling.solvers import SolverConfig, escalate  # noqa: E402
+from _solver_gate import need_solver  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 TIMEOUT_MS = 20_000
@@ -379,6 +380,7 @@ def test_pow_is_out_because_its_pass_completed_AND_the_row_is_now_GAUGED():
         )
 
 
+@need_solver
 def test_is_finite_is_out_because_the_row_cannot_be_wrong_in_that_DIRECTION():
     """MEASURED, not argued: the `is_finite` row emits the constant `true`,
     its replay returns `True`, and under the ℝ semantics the verdict claims
@@ -421,6 +423,7 @@ def test_is_finite_is_out_because_the_row_cannot_be_wrong_in_that_DIRECTION():
 # --- the cost, MEASURED here rather than estimated ---------------------------
 
 
+@need_solver
 def test_the_cost_of_barring_pow_is_MEASURED_here(monkeypatch):
     """A currently-VERIFIED `pow` query, and the same query with `pow` in the
     set. The point is that the cost is a live measurement in the same file as
@@ -452,6 +455,7 @@ def test_the_cost_of_barring_pow_is_MEASURED_here(monkeypatch):
     )
 
 
+@need_solver
 def test_the_cost_of_barring_is_finite_is_MEASURED_here_too(monkeypatch):
     """The same measurement for `is_finite`. It costs zero tests in this
     suite, which is a fact about this suite and not about the mechanism —

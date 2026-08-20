@@ -754,16 +754,10 @@ import jax.numpy as jnp  # noqa: E402
 # the environment, because then the child inherits it too; CI sets no such
 # variable, which is why CI is where it surfaced.
 
-from stelling import _optional  # noqa: E402
 from stelling.harness import any_array, assert_  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
 
-HAVE_SOLVER = (
-    _optional.available("z3")
-    or _optional.available("cvc5")
-    or _optional.cvc5_binary() is not None
-)
-need_solver = pytest.mark.skipif(not HAVE_SOLVER, reason="needs an SMT solver")
+from _solver_gate import need_solver  # noqa: E402
 
 
 @pytest.fixture(autouse=True, scope="module")

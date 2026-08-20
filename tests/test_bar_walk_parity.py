@@ -69,6 +69,7 @@ from stelling._jax_compat import transcribe  # noqa: E402
 from stelling.coverage import sub_jaxprs  # noqa: E402
 from stelling.harness import any_array, assert_  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
+from _solver_gate import need_solver  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -411,6 +412,7 @@ def _obl_solves(v):
     return len([s for s in sols if s and s.invoked and "widen" not in s.reason])
 
 
+@need_solver
 def test_the_bar_withholds_a_solver_decided_verified(_bar_add):
     """THE POSITIVE DIRECTION, exercised for the first time."""
     build = _solver_decided_query()

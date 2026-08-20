@@ -125,8 +125,18 @@ def test_every_property_in_the_tree_has_a_registered_positive_control():
     # The floor tests and the census assertions inside a property are not
     # themselves properties, so they carry no control. Everything else must.
     exempt = {
-        "tests/property/test_cvc5_protocol.py::"
-        "test_the_state_machine_examined_the_protocol",
+        # `test_search_determinism.py` holds no property at all: it is the
+        # control over the local-constant PIN that makes every property here
+        # deterministic, and it fails by reading the pool rather than by
+        # searching. A positive control for it would be the pin removed, which
+        # is what its own docstring records as a driven measurement (`1 xfailed`
+        # pinned, `1 FAILED` unpinned, same tree, same commit).
+        "tests/property/test_search_determinism.py::test_the_pin_is_installed",
+        "tests/property/test_search_determinism.py::test_the_pool_is_the_declared_one",
+        "tests/property/test_search_determinism.py::"
+        "test_importing_another_local_module_does_not_move_the_pool",
+        "tests/property/test_search_determinism.py::"
+        "test_the_snapshot_reader_is_not_vacuous",
     }
     uncontrolled = sorted(defined - pc.property_nodeids() - exempt)
     assert not uncontrolled, (

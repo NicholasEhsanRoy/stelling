@@ -34,7 +34,11 @@ xdist = pytest.importorskip(
 )
 
 from conftest import TRIPWIRE_PLUGIN as PLUGIN  # noqa: E402
-from conftest import tripwire_plugin_args, xdist_plugin_args  # noqa: E402
+from conftest import (  # noqa: E402
+    deterministic_order_args,
+    tripwire_plugin_args,
+    xdist_plugin_args,
+)
 
 # xdist reaches a nested session by the same `pytest11` entry point the
 # tripwire does, so `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` takes `-n 2` away from
@@ -68,7 +72,8 @@ TWO_FILES = {
 
 def _run(pytester, *args):
     return pytester.runpytest_subprocess(
-        *PLUGIN_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=auto", *args
+        *PLUGIN_ARGS, *deterministic_order_args(), "-p", "no:cacheprovider",
+        "--stelling-overflow=auto", *args
     )
 
 

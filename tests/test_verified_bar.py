@@ -96,6 +96,7 @@ import jax.numpy as jnp
 import stelling.verdict as V
 from stelling.harness import any_array, assert_, assume, trace
 from stelling.preconditions import check
+from _solver_gate import need_solver  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -159,6 +160,7 @@ def _scatter_OFF_the_decided_slice():
     return (assert_(y - y >= 0.0), assert_(s >= 0.0))
 
 
+@need_solver
 def test_the_bar_withholds_a_solver_path_verified_on_a_scatter_slice():
     # Deliberately NOT skipif-guarded on the bar being non-empty. A skip is
     # not a failure, so a guarded test cannot be mutation-proved: emptying
@@ -212,6 +214,7 @@ def test_the_scatter_really_is_on_the_decided_slice():
     )
 
 
+@need_solver
 def test_a_scatter_OFF_the_decided_slice_withholds_nothing():
     """THE DIRECTION THE SLICE-SCOPING CHANGED, and the reconstruction of
     this module's original fixture.
@@ -371,6 +374,7 @@ def _past_the_propagation_gate(prop, closed):
     return dataclasses.replace(prop, query_sha256=closed.content_hash())
 
 
+@need_solver
 def test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query():
     """THE MISPAIRING THE WHOLE-QUERY BAR WAS IMMUNE TO, and the reason the
     scope is derived rather than recorded.
@@ -494,6 +498,7 @@ def test_the_script_hash_alone_cannot_separate_these_two_slices():
     )
 
 
+@need_solver
 @pytest.mark.parametrize("elsewhere,key", [
     (_scatter_ELSEWHERE_same_shape, "the slice fingerprint"),
     (_scatter_ELSEWHERE_different_predicate, "the script hash"),
@@ -594,6 +599,7 @@ def _scatter_ELSEWHERE_and_actually_REFUTED():
     return (assert_(x[1] - x[1] <= 0.0), assert_(s >= 0.5))
 
 
+@need_solver
 def test_the_collision_could_mint_a_VERIFIED_on_a_REFUTED_query():
     """WHAT THE COLLISION ACTUALLY COSTS, and the case that settles whether
     the narrowing was a policy slip or a soundness defect.
@@ -697,6 +703,7 @@ def _scatter_ELSEWHERE_identical_decided_slice_TRUE():
     return (assert_(x[1] - x[1] <= 0.0), assert_(s >= 0.0))
 
 
+@need_solver
 def test_the_pairing_gate_refuses_the_mispairing_the_bar_only_narrows():
     """WHAT THE BAR DOES NOT DO, AND WHAT NOW DOES IT — this test was
     `test_the_LIMIT_of_this_bar_when_the_decided_slice_is_genuinely_the_same`,
@@ -811,6 +818,7 @@ def test_the_pairing_gate_refuses_the_mispairing_the_bar_only_narrows():
     )
 
 
+@need_solver
 def test_the_pairing_gate_closes_the_SCATTER_FREE_row():
     """THE ROW THAT SETTLES WHAT THE WHOLE-QUERY BAR ACTUALLY WAS. Its
     "backstop" covered scatter-bearing queries only, so it was a coincidence
@@ -875,6 +883,7 @@ def test_the_pairing_gate_closes_the_SCATTER_FREE_row():
     )
 
 
+@need_solver
 def test_the_two_pairing_gates_bind_the_ESCALATION_AND_the_propagation():
     """THE RESIDUE THIS TEST USED TO DISCLOSE IS CLOSED, and this is the
     measurement of the mechanism that closed it (audit 0.2.0 B6 re-audit
@@ -980,7 +989,16 @@ def _one_factory_interval_decided(lo, hi):
 @pytest.mark.parametrize(
     "factory,a_box,b_box,carries_work",
     [
-        (_one_factory_two_boxes, (100.0, 101.0), (1e9, 2e9), True),
+        # MARKED PER-PARAM AND NOT PER-TEST. The `exempt` row is the
+        # interval-decided claim: `escalate` returns `carries_work=False`, the
+        # gate is never consulted, and no solver is involved -- so it is the
+        # one row here that runs in a no-solver environment, and a marker on
+        # the function would have taken away the only case that could still be
+        # measured there.
+        pytest.param(
+            _one_factory_two_boxes, (100.0, 101.0), (1e9, 2e9), True,
+            marks=need_solver,
+        ),
         (_one_factory_interval_decided, (0.0, 1.0), (1e9, 2e9), False),
     ],
     ids=["carries-work", "exempt"],
@@ -1284,6 +1302,7 @@ def test_the_public_path_cannot_mispair_and_the_gate_never_fires_on_it():
     )
 
 
+@need_solver
 def test_the_bar_scope_itself_widens_on_the_colliding_pair():
     """The same defect one layer down, at `_bar_scope` rather than at the
     assembled verdict — so that deleting the `_evidence_is_about` call is not
@@ -1313,6 +1332,7 @@ def test_the_bar_scope_itself_widens_on_the_colliding_pair():
     assert "fell back to the whole query" in why, why
 
 
+@need_solver
 def test_a_wrong_closed_does_NOT_reliably_widen_the_bar():
     """THE COUNTEREXAMPLE TO A SENTENCE THAT STOOD BOLDED IN
     `make_solver_verdict`'s DOCSTRING: *"A wrong ``closed`` widens the bar,
@@ -1364,6 +1384,7 @@ def test_a_wrong_closed_does_NOT_reliably_widen_the_bar():
     )
 
 
+@need_solver
 def test_the_correct_pairing_still_narrows_and_the_hash_is_why():
     """THE OTHER DIRECTION of the test above, and the case that distinguishes
     the repair from a silent revert to the whole-query bar.
@@ -1439,6 +1460,7 @@ def _assume_carrying_discharge_beside_a_scatter():
     return (assert_(x - y <= 0.0), assert_(s >= 0.0))
 
 
+@need_solver
 def test_a_FORWARDED_AXIOM_does_not_cost_the_verdict_its_scope():
     """AUDIT 0.2.0 M10. The re-derivation must be given the query's forwarded
     relational assumes, or it re-emits a script the escalation never sent.
@@ -1525,6 +1547,7 @@ def test_the_two_bar_hashes_disagree_on_an_UNAXIOMED_re_derivation():
     )
 
 
+@need_solver
 def test_a_mispaired_PROPAGATION_cannot_empty_the_scope_either():
     """The other mispairing, and the one the recording design was built
     against: a propagation whose obligations are already `discharged` slices
@@ -1559,6 +1582,7 @@ def test_a_mispaired_PROPAGATION_cannot_empty_the_scope_either():
     )
 
 
+@need_solver
 def test_the_fallback_is_the_WHOLE_QUERY_SET_and_never_silence():
     """THE FAIL-CLOSED FALLBACK ITSELF, which nothing measured.
 
@@ -1666,6 +1690,7 @@ def test_what_a_stray_index_ACTUALLY_DOES_all_four_of_them():
         assert "fell back to the whole query" in why
 
 
+@need_solver
 def test_the_fallback_also_holds_when_the_derivation_RAISES(monkeypatch):
     """The other `return fallback`, and it is a different statement.
 
@@ -1742,6 +1767,7 @@ def _field_probes():
     }
 
 
+@need_solver
 def test_no_record_field_can_narrow_the_bars_domain():
     """A RECORD MUST NOT BE ABLE TO CERTIFY ITS OWN CLEANLINESS — pinned as a
     CHANNEL, not as a list of today's fields.
@@ -2150,6 +2176,7 @@ def _watched_escalation(esc, log):
     ))
 
 
+@need_solver
 def test_nothing_in_the_assembly_reads_a_field_it_is_not_allowed_to():
     """THE CHANNEL, PINNED AT THE SURFACE AND NOT ONLY AT ITS PRODUCER.
 
@@ -4082,6 +4109,7 @@ def test_the_bars_narrowing_does_not_move_with_a_CALLER_SETTABLE_option_value():
     )
 
 
+@need_solver
 @pytest.mark.parametrize("budget", [20000, 20001, 31337, 65535])
 def test_the_bars_verdict_does_not_move_with_the_SOLVER_TIMEOUT(budget):
     """CHANNEL 7 AT THE SURFACE — the arm that reaches a conjunct written
@@ -4132,6 +4160,7 @@ class _EqualButNotStr(str):
     """Equal to its value, `type()` is not `str`."""
 
 
+@need_solver
 def test_the_bars_decision_does_not_look_at_the_TYPE_of_a_record_field():
     """CHANNEL 5: a conjunct that reads NO new field and adds NO new key —
     `type(r.index) is not int` in the bar's domain, cleared by handing it an
@@ -4181,6 +4210,7 @@ def test_the_bars_decision_does_not_look_at_the_TYPE_of_a_record_field():
     ), "the subclass un-discharged an obligation; the probe passes vacuously"
 
 
+@need_solver
 def test_the_bar_is_consulted_with_exactly_that_domain(monkeypatch):
     """The surface half: `make_solver_verdict` must hand `_bar_scope` what
     `_bar_domain` returns and nothing else.
@@ -4255,6 +4285,7 @@ class _InvocationsThatRaise:
         raise ValueError("this record's stamps cannot be read")
 
 
+@need_solver
 def test_an_UNREADABLE_domain_widens_the_bar_and_the_sentinel_is_why():
     """THE OUTER `except` OF `_bar_domain`, WHICH NOTHING DROVE.
 
@@ -4326,6 +4357,7 @@ class _TwoFaced:
         return iter(self.first if self.passes == 1 else self.later)
 
 
+@need_solver
 @pytest.mark.parametrize("build,expected,withheld", [
     (_scatter_ON_the_decided_slice, "UNKNOWN", True),
     (_scatter_free, "VERIFIED", False),
@@ -4400,6 +4432,7 @@ def test_a_ONE_SHOT_records_behaves_EXACTLY_LIKE_THE_TUPLE_it_yields(
     )
 
 
+@need_solver
 @pytest.mark.parametrize("build,honest", [
     (_scatter_ON_the_decided_slice, "UNKNOWN"),
     (_scatter_free, "VERIFIED"),
@@ -4493,6 +4526,7 @@ class _StrictSubsetFirst:
         return iter(self.real[:1] if self.passes == 1 else self.real)
 
 
+@need_solver
 def test_a_STRICT_SUBSET_records_does_not_blame_the_INTERVAL():
     """THE GATE'S RESIDUE, AND THE ARGUMENT THE GATE IS JUSTIFIED BY.
 
@@ -4605,6 +4639,7 @@ def test_a_degenerate_records_with_NO_ledger_work_is_still_assembled():
     assert not any("incoherent" in n for n in v.notes)
 
 
+@need_solver
 @pytest.mark.parametrize("build,strip,label", [
     (_scatter_ON_the_decided_slice, 0, "the scatter obligation, alone"),
     (_two_solver_decided_obligations, 0, "the scatter obligation, of two"),
@@ -4671,6 +4706,7 @@ def test_stripping_invocations_cannot_clear_the_bar(build, strip, label):
     assert any("VERIFIED withheld" in n for n in v.notes)
 
 
+@need_solver
 @pytest.mark.parametrize("invocations,label", [
     ([], "an empty list"),
     (None, "None"),
@@ -4772,6 +4808,7 @@ def test_the_containment_guard_short_circuits_before_any_re_slicing(monkeypatch)
     )
 
 
+@need_solver
 def test_the_note_names_only_the_obligations_whose_slice_carries_it():
     """FINDING 3: the message must not claim a scope the mechanism lacks.
 

@@ -147,6 +147,7 @@ from dataclasses import dataclass
 
 import pytest
 
+import _lanes
 from stelling._optional import TESTED_JAX_SERIES, available, jax_series_tested
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -842,9 +843,23 @@ def test_every_documented_stamp_names_a_tested_series():
 
 #: WHICH LANE CHECKS WHICH DOCUMENTED QUERY HASH. Keys are
 #: ``<doc file>#<n>``, ``n`` counting the hash lines in that file in document
-#: order; values are the entries of ``TESTED_JAX_SERIES`` on which
-#: :func:`test_doc_example` compares that hash BYTE FOR BYTE. An empty tuple
-#: means the hash is checked nowhere, and is a failure.
+#: order; values are the jax series THE MERGE-BEARING LANES ACTUALLY RESOLVE
+#: (``_lanes.lane_series()``) on which :func:`test_doc_example` compares that
+#: hash BYTE FOR BYTE. An empty tuple means the hash is checked nowhere, and
+#: is a failure.
+#:
+#: KEYED ON THE LANES AND NOT ON ``TESTED_JAX_SERIES``, and the difference is
+#: the hole B13 closed reappearing one level up. This dict is a claim about
+#: which LANE is obliged to check which hash — the failure text below has said
+#: "compared on NO tested jax lane" since it was written — while the
+#: recomputation read a tuple of series, and nothing forced a series entry to
+#: have a lane. Today ``"0.11"`` is delivered by the FLOATING lane alone, so
+#: the day jax 0.12 ships and ``TESTED_JAX_SERIES`` is bumped to
+#: ``("0.10", "0.11", "0.12")`` — which is what a maintainer does after the two
+#: fences that go red are cleared — ``measured`` for ``quickstart.md#0`` stays
+#: ``("0.11",)``, this dict still says ``("0.11",)``, the test passes, and no
+#: lane runs 0.11 at all. Driven end to end; ``tests/test_lanes.py``'s
+#: ``test_every_tested_series_has_a_lane`` carries the transcript.
 #:
 #: THE RIGHT-HAND SIDE IS MEASURED, NEVER TYPED FROM HOPE — recomputed by
 #: :func:`test_every_documented_query_hash_is_compared_on_some_lane` from the
@@ -930,7 +945,7 @@ def test_every_documented_query_hash_is_compared_on_some_lane():
         measured[key] = (
             tuple(
                 s
-                for s in TESTED_JAX_SERIES
+                for s in _lanes.lane_series()
                 if hash_is_compared(doc_jax, f"{s}.0")
             )
             if compared
@@ -942,7 +957,10 @@ def test_every_documented_query_hash_is_compared_on_some_lane():
         "a documented query content hash is compared on NO tested jax lane, "
         "so nothing in CI would notice it going stale — either re-record the "
         "block on a series that has a lane, or put the hash in a fence that "
-        f"is compared: {unchecked}"
+        f"is compared: {unchecked}\n"
+        f"The lanes resolve {_lanes.lane_series()}; TESTED_JAX_SERIES claims "
+        f"{TESTED_JAX_SERIES}. Where those differ, the claim is the thing "
+        "that is wrong."
     )
     assert measured == EXPECTED_HASH_COVERAGE, (
         "the documented-hash coverage moved.\n"

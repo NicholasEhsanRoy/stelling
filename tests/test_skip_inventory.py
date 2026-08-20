@@ -153,6 +153,7 @@ from conftest import (
     _reason,
     colliding_basenames,
     deselected_items,
+    deterministic_order_args,
     pending_items,
     unseen_files,
 )
@@ -2368,7 +2369,16 @@ def _run_a_miniature_session(
     """
     tests = tmp_path / "tests"
     tests.mkdir()
-    (tests / "conftest.py").write_text((TESTS / "conftest.py").read_text())
+    # THE REAL CONFTEST, AND WHAT THE REAL CONFTEST NEEDS BESIDE IT.
+    # `tests/conftest.py` loads `tests/_state_guard.py` by path — the
+    # process-global state guard's inventory and autouse fixture — so a
+    # miniature tree holding the conftest alone holds a conftest that
+    # cannot load, and every session here dies at collection with an
+    # ImportError instead of measuring what it was written to measure.
+    # Driven: 40 of this file's tests failed that way, all of them on the
+    # child's `ImportError while loading conftest`.
+    for sibling in ("conftest.py", "_state_guard.py"):
+        (tests / sibling).write_text((TESTS / sibling).read_text())
     for relative, source in files.items():
         path = tests / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -2414,7 +2424,8 @@ def _run_a_miniature_session(
     # failure lines, which is how the nodeid a verdict lands on stops being
     # visible to the assertions below.
     argument_list = [
-        sys.executable, "-m", "pytest", "-q", "-rfsE", "-p", "no:cacheprovider"
+        sys.executable, "-m", "pytest", "-q", "-rfsE", "-p", "no:cacheprovider",
+        *deterministic_order_args()
     ]
     for name, _ in plugins:
         argument_list += ["-p", name]

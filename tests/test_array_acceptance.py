@@ -40,7 +40,6 @@ import numpy as np  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
 from jax import lax  # noqa: E402
 
-from stelling import _optional  # noqa: E402
 from stelling._jax_compat import transcribe  # noqa: E402
 from stelling.harness import any_array, assert_, trace  # noqa: E402
 from stelling.obligation import (  # noqa: E402
@@ -57,12 +56,7 @@ from stelling.solvers import (  # noqa: E402
     make_solver_verdict,
 )
 
-HAVE_SOLVER = (
-    _optional.available("z3")
-    or _optional.available("cvc5")
-    or _optional.cvc5_binary() is not None
-)
-need_solver = pytest.mark.skipif(not HAVE_SOLVER, reason="needs an SMT solver")
+from _solver_gate import need_solver  # noqa: E402
 
 VERSIONS = dict(
     stelling_version="test",

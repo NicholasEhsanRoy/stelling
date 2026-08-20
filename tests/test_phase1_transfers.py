@@ -143,7 +143,7 @@ def test_check_solver_kwarg_z3_records_only_z3():
     from stelling.preconditions import check, scalar_nonzero
 
     if not available("z3"):
-        pytest.skip("z3 not installed")
+        pytest.skip("needs z3")
 
     def h():
         _, o = scalar_nonzero("float64", (0.0, 1.0))

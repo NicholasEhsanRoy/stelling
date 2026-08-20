@@ -597,3 +597,55 @@ census.
 (integer computing/non-computing, structural/arithmetic, ieee
 category); every future row addition; any "derived set" whose
 derivation launders an unchecked claim into an asserted-looking one.
+
+## L23 — An instrument's silence is a reading only if it could have spoken
+
+**(a)** Every check has an *enabling condition* — the environment that
+provisions it, the lane that runs it, the pool it draws from, the
+domain it enumerates — and that condition is almost never asserted. So
+"this check did not fire" is read as "there was nothing to find", when
+the two are distinguishable only by measuring the condition itself. The
+remedy is structural and always the same shape: **declare the enabling
+condition, measure it against the machine that would have to deliver
+it, and fail on the difference** — never against a second list, because
+two lists agree until the day they do not and nothing notices when they
+stop. Where the condition is an enumeration, prefer the complement of
+an allow-list to a deny-list: a deny-list is silent about whatever
+arrives next.
+
+**(b)** B8b (2026-08-20) found the same shape at five altitudes in one
+tree, and none of the five was a wrong answer — all five were
+instruments that could not fire. *A configuration:* the environment
+`pip install -e ".[jax]" --group dev` produces had no whole-suite lane,
+so **72 tests were failing in it** with nothing red, every one a test
+that needs a solver and never declared it, plus five skips whose reason
+strings no rule in the skip inventory carried. *A lane:*
+`EXPECTED_HASH_COVERAGE` recomputed doc-hash coverage over
+`TESTED_JAX_SERIES` while its own failure text said *"compared on NO
+tested jax LANE"* — driven forward to the day jax 0.12 ships, the
+inventory stays green while the hash it certifies is compared on no
+lane at all. *A search:* the property suite's `ci` profile claimed the
+same tree gives the same examples; hypothesis mixes in constants
+harvested from whatever local modules are in `sys.modules`, and **one
+ordinary module co-collected and fully deselected flips a strict xfail
+to XPASS**. *Process state:* a test left jax's const-fold rule replaced
+and an unrelated exit-code battery went vacuous for two audit rounds.
+*Order:* `pytest-randomly` was installed in no venv and every lane ran
+plain `pytest`, so order-dependent pollution was invisible by
+construction — which is why the previous item survived.
+
+**(c)** **Structural**, and one mechanism carried three of the five:
+`tests/_lanes.py` reads `ci.yml` and every claim that depends on a lane
+is checked against the lane that delivers it (the tested-series tuple,
+the doc-hash inventory, the supported install matrix, the shuffled
+lane). The other two are the same principle at a scope no workflow can
+reach: `tests/_state_guard.py` declares the process-global state and
+fingerprints it around every test, and `_profiles.pin_local_constant_pool`
+takes the session's import set out of the search. What does **not**
+generalise is a single code object for all five — the altitudes differ
+— and each instrument ships its own "what this does not watch".
+
+**(d)** Every coverage claim keyed on a constant rather than on a job;
+every skip, xfail or escape whose condition is wider than the thing it
+excuses; every enumerated inventory that stands for an open domain;
+any future statement of the form "no lane/test/seed found X".
