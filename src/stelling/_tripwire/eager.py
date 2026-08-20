@@ -19,12 +19,17 @@ name and does not, which is ``design/private-jax-boundary.md``'s rule), in its
 ``if type(operand) is int`` branch, by ``np.asarray(operand).astype(new_dtype)``
 — and nothing downstream can tell that the 0 in the jaxpr was written as a 256.
 ``tests/test_tripwire_gate_coverage.py::GATE_COVERAGE`` enumerates the
-routes; six of the EIGHT unwatched ones narrow at that one line, and the
+routes; seven of the NINE unwatched ones narrow at that one line, and the
 other two are numpy's and are named in ``report.EAGER_UNCOVERED``. This
-read *"six of the seven"* until 2026-08-20: the dict has eight
-``unwatched`` rows and has had eight since ``fc98241`` added
+read *"six of the seven"* until 2026-08-20 -- the dict had eight
+``unwatched`` rows and had had eight since ``fc98241`` added
 ``jnp.stack``-of-``full``, and 6 closed + 2 residue was already 8 in the
-sentence beside it.
+sentence beside it. It read *"six of the eight"* until 2026-08-21, when
+``lax.select``-of-``full`` stopped being a measurement disclosed in prose
+and became a row. Both numerals are read out of every file that states
+them by ``test_the_documented_fraction_is_the_measured_one``; asserting
+the denominator in Python was not what was missing, because nothing read
+the sentence.
 
 THE TWO MODES, AND THIS IS THE SECOND. Mode 1 would record the eager narrowing
 and refuse the verdict from inside ``preconditions.check()``'s trace gate, which

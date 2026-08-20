@@ -27,19 +27,24 @@ Nothing downstream can tell that the `0` in the jaxpr was written as a `256`.
 is a **wrong VERIFIED**: a harness whose obligation is false at all eleven
 declared points, certified.
 
-`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` enumerates 33
-construction routes — 17 watched, 8 unwatched, 3 loud, 5 deferred. **Six of the
-eight unwatched routes narrow at that one line**, each reaching it with the
+`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` enumerates 35
+construction routes — 17 watched, 9 unwatched, 3 loud, 6 deferred. **Seven of
+the nine unwatched routes narrow at that one line**, each reaching it with the
 written value intact, on both series. The other two,
 `np.asarray(N).astype(dt)` and `jnp.asarray(np.array(N), dtype=dt)`, never
 reach jax at all.
 
 *This paragraph read "32 … 7 unwatched … The seventh" until 2026-08-20, and
-contradicted this file's own "Closed / Not closed" section below, which says
-six closed and **two** numpy routes remaining. The dict has had 33 rows and 8
-`unwatched` since `fc98241` added `jnp.stack`-of-`full`; the count was
-re-derived at `8f0adf2` and `tests/test_tripwire_gate_coverage.py` now
-asserts the bucket's size, not only the six of it this detector closes.*
+contradicted this file's own "Closed / Not closed" section below, which said
+six closed and **two** numpy routes remaining. It then read "33 … 8 unwatched
+… Six of the eight" until 2026-08-21, when `lax.select`-of-`full` and
+`jnp.take`'s `fill_value` — both driven, both disclosed below as closed, both
+rows of NEITHER inventory — were enrolled and measured. The first is
+`unwatched` and closed, which moved the fraction to seven of nine; the second
+is `deferred`, so it was never one of the gate's holes at all. Both numerals
+in the sentence above are now read out of this file, and out of the five
+others that state them, by
+`tests/test_tripwire_gate_coverage.py::test_the_documented_fraction_is_the_measured_one`.*
 
 ## Why a hook on a private function, and not something public
 
@@ -596,11 +601,24 @@ being fixed.
 **Cost:** no measurable change across four full suite runs (8m52s baseline,
 8m47s instrumented).
 
-**Closed:** six of the EIGHT `unwatched` routes, plus `lax.select`-of-`full` and
-`jnp.take`'s `fill_value`, plus `report.UNCOVERED`'s scoped
+**Closed:** seven of the NINE `unwatched` routes — the six `full`-family ones
+and `lax.select`-of-`full`, which became a row of `GATE_COVERAGE` and
+`EAGER_COVERAGE` on 2026-08-21 and had until then been driven closed and
+disclosed as closed while being a row of neither, so nothing would have gone
+red if a jax release had moved it. Plus `report.UNCOVERED`'s scoped
 `with jax.disable_jit():` bullet — that one because the reason the const-fold
 rule is handed `-56` instead of `200` is that the constant was narrowed at this
 very site on the way in.
+
+**`jnp.take`'s `fill_value` was listed here as closed and the listing was
+misleading**, which the same day's measurement settled. The detector does raise
+on it. But it was never one of the gate's holes: driven through `check()` in
+three spellings — over the traced array, over a `jnp.zeros` of its shape, and
+over a constant `jnp.zeros` — the written constant reaches the jaxpr INTACT in
+all three, so the route is `deferred` and the `convert_element_type` transfer
+is what declines it. It is the one row that is `deferred` for the gate and
+`raises` for this detector, and reading it as a hole this instrument plugs
+credited the instrument with a hole that was not there.
 
 **Not closed, and named:** two numpy routes. `np.asarray(N).astype(dt)` is
 PERMANENTLY unhookable — `np.ndarray.astype` is an immutable type attribute, so

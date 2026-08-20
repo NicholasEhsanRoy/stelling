@@ -56,6 +56,8 @@ import pytest
 jax = pytest.importorskip("jax")
 jnp = pytest.importorskip("jax.numpy")
 
+import re  # noqa: E402
+
 import numpy as np  # noqa: E402
 from jax import lax  # noqa: E402
 
@@ -63,6 +65,8 @@ from stelling import _tripwire  # noqa: E402
 from stelling._tripwire import eager as _eager, report  # noqa: E402
 from stelling.harness import any_array, assert_  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
+
+from _repo_files import read_text_files  # noqa: E402
 
 #: Out of int16 range; wraps to -25536.
 OVER = 40000
@@ -133,6 +137,18 @@ ROUTES = {
     "jnp.stack([x, jnp.full(N)])": lambda x: jnp.stack(
         [x, jnp.full(x.shape, OVER, DTYPE)]
     )[0],
+    # B8c fixup. MEASURED AND UNROSTERED until now: both were driven closed
+    # by the eager detector and named in `design/eager-truncation-detector.md`
+    # as closed, and neither was a row of GATE_COVERAGE or EAGER_COVERAGE — so
+    # nothing here would have reddened if a jax release moved either of them.
+    # A route that is measured, disclosed as closed, and enrolled in no
+    # inventory is a claim with no guard behind it.
+    "lax.select(c, jnp.full(N), x)": lambda x: lax.select(
+        x > 0, jnp.full(x.shape, OVER, DTYPE), x
+    ),
+    "jnp.take(x, i, fill_value=N)": lambda x: jnp.take(
+        x, jnp.array([9, 0]), mode="fill", fill_value=OVER
+    ),
     "jnp.array(N, dtype=dt)": lambda x: x + jnp.array(OVER, dtype=DTYPE),
     "jnp.asarray(N, dtype=dt)": lambda x: x + jnp.asarray(OVER, dtype=DTYPE),
     "jnp.int16(N)": lambda x: x + jnp.int16(OVER),
@@ -201,6 +217,13 @@ GATE_COVERAGE = {
     # detector armed: 0 fires, VERIFIED, and the value still wraps.
     "jnp.asarray(np.array(N), dt)": "unwatched",
     "jnp.stack([x, jnp.full(N)])": "unwatched",
+    # B8c fixup: `lax.select`-of-`full` narrows inside jax at the `full` line
+    # like the six above it, so the const-fold rule is handed an in-range
+    # value and the gate certifies a program the source does not describe.
+    # It was DRIVEN CLOSED by the eager detector and disclosed as closed in
+    # `design/eager-truncation-detector.md` while being a row of neither
+    # inventory -- a claim with no guard behind it, which is why it is here.
+    "lax.select(c, jnp.full(N), x)": "unwatched",
     # jnp.array and friends VALIDATE the Python int against the dtype and
     # raise. The contrast with jnp.full, three lines up, is jax's and not
     # stelling's, and it is the single most useful thing on this page for a
@@ -214,6 +237,16 @@ GATE_COVERAGE = {
     "jnp.where(c, N, x)": "deferred",
     "jnp.clip(x, 0, N)": "deferred",
     "jnp.pad(x, 1, constant_values=N)": "deferred",
+    # B8c fixup, and the bucket is NOT the one it was enrolled for.
+    # `jnp.take`'s `fill_value` was disclosed beside `lax.select`-of-`full` as
+    # a route the eager detector closes, which invited reading it as a hole
+    # the detector plugs. Driven here in three spellings -- over the traced
+    # `x`, over a `jnp.zeros` of `x`'s shape, and over a constant `jnp.zeros`
+    # -- all three put the written 40000 into the jaxpr INTACT, so the gate
+    # has nothing to see and correctly sees nothing. It is `deferred`, the
+    # transfer declines it like the five above, and it was never one of the
+    # gate's holes. See EAGER_COVERAGE for the other half of the story.
+    "jnp.take(x, i, fill_value=N)": "deferred",
 }
 
 
@@ -375,6 +408,7 @@ def test_every_deferred_route_is_caught_by_the_transfer_instead():
 UNCOVERED_SPELLING = {
     "jnp.stack([x, jnp.full(N)])": "jnp.stack([x, jnp.full(shape, N, dt)])",
     "jnp.asarray(np.array(N), dt)": "jnp.asarray(np.array(N), dtype=dt)",
+    "lax.select(c, jnp.full(N), x)": "lax.select(p, jnp.full(shape, N, dt), x)",
 }
 
 
@@ -554,6 +588,10 @@ EAGER_COVERAGE = {
     "lax.full_like(x, N)": "raises",
     "lax.convert_element_type(N, dt)": "raises",
     "jnp.stack([x, jnp.full(N)])": "raises",
+    # B8c fixup: driven FIRED, conv=1 trunc=1 with `jit` on and conv=2
+    # trunc=1 with `JAX_DISABLE_JIT=1`, warm, on jax 0.11.0. A row now,
+    # not prose.
+    "lax.select(c, jnp.full(N), x)": "raises",
     # jax refuses these three itself, with or without the detector
     "jnp.array(N, dtype=dt)": "loud",
     "jnp.asarray(N, dtype=dt)": "loud",
@@ -584,6 +622,14 @@ EAGER_COVERAGE = {
     "jnp.where(c, N, x)": "silent",
     "jnp.clip(x, 0, N)": "silent",
     "jnp.pad(x, 1, constant_values=N)": "silent",
+    # B8c fixup, and it is the ONE row that is `deferred` for the gate and
+    # `raises` for the detector at the same time. Nothing is inconsistent
+    # about that: under a TRACE the written 40000 reaches the jaxpr and the
+    # narrowing is a run-time convert, so the gate has nothing to see; run
+    # EAGERLY there is no trace to reach and the fill array is built at the
+    # construction site, which is this instrument's. Measured `raises` here
+    # and `deferred` in GATE_COVERAGE, and neither reading is the other's.
+    "jnp.take(x, i, fill_value=N)": "raises",
     # THE RESIDUE. numpy finished before jax was reached.
     "np.asarray(N).astype(dt)": "silent",
     "jnp.asarray(np.array(N), dt)": "silent",
@@ -662,24 +708,263 @@ def test_the_declared_eager_coverage_is_the_measured_eager_coverage(eager_armed)
     )
 
 
+#: The eager detector's coverage of the `unwatched` bucket, as ONE pair of
+#: numerals. `test_the_unwatched_routes_…` holds the measured buckets to
+#: them and `test_the_documented_fraction_is_the_measured_one` holds every
+#: file that states the fraction to them, so the sentence in the documents
+#: and the dict in this file cannot drift apart in either direction.
+_CLOSED = 7
+_UNWATCHED = 9
+
+#: The fraction as a document writes it: a numeral, `of the`, a numeral,
+#: `unwatched`. Tolerant of markdown emphasis, of wrapping and of case,
+#: because the six files that state it spell it six different ways.
+#:
+#: A QUOTED occurrence is skipped by `_live_fractions`, because a project
+#: that records what it got wrong has to be able to write the wrong
+#: sentence down. Quoting is the shape the retraction takes everywhere it
+#: appears here, and it is checked as a shape rather than trusted: an
+#: unquoted stale fraction fails wherever it stands.
+_FRACTION_RE = re.compile(
+    r"(?P<num>[A-Za-z]+|\d+)\s*\**\s*of\s+the\s*\**\s*"
+    r"(?P<den>[A-Za-z]+|\d+)\**\s+`*unwatched`*",
+    re.S,
+)
+
+#: THE CENSUS, the other shape the same numbers are written in:
+#: `N routes -- 17 `watched`, 9 `unwatched`, 3 `loud`, 6 `deferred``. It is
+#: a different sentence from the fraction and a check on one is not a check
+#: on the other -- driven in the B8c fixup, enrolling `lax.select`-of-`full`
+#: moved the fraction in every file that stated it AND left the census
+#: stale in `SOUNDNESS.md`'s `SF-0.2.0-07` block, which the fraction
+#: pattern does not match. Both shapes are read now.
+_CENSUS_RE = re.compile(
+    r"(?P<total>\d+)\s*\**\s*(?:constant-)?construction\s+routes|"
+    r"(?P<total2>\d+)\s+routes\s*[,—-]",
+    re.S,
+)
+_BUCKET_RE = re.compile(
+    r"(?P<n>\d+)\s*\**\s*`*(?P<bucket>watched|unwatched|loud|deferred)`*",
+    re.S,
+)
+
+_NUMERALS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12,
+}
+
+#: Every file that states the CENSUS. A partition, like the fraction's.
+_CENSUS_SITES = (
+    "SOUNDNESS.md",
+    "docs/overflow-tripwire.md",
+    "design/eager-truncation-detector.md",
+)
+
+#: Every file that states the fraction. This is a partition and not a
+#: reminder list: `test_the_documented_fraction_is_the_measured_one`
+#: requires each of these to state it AND requires no other file in the
+#: tree to state it, so adding the sentence somewhere new fails until it
+#: is listed here, and deleting it from a listed file fails too.
+#:
+#: THIS FILE IS ON THE LIST. The message that used to name the sites named
+#: six documents, included `SOUNDNESS.md` (which carried no such sentence
+#: before the 0.2.0 routing put one there) and omitted this file, which
+#: states the fraction in `test_the_unwatched_routes_…`'s own docstring —
+#: so *"move all six"* would have left the instruction's own file stale.
+#: `CHANGELOG.md` LEFT THIS LIST in the same commit that widened it, and
+#: that is the routing working rather than a site going quiet: the Mode 2
+#: detail moved into `SOUNDNESS.md` under §8.3, so the ledger states the
+#: fraction and the changelog links to it. The partition below is what
+#: made the move announce itself.
+_FRACTION_SITES = (
+    "SOUNDNESS.md",
+    "docs/overflow-tripwire.md",
+    "docs/quickstart.md",
+    "design/eager-truncation-detector.md",
+    "src/stelling/_tripwire/eager.py",
+    "tests/test_tripwire_gate_coverage.py",
+)
+
+#: A quoted run, which is how this repository writes a sentence it has
+#: retracted -- in prose with `"..."`, and in
+#: `tests/_soundness_routing_manifest.py` as a Python literal quoting a
+#: source line the destination does NOT carry. Bounded so that two unrelated
+#: quotes cannot swallow the text between them, and the single-quote form is
+#: guarded by letter lookarounds so an apostrophe in `jax's` cannot open one.
+_QUOTED = re.compile(
+    r"\"[^\"\n]{0,400}\"|(?<![A-Za-z])'[^'\n]{0,400}'(?![A-Za-z])", re.S
+)
+
+
+def _live_fractions(text: str) -> list[tuple[str, str]]:
+    """The fraction as this file ASSERTS it — quotations excluded.
+
+    A retraction has to be able to quote the sentence it retracts:
+    *"six of the SEVEN unwatched routes"* is written down in several
+    places on purpose, and a check that could not tell it from a live
+    claim would force the project to stop recording its own errors.
+    """
+    quoted = [m.span() for m in _QUOTED.finditer(text)]
+    out = []
+    for m in _FRACTION_RE.finditer(text):
+        s, e = m.span()
+        if any(qs <= s and e <= qe for qs, qe in quoted):
+            continue
+        out.append((m.group("num"), m.group("den")))
+    return out
+
+
+def found_censuses() -> dict[str, list[tuple[int, dict[str, int]]]]:
+    """`{file: [(total, {bucket: n}), …]}` for every live census in the tree.
+
+    A census is a sentence of the form `N construction routes — 17
+    `watched`, 9 `unwatched`, 3 `loud`, 6 `deferred``, and it is a
+    DIFFERENT sentence from the fraction: the fraction names two of the
+    buckets and the census names the size of the dict and all four. A
+    check on one is not a check on the other, which is exactly how
+    `SOUNDNESS.md`'s `SF-0.2.0-07` block kept `33 … 8 unwatched` while
+    every stated fraction moved to seven of nine.
+    """
+    out: dict[str, list[tuple[int, dict[str, int]]]] = {}
+    for rel, text in read_text_files():
+        quoted = [q.span() for q in _QUOTED.finditer(text)]
+        for m in _CENSUS_RE.finditer(text):
+            if any(qs <= m.start() and m.end() <= qe for qs, qe in quoted):
+                continue
+            total = int(m.group("total") or m.group("total2"))
+            tail = text[m.end():m.end() + 260]
+            buckets = {
+                b.group("bucket"): int(b.group("n"))
+                for b in _BUCKET_RE.finditer(tail)
+            }
+            if len(buckets) == 4:
+                out.setdefault(rel, []).append((total, buckets))
+    return out
+
+
+def _check_the_census(found):
+    measured = {"total": len(GATE_COVERAGE)}
+    for bucket in ("watched", "unwatched", "loud", "deferred"):
+        measured[bucket] = sum(1 for v in GATE_COVERAGE.values() if v == bucket)
+    assert set(found) == set(_CENSUS_SITES), (
+        f"the `GATE_COVERAGE` census is stated in {sorted(found)} and "
+        f"`_CENSUS_SITES` lists {sorted(_CENSUS_SITES)}. States it and is "
+        f"not listed: {sorted(set(found) - set(_CENSUS_SITES))}; listed and "
+        f"no longer states it: {sorted(set(_CENSUS_SITES) - set(found))}."
+    )
+    wrong = [
+        (rel, total, buckets)
+        for rel, hits in sorted(found.items())
+        for total, buckets in hits
+        if total != measured["total"]
+        or any(buckets[b] != measured[b] for b in buckets)
+    ]
+    assert not wrong, (
+        f"`GATE_COVERAGE` holds {measured} and these censuses say "
+        f"otherwise: {wrong}. The census and the fraction are two "
+        f"sentences over one dict, and moving one without the other is how "
+        f"`SF-0.2.0-07` kept a stale 33/8 through a commit that corrected "
+        f"the fraction in six files."
+    )
+
+
+def test_the_documented_fraction_is_the_measured_one():
+    """THE PROSE IS READ. That is the whole of this check, and it is new.
+
+    *"Six of the SEVEN unwatched routes"* stood in six shipped files from
+    ``fc98241`` until 2026-08-20 while ``GATE_COVERAGE`` held eight, and
+    the reason it survived is not that a Python assertion was one-sided —
+    ``len(closed) == 6`` and ``residue == {two}`` already entailed
+    ``len(unwatched) == 8`` between them. It survived because **no test
+    read the sentence.** Driven at ``de80ad8``: revert the fraction to
+    *"seven"* in all six prose sites and 419 tests over every suite that
+    opens any of those files still pass.
+
+    So this reads them. Both halves of the fraction, in every file that
+    states it, against the two numerals the buckets are held to — and in
+    BOTH directions, because a list of sites is only as wide as its list:
+    a file that states the fraction and is not listed fails here as loudly
+    as a listed file that has stopped stating it.
+    """
+    unwatched = {k for k, v in GATE_COVERAGE.items() if v == "unwatched"}
+    residue = {k for k in unwatched if EAGER_COVERAGE[k] == "silent"}
+    closed = unwatched - residue
+    assert (len(closed), len(unwatched)) == (_CLOSED, _UNWATCHED), (
+        "the declared numerals do not match the buckets; "
+        "test_the_unwatched_routes_… says the same thing with the detail"
+    )
+
+    found: dict[str, list[tuple[str, str]]] = {}
+    for rel, text in read_text_files():
+        hits = _live_fractions(text)
+        if hits:
+            found[rel] = hits
+
+    assert set(found) == set(_FRACTION_SITES), (
+        f"the eager detector's `unwatched` fraction is stated in "
+        f"{sorted(found)} and `_FRACTION_SITES` lists "
+        f"{sorted(_FRACTION_SITES)}. States it and is not listed: "
+        f"{sorted(set(found) - set(_FRACTION_SITES))}; listed and no longer "
+        f"states it: {sorted(set(_FRACTION_SITES) - set(found))}. A page "
+        f"list is only as wide as its list, so this is a partition: a new "
+        f"site has to be added here in the same commit, and a site that "
+        f"drops the sentence fails rather than passing as compliance."
+    )
+
+    _check_the_census(found_censuses())
+
+    wrong = []
+    for rel, hits in sorted(found.items()):
+        for num, den in hits:
+            n = int(num) if num.isdigit() else _NUMERALS.get(num.lower())
+            d = int(den) if den.isdigit() else _NUMERALS.get(den.lower())
+            if (n, d) != (_CLOSED, _UNWATCHED):
+                wrong.append((rel, num, den))
+    assert not wrong, (
+        f"the eager detector closes {_CLOSED} of the {_UNWATCHED} "
+        f"`unwatched` routes and these sites say otherwise: {wrong}. This "
+        f"is the sentence that read *\"six of the SEVEN\"* against a dict "
+        f"holding eight, in six files at once, for as long as it took "
+        f"someone to do the arithmetic in it."
+    )
+
+
 def test_the_unwatched_routes_the_eager_detector_cannot_close_are_the_two_named_numpy_ones():
     """The residue is EXACTLY two routes, and both are disclosed.
 
     This is the assertion that keeps the ``unwatched`` bucket from quietly
-    growing a third member. There are **eight** unwatched routes; six are
-    closed by an opt-in flag and two remain, and the two that remain are the
-    ones numpy destroys before jax is reached. A route added to ``unwatched``
+    growing a third member. Seven of the nine ``unwatched`` routes are closed
+    by an opt-in flag and two remain, and the two that remain are the ones
+    numpy destroys before jax is reached. A route added to ``unwatched``
     that the detector does not close has to be argued into
     ``report.EAGER_UNCOVERED`` here, in the same commit.
 
-    **THE DENOMINATOR IS ASSERTED NOW, AND IT IS WHY THIS DRIFTED.** This
-    test pinned the NUMERATOR alone — ``len(closed) == 6`` — and six was
-    always right, so six places in the prose could say *"six of the SEVEN
-    unwatched routes"* against a dict holding eight, from ``fc98241`` (which
-    added ``jnp.stack``-of-``full`` as the eighth) until 2026-08-20. A count
-    that is checked at one end is not checked: the closed set, the residue
-    and the whole ``unwatched`` bucket are all asserted here, so the
-    fraction has no unpinned half left.
+    THE FRACTION IN THE SENTENCE ABOVE IS READ, by
+    ``test_the_documented_fraction_is_the_measured_one``, in this file and
+    in the six shipped documents that state it. It is written in the same
+    form as theirs on purpose: the instruction *"move the bucket and move
+    all six"* used to stand in a message whose own file was the seventh
+    site and was not on its list.
+
+    **WHY THE FRACTION DRIFTED, STATED CORRECTLY THIS TIME.** The first
+    account of this said the sentence survived because the test *"asserted
+    the NUMERATOR alone"* and that *"the denominator is asserted now"*.
+    That is wrong about the mechanism, and the correction matters because
+    it points at the guard that was actually missing. ``residue`` is a
+    SUBSET of ``unwatched`` by construction, and the pre-existing
+    ``residue == {two named routes}`` already pinned ``|residue| = 2``; so
+    ``len(closed) == 6`` already entailed ``len(unwatched) == 8``, and
+    there is no state of ``GATE_COVERAGE`` in which the old assertions are
+    green and ``len(unwatched) == 8`` is red. Adding it detected nothing.
+
+    What was missing is a check that reads the PROSE. Driven at
+    ``de80ad8``: reverting the fraction to *"six of the seven"* in all six
+    prose sites gave **419 passed** over every suite that reads any of
+    those files. Nothing had ever read the sentence, and asserting the
+    denominator in Python did not change that.
+    ``test_the_documented_fraction_is_the_measured_one`` is the check that
+    reads it, and the numerals below are what it compares against.
 
     Reads the DECLARATIONS rather than re-measuring, on purpose: the
     measurement is the test above, and a second copy of it here would be a
@@ -697,18 +982,16 @@ def test_the_unwatched_routes_the_eager_detector_cannot_close_are_the_two_named_
         "`report.UNCOVERED`'s pre-narrowed bullet; anything else here is a "
         "hole the reader is not told about."
     )
-    assert len(unwatched) == 8, (
-        f"the `unwatched` bucket holds {len(unwatched)} route(s), not 8: "
-        f"{sorted(unwatched)}. This is the DENOMINATOR six documents state "
-        f"a fraction over — `docs/overflow-tripwire.md`, `docs/quickstart.md`,"
-        f" `design/eager-truncation-detector.md`, `src/stelling/_tripwire/"
-        f"eager.py`, `CHANGELOG.md` and `SOUNDNESS.md` — and it went unread "
-        f"once already. Move the bucket and move all six."
-    )
     closed = unwatched - residue
-    assert len(closed) == 6, (
-        f"six of the eight unwatched routes were closed by the eager "
-        f"detector and now {len(closed)} are: {sorted(closed)}"
+    assert (len(closed), len(unwatched)) == (_CLOSED, _UNWATCHED), (
+        f"the eager detector closes {len(closed)} of {len(unwatched)} "
+        f"`unwatched` route(s) and this file declares {_CLOSED} of "
+        f"{_UNWATCHED}: closed={sorted(closed)}, "
+        f"unwatched={sorted(unwatched)}. Those two numerals are the "
+        f"fraction stated in every file of `_FRACTION_SITES`, and "
+        f"`test_the_documented_fraction_is_the_measured_one` holds each of "
+        f"them to these. Move the bucket and move the prose in the same "
+        f"commit — the list is in this file and it includes this file."
     )
     text = " ".join(report.EAGER_UNCOVERED)
     for phrase in (

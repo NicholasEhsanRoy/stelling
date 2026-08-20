@@ -278,6 +278,30 @@ verdicts:
 
 ## Log
 
+**EVERY ENTRY BELOW CARRIES A `Versions:` FIELD, FROM A CLOSED SET OF
+THREE, AND IT SCOPES THE ENTRY'S OWN EVENT.** *0.1.0 pre-release builds
+only* means the thing this entry records — a defect fixed, a disclosure
+gap closed, a claim narrowed — was over before the `v0.1.0` tag, so no
+release is reached by it. *0.2.0 development builds only* means it
+arrived after that tag. *`v0.1.0` and 0.2.0 development builds* means the
+release is reached, and those entries also say so in their own words and
+carry the reproduction at the tag.
+
+**IT SCOPES THE ENTRY, NOT EVERY HAZARD THE ENTRY DISCUSSES**, and the
+2026-08-09 integer-literal-wrap entry is the case that makes the
+distinction matter: the WRAP is open in every build there has ever been,
+including `v0.1.0` and including today's, and what that entry records is
+the closing of a DISCLOSURE gap, which happened before the tag. Its field
+says *0.1.0 pre-release builds only* about the gap and says nothing about
+the wrap. Where an entry's hazard outlives its event, the entry's own
+text is what scopes the hazard.
+
+The fields are what the reached-release count at the END of this log is
+DERIVED from, by
+`tests/test_soundness_log_reach.py`, which also requires exactly one per
+top-level bullet — nine of them declared nothing at all until 2026-08-21,
+and a count over entries that happened to say something is not a count.
+
 - **2026-07-18 (pre-release): the stamp contract gained the semantics
   field.** The first verdict (E2a case 1, unreleased) shipped silently ℝ:
   its stamp named the endpoint representation but not which arithmetic
@@ -287,11 +311,15 @@ verdicts:
   release. Third field the contract has grown (solver options, precision
   config, semantics) — each because something was true and unsaid.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
 - **2026-07-18 (pre-release, same day): the stamp contract gained the
   nonvacuity field.** An empty or untethered declared set verifies
   everything vacuously, and no existing control catches it: the mutation
   control proves the *checker* isn't vacuous, not that any *harness*
   isn't. Fourth growth, same reason: true and unsaid.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
 - **2026-07-18 (pre-release, same day): four soundness defects fixed,
   found by an adversarial fresh-context audit** (`design/soundness-audit.md`
@@ -314,6 +342,8 @@ verdicts:
   definite in-range indices, and f64 constants); verified empirically
   before this entry was written. Every audit construction is a permanent
   regression test (`tests/test_audit_findings.py`).
+
+  *Versions: 0.1.0 pre-release builds only.*
 
 - **2026-07-18 (pre-release, same day): second audit pass — two more
   defects fixed, one introduced by the first audit's own fix.** A second
@@ -340,6 +370,8 @@ verdicts:
   existence divergence. No shipped verdict flipped — re-verified by
   re-running every recorded harness after the fixes. 119 tests green.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
 - **2026-07-18 (pre-release, same day): degrade-don't-crash completed for
   transfer shape guards.** The guards added against silent mis-joins
   (second-audit entry above) still *crashed* the analysis on legal jax
@@ -349,6 +381,8 @@ verdicts:
   ⊤ outputs, reason quoted in the verdict notes, counted as unknown in
   coverage. No verdict semantics changed — a crash produced no verdict
   before; regression test added.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
 - **2026-07-18 (pre-release, same day): the `any_pytree` build passed its
   registered audit gate; three posture escapes fixed before landing.**
@@ -371,6 +405,8 @@ verdicts:
   stamped ℝ semantics and yielded vacuous definite verdicts; refused at
   declaration now. No verdict flipped — every recorded harness re-run
   reproduces its status; 195 tests green.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
 - **2026-07-18 (pre-release, same day): the solver escalation layer
   landed through its gate; one unsound path and six lesser defects
@@ -409,6 +445,8 @@ verdicts:
   passed) and the zero-dep environment (227 passed). 299 tests green
   with both solvers installed.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
 - **2026-07-18 (pre-release, same day): two audited invariants made
   structural — the hardening pass, no behavior change.** The prior
   entry's UNSOUND and its stamp-integrity FRAGILE shared a shape:
@@ -435,6 +473,8 @@ verdicts:
   stamped absence — the ask was real and is fully described; statuses
   unaffected. 313 tests green with both solvers; 305 with jax and no
   solver; 241 zero-dep.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
 - **2026-07-18 (pre-release, same day): constraining assume landed
   through its gate — a semantics addition, with the sound direction
@@ -474,6 +514,8 @@ verdicts:
   the precondition) until narrowed-bounds emission ships as its own
   audited build. 431 tests green with both solvers; 423 with jax and no
   solver; 354 zero-dep.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
 - **2026-07-19 (pre-release): IEEE semantics landed as a second dial
   position — and the "one jaxpr, three devices" commitment bit twice,
@@ -529,6 +571,8 @@ verdicts:
   `HEAD` by the auditor twice. 522 tests green with both solvers; 514
   with jax and no solver; 445 zero-dep.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
 - **2026-07-19 (pre-release): three censused registry rows landed, and
   the audit they triggered found five UNSOUND defects — including the
   oldest false VERIFIED in the project.** The rows (`reduce_sum`,
@@ -541,6 +585,8 @@ verdicts:
   the ieee association bound; 1007 real and 770 ieee differential
   statuses, zero contradictions). **Nothing the three rows compute was
   unsound.**
+
+  *Versions: 0.1.0 pre-release builds only.*
 
   **Those four counts are RECORDED-HISTORICAL and no instrument in this
   repository produces them** — searched for, not assumed: no test and no
@@ -661,6 +707,8 @@ verdicts:
   content hashes and statuses. 906 tests green with both solvers; 758
   zero-dep.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
 - **2026-07-21 (pre-release): the I1 residual superseded — structurally
   prevented, no longer out-of-contract-by-convention.** The
   construction-path census (`design/ci-readiness.md`) falsified the
@@ -680,6 +728,8 @@ verdicts:
   built-in vacuity control (an entry-point VERIFIED has always been
   widen-checked; mode explicit, never defaulted) — the first
   duty-enforced backstop converted to structure for CI (ledger L18).
+
+  *Versions: 0.1.0 pre-release builds only.*
 
 - **2026-08-06 (pre-release): the scatter VERIFIED bar narrowed from the
   traced query to the decided obligation's slice — verdicts move, in the
@@ -809,6 +859,8 @@ verdicts:
   raise, so they are replaced by the reach count the same commit let go
   stale).
 
+  *Versions: 0.1.0 pre-release builds only.*
+
 - **2026-08-06 (pre-release): the narrowed scatter bar was NOT immune to a
   mispaired query, and now is — verdicts move, in the AVAILABLE →
   WITHHELD direction.** The entry above says the narrowed bar keeps the
@@ -821,6 +873,8 @@ verdicts:
   obligation (`ON`), one with it on an interval-decided obligation
   (`ELSEWHERE`), both two obligations, both `_barred_primitives ==
   ('scatter',)`:
+
+  *Versions: 0.1.0 pre-release builds only.*
 
       ON escalation + ON query         UNKNOWN on 8e42934, caac1ee, 45cf526
       ON escalation + ELSEWHERE query  UNKNOWN on 8e42934 (whole-query bar)
@@ -926,6 +980,8 @@ verdicts:
   term IS the update's, every other element's term IS the operand's), so
   for an element the write did not touch, `s[i]` aliases the operand's
   term. Measured, jax 0.11.0, x64, `s = x.at[0].set(0.5)`:
+
+  *Versions: 0.1.0 pre-release builds only.*
 
       slice of `s[1] - x[1] <= 0`   barred ('scatter',)   sha 2896a0f2…
       slice of `x[1] - x[1] <= 0`   barred ()             sha 2896a0f2…   collides
@@ -1104,6 +1160,8 @@ verdicts:
   queries carrying a barred primitive — the only ones any version of the
   bar inspects. Measured on this branch, on a query with **no `scatter`
   anywhere**, where no version of the bar has ever fired:
+
+  *Versions: 0.1.0 pre-release builds only.*
 
   | mispairing on a REFUTED query | 8e42934 | eb1ff86 | f5280cf | here |
   |---|---|---|---|---|
@@ -1336,6 +1394,8 @@ verdicts:
   corruption keyed on the index column's length would be the sixth instance
   of the pattern above.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
 - **2026-08-06 (pre-release, later the same day): the sixth instance of the
   bounded-sweep pattern closed at the ADD row's INDEX COLUMN, and the bar's
   narrowing decision stopped holding any option value at all.**
@@ -1483,6 +1543,8 @@ verdicts:
   coherence gate does not see a `records` whose first pass yields a non-empty
   strict subset; and the ADD row's column sweep stops at rank 1, so a
   multi-index column above rank 1 is DECLINED rather than gauged.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
 - **2026-08-06 (pre-release): the value zone is closed under CALL, and three
   checks that were satisfied by TEXT rather than by code.** A blinded audit of
@@ -1653,6 +1715,8 @@ verdicts:
   still stops at rank 1, so a multi-index column above rank 1 is DECLINED
   rather than gauged.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
 - **2026-08-06 (pre-release): the value zone was closed under CALL and left
   open under PREDICATE, because it is HANDED its constants.** A blinded audit
   of the entry above, answered here. **No item in this entry moves a verdict**:
@@ -1794,6 +1858,8 @@ verdicts:
   nobody reads — the ninth is the demonstration that this is not hypothetical.
   And the coherence gate and the ADD row's column bound are where the entry
   above left them.
+
+  *Versions: 0.1.0 pre-release builds only.*
 - **2026-08-07 (pre-release): the cvc5 WHEEL transport now refuses a
   crashed run — F4's rule, on the transport that never received it.**
   `_make_run_cvc5_binary` has refused a crashed run since F4;
@@ -1848,6 +1914,8 @@ verdicts:
   first, is now a protocol violation. Cry-wolf cost measured at zero.
   Every construction is a permanent regression test
   (`tests/test_solver_audit_findings.py`, the `f4wheel` block).
+
+  *Versions: 0.1.0 pre-release builds only.*
 - **2026-08-08 (pre-release): the cvc5 wheel driver and its parent
   disagreed about what a LINE is, and the payload could forge the
   terminator — defeating both tells at once. Reachable in PRINCIPLE, not
@@ -1883,6 +1951,8 @@ verdicts:
   anywhere in it. Driven through the driver's own route
   (`cvc5.InputParser`, SMT_LIB_2_6 string input, `sm.getDeclaredTerms()`,
   `solver.getValue`), real cvc5 1.3.4, `scratchpad/probe_cvc5_value_channel.py`:
+
+  *Versions: 0.1.0 pre-release builds only.*
 
       (declare-sort |S<VT>end 1| 0) (declare-const c |S<VT>end 1|)
         value = '(as |@_S\x0bend 1__0| |S\x0bend 1|)'
@@ -2132,6 +2202,8 @@ verdicts:
   above closes with *"`\r` from a driver out of step with this parser is a
   LIVE hole in both directions"*, and records a repair that was measured,
   dominant and unlanded. This is that repair.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
   **The mechanism, in one line.** `_run_cvc5_wheel` captured with
   `capture_output=True, text=True`, and universal-newline decoding maps a
@@ -2438,11 +2510,15 @@ verdicts:
   `test_tested_jax_series_is_silent` passes on 0.11 too — the suite alone
   cannot tell which series a lane ran. Before this, the honest floor was
   `jax>=0.11`.
+
+  *Versions: 0.1.0 pre-release builds only.*
 - **2026-08-07 (pre-release): a zero-element assumed predicate narrowed
   the declared box to a SUBSET and minted VERIFIED over it — a WRONG
   VERIFIED, reachable from the public API with two `any_array` calls.**
   Direction: **wrong VERIFIED → UNKNOWN**. This is the unsound direction,
   not capability loss; every affected verdict was false.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
   `assume` reads its predicate universally, and jax broadcasts an `and`
   whose operand is size-0 to `bool[0]`: a universal over no elements,
@@ -2609,6 +2685,8 @@ verdicts:
   — *truth over the points that TAKE the branch and satisfy its assume* —
   so **an obligation outside the vacuous branch was never scored**. The
   stated cause was the instrument's premise, not a finding of it.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
   **Re-measured on a corpus built to see it.** 1296 rows: 3 guards × 2
   branch SIDES for the assume × 6 branch-scoped assumes (incl. a
@@ -2777,6 +2855,8 @@ verdicts:
   analysis never looked at.** Both moves are **towards UNKNOWN**: nothing
   became VERIFIED, and nothing became REFUTED that was not before.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
   **(1) Refuting inside a branch presumed a reachability that nothing
   certified.** The `cond` transfer runs every branch the index interval
   ADMITS and judged each branch's obligations over the whole declared
@@ -2866,6 +2946,8 @@ verdicts:
   probe grid collapsed on wide boxes.** Both are defects in the witness
   search added by the entry above; the direction of the first fix is
   **REFUTED → UNKNOWN**, and nothing here moves anything toward VERIFIED.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
   **(1) A witness that is not a member certifies nothing, and the probe
   points were not members.** `_probe_point` rounded an integer
@@ -3163,6 +3245,8 @@ verdicts:
   move REFUTED → UNKNOWN and in no other direction; nothing moves toward
   VERIFIED and no `discharged` is touched.**
 
+  *Versions: 0.1.0 pre-release builds only.*
+
   **The defect.** An `assume` the checker cannot represent exactly is
   DROPPED, and the run records that it was; an `assume` that narrows a
   value whose computed box may exceed its true image leaves the narrowed
@@ -3334,20 +3418,34 @@ verdicts:
   REFUTED-then-UNKNOWN in the same four. Both cells are sound and neither
   is a wrong VERIFIED: the discharge is the CONDITIONAL claim and the
   stamp says so in itself — *"constrained assume at ...: the verdict
-  holds where the precondition holds — narrowed x0 (IR var 1) to
+  holds where the precondition holds — narrowed x0 (IR var 0) to
   [0.9, 1.0]"* —
   and the assume-last cell simply judges over more and discharges less.
 
-  **That quotation said `narrowed var 2` until 2026-08-20, and it was
-  never what this harness printed.** B8a gave the message the witness's
-  own name for a declared input (`propagate._Propagator._name_of_id`), so
-  the current text is `narrowed x0 (IR var 1)` — driven here on jax
-  0.11.0. But the predecessor did not print `var 2` either: driven at
-  `aabb58d`, the commit before that change, this one-declaration harness
-  printed `narrowed var 1`. So this was not a quotation that rotted when
-  the code moved; it was wrong when it was written, by an index, and the
-  code moving is only what made it worth re-driving. `design/constraining-assume.md`
-  carried the same digit and is corrected with it.
+  **That quotation said `narrowed var 2` until 2026-08-20 and `narrowed
+  x0 (IR var 1)` until 2026-08-21, and this harness printed neither.**
+  B8a gave the message the witness's own name for a declared input
+  (`propagate._Propagator._name_of_id`), so the shape of the current text
+  is right and the index in it was not. Driven on jax 0.11.0 with
+  `JAX_ENABLE_X64=1`, `check()` over exactly the harness this entry
+  describes — ONE declaration, `x = any_array((), "float64", (0.0, 1.0))`,
+  `assume(x >= 0.9)`, `assert_(x >= 0.5)`, VERIFIED — the note reads
+  **`narrowed x0 (IR var 0)`**. Driven at `aabb58d`, the commit before
+  that change, the same one-declaration harness printed **`narrowed var
+  0`**. Both indices belong to a harness with a SECOND declaration that
+  the assume is written on: that one prints `narrowed x1 (IR var 1)` today
+  and printed `narrowed var 1` at `aabb58d`, also driven. And
+  `tests/test_assume_constrain.py::test_disclosure_texts_are_exact` pins
+  the same string, at the IR level, on a one-declaration query:
+  `narrowed x0 (IR var 0)`.
+
+  So the entry whose subject is a quotation wrong by an index was
+  corrected to a quotation wrong by an index, twice. It was never a
+  quotation that rotted when the code moved; it was wrong when it was
+  written and wrong again when it was fixed, and what the code moving did
+  was make it worth re-driving rather than re-reading.
+  `design/constraining-assume.md` carried the same digit both times and is
+  corrected with it.
   What is true of the residual is that it can only cost precision, in
   BOTH directions; what is false is that a VERIFIED is out of its reach.
   `stelling.harness.assume`'s docstring now states both faces with the
@@ -3386,6 +3484,8 @@ verdicts:
   is EMPTY, in which case every obligation is vacuously true. Where the
   region is demonstrably non-empty the refutation stands, and this change
   demonstrates it.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
   **What the certificate is.** One point of the DECLARED SET at which
   every `stelling_assume` of the query is definitely true. It is found by
@@ -3851,6 +3951,8 @@ verdicts:
   *because of* an index. `design/index-bounds-round.md` is the full
   record.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
   **What was wrong before was power, not soundness.** Measured on
   `9564728`: `u[i]` with a traced `i` collapsed to `[-inf, inf]` whether
   the index was in bounds, partly out, or wholly out, and so did an
@@ -4133,6 +4235,8 @@ verdicts:
   It closes a DISCLOSURE gap: the hazard was measured, priced, and left
   open deliberately, and it was described nowhere a reader of THIS PAGE
   could have found it.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
   **THE SCOPE OF THAT GAP WAS OVERSTATED WHEN THIS ENTRY LANDED, AND THE
   CORRECTION IS RECORDED RATHER THAN QUIETLY SWAPPED.** The sentence
@@ -5111,13 +5215,15 @@ verdicts:
   attaches a second, independent hook at the construction site itself and
   **raises** `stelling.EagerTruncationError` at the line that wrote the
   constant, so a session it is armed on either contains no undeclared
-  truncation or does not finish. Measured at `8f0adf2` on jax 0.11.0: it
-  closes six of the eight `unwatched` routes in
+  truncation or does not finish. Measured on jax 0.11.0 — the route census
+  at `8f0adf2`, and re-measured 2026-08-21 when `lax.select`-of-`full`
+  became a row of both inventories: it closes seven of the nine
+  `unwatched` routes in
   `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` — `jnp.full`,
   `jnp.full_like`, `lax.full`, `lax.full_like`,
-  `lax.convert_element_type`, `jnp.stack`-of-`full` — and, measured but
-  carried in neither inventory, `lax.select`-of-`full` and `jnp.take`'s
-  `fill_value`, plus the scoped `with jax.disable_jit():` door.
+  `lax.convert_element_type`, `jnp.stack`-of-`full` and
+  `lax.select`-of-`full` — plus the scoped `with jax.disable_jit():` door,
+  which is measured and is a row of neither inventory.
   `stelling.intentional_wrap(value, dtype)` is how a deliberate wrap is
   declared, and it is a value rather than a mode, so it cannot license a
   different site.
@@ -5125,21 +5231,39 @@ verdicts:
   **What it does NOT change, which is why the word above is only
   qualified and not withdrawn.** It is **OFF BY DEFAULT** and
   `-p stelling.overflow` does not turn it on, so nothing in the default
-  configuration moves and no verdict flips either way. It does not touch
-  the INLINE door this entry is mostly about (`x + N` and its relatives
-  still narrow in the const-fold rule, which is the other instrument's
-  subject), it does not reach eager execution, and it leaves two numpy
+  configuration moves and no verdict flips either way. It leaves two numpy
   routes permanently open (`np.asarray(N).astype(dt)`,
   `jnp.asarray(np.array(N), dtype=dt)`). It is a RULE over a session, not
   a property of a verdict: **a VERIFIED still carries no claim that the
   constants in your source survived into the trace.**
   `docs/overflow-tripwire.md` prices it and enumerates the residue.
 
+  **AND THE TWO SENTENCES THIS PARAGRAPH USED TO CARRY ABOUT THE INLINE
+  DOOR AND EAGER EXECUTION WERE FALSE WITH `jit` OFF — corrected
+  2026-08-21.** They read *"it does not touch the INLINE door this entry
+  is mostly about"* and *"it does not reach eager execution"*, three lines
+  below a list that already named the scoped `with jax.disable_jit():`
+  door as one this instrument closes; the two halves of this entry
+  contradicted each other. Measured on jax 0.11.0, warm dispatch, counters
+  from `eager.snapshot()`: with `jit` ON — the default — `x + 40000` on an
+  `int16` array gives conv=0, trunc=0 and returns `-25535` in silence, and
+  `x * 40000`, `x >= 40000`, `jnp.maximum`, `jnp.minimum` and
+  `jnp.clip(x, 0, 40000)` are conv=0 as well. With `JAX_DISABLE_JIT=1`
+  **every one of them RAISES**, conv=1 trunc=1 apiece and conv=2 for
+  `clip`. So the honest sentences are: with `jit` ON this does not reach
+  the inline door and does not reach eager execution; with `jit` OFF it
+  reaches both, and that is exactly why the `disable_jit` door is on the
+  closed list above. `src/stelling/_tripwire/eager.py` has carried the
+  qualifier in capitals since B16 — *"THAT FIGURE IS FOR `jit` ON AND THAT
+  QUALIFIER IS LOAD-BEARING"* — and this entry did not.
+
 - **2026-08-14 (pre-release): the rational-`pow` row emitted about a
   DIFFERENT REAL FUNCTION than the program computes, and discharged it —
   `x ** 0.1` was enough.** Direction: **wrong VERIFIED → UNKNOWN**, plus
   **RAISE → Verdict** on the refutation side. Every affected VERIFIED was
   a claim about an expression the harness does not contain.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
   A non-integer `pow` exponent was rationalised —
   `Fraction(e).limit_denominator(128)` — and admitted whenever
@@ -5437,6 +5561,8 @@ verdicts:
   the wrong values.** A fabricated conjunct can only shrink the model set,
   so its failure direction is `unsat` → discharged → **VERIFIED**, and
   nothing downstream withholds a discharge.
+
+  *Versions: 0.2.0 development builds only.*
 
   **Measured, and it is the converse of what the user wrote.** Harness:
   two `float64` declarations in `[-10, 10]`, `assert_(x - y <= 0.0)`, and
@@ -5823,6 +5949,8 @@ verdicts:
   `discharged`, and the verdict is VERIFIED. Nothing checked whether the
   `unsat` came from the obligation or from the precondition. (Audit 0.2.0
   S7, S7′, and M5/M4 in the same batch.)
+
+  *Versions: 0.2.0 development builds only.*
 
   **THE ASYMMETRY IS WHY THIS IS A DEFECT AND NOT A TECHNICALITY.** The
   non-relational form of the identical mistake is refused, loudly, by
@@ -6431,6 +6559,8 @@ verdicts:
   FORMATS.** Audit 0.2.0 S10 (found by that audit's IEEE-formats lens as
   § F2), fixed in `interval.ieee_div` and `interval.ieee_div_fmt`.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
   **The defect.** Both kernels special-cased a divisor interval touching
   zero at exactly one boundary. `b = [lo, 0]` with `lo < 0` was read —
   the comment said so — as *"divisor approaches 0 from below"*, so for a
@@ -6676,6 +6806,8 @@ verdicts:
   was ever wrong — and it is in this log because it MOVED verdicts**, in
   the UNKNOWN → definite direction, on a shape the release advertises.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
   `add` routes through `_exactable` → `Fraction` and returns the exact
   endpoint when it is representable; `div` has the same branch; `mul`
   bumped unconditionally. Measured on this branch, before and after:
@@ -6836,6 +6968,8 @@ verdicts:
   REACHES zero dropped the zero and minted a definite verdict.** Audit
   0.2.0 B5-1. **FALSE VERIFIED, real mode**, made reachable by the M16 fix
   above.
+
+  *Versions: 0.1.0 pre-release builds only.*
 
   **The defect.** `div`'s zero-containing divisor had four shapes and
   three of them declined, every one citing the same fact — ℝ has no value
@@ -7142,6 +7276,8 @@ verdicts:
   reason.** Audit 0.2.0 B5-3. Not a false verdict — a false SENTENCE, out
   of a public entry point.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
   The S10 entry above records: *"the boundary-aware branch also raised
   `IntervalError("NaN endpoint")` on `[-inf,-inf] / [-inf, 0]`; returning
   ⊤ before any endpoint arithmetic removes that too."* True of `ieee_div`,
@@ -7275,6 +7411,8 @@ verdicts:
   inside a loop body. It is also the worse direction — a **false REFUTED**
   presents a point the user's own precondition excludes as a
   counterexample to their program.
+
+  *Versions: `v0.1.0` and 0.2.0 development builds.*
 
   **THE MECHANISM.** `propagate`'s walk descends the transparent wrappers
   (`jit`, `custom_jvp_call`, `custom_vjp_call`, `remat2`) and `cond`. It
@@ -7681,6 +7819,8 @@ verdicts:
   more-informative direction, and neither can mint a definite answer that
   the old code contradicted.
 
+  *Versions: 0.1.0 pre-release builds only.*
+
   **M12 — two of the four catalogued formats could not see a constant.**
   `propagate._STRUCT_FMT` had no `<f2` (float16) and no route for
   bfloat16's `<V2`, so `_decode_array` raised and `_Propagator.read` bound
@@ -7810,6 +7950,8 @@ verdicts:
   bracketing the WRONG FUNCTION, and one half of it REACHES THE RELEASED
   0.1.0.** Audit 0.2.0 S9 (float32) and S11 (binary64). FALSE VERIFIED and
   FALSE REFUTED.
+
+  *Versions: `v0.1.0` and 0.2.0 development builds.*
 
   **The defect.** Under `ieee` semantics a verdict is a claim about the
   float value **the program computes**. `iv.exp` brackets CPython's
@@ -8361,6 +8503,8 @@ in place and marked.*
   direction is the LESS conservative one, so it is logged first and argued
   rather than announced.
 
+  *Versions: 0.2.0 development builds only.*
+
   **What it was.** `verdict._bar_scope` narrows the bar from the whole query
   to the decided obligations' own slices, and it earns the narrowing by
   re-deriving each slice out of `closed` and re-emitting it: the recorded
@@ -8522,6 +8666,8 @@ in place and marked.*
   `TypeError: dot_general requires contracting dimensions to have the same
   shape, got (2,) and (4,)`. Nothing produced by `stelling.harness.trace`
   can carry one.
+
+  *Versions: `v0.1.0` and 0.2.0 development builds.*
 
   **THE MECHANISM, and it is a shape this project keeps being bitten by.**
   `stelling.interval.dot_general` checked contracted- and batch-dimension
@@ -8799,6 +8945,8 @@ in place and marked.*
   fix directly above. Read this entry and not that one when screening a
   verdict: its condition subsumes S12's, and S12's two recognition screens
   are struck as unsound (see the note there).
+
+  *Versions: `v0.1.0` and 0.2.0 development builds.*
 
   **THE MECHANISM, and it is S12's own repair seen from one step back.**
   S12 gave the row a shared shape oracle,
@@ -9772,6 +9920,8 @@ in place and marked.*
   behaviours, one malformation — the S12 shape, in the oracle's own
   contract.
 
+  *Versions: 0.2.0 development builds only.*
+
   The crash is **pre-existing**; what was new in `4d793cf` is the sentence
   *"Raises `IntervalError` on any malformation"* in
   `dot_general_geometry`'s docstring, which made a false promise where a
@@ -9838,6 +9988,8 @@ in place and marked.*
   M17 exists to have fixed. Reachable from hand-built IR, which this page
   names as in scope (`from_dict` coerces at its own door and nowhere else).
   Measured on the same query, an `int` where the frames go:
+
+  *Versions: 0.2.0 development builds only.*
 
   ```
   dee8bc2:  escalate() returned: [(0, 'violated-witness')]
@@ -9932,6 +10084,8 @@ in place and marked.*
   byte-identical `source_info` at the same position, so all three guards
   pass and the wrong-query slice comes out — exactly as under the count:
 
+  *Versions: 0.2.0 development builds only.*
+
   ```
   source_info identical across the two queries: True
   content hashes differ:                        True
@@ -10019,6 +10173,8 @@ in place and marked.*
   because this page's policy is about verdicts FLIPPING and says nothing
   about which direction they flip in: measured below, this change moves 109
   queries from UNKNOWN to REFUTED.
+
+  *Versions: 0.2.0 development builds only.*
 
   **THE MECHANISM.** Solver escalation slices a top-level
   `stelling_assert` equation. It decided which one an obligation belonged
@@ -10258,6 +10414,8 @@ in place and marked.*
   serialization and no hand-built record.** Audit 0.2.0 B6 re-audit,
   UNSOUND-3 — disclosed by the B6 batch, which correctly refused to
   half-close it, and closed here.
+
+  *Versions: `v0.1.0` and 0.2.0 development builds.*
 
   **THE MECHANISM.** `stelling.verdict.make_verdict` and
   `stelling.solvers.make_solver_verdict` take three things: the query
@@ -10763,6 +10921,8 @@ in place and marked.*
   through `ir.ClosedJaxpr.from_dict`, no attacker Python anywhere in the
   document.
 
+  *Versions: `v0.1.0` and 0.2.0 development builds.*
+
   **THE CONSTRUCTION.** `a = any_array((2,), float64, (1.0, 2.0));
   assert_(a > 0); assert_(a < 0)`. The second assertion is FALSE at every
   point of the declared box — concrete jax at three points and exact
@@ -10905,6 +11065,8 @@ in place and marked.*
   each call `float()` on them and one that does not.** Audit 0.2.0
   **S16**. Document-reachable, same conditions as S15.
 
+  *Versions: `v0.1.0` and 0.2.0 development builds.*
+
   **THE CONSTRUCTION.** `a = any_array((2,), float64, (-1.0, 1.0));
   assert_(a > 0)`, honestly UNKNOWN. Editing the persisted document's
   declaration to `lo: inf, hi: inf` returned **VERIFIED with
@@ -11031,6 +11193,8 @@ in place and marked.*
   stamp section above is where the scope of the `query <hash>` is argued —
   it already says the hash is "half-right by construction" and names which
   half — and this is another way the half it does not cover bites.
+
+  *Versions: 0.2.0 development builds only.*
 
   **What moved.** jax 0.11.1 added an `out_sharding` param to the
   `reduce_max` and `reduce_min` primitives. The param travels in the
@@ -11168,26 +11332,56 @@ in place and marked.*
   covers it.
 
 **Releases reached by an entry in this log.** `v0.1.0`, the only release,
-is reached by **six** entries, all of them audit 0.2.0 findings and all
-reproduced at the tag: the 2026-08-15 `exp`/`pow` libm-bracket entry (S11)
-through `propagate(closed, semantics="ieee")`; the 2026-08-15 undescended-
-`assume` entry (S13), through the ordinary `check()` path in real mode;
-the 2026-08-15 B6 `dot_general` entry (S12), through `from_dict`; the
-2026-08-16 B11 mispaired-`Propagation` entry (UNSOUND-3), through
-`make_verdict` / `make_solver_verdict` called directly; and the two
-2026-08-18 B12 entries (S15, S16), both through `from_dict` and both
-re-measured on a `git clone --shared` tree at the tag on the day they were
-written. UNSOUND-3 is the only one of the six that needs neither
-`semantics="ieee"`, nor a serialized query, nor an `assume`.
+is reached by **seven** ENTRIES of this log — and the unit is stated
+because the three counts here are 7, 8 and 7, and this sentence has twice
+been corrected by putting one of them where another belongs. Every
+top-level bullet above carries exactly one `Versions:` field from a closed
+set of three, and these seven are the bullets whose field names `v0.1.0`;
+all seven are audit 0.2.0 findings and all were reproduced at the tag. The
+2026-08-15 `exp`/`pow` libm-bracket entry (S11) through
+`propagate(closed, semantics="ieee")`; the 2026-08-15 undescended-`assume`
+entry (S13), through the ordinary `check()` path in real mode; the
+2026-08-15 B6 `dot_general` shape entry (S12), through `from_dict`; the
+2026-08-15 B6 emission-versus-propagation shape entry (S12&prime;), also
+through `from_dict`; the 2026-08-16 B11 mispaired-`Propagation` entry
+(UNSOUND-3), through `make_verdict` / `make_solver_verdict` called
+directly; and the two 2026-08-18 B12 entries (S15, S16), both through
+`from_dict` and both re-measured on a `git clone --shared` tree at the tag
+on the day they were written. UNSOUND-3 is the only one of the seven that
+needs neither `semantics="ieee"`, nor a serialized query, nor an `assume`.
 
-**AT LEAST THREE OF THE SIX NEED NO SOLVER AT ALL — UNSOUND-3, S15 AND
+**S12&prime; IS THE ONE THIS SENTENCE LEFT OUT, AND IT IS THE BROADER OF
+THE PAIR.** S12 is an equation the interval transfer refuses outright;
+S12&prime; is an equation NEITHER leg refused — different mechanism,
+different fix, and it covers `reduce_sum` as well as `dot_general`. S12's
+own entry defers to it (*"Screen with S12&prime;'s instead; it subsumes
+this entry's"*), and at the tag S12&prime; declares a FALSE DISCHARGE on
+`sum(a) <= 4.5` over `a` in `[1,2]^4`, whose supremum is 8. It was added
+by `96ab47a`, which wrote its `PRESENT IN THE RELEASED 0.1.0` headline and
+left this digit at **three** — so the omission was live from that commit
+until 2026-08-21, through every one of the corrections listed at the end
+of this paragraph, and none of them noticed it. That is why the digit is
+no longer written: `tests/test_soundness_log_reach.py` counts the fields
+and holds the numerals above and below to what it counts.
+
+**THE THREE UNITS, AND WHY EACH IS STATED.** Seven ENTRIES of this log
+reach `v0.1.0` — the list above. **Eight** audit findings reach it: S11,
+S12, S12&prime;, S13, S14, S15, S16, UNSOUND-3 — one more than the
+entries, because S14 has a routed detail section (`SF-0.2.0-59`) and its
+own reach declaration but no `## Log` bullet of its own. And **seven**
+one-liners in `CHANGELOG.md` carry the `v0.1.0` version field — one fewer
+than the findings, because S15 and S16 share `SF-0.2.0-14`. Three
+different questions, three different answers, and a reader who takes any
+one of them for another is reading a number this page did not state.
+
+**AT LEAST THREE OF THE SEVEN NEED NO SOLVER AT ALL — UNSOUND-3, S15 AND
 S16 — and this sentence claimed UNSOUND-3 was the only one.** It was true
-of the four entries `main` had; it is not true of the six the B12 merge
-makes. Corrected by MEASUREMENT at the tag rather than by reasoning from
+of the four entries `main` had; it is not true of the seven this log now
+carries. Corrected by MEASUREMENT at the tag rather than by reasoning from
 the entries — and stated as "at least three" because what was measured is
 that S15 and S16 join UNSOUND-3, not that the remaining three do not.
-S11, S13 and S12 are not re-measured here and this sentence claims
-nothing about them.
+S11, S13, S12 and S12&prime; are not re-measured here and this sentence
+claims nothing about them.
 
 On a `git clone --shared` tree at `e67688e`, through `propagate` and
 `verdict.make_verdict` with no solver anywhere in the chain: `assert_(a > 0); assert_(a < 0)` over the declared `(1.0, 2.0)`
@@ -11227,6 +11421,17 @@ arriving by a route the first three did not use: not a claim that rotted
 in place, but two claims that were each true where they were written. The
 merge re-derived the list rather than taking either side's digit, and the
 no-solver clause above is what re-deriving it turned up.
+
+**AND IT IS SEVEN NOW, WHICH IS THE SIXTH VALUE THIS DIGIT HAS HELD.**
+*(no releases yet)*, S11 alone, three, four-and-five together, six, seven.
+Every one of those corrections was made by a person re-reading the log,
+and not one of them noticed that S12&prime; had been declaring
+`PRESENT IN THE RELEASED 0.1.0` since `96ab47a` — the omission was live
+through all five. A digit that has been wrong five times and re-read by
+hand five times is not a digit to correct a sixth time; it is one to stop
+writing. It is derived now, from the `Versions:` fields on the bullets
+themselves, and the fields are a closed set of three so that a new entry
+cannot decline to answer the question.
 
 ## 0.2.0 soundness-fix detail (routed from `CHANGELOG.md`)
 
@@ -11356,8 +11561,8 @@ it** (`fix/B15-trace-gate-observation`). Branched from `a759809`.
 
 - **The tripwire's coverage claim is now an asserted inventory.**
   `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` declares a bucket
-  for each of 33 constant-construction routes — 17 `watched`, 8
-  `unwatched`, 3 `loud` (jax raises), 5 `deferred` (the constant reaches the
+  for each of 35 constant-construction routes — 17 `watched`, 9
+  `unwatched`, 3 `loud` (jax raises), 6 `deferred` (the constant reaches the
   jaxpr and the convert transfer declines it) — and the suite MEASURES every
   route by driving it through `check()` twice, comparing, and failing on a
   route whose two calls disagree. Driving it once was the shape that made
@@ -11384,6 +11589,16 @@ it** (`fix/B15-trace-gate-observation`). Branched from `a759809`.
   denominator; all are corrected, and
   `tests/test_tripwire_gate_coverage.py` now asserts the bucket's size and
   not only how many of it the eager detector closes.*
+
+  *And it read "33 … 17 `watched`, 8 `unwatched`, 3 `loud`, 5 `deferred`"
+  until 2026-08-21, when `lax.select`-of-`full` and `jnp.take`'s
+  `fill_value` — both driven, both disclosed elsewhere as routes the eager
+  detector closes, both rows of NEITHER inventory — were enrolled and
+  measured into it. The first is `unwatched`, the second is `deferred`.
+  Asserting the bucket's size was not what was missing either:
+  `test_the_documented_fraction_is_the_measured_one` reads the census and
+  the fraction out of every file in the tree that states them, in both
+  directions, because nothing had ever read the sentence.*
 
 #### SF-0.2.0-08
 
@@ -14428,3 +14643,298 @@ was measured on a B6-free tree unless it says otherwise.
   (F1b) and catches a rule the messages no longer state (F1d); it does
   not and cannot catch a rule someone widened on purpose.*
 
+## 0.2.0 Mode 2 detail (routed from `CHANGELOG.md`)
+
+`CHANGELOG.md`'s **The eager construction-site detector (Mode 2),
+DEFAULT-OFF** section was 242 of that file's 1158 lines at `de80ad8` —
+20.9%, the third-largest section in it and the second to be routed. `DOCUMENTATION_ARCHITECTURE.md` §8.3 governs the
+**Soundness** section by its letter and this section is not that one, so
+leaving it was defensible; it was routed anyway, on the ruling that §8.3's
+rationale — the changelog carries one-liners and the ledger carries the
+predicate — applies to it identically, and that the machinery built for the
+soundness routing exists and is verified.
+
+The destination is this file and not a design note because the section's
+own first sentence points here: the defect Mode 2 closes is
+`SOUNDNESS.md`'s integer-literal wrap entry, and its cost is a wrong
+VERIFIED. `design/eager-truncation-detector.md` remains the design note —
+why it raises, why it raises `BaseException`, why there is no carve-out —
+and `docs/overflow-tripwire.md` remains the user-facing page that prices it.
+
+The move is checked by the same machinery, not asserted:
+`tests/_soundness_routing_manifest.SECTIONS` carries this section beside the
+soundness one, with its own `source_commit`, its own derived span and a
+per-block `src_sha256`/`dest_sha256`, and `tests/test_soundness_routing.py`
+holds both to the same partition in both directions. **One of the six
+blocks was edited in transit**, `M2-0.2.0-01`, whose route census this
+commit corrected; the eleven source lines it did not carry are quoted in
+the manifest, one by one, and MEASURED against `de80ad8:CHANGELOG.md`
+rather than declared.
+
+#### M2-0.2.0-01
+
+- **`--stelling-eager-truncation=error` — an out-of-range integer constant
+  narrowed at array construction now RAISES at the line that wrote it.**
+  `jnp.full((), 256, jnp.int8)` is `0`: the 256 is destroyed before any
+  primitive is bound, so the overflow tripwire — which watches jax's
+  const-fold rule — never sees it, and no verdict downstream can tell that
+  the `0` it certified was written as a `256`. `SOUNDNESS.md`'s
+  integer-literal wrap entry is that defect and its cost is a wrong VERIFIED.
+
+  Seven of the **nine** `unwatched` routes in
+  `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` narrow at one line
+  inside jax, and this attaches there: `jnp.full`, `jnp.full_like`,
+  `lax.full`, `lax.full_like`, `lax.convert_element_type`,
+  `jnp.stack`-of-`full` and `lax.select`-of-`full`, plus — measured, but a
+  row of neither inventory — a scoped `with jax.disable_jit():`. Two numpy
+  routes remain and are named: `np.asarray(N).astype(dt)` is permanently
+  unhookable (`np.ndarray.astype` is an immutable type attribute) and
+  `jnp.asarray(np.array(N), dtype=dt)` is a second spelling into the same
+  residue. `EAGER_COVERAGE`, beside `GATE_COVERAGE`, is the measured
+  inventory and a test holds the residue to exactly those two.
+
+  **`jnp.take`'s `fill_value` was disclosed beside `lax.select`-of-`full` as
+  a route this closes, and it is not one of the gate's holes at all.** Driven
+  through `check()` in three spellings on 2026-08-21, the written 40000
+  reaches the jaxpr INTACT in all three: the route is `deferred`, the
+  `convert_element_type` transfer is what declines it, and the gate never had
+  anything to see. Run EAGERLY there is no trace for the constant to reach,
+  the fill array is built at the construction site, and this detector does
+  raise — so it is `deferred` in `GATE_COVERAGE` and `raises` in
+  `EAGER_COVERAGE`, the only row that is both.
+
+  *This entry said "six of the SEVEN" until 2026-08-20, as did five other
+  places, while `GATE_COVERAGE` held eight `unwatched` rows — and had held
+  eight since `fc98241` added `jnp.stack`-of-`full`. The sentence's own
+  arithmetic gave it away (six closed plus two remaining is eight). The
+  diagnosis published with the correction was wrong about the mechanism: it
+  said the sentence survived because a test asserted the NUMERATOR alone,
+  and `residue == {two named routes}` had already pinned the denominator, so
+  `len(closed) == 6` entailed `len(unwatched) == 8` and there was no state in
+  which the old assertions passed and the new one failed. What was missing is
+  that NOTHING READ THE PROSE: driven at `de80ad8`, reverting the fraction to
+  "seven" in all six prose sites left 419 tests green.
+  `test_the_documented_fraction_is_the_measured_one` reads it now, in every
+  file of the tree that states it and in both directions. Measured at
+  2026-08-21: 35 routes — 17 `watched`, 9 `unwatched`, 3 `loud`, 6
+  `deferred`.*
+
+  **It carries an ORIGIN QUESTION, and the first version of this entry said it
+  needed none.** With `jit` on, jax's own threefry PRNG mask reaches the
+  const-fold site and not this one, which is what that claim was measured on.
+  With `jit` OFF — `jax.disable_jit()`, `JAX_DISABLE_JIT=1`, and the public
+  `chex.fake_jit()` / `chex.fake_pmap_and_jit()` that install it — jax
+  evaluates the mask eagerly and it arrives here as a written scalar, and the
+  detector raised `4294967295 -> -1 (int32)` **inside jax's own PRNG**,
+  naming a line the user never wrote a constant on. Measured on jax 0.11.0 and
+  0.10.2, byte-identically, over a 32-workload census across 24 third-party
+  packages: with `JAX_DISABLE_JIT=1`, **9 truncations, 9 fires before and 1
+  after** (8 of them jax's own: `jax.random` ×4, flax linen, flax nnx,
+  equinox, `chex.fake_jit`); with `jit` ON and jax's defaults untouched, **2
+  truncations, 2 fires before and 1 after** — because `chex.fake_jit()`
+  installs `disable_jit` around a test body, so this is reachable in the
+  DEFAULT configuration through a public API. The one remaining fire in every
+  row is a control of this repository's own that must fire. Over chex's own
+  installed `fake_test.py`: **2 failed / 32 passed before, 34 passed after.**
+
+  **The answer is a LOOKUP, not a predicate, and that is the second attempt.**
+  The first asked a general question of the data — *is the narrowed integer
+  among the arguments of the call that crossed out of non-jax code into jax?*
+  — and an audit found it wrong in both directions: it **suppressed a constant
+  the user really wrote** whenever the call carried it in a `functools.partial`,
+  a `jax.tree_util.Partial`, a bound method, a closure cell or a
+  registered-dataclass pytree — silently, in the DEFAULT `jit`-on
+  configuration, on `jax.tree.map(partial(jnp.full_like, fill_value=300),
+  tree)` and under `jit`, `vmap`, `lax.map`, `lax.scan` and `lax.fori_loop`
+  alike — and it **raised on jax's own mask** whenever its container scan hit
+  a depth, breadth or budget limit, which a params-shaped pytree does.
+
+  A sweep of 649 conversions across `jax.random.*` and `jnp`'s integer ops
+  over six integer dtypes, under `JAX_DISABLE_JIT=1`, finds **exactly one**
+  eager truncation of jax's own in existence — re-derived as shipped code by
+  `_adapter_jax.eager_jax_constant_sweep`, over a wider surface, at 675
+  conversions and 13 truncation events all of which are that one row, on both
+  jax series. So the one thing jax writes is
+  written down, at jax's own site, in `_adapter_jax._JAX_EAGER_CONSTANTS`:
+  `("_src/random/threefry2x32.py", "_threefry_seed") -> 4294967295, uint32
+  into int32`. A narrowing is jax's when one of those functions is in the
+  unbroken run of jax frames beneath the caller AND the value, the SOURCE
+  dtype and the target dtype are that row's. Everything else is the caller's.
+  That is the same shape — a narrow map plus a canary that reddens when it is
+  incomplete — that `_KNOWN_HASHES` already argues for one screen up in the
+  same file.
+
+  **The source dtype is in the key because without it a row suppresses the
+  CALLER'S constant.** At that one site the two collide:
+  `jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))` narrows
+  twice under `_threefry_seed` — the caller's seed and jax's mask, both
+  `4294967295 -> -1` at `int32` — and a three-field row suppressed **both**,
+  then printed *"written by jax … the threefry PRNG's 32-bit mask"* at the
+  caller's own line. It was a value collision and not a general quiet
+  (`seed=8589934592` and `seed=2147483648` alarmed correctly throughout), and
+  the two differ in exactly one field the hook can see: all 13 of jax's own
+  truncation events arrive from `uint32` and a caller's seed from `int64`.
+  Driven before and after on both routes into that entry point. What remains
+  is the shape rather than the instance — a row is a value lookup, not a proof
+  of authorship — and it is disclosed in `report.EAGER_UNCOVERED`.
+
+  It **fails closed**: a jax release that adds a second internal eager
+  truncation has no row, is therefore the caller's, and RAISES at a line
+  inside jax rather than disappearing. Three things arrive first — the sweep
+  runs as a test on both jax series, arming drives the row and reports
+  `origin-blind:jax-attributed-to-you` rather than attaching if it stops
+  holding, and the alarm prints jax's own frames and asks the reader to report
+  it. It needs no container scan, so the depth, breadth and budget constants
+  and the "inconclusive" bucket are gone rather than documented; and it
+  removes the previously-disclosed false alarm on `jax.random.PRNGKey(2**32 -
+  1)`, where jax's mask and the caller's seed are the same integer — a correct
+  verdict about a program whose seed is nonetheless **already dead**, which is
+  now disclosed rather than left to read as a clean bill of health.
+  `PRNGKey` and `key` cast the seed with `jnp.asarray(np.int64(seeds))` inside
+  jax's own `random_seed`, a NUMPY-level cast this detector has never sat on —
+  `jit` on or off, before this work and after it — so the seed produces **zero**
+  observations at the hook. Measured on jax 0.11.0, x64 off:
+  `PRNGKey(2**32 - 1) == PRNGKey(-1)`, `PRNGKey(2**32) == PRNGKey(0)`,
+  `PRNGKey(2**33 + 5) == PRNGKey(5)`. A seed that does not survive is exactly
+  what this instrument exists to report and it structurally cannot report this
+  one; closing it needs a hook at a numpy cast rather than at jax's array
+  constructor.
+
+  **The `jit` claim is now the narrow one.** *"A call boundary exists whether
+  or not a trace is in progress, which is why the answer does not depend on
+  `jit`"* was **false**: widened from four programs to fourteen,
+  `jax.jit(partial(jnp.full_like, fill_value=300))(x)` gave no alarm with
+  `jit` on and raised with it off, on the same observed conversion, because
+  which frame is "the outermost jax frame" depends on how many wrapper frames
+  jax installs. **And the sentence that replaced it carried a false clause of
+  its own** — *"the verdict is a function of the value, the dtypes and which
+  jax functions are in the run, and `jit` changes none of the three"*. The
+  third clause is false, measured on jax 0.11.0 with one fresh subprocess per
+  cell over 36 programs: of the 25 observations that occur in both modes, **6
+  (in 5 programs) present a different run of jax frames**, and it differs in
+  BOTH directions — `jit` on inserts tracing frames
+  (`jit(partial(full_like, fill_value=300))(x)`: 8 frames on, 2 off) and `jit`
+  off inserts jax's eager dispatch, which a trace does not contain
+  (`jnp.take(x, [9], mode="fill")`: 25 frames on, 31 off). The real invariant
+  is a **constraint on rows**: the verdict is stable across `jit` exactly when
+  the function a row names is in the run under both modes or in neither, which
+  is why the one row holds — `_threefry_seed` is a PRNG leaf that neither
+  jit's machinery nor eager dispatch contains. A row keyed on a function only
+  one mode's run contains would flip the verdict. Driven as an equality over
+  **19 programs** covering `jit`, `vmap`, `tree.map`, `lax.map`, `lax.scan`,
+  `lax.fori_loop`, five carrier shapes and two pytrees big enough to have
+  exhausted the old scan's budget: 0 of 19 verdicts differ. Suppressions are
+  counted and printed with their sites, their source dtype, the jax function
+  that wrote them and what the constant is.
+
+  **Off by default, and NOT turned on by `--stelling-overflow`.** Two dials,
+  because the tripwire is a report over a session and this is a rule: a
+  session it is armed on either contains no undeclared truncation or does not
+  finish. With it off, nothing is patched, no jax is imported for it, and
+  every program is byte-identical.
+
+#### M2-0.2.0-02
+
+- **`stelling.intentional_wrap(value, dtype)` and
+  `stelling.EagerTruncationError`, both public.** `intentional_wrap` returns
+  the wrapped integer — `intentional_wrap(0xFF, "int8")` is `-1` — so the
+  value that reaches jax is the value jax would have produced anyway, and a
+  declared program is byte-identical to an undeclared one. It needs no jax
+  and no numpy, and every declaration is recorded and printed with its site.
+  The dtype is half the declaration, and what that buys is narrower than
+  "a declaration used at a different width fires": measured over 98
+  (declaration, misuse) pairs, 45 fire and 53 pass silently — but in every
+  silent case the declared value is IN RANGE at the other dtype, so no
+  narrowing happens there and no truncation is hidden. Writing the wrong
+  constant is a bug this instrument does not claim to catch.
+
+  **The exception inherits directly from `BaseException`**, so an ordinary
+  `except Exception:` cannot swallow a soundness alarm — the handler shape
+  that is everywhere in numerical Python. "Uncatchable" is not achievable and
+  is not claimed; `design/eager-truncation-detector.md` carries the argument,
+  the measured blast radius and the cost (cleanup written in
+  `except Exception:` rather than `finally:` will not run). The radius, with
+  the configuration it was measured in now stated: 122 module imports (174
+  scalar integer conversions, 0 truncations) and 33 real workloads across 24
+  third-party packages (264 conversions, 1 truncation — a control of this
+  project's own that must fire and does) give **0 fires in any third-party
+  workload with `jit` on**, every figure identical on jax 0.11.0 and 0.10.2.
+  With `JAX_DISABLE_JIT=1`, a 32-workload re-derivation sees 9 truncations, 8
+  of them jax's own, attributed and counted rather than raised on, and the one
+  remaining fire is that same control. **Compare truncations and not
+  conversions across those rows**: the alarm is a `BaseException`, so a fire
+  kills the rest of its workload and stops its later conversions being
+  counted, and a tree that fires nine times therefore reports a smaller
+  denominator than the same tree that fires once.
+
+  **There is no value-based carve-out and there will not be one.**
+  `jnp.full((4,), 0xFF, jnp.int8)` and `jnp.full((4,), 255, jnp.int8)`
+  produce identical observations at the hook, so intent is not a function of
+  `(value, dtype, result)`. Two heuristics were driven over a corpus of real
+  narrowings: "a value below the dtype's minimum is deliberate" hard-errors
+  correct code 7 times and misses a real bug once; "an all-ones result is
+  deliberate" is 5 and 2. And the corpus carries the PROOF rather than only
+  the scores: `0xFF` and `255` into `int8` are the same `(value, dtype)` pair
+  with opposite intent, so the class of value-based rules is empty rather than
+  merely badly-scoring.
+
+#### M2-0.2.0-03
+
+- **The dial reaches the exit code and the report on its own.** The eager
+  detector's session escalation sat below the tripwire's `state.recorder is
+  None` guard, so with `--stelling-overflow=off` — the spelling the docs
+  recommend for running this detector alone — a rule that could not stay
+  attached exited **0**. Under xdist, `pytest_testnodedown` returned on the
+  tripwire's condition and dropped every worker's eager payload (`-n 2` on a
+  fully green suite reported `NOT ARMED [no-worker-reported]` and exited 1),
+  and `_capture_eager` then overwrote the merged worker snapshot with the
+  controller's own zeros. All three are fixed and driven; a controller now
+  prints its workers' figures and a single process's figures identically.
+
+  **The first thing the reachable escalation caught was in this repository's
+  own suite.** A canary test stubbed the tripwire's half of the canary and not
+  the eager one, so `canary.main()` called the real `disarm_eager()`: a
+  session run with `--stelling-eager-truncation=error` lost its detector at
+  that test and ran every later file unwatched, printing `NOT ARMED
+  [detached]` and exiting **0**. It now stubs both, and both files that drive
+  the canary assert the process's arm state is what they found it.
+
+#### M2-0.2.0-04
+
+- **`expected_truncation` is dynamically scoped, and now says so.** It was
+  described as "lexically bounded" in four places. A `with` block looks
+  lexical and no context manager can be: a region held across an `await`
+  licensed a truncation in a SECOND asyncio task on the same loop. The region
+  stack is now a `contextvars.ContextVar`, which isolates asyncio tasks as
+  well as threads; a generator suspended inside a region still licenses its
+  resumer, which nothing in Python fixes, and that residue is disclosed and
+  driven rather than claimed away.
+
+#### M2-0.2.0-05
+
+- **`_tripwire.arm()` on an already-armed process returns the recorder that
+  is actually recording.** It returned a fresh, disconnected `Recorder`, so
+  any assertion written against it under `-p stelling.overflow` was false by
+  construction rather than by measurement.
+
+#### M2-0.2.0-06
+
+- **It fails closed on drift.** It patches a private jax function, so arming
+  verifies the module and attribute, checks `inspect.signature`'s first two
+  parameters, and then drives EVERY construction route it claims in both
+  directions. A route that stops reaching the site — the silent failure a jax
+  release actually produces — is `route-blind:<route>` and it refuses to
+  attach. Failure codes: `no-site-module`, `no-site`, `signature-drift`,
+  `route-blind`, and `origin-blind:<leg>`. The nightly jax canary arms it,
+  drives a live control both ways, and checks its own per-release source-hash
+  map.
+
+  **Arming drives the ATTRIBUTION too**, which the route probes cannot: they
+  swap a collector in for the observer, so they exercise every route for
+  reachability and arithmetic and never reach the function that decides
+  whether a narrowing raises. A detector whose origin rule suppressed
+  everything passed all of them. One narrowing of each origin now goes through
+  the live policy at arm time — a constant at no enumerated jax site, which
+  must raise, and `jax.random.key(0)` under `jax.disable_jit()`, which must be
+  attributed to jax — and the control puts the user's counters back exactly as
+  it found them, so a self-check can never appear in a denominator.

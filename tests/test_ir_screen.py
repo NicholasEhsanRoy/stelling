@@ -498,8 +498,6 @@ def test_the_entry_names_the_screens_blind_classes():
 
 # -- F5: the attribution table is PUBLISHED, and its arithmetic is checked --
 
-CHANGELOG = REPO / "CHANGELOG.md"
-
 # READ THE WHOLE RELEASE RECORD, not one file of it — batch B8c. The three
 # checks below pin an attribution table, its census method and the R1c
 # exhibit; all three lived in `CHANGELOG.md` until the 0.2.0 routing moved

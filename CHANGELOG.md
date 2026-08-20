@@ -131,246 +131,51 @@ SPDX-License-Identifier: Apache-2.0
 
 ### The eager construction-site detector (Mode 2), DEFAULT-OFF
 
-- **`--stelling-eager-truncation=error` — an out-of-range integer constant
-  narrowed at array construction now RAISES at the line that wrote it.**
-  `jnp.full((), 256, jnp.int8)` is `0`: the 256 is destroyed before any
-  primitive is bound, so the overflow tripwire — which watches jax's
-  const-fold rule — never sees it, and no verdict downstream can tell that
-  the `0` it certified was written as a `256`. `SOUNDNESS.md`'s
-  integer-literal wrap entry is that defect and its cost is a wrong VERIFIED.
+Strict one-liners: ID, one-sentence statement, affected versions, link.
+The predicate, the measurement and the derivation behind each one are in
+[`SOUNDNESS.md`](SOUNDNESS.md#020-mode-2-detail-routed-from-changelogmd),
+under the same rule that governs the **Soundness** section
+(`DOCUMENTATION_ARCHITECTURE.md` §8.3).
 
-  Six of the **eight** `unwatched` routes in
-  `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` narrow at one line
-  inside jax, and this attaches there: `jnp.full`, `jnp.full_like`,
-  `lax.full`, `lax.full_like`, `lax.convert_element_type` and
-  `jnp.stack`-of-`full`, plus — measured, but rows of neither inventory —
-  `lax.select`-of-`full`, `jnp.take`'s `fill_value`, and a scoped
-  `with jax.disable_jit():`. Two numpy routes
-  remain and are named: `np.asarray(N).astype(dt)` is permanently unhookable
-  (`np.ndarray.astype` is an immutable type attribute) and
-  `jnp.asarray(np.array(N), dtype=dt)` is a second spelling into the same
-  residue. `EAGER_COVERAGE`, beside `GATE_COVERAGE`, is the measured
-  inventory and a test holds the residue to exactly those two.
+**Nothing was summarised on the way**, and that is checked rather than
+claimed: every block that left this section is pinned by the sha256 of the
+text it left as at `de80ad8`, and has to be found under its own ID in
+`SOUNDNESS.md` with the sha256 of the text it arrived as. **One block was
+edited in transit** — `M2-0.2.0-01`, whose route census this commit
+corrected — and the eleven source lines it did not carry are quoted in
+`tests/_soundness_routing_manifest.py` one by one and measured against the
+pre-routing file. The check is a partition in both directions, so an entry
+cannot be brought into compliance by deleting it.
 
-  *This entry said "six of the SEVEN" until 2026-08-20, as did five other
-  places, while `GATE_COVERAGE` held eight `unwatched` rows — and had held
-  eight since `fc98241` added `jnp.stack`-of-`full`. The sentence's own
-  arithmetic gave it away (six closed plus two remaining is eight), and it
-  survived because the test asserted the NUMERATOR alone: `len(closed) == 6`
-  was true throughout. The denominator is asserted now. Measured at
-  `8f0adf2`: 33 routes — 17 `watched`, 8 `unwatched`, 3 `loud`, 5
-  `deferred`.*
+*Versions.* `v0.1.0` is the only release, and nothing in this section
+reaches it: Mode 2 is 0.2.0 development work throughout.
 
-  **It carries an ORIGIN QUESTION, and the first version of this entry said it
-  needed none.** With `jit` on, jax's own threefry PRNG mask reaches the
-  const-fold site and not this one, which is what that claim was measured on.
-  With `jit` OFF — `jax.disable_jit()`, `JAX_DISABLE_JIT=1`, and the public
-  `chex.fake_jit()` / `chex.fake_pmap_and_jit()` that install it — jax
-  evaluates the mask eagerly and it arrives here as a written scalar, and the
-  detector raised `4294967295 -> -1 (int32)` **inside jax's own PRNG**,
-  naming a line the user never wrote a constant on. Measured on jax 0.11.0 and
-  0.10.2, byte-identically, over a 32-workload census across 24 third-party
-  packages: with `JAX_DISABLE_JIT=1`, **9 truncations, 9 fires before and 1
-  after** (8 of them jax's own: `jax.random` ×4, flax linen, flax nnx,
-  equinox, `chex.fake_jit`); with `jit` ON and jax's defaults untouched, **2
-  truncations, 2 fires before and 1 after** — because `chex.fake_jit()`
-  installs `disable_jit` around a test body, so this is reachable in the
-  DEFAULT configuration through a public API. The one remaining fire in every
-  row is a control of this repository's own that must fire. Over chex's own
-  installed `fake_test.py`: **2 failed / 32 passed before, 34 passed after.**
+- **M2-0.2.0-01** — An out-of-range integer constant narrowed at array
+  construction RAISES at the line that wrote it, under the opt-in
+  `--stelling-eager-truncation=error`. Versions: 0.2.0 development builds
+  only. [Detail](SOUNDNESS.md#m2-020-01)
 
-  **The answer is a LOOKUP, not a predicate, and that is the second attempt.**
-  The first asked a general question of the data — *is the narrowed integer
-  among the arguments of the call that crossed out of non-jax code into jax?*
-  — and an audit found it wrong in both directions: it **suppressed a constant
-  the user really wrote** whenever the call carried it in a `functools.partial`,
-  a `jax.tree_util.Partial`, a bound method, a closure cell or a
-  registered-dataclass pytree — silently, in the DEFAULT `jit`-on
-  configuration, on `jax.tree.map(partial(jnp.full_like, fill_value=300),
-  tree)` and under `jit`, `vmap`, `lax.map`, `lax.scan` and `lax.fori_loop`
-  alike — and it **raised on jax's own mask** whenever its container scan hit
-  a depth, breadth or budget limit, which a params-shaped pytree does.
+- **M2-0.2.0-02** — `stelling.intentional_wrap(value, dtype)` and
+  `stelling.EagerTruncationError` are public, and a declared wrap produces a
+  program byte-identical to an undeclared one. Versions: 0.2.0 development
+  builds only. [Detail](SOUNDNESS.md#m2-020-02)
 
-  A sweep of 649 conversions across `jax.random.*` and `jnp`'s integer ops
-  over six integer dtypes, under `JAX_DISABLE_JIT=1`, finds **exactly one**
-  eager truncation of jax's own in existence — re-derived as shipped code by
-  `_adapter_jax.eager_jax_constant_sweep`, over a wider surface, at 675
-  conversions and 13 truncation events all of which are that one row, on both
-  jax series. So the one thing jax writes is
-  written down, at jax's own site, in `_adapter_jax._JAX_EAGER_CONSTANTS`:
-  `("_src/random/threefry2x32.py", "_threefry_seed") -> 4294967295, uint32
-  into int32`. A narrowing is jax's when one of those functions is in the
-  unbroken run of jax frames beneath the caller AND the value, the SOURCE
-  dtype and the target dtype are that row's. Everything else is the caller's.
-  That is the same shape — a narrow map plus a canary that reddens when it is
-  incomplete — that `_KNOWN_HASHES` already argues for one screen up in the
-  same file.
+- **M2-0.2.0-03** — The eager dial reaches the exit code and the session
+  report on its own, without `--stelling-overflow` being on. Versions: 0.2.0
+  development builds only. [Detail](SOUNDNESS.md#m2-020-03)
 
-  **The source dtype is in the key because without it a row suppresses the
-  CALLER'S constant.** At that one site the two collide:
-  `jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))` narrows
-  twice under `_threefry_seed` — the caller's seed and jax's mask, both
-  `4294967295 -> -1` at `int32` — and a three-field row suppressed **both**,
-  then printed *"written by jax … the threefry PRNG's 32-bit mask"* at the
-  caller's own line. It was a value collision and not a general quiet
-  (`seed=8589934592` and `seed=2147483648` alarmed correctly throughout), and
-  the two differ in exactly one field the hook can see: all 13 of jax's own
-  truncation events arrive from `uint32` and a caller's seed from `int64`.
-  Driven before and after on both routes into that entry point. What remains
-  is the shape rather than the instance — a row is a value lookup, not a proof
-  of authorship — and it is disclosed in `report.EAGER_UNCOVERED`.
+- **M2-0.2.0-04** — `expected_truncation` is dynamically scoped and says so,
+  after being described as lexically bounded in four places. Versions: 0.2.0
+  development builds only. [Detail](SOUNDNESS.md#m2-020-04)
 
-  It **fails closed**: a jax release that adds a second internal eager
-  truncation has no row, is therefore the caller's, and RAISES at a line
-  inside jax rather than disappearing. Three things arrive first — the sweep
-  runs as a test on both jax series, arming drives the row and reports
-  `origin-blind:jax-attributed-to-you` rather than attaching if it stops
-  holding, and the alarm prints jax's own frames and asks the reader to report
-  it. It needs no container scan, so the depth, breadth and budget constants
-  and the "inconclusive" bucket are gone rather than documented; and it
-  removes the previously-disclosed false alarm on `jax.random.PRNGKey(2**32 -
-  1)`, where jax's mask and the caller's seed are the same integer — a correct
-  verdict about a program whose seed is nonetheless **already dead**, which is
-  now disclosed rather than left to read as a clean bill of health.
-  `PRNGKey` and `key` cast the seed with `jnp.asarray(np.int64(seeds))` inside
-  jax's own `random_seed`, a NUMPY-level cast this detector has never sat on —
-  `jit` on or off, before this work and after it — so the seed produces **zero**
-  observations at the hook. Measured on jax 0.11.0, x64 off:
-  `PRNGKey(2**32 - 1) == PRNGKey(-1)`, `PRNGKey(2**32) == PRNGKey(0)`,
-  `PRNGKey(2**33 + 5) == PRNGKey(5)`. A seed that does not survive is exactly
-  what this instrument exists to report and it structurally cannot report this
-  one; closing it needs a hook at a numpy cast rather than at jax's array
-  constructor.
+- **M2-0.2.0-05** — `_tripwire.arm()` on an already-armed process returns the
+  recorder that is actually recording, not a fresh disconnected one. Versions:
+  0.2.0 development builds only. [Detail](SOUNDNESS.md#m2-020-05)
 
-  **The `jit` claim is now the narrow one.** *"A call boundary exists whether
-  or not a trace is in progress, which is why the answer does not depend on
-  `jit`"* was **false**: widened from four programs to fourteen,
-  `jax.jit(partial(jnp.full_like, fill_value=300))(x)` gave no alarm with
-  `jit` on and raised with it off, on the same observed conversion, because
-  which frame is "the outermost jax frame" depends on how many wrapper frames
-  jax installs. **And the sentence that replaced it carried a false clause of
-  its own** — *"the verdict is a function of the value, the dtypes and which
-  jax functions are in the run, and `jit` changes none of the three"*. The
-  third clause is false, measured on jax 0.11.0 with one fresh subprocess per
-  cell over 36 programs: of the 25 observations that occur in both modes, **6
-  (in 5 programs) present a different run of jax frames**, and it differs in
-  BOTH directions — `jit` on inserts tracing frames
-  (`jit(partial(full_like, fill_value=300))(x)`: 8 frames on, 2 off) and `jit`
-  off inserts jax's eager dispatch, which a trace does not contain
-  (`jnp.take(x, [9], mode="fill")`: 25 frames on, 31 off). The real invariant
-  is a **constraint on rows**: the verdict is stable across `jit` exactly when
-  the function a row names is in the run under both modes or in neither, which
-  is why the one row holds — `_threefry_seed` is a PRNG leaf that neither
-  jit's machinery nor eager dispatch contains. A row keyed on a function only
-  one mode's run contains would flip the verdict. Driven as an equality over
-  **19 programs** covering `jit`, `vmap`, `tree.map`, `lax.map`, `lax.scan`,
-  `lax.fori_loop`, five carrier shapes and two pytrees big enough to have
-  exhausted the old scan's budget: 0 of 19 verdicts differ. Suppressions are
-  counted and printed with their sites, their source dtype, the jax function
-  that wrote them and what the constant is.
-
-  **Off by default, and NOT turned on by `--stelling-overflow`.** Two dials,
-  because the tripwire is a report over a session and this is a rule: a
-  session it is armed on either contains no undeclared truncation or does not
-  finish. With it off, nothing is patched, no jax is imported for it, and
-  every program is byte-identical.
-
-- **`stelling.intentional_wrap(value, dtype)` and
-  `stelling.EagerTruncationError`, both public.** `intentional_wrap` returns
-  the wrapped integer — `intentional_wrap(0xFF, "int8")` is `-1` — so the
-  value that reaches jax is the value jax would have produced anyway, and a
-  declared program is byte-identical to an undeclared one. It needs no jax
-  and no numpy, and every declaration is recorded and printed with its site.
-  The dtype is half the declaration, and what that buys is narrower than
-  "a declaration used at a different width fires": measured over 98
-  (declaration, misuse) pairs, 45 fire and 53 pass silently — but in every
-  silent case the declared value is IN RANGE at the other dtype, so no
-  narrowing happens there and no truncation is hidden. Writing the wrong
-  constant is a bug this instrument does not claim to catch.
-
-  **The exception inherits directly from `BaseException`**, so an ordinary
-  `except Exception:` cannot swallow a soundness alarm — the handler shape
-  that is everywhere in numerical Python. "Uncatchable" is not achievable and
-  is not claimed; `design/eager-truncation-detector.md` carries the argument,
-  the measured blast radius and the cost (cleanup written in
-  `except Exception:` rather than `finally:` will not run). The radius, with
-  the configuration it was measured in now stated: 122 module imports (174
-  scalar integer conversions, 0 truncations) and 33 real workloads across 24
-  third-party packages (264 conversions, 1 truncation — a control of this
-  project's own that must fire and does) give **0 fires in any third-party
-  workload with `jit` on**, every figure identical on jax 0.11.0 and 0.10.2.
-  With `JAX_DISABLE_JIT=1`, a 32-workload re-derivation sees 9 truncations, 8
-  of them jax's own, attributed and counted rather than raised on, and the one
-  remaining fire is that same control. **Compare truncations and not
-  conversions across those rows**: the alarm is a `BaseException`, so a fire
-  kills the rest of its workload and stops its later conversions being
-  counted, and a tree that fires nine times therefore reports a smaller
-  denominator than the same tree that fires once.
-
-  **There is no value-based carve-out and there will not be one.**
-  `jnp.full((4,), 0xFF, jnp.int8)` and `jnp.full((4,), 255, jnp.int8)`
-  produce identical observations at the hook, so intent is not a function of
-  `(value, dtype, result)`. Two heuristics were driven over a corpus of real
-  narrowings: "a value below the dtype's minimum is deliberate" hard-errors
-  correct code 7 times and misses a real bug once; "an all-ones result is
-  deliberate" is 5 and 2. And the corpus carries the PROOF rather than only
-  the scores: `0xFF` and `255` into `int8` are the same `(value, dtype)` pair
-  with opposite intent, so the class of value-based rules is empty rather than
-  merely badly-scoring.
-
-- **The dial reaches the exit code and the report on its own.** The eager
-  detector's session escalation sat below the tripwire's `state.recorder is
-  None` guard, so with `--stelling-overflow=off` — the spelling the docs
-  recommend for running this detector alone — a rule that could not stay
-  attached exited **0**. Under xdist, `pytest_testnodedown` returned on the
-  tripwire's condition and dropped every worker's eager payload (`-n 2` on a
-  fully green suite reported `NOT ARMED [no-worker-reported]` and exited 1),
-  and `_capture_eager` then overwrote the merged worker snapshot with the
-  controller's own zeros. All three are fixed and driven; a controller now
-  prints its workers' figures and a single process's figures identically.
-
-  **The first thing the reachable escalation caught was in this repository's
-  own suite.** A canary test stubbed the tripwire's half of the canary and not
-  the eager one, so `canary.main()` called the real `disarm_eager()`: a
-  session run with `--stelling-eager-truncation=error` lost its detector at
-  that test and ran every later file unwatched, printing `NOT ARMED
-  [detached]` and exiting **0**. It now stubs both, and both files that drive
-  the canary assert the process's arm state is what they found it.
-
-- **`expected_truncation` is dynamically scoped, and now says so.** It was
-  described as "lexically bounded" in four places. A `with` block looks
-  lexical and no context manager can be: a region held across an `await`
-  licensed a truncation in a SECOND asyncio task on the same loop. The region
-  stack is now a `contextvars.ContextVar`, which isolates asyncio tasks as
-  well as threads; a generator suspended inside a region still licenses its
-  resumer, which nothing in Python fixes, and that residue is disclosed and
-  driven rather than claimed away.
-
-- **`_tripwire.arm()` on an already-armed process returns the recorder that
-  is actually recording.** It returned a fresh, disconnected `Recorder`, so
-  any assertion written against it under `-p stelling.overflow` was false by
-  construction rather than by measurement.
-
-- **It fails closed on drift.** It patches a private jax function, so arming
-  verifies the module and attribute, checks `inspect.signature`'s first two
-  parameters, and then drives EVERY construction route it claims in both
-  directions. A route that stops reaching the site — the silent failure a jax
-  release actually produces — is `route-blind:<route>` and it refuses to
-  attach. Failure codes: `no-site-module`, `no-site`, `signature-drift`,
-  `route-blind`, and `origin-blind:<leg>`. The nightly jax canary arms it,
-  drives a live control both ways, and checks its own per-release source-hash
-  map.
-
-  **Arming drives the ATTRIBUTION too**, which the route probes cannot: they
-  swap a collector in for the observer, so they exercise every route for
-  reachability and arithmetic and never reach the function that decides
-  whether a narrowing raises. A detector whose origin rule suppressed
-  everything passed all of them. One narrowing of each origin now goes through
-  the live policy at arm time — a constant at no enumerated jax site, which
-  must raise, and `jax.random.key(0)` under `jax.disable_jit()`, which must be
-  attributed to jax — and the control puts the user's counters back exactly as
-  it found them, so a self-check can never appear in a denominator.
-
+- **M2-0.2.0-06** — Arming fails CLOSED on drift: it verifies the private jax
+  function it patches and drives every construction route it claims, in both
+  directions. Versions: 0.2.0 development builds only.
+  [Detail](SOUNDNESS.md#m2-020-06)
 ### Verification pipeline
 
 - **`check(..., falsify="sample")` — the falsification probe, DEFAULT-OFF
@@ -663,14 +468,20 @@ single source of truth for them (`DOCUMENTATION_ARCHITECTURE.md` §8.3).
 there whole, block for block, and `tests/test_soundness_routing.py`
 checks the move rather than asserting it: every block that left this
 section is pinned by the sha256 of the text it left as, and has to be
-found under its own ID in `SOUNDNESS.md` with that hash. Two blocks were
-edited in transit — a hash literal nobody could reproduce and a solver
-workaround's obsolete justification — and both are declared in the
-manifest with the reason and with a count of the source lines the edit
-did not carry, so an edit cannot hide a deletion. The check is a
-partition in both directions: an ID missing from either file, an ID in
-one and not the other, and a detail section nothing links to are each a
-failure, so **an entry cannot be made to comply by deleting it.**
+found under its own ID in `SOUNDNESS.md` with that hash. **Three blocks
+were edited in transit** — `SF-0.2.0-07`'s route census, which said 32
+construction routes and 7 `unwatched` against a dict holding 33 and 8;
+`SF-0.2.0-51`'s solver-workaround justification, which named a case the
+emission cannot produce; and `SF-0.2.0-59`'s hash literal, which nobody
+could reproduce. All three are declared in the manifest with the reason,
+with a count of the source lines the edit did not carry and with those
+lines QUOTED — and the count and the quotation are both measured against
+the pre-routing file rather than taken on trust, which they were not
+until the B8c fixup. The digit in this sentence is derived from the
+manifest too, so a fourth edit cannot leave it reading three. The check
+is a partition in both directions: an ID missing from either file, an ID
+in one and not the other, and a detail section nothing links to are each
+a failure, so **an entry cannot be made to comply by deleting it.**
 
 *Versions.* `v0.1.0` is the only release. An entry marked *0.2.0
 development builds only* does not reach it. An entry marked *`v0.1.0` and
@@ -697,19 +508,24 @@ it** (`fix/B15-trace-gate-observation`) —
   third has its own sentence. Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#sf-020-04)
 
-- **SF-0.2.0-05** — User-visible cost, and it is real. Versions: 0.2.0
-  development builds only. [Detail](SOUNDNESS.md#sf-020-05)
+- **SF-0.2.0-05** — Arming the trace gate has a real, measured user-visible
+  cost: every `check()` calls the process-global `jax.clear_caches()`, which
+  drops the caller's own compiled functions. Versions: 0.2.0 development
+  builds only. [Detail](SOUNDNESS.md#sf-020-05)
 
-- **SF-0.2.0-06** — What the fix cost in verdicts: nothing. Versions: 0.2.0
-  development builds only. [Detail](SOUNDNESS.md#sf-020-06)
+- **SF-0.2.0-06** — The gate's cache eviction cost NOTHING in verdicts — 1475
+  armed gated traces at `a759809`, 88 not fully observed, 0 of them narrowing,
+  VERIFIED unchanged at 312. Versions: 0.2.0 development builds only.
+  [Detail](SOUNDNESS.md#sf-020-06)
 
 - **SF-0.2.0-07** — The tripwire's coverage claim is now an asserted
   inventory. Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#sf-020-07)
 
-- **SF-0.2.0-08** — Three disclosures that this batch narrowed, corrected
-  where they were made. Versions: 0.2.0 development builds only.
-  [Detail](SOUNDNESS.md#sf-020-08)
+- **SF-0.2.0-08** — Three disclosures the trace-gate batch narrowed are
+  corrected in the pages that made them: `design/d4-wrap-disclosure.md`,
+  `docs/quickstart.md` and the README's retracted faithfulness claim.
+  Versions: 0.2.0 development builds only. [Detail](SOUNDNESS.md#sf-020-08)
 
 - **SF-0.2.0-09** — `design/d4-wrap-disclosure.md`'s flagship worked example
   did not run. Versions: 0.2.0 development builds only.
@@ -792,9 +608,10 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
   out of the VERIFIED bar (audit 0.2.0 **S4**). Versions: 0.2.0 development
   builds only. [Detail](SOUNDNESS.md#sf-020-28)
 
-- **SF-0.2.0-29** — That gauge was overfit to the exponents it drove, and
-  now states its arity as a MEASUREMENT. Versions: 0.2.0 development builds
-  only. [Detail](SOUNDNESS.md#sf-020-29)
+- **SF-0.2.0-29** — The `pow` fidelity gauge was overfit to the exponents its
+  own battery drove, and states its exponent reach as a MEASUREMENT now rather
+  than as a branch count. Versions: 0.2.0 development builds only.
+  [Detail](SOUNDNESS.md#sf-020-29)
 
 - **SF-0.2.0-30** — `docs/gauge-coverage.md`'s coverage figures are
   recomputed from the battery instead of typed. Versions: 0.2.0 development
@@ -804,36 +621,43 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
   that reads as covered. Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#sf-020-31)
 
-- **SF-0.2.0-32** — That gauge measured two of its row's three seams, and
-  the SHAPE axis was the one left as prose. Versions: 0.2.0 development
-  builds only. [Detail](SOUNDNESS.md#sf-020-32)
+- **SF-0.2.0-32** — The `pow` fidelity gauge measured two of its row's three
+  seams: `smt._pow_aux_name`, the only one handed the array shape, was left as
+  prose. Versions: 0.2.0 development builds only.
+  [Detail](SOUNDNESS.md#sf-020-32)
 
-- **SF-0.2.0-33** — And then the radius moved onto the seam's OTHER
-  ARGUMENT: the BASE TERM. Versions: 0.2.0 development builds only.
+- **SF-0.2.0-33** — The `pow` gauge's blind spot then moved to
+  `_pow_integer_body`'s OTHER argument, the BASE TERM, which every fixture in
+  the battery drove at one value. Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#sf-020-33)
 
-- **SF-0.2.0-34** — And then the LIST was closed and every RANGE was still
-  open, which is the defect the enumeration itself shipped. Versions: 0.2.0
-  development builds only. [Detail](SOUNDNESS.md#sf-020-34)
+- **SF-0.2.0-34** — Enumerating the `pow` gauge's parameters closed the LIST
+  and left every parameter's RANGE as open as before, which is the defect the
+  enumeration itself shipped. Versions: 0.2.0 development builds only.
+  [Detail](SOUNDNESS.md#sf-020-34)
 
-- **SF-0.2.0-35** — Two documented claims about this gauge were out of date
-  in its own file. Versions: 0.2.0 development builds only.
+- **SF-0.2.0-35** — Two documented claims about the `pow` gauge were out of
+  date in `docs/gauge-coverage.md`, and the test reading them was missing its
+  sibling's inconsistency guard. Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#sf-020-35)
 
-- **SF-0.2.0-36** — The document test accepted wrong documents and rejected
-  a right one. Versions: 0.2.0 development builds only.
-  [Detail](SOUNDNESS.md#sf-020-36)
+- **SF-0.2.0-36** —
+  `test_the_documented_coverage_figures_are_the_MEASURED_ones` accepted
+  incomplete gauge-coverage tables and rejected a correct one. Versions: 0.2.0
+  development builds only. [Detail](SOUNDNESS.md#sf-020-36)
 
-- **SF-0.2.0-37** — A fixture docstring described an emission this tree had
-  just outlawed. Versions: 0.2.0 development builds only.
-  [Detail](SOUNDNESS.md#sf-020-37)
+- **SF-0.2.0-37** — `_rat_denominator_false_harness`'s docstring described a
+  rational-`pow` emission that the same round had just outlawed. Versions:
+  0.2.0 development builds only. [Detail](SOUNDNESS.md#sf-020-37)
 
 - **SF-0.2.0-38** — `exp` and `pow` under `semantics="ieee"` now require a
   DECLARED libm accuracy budget (audit 0.2.0 **S9** and **S11**). Versions:
   `v0.1.0` and 0.2.0 development builds. [Detail](SOUNDNESS.md#sf-020-38)
 
-- **SF-0.2.0-39** — Rational-`pow` exponent identity (audit 0.2.0 S1).
-  Versions: 0.2.0 development builds only. [Detail](SOUNDNESS.md#sf-020-39)
+- **SF-0.2.0-39** — A rational-`pow` exponent was admitted on a binary64
+  distance test that reads exactly `0.0` for `0.1`, so
+  `limit_denominator(128)` decided identity (audit 0.2.0 **S1**). Versions:
+  0.2.0 development builds only. [Detail](SOUNDNESS.md#sf-020-39)
 
 - **SF-0.2.0-40** — No emitted term is a unary `(* t)` (audit 0.2.0 S2).
   Versions: 0.2.0 development builds only. [Detail](SOUNDNESS.md#sf-020-40)
@@ -841,9 +665,10 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
 - **SF-0.2.0-41** — The rational-`pow` replay is exact (audit 0.2.0 S3, M8).
   Versions: 0.2.0 development builds only. [Detail](SOUNDNESS.md#sf-020-41)
 
-- **SF-0.2.0-42** — The fragment stamp follows the aux encoding (audit 0.2.0
-  M9). Versions: 0.2.0 development builds only.
-  [Detail](SOUNDNESS.md#sf-020-42)
+- **SF-0.2.0-42** — A non-integer `pow` over a declaration-independent base
+  was stamped `QF_LRA` while its emission wrote `(* aux aux)`; the fragment
+  stamp follows the aux encoding now (audit 0.2.0 **M9**). Versions: 0.2.0
+  development builds only. [Detail](SOUNDNESS.md#sf-020-42)
 
 - **SF-0.2.0-43** — An IEEE divisor box that reaches zero divides to ⊤
   (audit 0.2.0 S10). Versions: 0.2.0 development builds only.
@@ -861,8 +686,10 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
   representable (audit 0.2.0 M16). Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#sf-020-46)
 
-- **SF-0.2.0-47** — Relational assumes forwarded to solver. Versions: 0.2.0
-  development builds only. [Detail](SOUNDNESS.md#sf-020-47)
+- **SF-0.2.0-47** — A relational `assume` over two variable operands is
+  forwarded to the solver as a positive axiom instead of being dropped by the
+  interval domain. Versions: 0.2.0 development builds only.
+  [Detail](SOUNDNESS.md#sf-020-47)
 
 - **SF-0.2.0-48** — SOUNDNESS FIX — a forwarded assume is now resolved by a
   scope-correct identity; it could previously be emitted about the wrong
@@ -878,11 +705,15 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
   an EMPTY assumed region alone explains it. Versions: 0.2.0 development
   builds only. [Detail](SOUNDNESS.md#sf-020-50)
 
-- **SF-0.2.0-51** — z3 tactic workaround for high-degree polynomials.
-  Versions: 0.2.0 development builds only. [Detail](SOUNDNESS.md#sf-020-51)
+- **SF-0.2.0-51** — A z3 tactic chain replaces the default `Solver()` on
+  obligations carrying a rational-`pow` auxiliary variable, restoring the
+  cross-check on high-degree polynomials. Versions: 0.2.0 development builds
+  only. [Detail](SOUNDNESS.md#sf-020-51)
 
-- **SF-0.2.0-52** — Per-obligation withholding refinement. Versions: 0.2.0
-  development builds only. [Detail](SOUNDNESS.md#sf-020-52)
+- **SF-0.2.0-52** — A definite violation is un-withheld only when every
+  `assume` the user wrote is accounted for on THAT obligation's query, rather
+  than on the query as a whole. Versions: 0.2.0 development builds only.
+  [Detail](SOUNDNESS.md#sf-020-52)
 
 - **SF-0.2.0-53** — An assume that excludes nothing no longer withholds
   forever. Versions: 0.2.0 development builds only.
@@ -895,9 +726,9 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
   recorded instead of ignored (audit 0.2.0 S13). Versions: `v0.1.0` and
   0.2.0 development builds. [Detail](SOUNDNESS.md#sf-020-55)
 
-- **SF-0.2.0-56** — ATTRIBUTION FOR THIS BATCH, PUBLISHED — with the census
-  method, so the numbers can be re-derived rather than trusted (audit 0.2.0
-  B6 audit 3, F5). Versions: 0.2.0 development builds only.
+- **SF-0.2.0-56** — The B6 batch's per-change attribution table is published
+  WITH its census method, so every row can be re-derived rather than trusted
+  (audit 0.2.0 B6 audit 3, F5). Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#sf-020-56)
 
 - **SF-0.2.0-57** — A SHAPE IS JUDGED BY THE SAME RULE WHEREVER IT APPEARS,
@@ -905,9 +736,10 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
   B6 audit 8). Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#sf-020-57)
 
-- **SF-0.2.0-58** — THE RECORD'S OWN CLAIMS, RE-READ AGAINST THE CODE (audit
-  0.2.0 B6 audit 8). Versions: 0.2.0 development builds only.
-  [Detail](SOUNDNESS.md#sf-020-58)
+- **SF-0.2.0-58** — The record's own claims were re-read against the code and
+  corrected in one place where measurement contradicted them, rather than
+  edited silently (audit 0.2.0 B6 audit 8). Versions: 0.2.0 development builds
+  only. [Detail](SOUNDNESS.md#sf-020-58)
 
 - **SF-0.2.0-59** — UNSOUND — THE DOOR'S OWN DISPATCH WAS BUILT FROM THE TWO
   MOST OVERRIDABLE TESTS IN PYTHON, SO IT COULD BE WALKED PAST; IT DECIDES
@@ -939,7 +771,9 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
   QUALIFYING TEST. Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#sf-020-65)
 
-- **SF-0.2.0-66** — ATTRIBUTION FOR AUDIT 4, by MUTATION. Versions: 0.2.0
+- **SF-0.2.0-66** — Audit 4's attribution is established BY MUTATION: each
+  mutation asserts its own anchor, runs over the whole suite in its own clone,
+  against an unmutated control (audit 0.2.0 B6 audit 4). Versions: 0.2.0
   development builds only. [Detail](SOUNDNESS.md#sf-020-66)
 
 ### Inductive step verification

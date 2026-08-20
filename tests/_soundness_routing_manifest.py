@@ -1,53 +1,75 @@
 # SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 # SPDX-License-Identifier: Apache-2.0
 
-"""The routing manifest: what left `CHANGELOG.md` and where it arrived.
+"""The routing manifest: what left `CHANGELOG.md`, and where it arrived.
 
-`CHANGELOG.md`'s `### Soundness fixes` section was 2990 of that file's
-3778 lines at `8f0adf2` — 79.1% of the changelog, against a released
-0.1.0 section of 60 lines. `DOCUMENTATION_ARCHITECTURE.md` §8.3 had
-already ruled that the section carries one-liners and links to the
-ledger; it had drifted because it routed detail to `evidence/soundness.yaml`,
-a file that was never built, so the detail landed in the two files that
-exist. §8.3 now names `SOUNDNESS.md` as the ledger, and this manifest
-records the move.
+TWO SECTIONS ARE ROUTED. `### Soundness fixes` was 2990 of `CHANGELOG.md`'s
+3778 lines at `8f0adf2` — 79.1% of the file, against a released 0.1.0
+section of 60 lines — and `### The eager construction-site detector (Mode
+2), DEFAULT-OFF` was 242 of 1158 at `de80ad8`, 20.9%.
+`DOCUMENTATION_ARCHITECTURE.md` §8.3 had already ruled that the Soundness
+section carries one-liners and links to the ledger; it had drifted because
+it routed detail to `evidence/soundness.yaml`, a file that was never built,
+so the detail landed in the two files that exist. §8.3 now names
+`SOUNDNESS.md` as the ledger. §8.3's letter governs the Soundness section
+only; the Mode 2 section was routed on the ruling that its rationale
+applies identically, and it is recorded here with its own `source_commit`,
+its own span and its own blocks.
 
 **Routing was chosen over summarising because it is checkable.** Every
 block that left the changelog is pinned here by the sha256 of the text it
 left as (`src_sha256`) and by the sha256 of the text it arrived as
-(`dest_sha256`); `tests/test_soundness_routing.py` reads `SOUNDNESS.md`
-and compares. For 63 of the 66 blocks the two hashes are equal, which is
-what "verbatim" means here and is not a claim anyone has to take on
-trust.
+(`dest_sha256`); `tests/test_soundness_routing.py` reads `SOUNDNESS.md` and
+compares. For 68 of the 72 blocks the two hashes are equal, which is what
+"verbatim" means here and is not a claim anyone has to take on trust.
 
-**Three blocks were edited in transit and all three are declared**, each
-because the text it carried was wrong rather than because it read badly:
-an unreproducible hash literal, a solver workaround's obsolete
-justification, and a route census that stated 32 routes and 7 `unwatched`
-against a dict holding 33 and 8. An edit that is really a deletion is the
-thing this manifest exists to prevent, so each edited block also records
-`src_lines_not_carried` — how many of its non-blank source lines are not
-present verbatim in the destination — and the test holds each to the
-number recorded. One line, three lines and two lines; the rest of all
-three blocks moved untouched.
+**FOUR BLOCKS WERE EDITED IN TRANSIT AND ALL FOUR ARE DECLARED**, each
+because the text it carried was wrong rather than because it read badly: an
+unreproducible hash literal (`SF-0.2.0-59`), a solver workaround's obsolete
+justification (`SF-0.2.0-51`), a route census stating 32 routes and 7
+`unwatched` against a dict holding 33 and 8 (`SF-0.2.0-07`), and Mode 2's
+own route census and its account of why the old fraction survived
+(`M2-0.2.0-01`).
 
-**Nothing was dropped.** `DROPPED` is empty and the test requires the 66
-blocks to partition the section exactly, so a block that went missing
-could not be silently absent from this file either — it would have to be
-listed with a reason, and there is nothing to list.
+**AND THE MEASUREMENT THAT MAKES THAT SENTENCE MEAN ANYTHING WAS NOT TAKEN
+UNTIL THE B8c FIXUP.** This paragraph used to end *"each edited block also
+records `src_lines_not_carried` … and the test holds each to the number
+recorded"*, and that was FALSE ABOUT THIS TREE'S OWN TEST: the only
+assertion on the field was `<= 3`. Driven at `de80ad8`: `SF-0.2.0-59`'s
+367-line body replaced by a three-line summary, `dest_sha256` updated as
+any honest editor would, `src_lines_not_carried=3` declared, an `edit_note`
+written — **`10 passed in 0.12s`**. Declaring `0` where two lines were
+dropped passed too. An edit that is really a deletion is the thing this
+manifest exists to prevent, and nothing prevented it.
 
-**The limit, stated because it is real.** `src_sha256` is a claim about a
-file this tree no longer contains. It is verifiable — the section is
-re-derivable from `git show 8f0adf2:CHANGELOG.md` with the same splitter
-the routing used, and `test_the_source_hashes_reproduce_from_git` does
-exactly that — but only where git and that commit are present. In an
-sdist that test skips, and what remains checkable there is the
+It is measured now, twice over. Each edited block records
+`src_lines_not_carried` AND `not_carried`, the lines themselves, and
+`test_the_source_hashes_reproduce_from_git` recomputes both from
+`source_commit:CHANGELOG.md` and asserts EQUALITY — not a bound. Quoting
+the lines is what makes an edit reviewable: a summarisation with a note
+attached would have to write every line it summarised away into this file,
+where a reader will meet them. One, three, two and eleven lines; the rest
+of all four blocks moved untouched.
+
+**Nothing was dropped.** `DROPPED` is empty and the test requires each
+section's blocks to partition its span exactly, so a block that went
+missing could not be silently absent from this file either — it would have
+to be listed with a reason, and there is nothing to list.
+
+**The limit, stated because it is real.** `src_sha256`, `src_span` and
+`src_lines_not_carried` are all claims about a file this tree no longer
+contains. They are verifiable — each section is re-derivable from
+`git show <source_commit>:CHANGELOG.md` with the same splitter the routing
+used — but only where git and that commit are present. In an sdist the
+three git-gated tests skip, and what remains checkable there is the
 destination: every hash, every anchor, and the two-way partition against
-`CHANGELOG.md`.
+`CHANGELOG.md`. `tests/test_soundness_routing.py`'s module docstring says
+which mutation class that leaves with NO guard at all, because it is not
+the empty set.
 
 The IDs are positional. They were minted once, at 0.2.0, in the order the
-blocks stood in `CHANGELOG.md` at `8f0adf2`, and `src_span` is where each
-one stood.
+blocks stood in `CHANGELOG.md` at their section's `source_commit`, and
+`src_span` is where each one stood.
 """
 
 from __future__ import annotations
@@ -60,7 +82,18 @@ class Block(NamedTuple):
     a `- **ID** — …` one-liner carrying a `Versions:` field) or `"context"`
     (a batch heading or an interstitial provenance note, which gets a
     heading line and no version field, because it makes no claim that has
-    affected versions)."""
+    affected versions).
+
+    `src_lines_not_carried` and `not_carried` are the same measurement
+    twice: the number of the block's non-blank source lines that are not
+    present verbatim in the destination, and those lines themselves.
+    `test_the_source_hashes_reproduce_from_git` MEASURES both against the
+    source and asserts equality with what is declared here — it does not
+    take either on trust, and it does not merely bound them. Writing the
+    lines out is what makes an edit reviewable: a "summarisation with a
+    note attached" would have to quote every line it summarised away, in
+    this file, where a reader will see them.
+    """
 
     id: str
     anchor: str
@@ -71,21 +104,36 @@ class Block(NamedTuple):
     dest_sha256: str
     src_lines_not_carried: int
     edit_note: str
+    not_carried: tuple[str, ...] = ()
 
 
-#: The commit whose `CHANGELOG.md` the `src_sha256` column is taken from.
-SOURCE_COMMIT = "8f0adf2"
+class Section(NamedTuple):
+    """One routed `###` section of `CHANGELOG.md`.
 
-#: The `### Soundness fixes` body at `SOURCE_COMMIT`, 1-based inclusive,
-#: heading line excluded. The splitter that produced the blocks below is
-#: `tests/test_soundness_routing.py::split_blocks`.
-SOURCE_SPAN = (576, 3564)
+    A routing is per-section, and every column here is per-section too:
+    the commit the text left from, the span it occupied there, the `##`
+    heading it arrived under in `SOUNDNESS.md`, and the ID prefix its
+    blocks carry. `SOURCE_SPAN` was a bare module constant while there
+    was one section, and a bare constant is a place a deletion can hide
+    (shrink the span, drop the block it no longer covers, and every
+    remaining check agrees) — `derive_source_span` recomputes it from the
+    source file and holds this column to it.
+    """
+
+    key: str
+    heading: str
+    id_prefix: str
+    source_commit: str
+    source_span: tuple[int, int]
+    dest_heading: str
+    blocks: tuple[Block, ...]
+
 
 #: Blocks deliberately NOT routed, each with the reason. Empty, and the
 #: partition check is what makes that mean something.
 DROPPED: tuple[tuple[str, str], ...] = ()
 
-ROUTED: tuple[Block, ...] = (
+_SOUNDNESS_FIXES: tuple[Block, ...] = (
     Block(
         id="SF-0.2.0-01",
         anchor="sf-020-01",
@@ -159,13 +207,19 @@ ROUTED: tuple[Block, ...] = (
         src_span=(671, 691),
         src_lines=21,
         src_sha256="319d09cf527d0ae754196875b8d8dfca3923025a8608c1cafe026bde9242a455",
-        dest_sha256="233ab432c21ef2478c6f3a1e49c706b8d2bfacbe9b872e91a439007bb7659171",
-        src_lines_not_carried=1,
+        dest_sha256="748fb03c94e7e78405347c3e48396950634db46f0db2e4459458d39ead80ed85",
+        src_lines_not_carried=2,
+        not_carried=(
+            '  for each of 32 constant-construction routes — 17 `watched`, 7',
+            '  `unwatched`, 3 `loud` (jax raises), 5 `deferred` (the constant reaches the',
+        ),
         edit_note=(
             "the route census it states was wrong on arrival: 32 routes "
             "and 7 `unwatched` against a GATE_COVERAGE holding 33 and 8 "
-            "since this batch's own fc98241. Corrected, with the "
-            "correction stated. No behaviour change."
+            "since this batch's own fc98241; and the corrected 33/8 "
+            "went stale in the B8c fixup, which enrolled two measured "
+            "routes and moved it to 35/9. Both corrections stated in "
+            "the block. No behaviour change."
         ),
     ),
     Block(
@@ -650,6 +704,11 @@ ROUTED: tuple[Block, ...] = (
         src_sha256="6e9996eb5aa05ac9febf6fb7e2819c550e60c422cbd19174e9fb6a6f373ca6b0",
         dest_sha256="b39125907239bafce00dffc3f38950cf07ae562f3b3f4b2fe4b02f09259c3638",
         src_lines_not_carried=3,
+        not_carried=(
+            "  default `Solver()`. This restores the z3 cross-check on high-degree",
+            "  polynomials (measured: d=80 from 10s+ timeout to 0.35-0.6s). The tactic",
+            "  is activated automatically; cvc5 handles these natively.",
+        ),
         edit_note="the stated reason (a degree-80 factoring pathology) names a case the emission cannot produce; replaced by the measured reason, with the re-derived z3 5.0.0 table. No behaviour change.",
     ),
     Block(
@@ -738,6 +797,10 @@ ROUTED: tuple[Block, ...] = (
         src_sha256="d3581e50075343e79b60c8f20f4337f69e6bbae7ee912c42ccce895f040d3ef9",
         dest_sha256="d80f028b90596ef175aacb7e1b561b4d664305ac5a46432b83bb5cca2ac2bfb9",
         src_lines_not_carried=2,
+        not_carried=(
+            "  `dff95fc` and on `main` at `198a2b5` (both hashing to `64a0ce8d\u2026`) and",
+            "  is a `TranscriptionError` here. The refusal is right \u2014",
+        ),
         edit_note="replaces an unreproducible hash literal with the property it was standing for, re-derived across the two trees. No behaviour change.",
     ),
     Block(
@@ -818,3 +881,121 @@ ROUTED: tuple[Block, ...] = (
         edit_note="",
     ),
 )
+
+_MODE_2: tuple[Block, ...] = (
+    Block(
+        id="M2-0.2.0-01",
+        anchor="m2-020-01",
+        kind="entry",
+        src_span=(134, 276),
+        src_lines=143,
+        src_sha256="b5f2a21a36aba075d22a2a8ee56fe2383d86fcf31bbc0ef9b8830025b4605287",
+        dest_sha256="a4c4ce4a6117db727b48db0edd24829fa632a0d288dcd3c848281832b94cae21",
+        src_lines_not_carried=11,
+        not_carried=(
+            '  Six of the **eight** `unwatched` routes in',
+            '  `lax.full`, `lax.full_like`, `lax.convert_element_type` and',
+            '  `jnp.stack`-of-`full`, plus — measured, but rows of neither inventory —',
+            "  `lax.select`-of-`full`, `jnp.take`'s `fill_value`, and a scoped",
+            '  `with jax.disable_jit():`. Two numpy routes',
+            '  remain and are named: `np.asarray(N).astype(dt)` is permanently unhookable',
+            '  (`np.ndarray.astype` is an immutable type attribute) and',
+            '  arithmetic gave it away (six closed plus two remaining is eight), and it',
+            '  survived because the test asserted the NUMERATOR alone: `len(closed) == 6`',
+            '  was true throughout. The denominator is asserted now. Measured at',
+            '  `8f0adf2`: 33 routes — 17 `watched`, 8 `unwatched`, 3 `loud`, 5',
+        ),
+        edit_note=(
+            'the route census it carried was corrected in the same commit'
+            'that routed it: `lax.select`-of-`full` was enrolled in'
+            'GATE_COVERAGE and EAGER_COVERAGE, which moves the closed'
+            "fraction from six of eight to seven of nine; `jnp.take`'s"
+            '`fill_value` was measured `deferred` rather than a hole the'
+            'detector closes; and the published diagnosis of why the old'
+            'fraction survived was replaced by the measured one. No'
+            'behaviour change.'
+        ),
+    ),
+    Block(
+        id="M2-0.2.0-02",
+        anchor="m2-020-02",
+        kind="entry",
+        src_span=(278, 319),
+        src_lines=42,
+        src_sha256="6f8dd6f4f4c4f7215d6478f282a25ee0d821c5d0e4c064f9f12105768d7e84ed",
+        dest_sha256="6f8dd6f4f4c4f7215d6478f282a25ee0d821c5d0e4c064f9f12105768d7e84ed",
+        src_lines_not_carried=0,
+        edit_note="",
+    ),
+    Block(
+        id="M2-0.2.0-03",
+        anchor="m2-020-03",
+        kind="entry",
+        src_span=(321, 338),
+        src_lines=18,
+        src_sha256="f48b48021d3647d550dc128aae456bcc45bc3fb70323a43a87df9d3c48c20060",
+        dest_sha256="f48b48021d3647d550dc128aae456bcc45bc3fb70323a43a87df9d3c48c20060",
+        src_lines_not_carried=0,
+        edit_note="",
+    ),
+    Block(
+        id="M2-0.2.0-04",
+        anchor="m2-020-04",
+        kind="entry",
+        src_span=(340, 347),
+        src_lines=8,
+        src_sha256="55a1e493d3b74d0cb28591c9adeffa782cdc59f41639f8def7843c2fd735a1fb",
+        dest_sha256="55a1e493d3b74d0cb28591c9adeffa782cdc59f41639f8def7843c2fd735a1fb",
+        src_lines_not_carried=0,
+        edit_note="",
+    ),
+    Block(
+        id="M2-0.2.0-05",
+        anchor="m2-020-05",
+        kind="entry",
+        src_span=(349, 352),
+        src_lines=4,
+        src_sha256="770f30a62de6063d5d799f80024035a7e9fd57d2764942d92c20f9b03c8d0afc",
+        dest_sha256="770f30a62de6063d5d799f80024035a7e9fd57d2764942d92c20f9b03c8d0afc",
+        src_lines_not_carried=0,
+        edit_note="",
+    ),
+    Block(
+        id="M2-0.2.0-06",
+        anchor="m2-020-06",
+        kind="entry",
+        src_span=(354, 372),
+        src_lines=19,
+        src_sha256="3453e8daa832107ef08b42def1c43bd56e2bef79fd24811c4cf7a76c54a61fe2",
+        dest_sha256="3453e8daa832107ef08b42def1c43bd56e2bef79fd24811c4cf7a76c54a61fe2",
+        src_lines_not_carried=0,
+        edit_note="",
+    ),
+)
+
+SECTIONS: tuple[Section, ...] = (
+    Section(
+        key="soundness",
+        heading="### Soundness fixes",
+        id_prefix="SF-0.2.0-",
+        source_commit="8f0adf2",
+        source_span=(576, 3564),
+        dest_heading=(
+            "## 0.2.0 soundness-fix detail (routed from `CHANGELOG.md`)"
+        ),
+        blocks=_SOUNDNESS_FIXES,
+    ),
+    Section(
+        key="mode2",
+        heading="### The eager construction-site detector (Mode 2), DEFAULT-OFF",
+        id_prefix="M2-0.2.0-",
+        source_commit="de80ad8",
+        source_span=(133, 373),
+        dest_heading="## 0.2.0 Mode 2 detail (routed from `CHANGELOG.md`)",
+        blocks=_MODE_2,
+    ),
+)
+
+#: Every routed block, in section order then document order. The checks
+#: that do not care which section a block came from read this.
+ROUTED: tuple[Block, ...] = tuple(b for s in SECTIONS for b in s.blocks)

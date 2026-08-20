@@ -330,26 +330,37 @@ expression it is written in.
 
 ### What it closes, and what it does not
 
-Six of the **eight** `unwatched` routes in
+Seven of the **nine** `unwatched` routes in
 `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` move from "silently
 certifies a destroyed constant" to "cannot be traced at all": `jnp.full`,
-`jnp.full_like`, `lax.full`, `lax.full_like`, `lax.convert_element_type` and
-`jnp.stack`-of-`full`.
+`jnp.full_like`, `lax.full`, `lax.full_like`, `lax.convert_element_type`,
+`jnp.stack`-of-`full` and `lax.select`-of-`full`.
 
 *This page said "six of the seven" until 2026-08-20, in a paragraph whose
 next line says two routes remain — 6 + 2 is 8, and the denominator was
 simply never re-read after `fc98241` made `jnp.stack`-of-`full` the eighth
-`unwatched` row. It is measured now: `GATE_COVERAGE` carries 33 routes, 17
-`watched`, 8 `unwatched`, 3 `loud`, 5 `deferred`, and the eager detector's
-test asserts the denominator as well as the six.*
+`unwatched` row. Both halves are read now, by
+`test_the_documented_fraction_is_the_measured_one`, in this page and in
+the five other files that state the same fraction — asserting the
+denominator in Python changed nothing, because nothing read the sentence.
+Measured: `GATE_COVERAGE` carries 35 routes, 17 `watched`, 9 `unwatched`,
+3 `loud`, 6 `deferred`.*
 
-`lax.select`-of-`full` and `jnp.take`'s `fill_value` close too, and they
-are named separately because they are **not rows of either inventory**:
-they build on `full`, so they raise for the reason `full` does, and driven
-on jax 0.11.0 with the detector armed both raise `EagerTruncationError` at
-the writing line. That is a measurement, not a row — nothing goes red if a
-jax release changes it. A scoped `with jax.disable_jit():` closes too, and for the same
-reason: the constant it wraps is narrowed at this very site on the way in.
+*The denominator moved 8 → 9 on 2026-08-21 because `lax.select`-of-`full`
+became a row. It had been driven closed and disclosed as closed while
+being a row of NEITHER inventory, so a jax release that changed it would
+have reddened nothing.*
+
+**`jnp.take`'s `fill_value` was disclosed beside it and is a different
+case, measured.** Under a TRACE the written constant reaches the jaxpr
+intact — driven in three spellings, all `deferred` — so it was never one
+of the gate's holes and is not in the fraction above; the propagation's
+`convert_element_type` transfer is what declines it. Run EAGERLY there is
+no trace to reach it in, the fill array is built at the construction site,
+and the detector raises. It is `deferred` in `GATE_COVERAGE` and `raises`
+in `EAGER_COVERAGE`, the only row that is both. A scoped
+`with jax.disable_jit():` closes too, and for the same reason as `full`:
+the constant it wraps is narrowed at this very site on the way in.
 
 Two named routes remain, and both are numpy finishing before jax is reached:
 

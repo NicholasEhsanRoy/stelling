@@ -266,13 +266,33 @@ Printed on every run, findings or not. This is a floor, not a census.
 | `jnp.where(pred, N, x)` | **UNCOVERED** | the literal sits at the enclosing call site; the fold operates on a variable inside the sub-jaxpr |
 | `jnp.clip(x, lo, N)` | **UNCOVERED** | same — nested sub-jaxpr |
 | `jnp.full(shape, N, dt)` / `jnp.full_like` | **UNCOVERED by this hook** | the value is narrowed at array construction, inside jax, before the fold site is reached. Closed by the opt-in eager detector, which is off by default |
-| eager execution (outside `jit`) | **UNCOVERED** | warm dispatch is 11 frames of C++ fast path; the fold is reached 0 times, and the eager detector sees 0 conversions here too |
+| eager execution (outside `jit`) | **UNCOVERED with `jit` ON** | warm dispatch is 11 frames of C++ fast path; the fold is reached 0 times, and with `jit` on the eager detector sees 0 conversions *of the written constant* here too. **That is a `jit`-ON measurement and the qualifier is load-bearing** — with `jit` off the detector fires on every spelling tried. See the note below the table |
 | anything traced before the plugin armed | **UNCOVERED here, COVERED inside `check()`** | jit caches, so the body is never re-traced. `preconditions.check()` and `contracts.check_contract()` empty jax's trace caches before the trace they gate, so a *verdict*'s observation is complete with respect to jax's caches on one thread; this *session report* has no such moment. `docs/overflow-tripwire.md` carries the two rows past that qualifier |
 
 *The last two rows' "why" columns are dated 2026-08-20. The third row read a
 flat **UNCOVERED** — "jit caches; it is never re-traced" — after the cache
 eviction had already closed it for a verdict, so this page and
 `docs/overflow-tripwire.md` gave different answers to the same question.*
+
+**AND THE EAGER ROW WAS THE SAME DEFECT ONE ROW UP, corrected 2026-08-21.**
+It said the eager detector sees 0 conversions here, flat, and that is true of
+one configuration and false of the other. Measured on jax 0.11.0, warm
+dispatch, counters from `eager.snapshot()`, on an `int16` array: with `jit`
+**ON** — the default — `x + 40000` is conv=0, trunc=0 and returns `-25535` in
+silence, and `x * 40000`, `x >= 40000`, `jnp.maximum(x, 40000)`,
+`jnp.minimum(x, 40000)` and `jnp.clip(x, 0, 40000)` are conv=0 too. With
+`JAX_DISABLE_JIT=1` **every one of them RAISES** — conv=1 trunc=1 apiece,
+conv=2 for `clip`. `jnp.full((2,), 40000, int16)` fires in both.
+`src/stelling/_tripwire/eager.py` has said this in capitals since B16 —
+**"THAT FIGURE IS FOR `jit` ON AND THAT QUALIFIER IS LOAD-BEARING"** — and
+this page did not, which is the same "two pages, two answers" defect the
+paragraph above says it just fixed for the row before.
+
+**And "0 conversions" was off by one even with `jit` on**, for
+`x.at[i].set(N)` and `x.at[i].add(N)`: conv=**1**, trunc=0, identically with
+`jit` on and off. The one conversion is the INDEX — `0`, converted to
+`int32` — and not the written constant, which is why the row now says "0
+conversions of the written constant".
 
 The two causes are distinct:
 1. **The site is never reached** (`where`, `clip`, `pad`): the literal survives
