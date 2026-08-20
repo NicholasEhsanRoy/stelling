@@ -1997,6 +1997,7 @@ def eager_jax_constant_sweep() -> dict:
         {"code": "swept" | "not-armed" | "unexpected:<Type>",
          "conversions": int,          # the denominator: 0 means it went blind
          "truncations": int,
+         "x64": bool,                 # the setting it ran under; see below
          "unmatched": ((written, from_dtype, to_dtype, ((file, func), ...)), ...),
          "matched": ((file, func, written, from_dtype, to_dtype), ...)}
 
@@ -2006,6 +2007,15 @@ def eager_jax_constant_sweep() -> dict:
     jax. ``matched`` missing a row that :data:`_JAX_EAGER_CONSTANTS` carries
     is the other signal -- a row that has stopped being real, which at x64 off
     means the site moved.
+
+    ``x64`` IS IN THE RESULT BECAUSE THE MEASUREMENT IS BLIND AT ONE SETTING
+    AND THE NUMBERS DO NOT SAY SO. With ``jax_enable_x64=True`` jax's own
+    threefry mask widens to ``int64``, it fits, and NOTHING of jax's narrows:
+    ``unmatched`` is then necessarily empty and ``matched`` necessarily
+    empty, whatever jax has grown. Measured on jax 0.11.0 -- x64 on: 729
+    conversions, 0 truncations, 0 rows exercised; x64 off: 675, 13, 1. A
+    caller that prints "0 unmatched" from an x64-on sweep is reporting that
+    it did not look, and the flag is what lets it say so.
     """
     # THE ARMED CHECK COMES BEFORE THE IMPORT, and that ordering is the
     # difference between "not armed" and a traceback: this function is called
@@ -2053,13 +2063,18 @@ def eager_jax_constant_sweep() -> dict:
                     pass
     except Exception as exc:  # noqa: BLE001 - a probe may not raise
         return {"code": f"unexpected:{type(exc).__name__}", "conversions": counters[0],
-                "truncations": counters[1], "unmatched": (), "matched": ()}
+                "truncations": counters[1],
+                "x64": bool(_jax.config.jax_enable_x64),
+                "unmatched": (), "matched": ()}
     finally:
         _eager_installed["observer"] = saved
     return {
         "code": "swept",
         "conversions": counters[0],
         "truncations": counters[1],
+        # READ AFTER THE SWEEP, not before: this is the setting the numbers
+        # above were taken at, and at `True` they are blind by construction.
+        "x64": bool(_jax.config.jax_enable_x64),
         "unmatched": tuple(sorted(unmatched, key=repr)),
         "matched": tuple(sorted(matched)),
     }

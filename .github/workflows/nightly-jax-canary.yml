@@ -9,7 +9,7 @@
 # it still works is to run it against tomorrow's jax before tomorrow's users
 # do.
 #
-# THREE PROPERTIES, ALL LOAD-BEARING, and each one is a way this job could be
+# FOUR PROPERTIES, ALL LOAD-BEARING, and each one is a way this job could be
 # theatre instead of a canary:
 #
 #   1. IT RUNS THE SHIPPED `arm()`. Not a copy of the probe, not a
@@ -34,7 +34,16 @@
 #      the previous version of this sentence said otherwise, and header prose
 #      in this file has now been wrong twice. Where it disagrees with
 #      `_TWO_LEGS`, `_TWO_LEGS` is the checked one.
-#   3. INFRASTRUCTURE FAILURE MUST NOT PAGE. The nightly index URL below is
+#   3. EACH LEG RUNS THE CANARY IN BOTH `JAX_ENABLE_X64` CELLS. The eager
+#      CONSTANT SWEEP -- the earliest signal that jax has grown an internal
+#      eager truncation nobody has written a row for -- can only find one at
+#      x64 OFF: with x64 on, jax's threefry mask widens to int64, nothing of
+#      jax's narrows, and `unmatched` is necessarily empty. Measured on jax
+#      0.11.0: 729 conversion(s) / 0 truncation(s) / 0 row(s) at x64=1
+#      against 675 / 13 / 1 at x64=0. For one commit both legs ran only at
+#      x64=1 while the documentation said the canary runs the sweep, which
+#      is an alarm wired to a condition that cannot occur.
+#   4. INFRASTRUCTURE FAILURE MUST NOT PAGE. The nightly index URL below is
 #      NOT verified current; jax's nightly hosting has moved before and may
 #      move again. An install that cannot reach it is infra, not signal, and
 #      takes a distinct non-failing path that says so.
@@ -94,6 +103,22 @@ jobs:
           JAX_PLATFORMS: cpu
         run: .venv/bin/python .github/scripts/tripwire_canary.py --require
 
+      # PROPERTY 4, AND IT WAS MISSING. `JAX_ENABLE_X64: "1"` above is this
+      # repository's setting for jax work, and it is the setting in which the
+      # canary's EAGER CONSTANT SWEEP cannot find anything: jax's own threefry
+      # mask widens to int64, so nothing of jax's narrows, `unmatched` is
+      # necessarily empty and `eager:unenumerated-jax-constant` cannot page.
+      # Measured on jax 0.11.0 — x64=1: 729 conversion(s), 0 truncation(s), 0
+      # row(s) exercised; x64=0: 675 / 13 / 1. With only the step above, the
+      # earliest signal that jax has grown an eager truncation nobody has
+      # written a row for was an alarm wired to a condition that cannot occur.
+      # A TEST READS BOTH LEGS for a canary run at x64 off.
+      - name: ...and again at x64 OFF, the only setting the sweep can redden in
+        env:
+          JAX_ENABLE_X64: "0"
+          JAX_PLATFORMS: cpu
+        run: .venv/bin/python .github/scripts/tripwire_canary.py --require
+
   nightly:
     name: nightly jax
     runs-on: ubuntu-latest
@@ -103,7 +128,7 @@ jobs:
       - run: uv venv
       - run: uv pip install -e "." pytest
 
-      # PROPERTY 3. `continue-on-error` so an unreachable index, a yanked
+      # PROPERTY 4. `continue-on-error` so an unreachable index, a yanked
       # nightly or a resolver change cannot page anybody. The step's outcome
       # is read below and turned into a distinct, NON-FAILING path.
       - name: install a jax nightly
@@ -136,6 +161,17 @@ jobs:
         if: steps.install.outcome == 'success'
         env:
           JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
+        run: .venv/bin/python .github/scripts/tripwire_canary.py --require
+
+      # PROPERTY 4 on this leg too — see the control job. At x64 on, the eager
+      # constant sweep is structurally blind (jax's mask fits in int64), so a
+      # nightly that grew a second internal eager truncation would come back
+      # green from the step above. This is the step that can go red.
+      - name: ...and again at x64 OFF, the only setting the sweep can redden in
+        if: steps.install.outcome == 'success'
+        env:
+          JAX_ENABLE_X64: "0"
           JAX_PLATFORMS: cpu
         run: .venv/bin/python .github/scripts/tripwire_canary.py --require
 

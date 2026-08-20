@@ -395,6 +395,16 @@ def _eager_sweep_row(armed, enabled=True) -> tuple[str, tuple[str, str] | None]:
     new release before any CI lane does, which is the earliest anyone can be
     told.
 
+    IT CAN ONLY FIND ONE WITH ``JAX_ENABLE_X64`` OFF, and it SAYS SO when it
+    ran with x64 on. With x64 on jax's own threefry mask widens to ``int64``,
+    it fits, and nothing of jax's narrows at all -- so ``unmatched`` is empty
+    by construction and this row cannot page, whatever the installed jax has
+    grown. Measured on jax 0.11.0: 729 conversion(s), 0 truncation(s), 0
+    row(s) at x64=1 against 675, 13, 1 at x64=0. Both nightly legs therefore
+    run this script twice, once per cell, and a test reads the workflow for
+    the x64-off run; the note below is the second guard, for a reader of a
+    single x64-on run who would otherwise read "0 unmatched" as a clearance.
+
     Everything that is not a measurement is a note: with no jax, with the hook
     not attached, or with ``--no-sweep``, there is nothing to sweep and
     nothing to say.
@@ -445,6 +455,21 @@ def _eager_sweep_row(armed, enabled=True) -> tuple[str, tuple[str, str] | None]:
                 "Read the jax frames named above, write the row, and say what "
                 "the constant is.",
             ),
+        )
+    # THE QUALIFICATION TRAVELS WITH THE NUMBER, and it belongs on THIS
+    # return rather than on the one above: a sweep that found something has
+    # looked, whatever the setting, and a "could not have found one" clause
+    # printed beside an `UNENUMERATED` count would contradict itself. Here
+    # the figures are zeroes, and at x64 on zeroes are what a sweep that
+    # could not look reports.
+    if swept.get("x64"):
+        return (
+            summary
+            + " -- taken at JAX_ENABLE_X64=1, where jax's own mask widens to "
+            "int64 and NOTHING of jax's narrows, so these zeroes mean this "
+            "sweep could not have found an unenumerated constant. The x64=0 "
+            "run is the one that can",
+            None,
         )
     return summary, None
 

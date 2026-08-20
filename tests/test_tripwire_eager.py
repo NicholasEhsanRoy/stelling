@@ -1379,6 +1379,116 @@ def test_a_seed_that_DOES_NOT_SURVIVE_is_a_gap_this_detector_CANNOT_see(armed):
     )
 
 
+def test_the_SAME_SEED_dies_with_jit_ON_at_the_entry_point_the_fix_is_SOLD_on(armed):
+    """The gap this batch's own program has in the DEFAULT configuration.
+
+    The collision the four-field key exists to separate is worked under
+    ``jax.disable_jit()``. With jax's defaults untouched that same call --
+    ``jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))`` --
+    kills the caller's seed and **neither instrument reports it**.
+    ``_threefry_seed`` is ``@jit``, so with ``jit`` on the seed is
+    canonicalised to ``int32`` at jax's argument boundary before any trace
+    begins: that is the same NUMPY-level cast the ``PRNGKey`` gap above is
+    about, one entry point lower. This hook records zero conversions of it,
+    and the const-fold tripwire's view of that trace is exactly one narrowing
+    -- jax's own mask -- which it correctly suppresses.
+
+    THE FACT USED TO LIVE IN A TEST DOCSTRING. A gap that is only stated where
+    a maintainer reads it is not disclosed, so this drives the measurement and
+    then asserts it is printed where a USER reads it. It is not closed here
+    and is not claimed closed: closing it needs the hook at a numpy cast that
+    the ``PRNGKey`` bullet already says it needs.
+    """
+    impl = _seed_routes()["numpy scalar"]
+    if jax.config.jax_enable_x64:
+        # x64 ON keeps the seed at int64, where it fits, and it SURVIVES:
+        # there is no gap in this cell. Asserted rather than skipped, so the
+        # day either configuration changes a test says so.
+        assert not bool((impl(2 ** 32 - 1) == impl(-1)).all()), (
+            "the seed collapsed onto seed(-1) with x64 ON"
+        )
+        return
+    # the consequence, in the caller's own terms
+    assert bool((impl(2 ** 32 - 1) == impl(-1)).all()), (
+        "seed(2**32 - 1) no longer collapses onto seed(-1); the disclosure "
+        "this test guards has gone stale in the good direction"
+    )
+    # ...and with `jit` ON this detector sees NOTHING of the seed
+    assert _tripwire.evict_trace_caches() == "evicted"
+    eager.reset_counters()
+    impl(2 ** 32 - 1)
+    silent = eager.snapshot()
+    assert silent["conversions"] == 0, (
+        "the seed reached this hook with jit on, so the gap this discloses "
+        f"has changed shape: {silent}"
+    )
+    # ...while with `jit` OFF it is the caller's and raises, which is the
+    # contrast that makes "0 conversions" above a GAP and not a verdict.
+    assert _tripwire.evict_trace_caches() == "evicted"
+    eager.reset_counters()
+    with jax.disable_jit():
+        with pytest.raises(stelling.EagerTruncationError) as caught:
+            impl(2 ** 32 - 1)
+    assert (caught.value.written, caught.value.became) == (4294967295, -1)
+    # ...and the OTHER instrument's whole view of the jit-on program is jax's
+    # own mask, correctly suppressed: 1 narrowing, 1 fire, 1 suppression.
+    was_armed = _tripwire.is_armed()
+    fold_status, recorder = _tripwire.arm()
+    if not fold_status.armed:  # pragma: no cover - environment
+        pytest.skip(fold_status.code)
+    try:
+        assert _tripwire.evict_trace_caches() == "evicted"
+        before = (recorder.int_narrowings, recorder.fires, recorder.suppressed_jax)
+        impl(2 ** 32 - 1)
+        after = (recorder.int_narrowings, recorder.fires, recorder.suppressed_jax)
+    finally:
+        if not was_armed:
+            _tripwire.disarm()
+    assert [a - b for a, b in zip(after, before)] == [1, 1, 1], (
+        "the const-fold tripwire's view of that program with jit on is no "
+        f"longer one narrowing, all of it jax's own: {before} -> {after}"
+    )
+    # ...and it is disclosed, with the measurement, where a user reads it
+    text = " ".join(report.EAGER_UNCOVERED)
+    assert "threefry_prng_impl.seed(np.int64(N))" in text, (
+        "`report.EAGER_UNCOVERED`'s PRNG bullet names `PRNGKey`/`key` only, "
+        "so the entry point that dies with jax's DEFAULTS is undisclosed"
+    )
+    assert "NEITHER INSTRUMENT REPORTS IT" in text, (
+        "the disclosure does not say that the other instrument is silent too"
+    )
+
+
+def test_a_jax_run_deeper_than_the_CAP_says_what_it_dropped(armed):
+    """The bug report is how a new row gets written, and the cap can gut it.
+
+    :func:`eager._origin` looks a narrowing up against the WHOLE run of jax
+    frames; the alarm prints the first :data:`eager.MAX_JAX_FRAMES` of them.
+    The one row the map has sits at index 4, so nothing is lost today -- but a
+    jax release whose internal truncation sits deeper than the cap would have
+    the function a row must be keyed on ELIDED from the very report that asks
+    the reader to send it. A bare ``... and N more`` reads as a courtesy.
+
+    Driven through the real message builder with a synthetic run, because the
+    property is about the CAP and not about any jax that ships today.
+    """
+    run = tuple(
+        (f"jax/_src/f{i}.py", f"frame{i}")
+        for i in range(eager.MAX_JAX_FRAMES + 3)
+    )
+    text = eager._message(
+        4294967295, "int64", "int32", -1, "caller.py", 3, "seed", run
+    )
+    assert "frame0()" in text, "the run is not printed at all"
+    assert f"frame{eager.MAX_JAX_FRAMES - 1}()" in text, "the cap shrank"
+    assert f"frame{eager.MAX_JAX_FRAMES}()" not in text, "the cap stopped capping"
+    assert "not printed" in text and "traceback" in text, (
+        "the elision reads as a courtesy: nothing tells the reader that the "
+        "jax function a row must be keyed on may be among the frames it "
+        f"dropped, nor where the rest of the run is:\n{text}"
+    )
+
+
 #: The basis the ``jit``-independence claim is driven over. It was FOUR
 #: programs and four was too few: widened to these, an audit found one that
 #: genuinely flipped -- ``jit(partial(jnp.full_like, fill_value=300))(x)``
@@ -1807,9 +1917,51 @@ def test_arming_REFUSES_when_the_jax_leg_of_that_control_stops_holding(unarmed, 
     jax's mask is a detector that is about to raise inside jax's own PRNG at a
     line the user cannot edit -- audit 1's finding, exactly -- and the remedy
     is one row. Refusing names the row; attaching would name a user.
+
+    AND THE COMPLEMENTARY FACT AT ``jax_enable_x64=1``, asserted rather than
+    skipped. With x64 on, jax's mask widens to ``int64``, nothing narrows, and
+    the empty map is ACCEPTED -- correctly, because there is no jax leg to
+    fail. This test used to skip there, which made the one configuration where
+    ``_origin_control`` takes its third branch a configuration nothing
+    covered; a skip is a hole the skip inventory can only notice if somebody
+    forgets to register the reason, and that is luck rather than coverage.
+    What is pinned instead is that the acceptance says WHY in the status
+    detail and that it is not vacuous -- jax's own probe program really did
+    run through the live hook.
     """
     if jax.config.jax_enable_x64:
-        pytest.skip("with x64 on jax's mask does not narrow, so there is no leg")
+        monkeypatch.setattr(adapter, "_JAX_EAGER_CONSTANTS", {})
+        status = _tripwire.arm_eager()
+        try:
+            assert status.armed, status.code
+            assert "jax writes nothing narrow here at this x64 setting" in (
+                status.detail or ""
+            ), (
+                "the empty map was accepted without the status saying why, so "
+                "a reader cannot tell this from a jax leg that ran and held: "
+                f"{status.detail}"
+            )
+            # ...and the acceptance is not vacuous. "no truncation to
+            # attribute" is also what a hook that was never called reports,
+            # and the conversion count is the only thing that tells them
+            # apart -- the same denominator-first rule the report prints by.
+            probes = dict(adapter.eager_origin_probes())
+            assert _tripwire.evict_trace_caches() == "evicted"
+            eager.reset_counters()
+            probes["jax"]()
+            snap = eager.snapshot()
+            assert snap["conversions"] > 0, (
+                "the hook saw nothing of jax's own PRNG, so 'nothing narrowed'"
+                f" is indistinguishable from a hook that never ran: {snap}"
+            )
+            assert (snap["truncations"], snap["suppressed_jax"]) == (0, 0), (
+                "with x64 on jax's mask is supposed to fit in int64; it "
+                f"narrowed anyway, and with the map emptied: {snap}"
+            )
+        finally:
+            if eager.is_armed():
+                _tripwire.disarm_eager()
+        return
     monkeypatch.setattr(adapter, "_JAX_EAGER_CONSTANTS", {})
     status = _tripwire.arm_eager()
     try:

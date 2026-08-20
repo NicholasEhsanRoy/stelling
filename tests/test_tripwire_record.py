@@ -1569,12 +1569,30 @@ def test_an_UNENUMERATED_eager_truncation_of_jax_s_own_pages(monkeypatch):
     assert reason is None and "not-armed" in note
 
     _sweep({"code": "swept", "conversions": 675, "truncations": 13,
+            "x64": False,
             "unmatched": (),
             "matched": (("_src/random/threefry2x32.py", "_threefry_seed",
                          4294967295, "uint32", "int32"),)})
     note, reason = canary._eager_sweep_row(True)
     assert reason is None, note
     assert "675 conversion(s)" in note and "1 row(s) exercised" in note
+    assert "JAX_ENABLE_X64=1" not in note, (
+        "an x64-off sweep is the one that CAN find something, and the note "
+        f"disclaimed it: {note}"
+    )
+
+    # ...AND THE SAME NUMBERS FROM AN x64-ON SWEEP ARE NOT A CLEARANCE. With
+    # x64 on jax's mask widens to int64 and nothing of jax's narrows, so a
+    # zero there says the sweep could not have looked. The qualification
+    # travels with the number or a reader reads "0 unmatched" as "clean".
+    _sweep({"code": "swept", "conversions": 729, "truncations": 0,
+            "x64": True, "unmatched": (), "matched": ()})
+    note, reason = canary._eager_sweep_row(True)
+    assert reason is None, note
+    assert "JAX_ENABLE_X64=1" in note and "could not have found" in note, (
+        "a blind sweep printed its zeroes with no qualification, which reads "
+        f"exactly like a sweep that looked and found nothing: {note}"
+    )
 
     _sweep({"code": "swept", "conversions": 675, "truncations": 14,
             "unmatched": ((511, "int", "uint8",
@@ -1867,6 +1885,60 @@ def test_the_canary_and_the_workflow_agree_about_the_two_legs():
         assert not claims, (
             f"{where} describes a leg as pinned and no leg pins its jax "
             f"version: {[m.group(0) for m in claims]}"
+        )
+
+
+def test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN():
+    """An alarm wired to a condition that cannot occur is not an alarm.
+
+    The canary's eager CONSTANT SWEEP is the earliest signal there is that jax
+    has grown an internal eager truncation nobody has written a row for -- and
+    it can only find one with ``JAX_ENABLE_X64`` OFF. With x64 on, jax's own
+    threefry mask widens to ``int64``, it fits, and NOTHING of jax's narrows,
+    so ``unmatched`` is empty by construction whatever the installed jax does.
+    Measured on jax 0.11.0: 729 conversion(s), 0 truncation(s), 0 row(s)
+    exercised at x64=1 against 675, 13, 1 at x64=0.
+
+    For one commit both legs of that workflow set ``JAX_ENABLE_X64: "1"`` and
+    nothing else, while `docs/overflow-tripwire.md` said the nightly canary
+    runs the sweep. Both halves were true and the conjunction was not: the
+    page could not fire on either leg. This reads the workflow rather than the
+    sentence, because the sentence is what was already wrong.
+    """
+    import re
+
+    workflow = (
+        _pathlib_for_canary() / ".github" / "workflows" / "nightly-jax-canary.yml"
+    ).read_text(encoding="utf-8")
+
+    starts = [
+        (m.start(), m.group(1))
+        for m in re.finditer(r"\n  ([a-z-]+):\n    name: ", workflow)
+    ]
+    assert starts, "no jobs found; the workflow layout this test reads has moved"
+    bounds = [pos for pos, _ in starts] + [len(workflow)]
+    for index, (_, job) in enumerate(starts):
+        block = workflow[bounds[index]:bounds[index + 1]]
+        # ONE STEP AT A TIME, so the setting read is the one that step runs
+        # under. A job-level `env:` and another step's `env:` both live in the
+        # same block, and matching across them would let an x64-off step
+        # somewhere else certify an x64-on canary run.
+        cells = []
+        for step in re.split(r"\n      - (?=name:|uses:|run:)", block)[1:]:
+            if not re.search(r"^\s*run:[^\n]*tripwire_canary\.py", step, re.M):
+                continue
+            setting = re.search(r'JAX_ENABLE_X64:\s*"?([01])"?', step)
+            cells.append(setting.group(1) if setting else "unset")
+        assert cells, (
+            f"the `{job}` leg does not run the canary at all"
+        )
+        assert any(cell in ("0", "unset") for cell in cells), (
+            f"every `tripwire_canary.py` step on the `{job}` leg runs at "
+            f"JAX_ENABLE_X64={cells}, and the eager constant sweep cannot "
+            "find an unenumerated jax constant at x64=1: jax's own mask "
+            "widens to int64, nothing of jax's narrows, and `unmatched` is "
+            "empty by construction. That leg cannot go red for the reason "
+            "`eager:unenumerated-jax-constant` exists"
         )
 
 

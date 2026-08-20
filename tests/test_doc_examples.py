@@ -24,13 +24,13 @@ Measured over ``README.md`` + ``docs/*.md``, and pinned by
       EXECUTED (exit 0 required)                    30
         marked run-only — output not compared        3
         OUTPUT COMPARED against a fence             27
-    plain ``` fences                                69
+    plain ``` fences                                70
       consumed as an example's claimed output       27
-      HAND-WRITTEN, compared to nothing             42
+      HAND-WRITTEN, compared to nothing             43
 
 So the claim this file earns is: *every runnable example runs, and 27 of
 the 30 have their stdout compared byte for byte after a narrow
-normalisation.* The 42 unattached fences — a render pasted into prose, a
+normalisation.* The 43 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
 
@@ -182,8 +182,14 @@ EXPECTED_INVENTORY = {
     # It is a MEASUREMENT quoted in prose, not an example's output --
     # `tests/test_tripwire_eager.py` re-drives the equalities against the
     # real jax, which is what holds them down.
-    "plain_fences": 69,
-    "plain_unattached": 42,
+    # B16 fixup 4 added one more, in the same section and for the same
+    # reason: the two instruments' readings of
+    # `threefry_prng_impl.seed(np.int64(2**32 - 1))` with `jit` on and off,
+    # which is the gap that program has in jax's DEFAULT configuration.
+    # Measured, hand-written, attached to nothing;
+    # `tests/test_tripwire_eager.py` re-drives every line of it.
+    "plain_fences": 70,
+    "plain_unattached": 43,
 }
 
 _MARKER = re.compile(r"<!--\s*doc-example:\s*(illustrative|run-only)\s*-->")

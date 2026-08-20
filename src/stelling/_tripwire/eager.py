@@ -928,6 +928,16 @@ MAX_REASONS = 4
 #: ``bitwise_and`` <- ``__call__`` <- ``_threefry_seed``), so a shorter list
 #: would print the promotion helper and stop before the PRNG -- which is the
 #: one line a reader who did not write the constant needs to see.
+#:
+#: THE LIMITATION, SAID WHERE THE MESSAGE IS BUILT. This is a CAP on what is
+#: PRINTED and not on what is decided: :func:`_origin` looks the narrowing up
+#: against the whole run, not against these six. So a jax release whose
+#: internal eager truncation sits deeper than six frames below the writer
+#: would have the function a new row must be keyed on ELIDED from the very
+#: report that is how a row gets written. The elision line below therefore
+#: says so and names where the rest is: the alarm is raised from inside the
+#: run, so Python's own traceback above the message carries every frame of
+#: it, and nothing is unrecoverable -- only unprinted.
 MAX_JAX_FRAMES = 6
 
 
@@ -1012,7 +1022,16 @@ def _message(
             f"      {func}()  ({file})" for file, func in jax_run[:MAX_JAX_FRAMES]
         ]
         if len(jax_run) > MAX_JAX_FRAMES:
-            lines.append(f"      ... and {len(jax_run) - MAX_JAX_FRAMES} more")
+            # NOT A COURTESY ELISION. The frames dropped here can be the one a
+            # row would be keyed on, and this report is how a row gets
+            # written, so the line says what it dropped and where the rest is.
+            lines.append(
+                f"      ... and {len(jax_run) - MAX_JAX_FRAMES} more, not "
+                "printed. If the jax function that WROTE the constant is one "
+                "of them, it is in the traceback above this message -- the "
+                "alarm is raised from inside this run, so every frame of it "
+                "is there."
+            )
     lines += [
         "",
         "If the wrap is what you meant, DECLARE it and the declaration will "

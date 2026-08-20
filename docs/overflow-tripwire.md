@@ -395,9 +395,10 @@ that wrote the constant, and what the constant is.
 
 **The source dtype is in the key because without it a row can suppress YOUR
 constant.** At that one site your seed and jax's mask collide:
-`jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))` narrows twice
-under `_threefry_seed` — your seed and jax's mask, both `4294967295 -> -1` at
-`int32` — and a row without the source dtype suppressed both, then printed
+`jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))`, **under
+`jax.disable_jit()`**, narrows twice under `_threefry_seed` — your seed and
+jax's mask, both `4294967295 -> -1` at `int32` — and a row without the source
+dtype suppressed both, then printed
 *"written by jax … the threefry PRNG's 32-bit mask"* at your own line. They
 differ in one field the hook can see: all 13 of jax's own truncations arrive
 from `uint32`, and a seed you pass arrives from `int64`.
@@ -408,8 +409,16 @@ implementation and seed spelling, then `jax.random`'s consumers and `jnp`'s
 integer ops over six integer dtypes — sees 675 conversions and 13 truncations
 of jax's own, and **all 13 are that one row**, identically on jax 0.11.0 and
 0.10.2. It is shipped code, not a note: it runs as a test on both jax series,
-so a release that adds a second one turns a lane red, and the nightly jax
-canary runs it too, on the leg that meets a new release first.
+so a release that adds a second one turns a lane red, and **both legs of the
+nightly jax canary run it too, at `JAX_ENABLE_X64=0`** — which is the only
+setting it can find anything at. With x64 on, jax's mask widens to `int64`, it
+fits, and nothing of jax's narrows: the sweep sees 729 conversions, 0
+truncations and 0 rows exercised, against 675 / 13 / 1 with x64 off (jax
+0.11.0), so its zeroes there mean it did not look rather than that it looked
+and found nothing. For one commit both canary legs ran at x64 on only, which
+made that page an alarm wired to a condition that could not occur; each leg
+now runs the canary in both cells and the x64-on run prints the
+qualification.
 
 **The residue is the one an enumeration has, and it is loud.** A jax release
 that adds an internal eager truncation nobody has written a row for is
@@ -450,6 +459,30 @@ not "your seed survived."** A seed wider than `int32` is not covered, and
 closing it needs a hook at a numpy cast rather than at jax's constructor —
 a different design, not a patch. It is disclosed in the section's own coverage
 list.
+
+**The lower-level entry point is the same story with `jit` ON — and it is the
+program the source-dtype fix above is sold on.** `_threefry_seed` is `@jit`, so
+in the **default** configuration your seed is canonicalised to `int32` at jax's
+argument boundary, before any trace begins. Measured on jax 0.11.0, x64 off:
+
+```
+threefry_prng_impl.seed(np.int64(2**32 - 1))   ==  seed(np.int64(-1))   True
+                                                   both [0 4294967295]
+
+  jit ON   eager detector:      0 conversions of your seed, no alarm
+           const-fold tripwire: 1 narrowing — jax's own mask at
+                                threefry2x32.py:73, uint32 4294967295,
+                                correctly suppressed
+  jit OFF  eager detector:      1 conversion, 1 truncation, RAISES at your
+                                line, 4294967295 -> -1
+```
+
+So **with jax's defaults that call kills your seed and neither instrument
+reports it.** Turning `jit` off is what makes it visible, which means the
+collision worked through above is a `disable_jit` phenomenon; with
+`JAX_ENABLE_X64=1` the seed survives and there is nothing to report. Closing
+this is the same numpy-cast hook as the paragraph above, and it is not
+attempted here.
 
 ### It fails closed
 
