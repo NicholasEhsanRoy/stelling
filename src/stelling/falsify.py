@@ -200,8 +200,7 @@ So the import list below is a soundness argument and is enforced by a test
 ``stelling.propagate``, ``stelling.interval``, ``stelling.affine``,
 ``stelling.smt``, ``stelling.solvers``, ``stelling.obligation``,
 ``stelling.exactness``, ``stelling.fidelity``, ``stelling.coverage``,
-``stelling.reachability``, ``stelling.vacuity``, ``stelling.verdict``,
-``stelling.ir``.
+``stelling.vacuity``, ``stelling.verdict``, ``stelling.ir``.
 
 Three of those absences are load-bearing beyond the obvious:
 

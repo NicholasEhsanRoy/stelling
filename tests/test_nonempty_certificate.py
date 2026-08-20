@@ -704,7 +704,7 @@ def test_a_certifying_probe_narrows_nothing():
             ):
                 continue
             certified += 1
-            assert not [n for n in probe.notes if "narrowed var" in n], (
+            assert not [n for n in probe.notes if "narrowed x" in n], (
                 f"{h.__name__} probe {k} certified AND narrowed"
             )
             assert probe.narrowing_uncertified is False

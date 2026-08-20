@@ -128,7 +128,7 @@ def test_assume_gt0_div_ieee_f32_no_longer_decides_and_this_is_the_price():
     assert p.obligations[0].status == "unknown", (
         f"expected unknown after S10; got {p.obligations[0].status}"
     )
-    assert any("narrowed var 1" in n for n in p.notes), p.notes
+    assert any("narrowed x1 (IR var 1)" in n for n in p.notes), p.notes
 
 
 def test_assume_above_the_subnormal_band_still_divides_in_ieee_f32():
@@ -269,7 +269,7 @@ def test_ieee_f32_assume_gt0_bumps_to_min_positive():
     )
     p = propagate(query, semantics="ieee")
     # The propagation note reports the narrowed interval; verify the bump
-    narrowing_notes = [n for n in p.notes if "narrowed var 0" in n]
+    narrowing_notes = [n for n in p.notes if "narrowed x0 (IR var 0)" in n]
     assert narrowing_notes, f"expected a narrowing note, got: {p.notes}"
     note = narrowing_notes[0]
     # Should contain the min_positive value, NOT 0
@@ -365,7 +365,7 @@ def test_assume_gt_negative_bumps_correctly():
         f"got {p.obligations[0].status}; notes: {p.notes}"
     )
     # Verify the narrowing note shows the bumped value (not -5.0 exactly)
-    narrowing_notes = [n for n in p.notes if "narrowed var 0" in n]
+    narrowing_notes = [n for n in p.notes if "narrowed x0 (IR var 0)" in n]
     assert narrowing_notes, f"expected a narrowing note, got: {p.notes}"
     note = narrowing_notes[0]
     # The bumped lo should be nextafter(-5, inf) ≈ -4.999999999999999
@@ -1064,6 +1064,40 @@ def _changelog_text():
     return " ".join(raw.split())
 
 
+_SUBJAXPR_DISCLOSURE_OPENS = (
+    "- **The certificate does not cross a sub-jaxpr boundary"
+)
+
+
+def _subjaxpr_disclosure():
+    """THE PARAGRAPH, not the file.
+
+    Audit 0.2.0 B8a, item 7 (a B5 follow-up scheduled there). The check
+    below used to search the WHOLE of CHANGELOG.md for each member's name,
+    and `jit`, `remat2` and the two `custom_*_call`s are named all over a
+    changelog for a jax tool — so the assertion passed on any file that
+    mentioned them ANYWHERE, including a file from which this disclosure
+    had been deleted outright. A gate that cannot fail is not a gate, and
+    this one guards the sentence a user reads to learn that their `jit`
+    silently costs them the certificate.
+
+    The slice is the markdown BULLET: from its opening marker to the next
+    top-level `- ` bullet. Both ends are asserted, so a rewrite that moves
+    the disclosure reddens here rather than passing on the surrounding
+    prose.
+    """
+    root = pathlib.Path(__file__).resolve().parents[1]
+    raw = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    start = raw.find(_SUBJAXPR_DISCLOSURE_OPENS)
+    assert start != -1, (
+        f"the sub-jaxpr disclosure bullet is gone from CHANGELOG.md "
+        f"(looked for {_SUBJAXPR_DISCLOSURE_OPENS!r})"
+    )
+    end = raw.find("\n- ", start + len(_SUBJAXPR_DISCLOSURE_OPENS))
+    assert end != -1, "the disclosure bullet does not end at another bullet"
+    return " ".join(raw[start:end].split())
+
+
 def test_the_disclosure_names_EVERY_transparent_wrapper():
     """REDDENS ON REVERT of the CHANGELOG list, and on drift in either file.
 
@@ -1074,17 +1108,56 @@ def test_the_disclosure_names_EVERY_transparent_wrapper():
     one understates the limitation's cost to the reader who is paying it.
     Pinned to the code so the next member added to the frozenset cannot
     quietly fall out of the prose (B5 follow-up audit).
+
+    SCOPED TO THE DISCLOSURE PARAGRAPH, not to the file — see
+    :func:`_subjaxpr_disclosure` for what the whole-file version could not
+    detect.
     """
-    text = _changelog_text()
+    paragraph = _subjaxpr_disclosure()
     for member in sorted(DEFAULT_TRANSPARENT):
-        assert f"`{member}`" in text, (
-            f"DEFAULT_TRANSPARENT member {member!r} is not named anywhere in "
-            f"CHANGELOG.md; the sub-jaxpr disclosure lists "
-            f"{sorted(DEFAULT_TRANSPARENT)}"
+        assert f"`{member}`" in paragraph, (
+            f"DEFAULT_TRANSPARENT member {member!r} is not named in the "
+            f"sub-jaxpr disclosure paragraph of CHANGELOG.md; the "
+            f"frozenset is {sorted(DEFAULT_TRANSPARENT)}"
         )
-    assert "`jit` is the one that matters in practice" in text, (
+    assert "`jit` is the one that matters in practice" in paragraph, (
         "the disclosure no longer says which member the reader will hit"
     )
+
+
+def test_the_disclosure_scope_can_actually_fail():
+    """POSITIVE CONTROL for the scoping, and a measurement of what the
+    whole-file predecessor could and could not see.
+
+    Delete the disclosure paragraph and ask both questions of what is left.
+    MEASURED on this tree, occurrences OUTSIDE the disclosure:
+
+        `jit`              11
+        `remat2`            1
+        `custom_jvp_call`   0
+        `custom_vjp_call`   0
+
+    So the whole-file check was blind for exactly the member the
+    disclosure exists to name: with the paragraph deleted it would still
+    have found `jit` eleven times in unrelated entries and reported that
+    the reader had been told.
+    """
+    paragraph = _subjaxpr_disclosure()
+    whole_file = _changelog_text()
+    assert paragraph in whole_file
+    assert len(paragraph) < len(whole_file) / 10, (
+        "the 'paragraph' is most of the file, so scoping bought nothing"
+    )
+    without = whole_file.replace(paragraph, "")
+    survives = {m for m in DEFAULT_TRANSPARENT if f"`{m}`" in without}
+    assert "jit" in survives, (
+        "the control rests on `jit` being named elsewhere; if it is not, "
+        "the whole-file check was sound for the member that matters and "
+        "this scoping needs a different argument"
+    )
+    assert survives == {"jit", "remat2"}, sorted(survives)
+    # ... and the SCOPED check cannot pass on that text: the anchor is gone
+    assert _SUBJAXPR_DISCLOSURE_OPENS not in without.replace(paragraph, "")
 
 
 def _jit_wrapped_sumsq_query(*, assume_inside):

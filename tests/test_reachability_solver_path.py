@@ -1,20 +1,23 @@
 # SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the reaches-output reachability conjunct on the solver path.
+"""THE SOLVER PATH DOES NOT DOWNGRADE A VIOLATION ON REACHABILITY GROUNDS.
 
-The same dead-variable downgrade that fires in the interval verdict path
-(``make_verdict``) must fire identically in the solver verdict path
-(``make_solver_verdict``).  A violated obligation whose predicate operand
-does not reach any output of the harness function is downgraded to UNKNOWN
-regardless of whether the violation was found by interval propagation or by
-a solver with a replay-confirmed witness.
+This file was written for the reaches-output conjunct, which
+``make_solver_verdict`` called exactly as ``make_verdict`` did; the
+docstring here promised that "a violated obligation whose predicate operand
+does not reach any output of the harness function is downgraded to UNKNOWN"
+on both paths. The conjunct is removed (audit 0.2.0 B8a, item 4 — it could
+not fire on a dead variable and its one reachable input silenced a genuine
+REFUTED; see ``tests/test_reachability_removed.py``), and every case below
+already asserted the behaviour that survives it.
 
-Three cases:
-1. Dead-variable violation via solver -> UNKNOWN (same as interval path)
-2. Live-variable violation via solver -> stays REFUTED
-3. Dead-variable violation with witness preserved (evidence kept, verdict
-   changes)
+What is pinned here:
+1. an un-returned assert violated via solver -> REFUTED, with the witness
+2. a returned assert violated via solver -> REFUTED, with the witness
+3. both verdict paths agree on the same query
+4. a solver DISCHARGE on an un-returned assert -> VERIFIED
+and, throughout, that no verdict carries a "does not reach any output" note.
 """
 
 from __future__ import annotations
@@ -102,11 +105,9 @@ SAT_BODY = (
 )
 
 
-class TestDeadVariableViolationSolverPath:
-    """Assert outvars are always live (asserts are declarations), so the
-    'dead variable' downgrade fires only for sub-jaxpr obligations with
-    out-of-scope operand IDs. The tests below verify that the solver path
-    treats assert-not-returned the same as assert-returned: REFUTED."""
+class TestAssertNotReturnedViolationSolverPath:
+    """An assert is a declaration, so the solver path treats
+    assert-not-returned exactly as assert-returned: REFUTED."""
 
     def test_assert_not_returned_solver_still_refuted(self, monkeypatch, tmp_path):
         fake = fake_solver(tmp_path, SAT_BODY, "cvc5-sat-dead")
@@ -225,11 +226,11 @@ class TestLiveVariableViolationSolverPath:
 
 
 class TestSolverDischargeUnaffected:
-    """A solver-discharged obligation (unsat) is unaffected by reachability."""
+    """A solver-discharged obligation (unsat) is VERIFIED whatever the
+    harness returns."""
 
-    def test_unsat_on_dead_variable_stays_verified(self, monkeypatch, tmp_path):
-        """Even when the assert is dead, a VERIFIED from solver discharge
-        is not downgraded (reachability only applies to violations)."""
+    def test_unsat_on_unreturned_assert_stays_verified(self, monkeypatch, tmp_path):
+        """An un-returned assert discharged by the solver is VERIFIED."""
         # x in [1, 2], x^2 <= 2.0: the interval path is "unknown" (x^2
         # straddles [1, 4] vs 2.0).  The fake solver says "unsat" (no
         # counterexample), so the obligation is discharged.  Even though

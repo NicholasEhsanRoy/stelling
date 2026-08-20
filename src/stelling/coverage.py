@@ -57,6 +57,29 @@ from stelling import ir
 DEFAULT_TRANSPARENT = frozenset({"jit", "custom_jvp_call", "custom_vjp_call", "remat2"})
 
 
+# THE PUBLISHED USER-FACING NAME OF A DECLARATION, minted in ONE place.
+#
+# `stelling.obligation.SliceInput` names the k-th declaration's SMT constant
+# `x{k}` (and `x{k}_{i}` per element of an array one), `stelling.smt` emits
+# under those names, `stelling.reproduce` reads witness values back by them,
+# and a REFUTED verdict prints them at the user. That numbering is the
+# DECLARATION ORDER of the query; it is not, and never was, an `ir.Var.id`.
+#
+# Audit 0.2.0 B8a, item 5 (M3): `propagate`'s assume messages spelled their
+# subject `var {atom.id}` — the internal IR id — beside witnesses spelled
+# `x{k}`. Two 0-based numeric namespaces printed at one reader with nothing
+# relating them, and they genuinely disagree: measured on `aabb58d`, a
+# two-declaration query numbers declaration 0 as IR var 1 and declaration 1
+# as IR var 2, so an unsatisfiable-assume message about declaration 1 read
+# "var 2" while the witness for it read "x1".
+DECLARATION_NAME_PREFIX = "x"
+
+
+def declaration_name(k: int) -> str:
+    """The published SMT/witness name of the ``k``-th declaration."""
+    return f"{DECLARATION_NAME_PREFIX}{k}"
+
+
 @dataclass(frozen=True)
 class Coverage:
     total: int  # every equation in the query, at any depth

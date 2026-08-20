@@ -92,7 +92,6 @@ FORBIDDEN = frozenset(
         "stelling.obligation",
         "stelling.preconditions",
         "stelling.propagate",
-        "stelling.reachability",
         "stelling.smt",
         "stelling.solvers",
         "stelling.vacuity",

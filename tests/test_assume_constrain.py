@@ -852,12 +852,13 @@ def test_disclosure_texts_are_exact():
     )
     p = propagate(q)
     assert (
-        "assume CONSTRAINED at unknown location: narrowed var 0 to [1.5, 4.0]"
+        "assume CONSTRAINED at unknown location: narrowed x0 (IR var 0) "
+        "to [1.5, 4.0]"
         in p.notes
     )
     assert (
         "constrained assume at unknown location: the verdict holds where the "
-        "precondition holds — narrowed var 0 to [1.5, 4.0]"
+        "precondition holds — narrowed x0 (IR var 0) to [1.5, 4.0]"
     ) in p.assumptions
     assert "1 assume(s) CONSTRAINED (stelling_assume ×1)" in p.coverage.summary()
 

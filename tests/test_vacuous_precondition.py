@@ -1031,7 +1031,7 @@ def test_a_whole_query_line_bears_on_every_obligation():
     boxes, so every obligation of the run was judged over the narrowed set."""
     narrowing = (
         f"constrained assume at foo.py:1 (h): {CONDITIONAL_ON_PRECONDITION} "
-        f"— narrowed var 3 to [0, 1]"
+        f"— narrowed x1 (IR var 3) to [0, 1]"
     )
     assert conditional_on_precondition([narrowing], {0})
     assert conditional_on_precondition([narrowing], {7})

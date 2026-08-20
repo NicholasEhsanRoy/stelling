@@ -2524,7 +2524,7 @@ verdicts:
   **What to re-run:** any recorded VERIFIED whose harness passes a
   possibly-empty shape to `any_array`, or compares values of different
   ranks inside an `assume`. Re-`check()` it: a `zero elements … it
-  constrains nothing` note where a `assume CONSTRAINED … narrowed var`
+  constrains nothing` note where a `assume CONSTRAINED … narrowed x`
   note used to be is this change, and the old VERIFIED was false. Every
   construction is a permanent regression test
   (`tests/test_size0_assume.py`, and the jax-free half in

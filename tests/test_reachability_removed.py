@@ -1,19 +1,30 @@
 # SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the reaches-output reachability conjunct.
+"""THE REACHES-OUTPUT CONJUNCT IS REMOVED, AND THIS IS THE PROPERTY THAT
+REPLACES IT — audit 0.2.0 B8a, item 4 (M1).
 
-Three cases per the design:
-1. Violation on a variable that IS used in the output -> stays REFUTED
-2. Violation on a dead variable (computed but not returned) -> UNKNOWN with note
-3. Mixed: one reachable violation, one unreachable -> REFUTED, unreachable gets note
+`verdict._apply_reachability_conjunct` downgraded a violated obligation to
+UNKNOWN when its `operand_var_ids` were in the top-level scope but not in
+`reachability.reaches_output`'s live set. It could not fire on a dead
+variable — `reaches_output` seeded every `stelling_assert`'s outvars, so the
+reverse walk made every assert's INVARS live, and `operand_var_ids` IS the
+assert equation's invars — and the one input that DID reach the downgrade
+was a var-id collision between an inner obligation's operand and a dead
+top-level id, where the downgrade silences a genuine REFUTED.
+
+So the file no longer unit-tests `reaches_output` and `defined_vars` (both
+gone with the conjunct). What it tests is the standing property:
+**no verdict path downgrades a violated obligation on reachability
+grounds**, whatever the harness returns and whatever ids the scopes use.
+`tests/test_reachability_solver_path.py` drives the same property through
+`make_solver_verdict`.
 """
 
 from __future__ import annotations
 
 from stelling import ir
 from stelling.propagate import propagate
-from stelling.reachability import defined_vars, reaches_output
 from stelling.verdict import make_verdict
 
 F64 = ir.Aval(kind="ShapedArray", shape=(), dtype="float64")
@@ -43,113 +54,91 @@ def close(eqns, outvars):
     )
 
 
-# -- Unit tests for reaches_output -------------------------------------------
+# -- THE FINDING, DRIVEN ------------------------------------------------------
 
 
-def test_reaches_output_simple_chain():
-    """All vars in a linear chain to an output are live."""
-    x, y, z = var(0), var(1), var(2)
-    jaxpr = ir.Jaxpr(
-        constvars=(),
-        invars=(),
-        outvars=(z,),
-        eqns=(
-            any_eqn(x, 0.0, 1.0),
-            ir.JaxprEqn(
-                primitive="exp", invars=(x,), outvars=(y,)
+def _collision_query(*, with_dead_top_level_var: bool):
+    """`jit{ assert x < 0.5 }` over `x in [1, 2]` — a genuine REFUTED — with
+    an optional UNRELATED, UNREAD top-level equation whose outvar id equals
+    the inner predicate's id.
+
+    Two scopes, two variables, one number. The removed conjunct read the
+    inner obligation's `operand_var_ids` against the TOP-LEVEL live set, so
+    the presence of the dead equation — which changes nothing the assert
+    depends on — decided the verdict.
+    """
+    COLLIDING = 7
+    inner_x = var(10)
+    inner_pred = var(COLLIDING, BOOL)
+    inner_out = var(8, BOOL)
+    inner = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(inner_x,),
+            outvars=(inner_x,),
+            eqns=(
+                ir.JaxprEqn(
+                    primitive="lt",
+                    invars=(inner_x, ir.Literal(val=0.5, aval=F64)),
+                    outvars=(inner_pred,),
+                ),
+                assert_eqn(inner_pred, inner_out),
             ),
-            ir.JaxprEqn(
-                primitive="exp", invars=(y,), outvars=(z,)
-            ),
-        ),
+        )
     )
-    live = reaches_output(jaxpr)
-    assert 0 in live  # x
-    assert 1 in live  # y
-    assert 2 in live  # z
-
-
-def test_reaches_output_dead_branch():
-    """A variable not needed for any output is dead."""
-    x, dead, y = var(0), var(1), var(2)
-    jaxpr = ir.Jaxpr(
-        constvars=(),
-        invars=(),
-        outvars=(y,),
-        eqns=(
-            any_eqn(x, 0.0, 1.0),
-            ir.JaxprEqn(
-                primitive="exp", invars=(x,), outvars=(dead,)
-            ),
-            ir.JaxprEqn(
-                primitive="mul",
-                invars=(x, ir.Literal(val=2.0, aval=F64)),
-                outvars=(y,),
-                params=(("out_dtype", None),),
-            ),
-        ),
+    x, dead, wrapped = var(0), var(COLLIDING), var(1)
+    eqns = [any_eqn(x, 1.0, 2.0)]
+    if with_dead_top_level_var:
+        eqns.append(ir.JaxprEqn(primitive="exp", invars=(x,), outvars=(dead,)))
+    eqns.append(
+        ir.JaxprEqn(
+            primitive="jit",
+            invars=(x,),
+            outvars=(wrapped,),
+            params=(("jaxpr", inner),),
+        )
     )
-    live = reaches_output(jaxpr)
-    assert 0 in live  # x (used by mul -> y)
-    assert 1 not in live  # dead (exp output, unused)
-    assert 2 in live  # y (the output)
+    return close(eqns, (wrapped,))
 
 
-def test_reaches_output_literal_output():
-    """A jaxpr whose output is a Literal: no Var IDs from it."""
-    x = var(0)
-    jaxpr = ir.Jaxpr(
-        constvars=(),
-        invars=(),
-        outvars=(ir.Literal(val=1.0, aval=F64),),
-        eqns=(any_eqn(x, 0.0, 1.0),),
+def test_an_unrelated_dead_equation_cannot_silence_a_violation():
+    """REDDENS ON REVERT of the conjunct's removal.
+
+    Measured on `aabb58d`, with the conjunct in place:
+
+        dead top-level var 7 present: False  ->  STATUS: REFUTED
+        dead top-level var 7 present: True   ->  STATUS: UNKNOWN
+            note: "obligation #0 is violated but the violated variable does
+                   not reach any output of the harness function"
+
+    Same assert, same declared box, same violation; one added equation
+    nothing reads. That is the only input that ever reached the downgrade.
+    """
+    verdicts = {}
+    for with_dead in (False, True):
+        closed = _collision_query(with_dead_top_level_var=with_dead)
+        p = propagate(closed)
+        assert [o.status for o in p.obligations] == ["violated-over-set"], (
+            "the propagation itself must see the violation in both queries"
+        )
+        verdicts[with_dead] = make_verdict(
+            closed,
+            p,
+            stelling_version="test",
+            jax_version="none: hand-built IR",
+            precision_config="jax_enable_x64=True (hand-built f64 IR)",
+        )
+    assert verdicts[False].status == "REFUTED"
+    assert verdicts[True].status == "REFUTED", (
+        "a dead top-level equation whose outvar id collides with an inner "
+        "obligation's operand id silenced a genuine REFUTED"
     )
-    live = reaches_output(jaxpr)
-    assert 0 not in live  # x is never used for the output
+    for v in verdicts.values():
+        assert not any("does not reach any output" in n for n in v.notes)
+        assert v.obligations[0].status == "violated-over-set"
 
 
-# -- Unit tests for defined_vars -----------------------------------------------
-
-
-def test_defined_vars_includes_all_equation_outvars():
-    """defined_vars returns all Var IDs in the top-level scope."""
-    x, y, z = var(0), var(1), var(2)
-    jaxpr = ir.Jaxpr(
-        constvars=(),
-        invars=(),
-        outvars=(z,),
-        eqns=(
-            any_eqn(x, 0.0, 1.0),
-            ir.JaxprEqn(primitive="exp", invars=(x,), outvars=(y,)),
-            ir.JaxprEqn(primitive="exp", invars=(y,), outvars=(z,)),
-        ),
-    )
-    scope = defined_vars(jaxpr)
-    assert scope == frozenset({0, 1, 2})
-
-
-def test_operand_var_ids_propagated():
-    """ObligationReport carries operand_var_ids from propagation."""
-    x, ex, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
-    closed = close(
-        [
-            any_eqn(x, 1.0, 2.0),
-            ir.JaxprEqn(primitive="exp", invars=(x,), outvars=(ex,)),
-            ir.JaxprEqn(
-                primitive="lt",
-                invars=(ex, ir.Literal(val=2.0, aval=F64)),
-                outvars=(pred,),
-            ),
-            assert_eqn(pred, out),
-        ],
-        (out,),
-    )
-    p = propagate(closed)
-    # The obligation should carry the var ID of the assert's invar (pred = var 2)
-    assert p.obligations[0].operand_var_ids == (2,)
-
-
-# -- Integration tests: verdict assembly with reachability --------------------
+# -- THE RETURN CONVENTION DOES NOT MOVE A VERDICT ----------------------------
 
 
 def _make_verdict(closed):
@@ -191,16 +180,17 @@ class TestReachableViolationStaysRefuted:
         assert not any("does not reach any output" in n for n in v.notes)
 
 
-class TestDeadViolationDowngradedToUnknown:
-    """Case 2: a stelling_assert is ALWAYS live (it's a declaration), so
-    the dead-variable downgrade fires only for obligations whose
-    operand_var_ids are out of scope (sub-jaxpr origin) or empty.
+class TestAssertNotReturnedIsStillRefuted:
+    """A `stelling_assert` is a DECLARATION, so leaving its output out of
+    the jaxpr's outvars does not withdraw it and does not soften its
+    verdict. `docs/harness-api.md` says the same thing to the user.
 
-    Before the assert-always-live fix, an assert whose output wasn't in
-    the jaxpr's outvars was treated as dead. That was wrong: the user
-    wrote the assert, so they care about it. The downgrade now serves
-    a narrower purpose: protecting against positional misalignment of
-    sub-jaxpr obligations.
+    This class's name and docstring used to describe a "dead-variable
+    downgrade" that "fires only for obligations whose operand_var_ids are
+    out of scope (sub-jaxpr origin) or empty". Neither of those two cases
+    downgraded anything — both took the conjunct's fail-safe arm — so the
+    sentence described a branch nothing could reach. What could reach it
+    is the collision above.
     """
 
     def test_assert_not_returned_still_refuted(self):
@@ -224,9 +214,9 @@ class TestDeadViolationDowngradedToUnknown:
         assert v.status == "REFUTED"
         assert v.obligations[0].status == "violated-over-set"
 
-    def test_out_of_scope_operand_ids_downgraded(self):
-        # An obligation with operand_var_ids that are NOT in the top-level
-        # scope (simulating a sub-jaxpr obligation) gets downgraded.
+    def test_operand_in_scope_and_violated_stays_refuted(self):
+        # The ordinary case: the operand is a top-level id, it is live, and
+        # the violation stands.
         x, pred, out = var(0), var(1, BOOL), var(2, BOOL)
         closed = close(
             [
@@ -265,8 +255,8 @@ class TestDeadViolationDowngradedToUnknown:
         assert not any("does not reach any output" in n for n in v.notes)
 
 
-class TestMixedReachability:
-    """Both asserts are always live — the return convention doesn't matter."""
+class TestTwoAssertsOneReturned:
+    """Both asserts stand — the return convention does not matter."""
 
     def test_both_asserts_live_regardless_of_outvars(self):
         # Two violated asserts. Only out1 is in outvars, but BOTH assert
@@ -307,7 +297,7 @@ class TestMixedReachability:
 
 
 class TestNonViolationsUnaffected:
-    """Discharged and unknown obligations are never touched by reachability."""
+    """A discharged obligation is unaffected by what the harness returns."""
 
     def test_discharged_not_affected(self):
         # x in [1, 2], exp(x) < 8.0 -> discharged. Even if output is x only.
@@ -334,18 +324,17 @@ class TestNonViolationsUnaffected:
 
 # -- Interleaving test (jax required) -----------------------------------------
 # A cond with an assert inside a branch BEFORE a top-level assert: the
-# sub-jaxpr obligation must NOT be incorrectly downgraded.
+# sub-jaxpr obligation must reach the user as the violation it is.
 
 import pytest
 
 
-class TestSubJaxprInterleavingNotDowngraded:
+class TestSubJaxprInterleavingStaysRefuted:
     """Sub-jaxpr obligations interleaved with top-level ones stay correct."""
 
-    def test_cond_branch_violation_not_downgraded(self):
+    def test_cond_branch_violation_stays_refuted(self):
         """A violation inside a forced cond branch stays REFUTED even when
-        a later top-level assert exists -- the positional index must not
-        misalign and incorrectly downgrade the branch obligation."""
+        a later top-level assert exists."""
         jax = pytest.importorskip("jax")
         jnp = pytest.importorskip("jax.numpy")
         from stelling.harness import any_array, assert_

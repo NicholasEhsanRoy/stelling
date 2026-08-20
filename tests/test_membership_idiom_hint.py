@@ -762,10 +762,10 @@ def test_a_reduction_used_as_a_SELECTOR_gets_no_hint():
 
 def test_a_SIZE_ZERO_reduction_is_decided_and_gets_no_hint_NONVACUITY():
     """The status guard is load-bearing, not belt-and-braces. A `reduce_and`
-    with a non-reduced zero-length axis is `discharged` — "definitely true for
-    all 0 element(s)", matching `jnp.all` of an empty array — while its box is
-    still stelling's ⊤ and the gate still says yes. Drop the guard and a
-    DECIDED face carries a note calling itself UNDECIDED."""
+    with a non-reduced zero-length axis is `discharged` — vacuously, matching
+    `jnp.all` of an empty array — while its box is still stelling's ⊤ and the
+    gate still says yes. Drop the guard and a DECIDED face carries a note
+    calling itself UNDECIDED."""
     def h():
         x = any_array((2,), "float64", (LO, HI))
         pt = jnp.zeros((0, 2), jnp.float64)
@@ -773,7 +773,10 @@ def test_a_SIZE_ZERO_reduction_is_decided_and_gets_no_hint_NONVACUITY():
 
     p = _run(h)
     assert p.nonvacuity_checks[0].status == "discharged"
-    assert p.nonvacuity_checks[0].detail == "definitely true for all 0 element(s)"
+    assert p.nonvacuity_checks[0].detail == P.EMPTY_UNIVERSAL_DETAIL
+    # ... and the emptiness reaches the NOTES, not only the detail (audit
+    # 0.2.0 B8a, item 6 / M18)
+    assert any("VACUOUSLY discharged" in n for n in p.notes), p.notes
     assert ("reduce_and", 1) in p.coverage.unknown_primitives
     assert _hinted(p) == []
 
@@ -789,7 +792,8 @@ def test_a_SIZE_ZERO_reduction_is_decided_and_gets_no_hint_ASSERT():
 
     p = _run(h)
     assert p.obligations[0].status == "discharged"
-    assert p.obligations[0].detail == "definitely true for all 0 element(s)"
+    assert p.obligations[0].detail == P.EMPTY_UNIVERSAL_DETAIL
+    assert any("VACUOUSLY discharged" in n for n in p.notes), p.notes
     assert ("reduce_and", 1) in p.coverage.unknown_primitives
     assert _hinted(p) == []
 

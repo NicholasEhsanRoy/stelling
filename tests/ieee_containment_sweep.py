@@ -395,12 +395,28 @@ ROWS = (
 )
 
 
-def run_all():
-    """Every row, as ``{(kernel, format): (samples, fails, nan, raised)}``."""
+def run_all() -> dict:
+    """Every row, keyed as :data:`POST_FIX_ROWS` is and COLUMNED AS IT IS:
+    ``{(kernel, format): (failures, samples, nan_samples, raised)}``, plus a
+    ``(kernel, format, "misses")`` entry wherever a row produced examples.
+
+    **THE COLUMN ORDER USED TO BE THE OTHER ONE** — audit 0.2.0 B8a, item 7.
+    This function's contract read ``(samples, fails, nan, raised)`` and it
+    built exactly that, one screen below a table in the same module written
+    ``(failures, samples, nan_samples, raised)`` — so the two spellings of
+    "the row" in a module whose whole purpose is stopping numbers from
+    drifting were transposed against each other. It was also DEAD: nothing
+    in the tree called it, and the one test of the table iterated
+    :data:`ROWS` itself. A dead helper documenting the opposite convention
+    from its own module's constants is a trap for whoever writes the next
+    caller, so it is realigned AND made the single row-runner: the test and
+    the ``__main__`` reproduction both go through it now, which is what
+    stops the two orders from parting again.
+    """
     out = {}
     for name, fmt, fn in ROWS:
         s, f, n, r, misses = fn()
-        out[(name, fmt)] = (s, f, n, r)
+        out[(name, fmt)] = (f, s, n, r)
         if misses:
             out[(name, fmt, "misses")] = misses
     return out
@@ -411,8 +427,9 @@ if __name__ == "__main__":  # pragma: no cover - reproduction entry point
           f"box_pairs={len(BOXES) ** 2}")
     print(f"{'kernel':<14}{'format':<10}{'failures/samples':>26}"
           f"{'NaN':>12}{'RAISED':>9}")
-    for name, fmt, fn in ROWS:
-        s, f, n, r, misses = fn()
+    rows = run_all()
+    for name, fmt, _fn in ROWS:
+        f, s, n, r = rows[(name, fmt)]
         print(f"{name:<14}{fmt:<10}{f'{f:,} / {s:,}':>26}{n:>12,}{r:>9}")
-        for m in misses:
+        for m in rows.get((name, fmt, "misses"), ()):
             print(f"    {m}")

@@ -191,7 +191,6 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from operator import index as _op_index
 import re
 import struct
 from dataclasses import dataclass
@@ -204,6 +203,7 @@ from stelling.coverage import (
     Coverage,
     CoverageCounter,
     call_body,
+    declaration_name,
     sub_jaxprs,
 )
 
@@ -303,6 +303,109 @@ _EXACT_INT = 9007199254740992
 # disclosed skip, never a forged axiom.
 ScopeStep = tuple  # ("call", eqn_index) | ("cond", eqn_index, branch_index)
 ScopePath = tuple  # tuple[ScopeStep, ...]; () is the top-level scope
+
+
+def _declaration_names(jaxpr: ir.Jaxpr) -> dict[tuple, str] | None:
+    """``(scope path, var id) -> "x{k}"`` for every declaration this query's
+    EMISSION will name that way, or ``None`` when the numbering cannot be
+    derived without risk of naming the wrong one.
+
+    THE POINT IS THAT IT IS THE SAME NUMBERING, not a second one (audit
+    0.2.0 B8a, item 5 / M3). :meth:`stelling.obligation._Slicer._flatten`
+    assigns ``any_order[outvar.id] = len(any_order)`` while walking the
+    query's equations in order and inlining each SOUNDLY INLINABLE
+    transparent wrapper IN PLACE; :attr:`stelling.obligation.SliceInput.name`
+    is :func:`stelling.coverage.declaration_name` of that index. This
+    function performs the identical walk over the identical wrapper set and
+    counts the identical equations, so the name it hands a message is the
+    name the witness will carry — and it is derived from the IR alone, so no
+    message can be aimed by anything a caller supplies.
+
+    Where the two walks COULD diverge, this returns ``None`` and every
+    message falls back to the internal id, spelled so that it cannot be read
+    as a declaration index:
+
+    * the propagator descends a ``cond``; the slicer never does. A
+      declaration inside a branch has no ``x{k}`` at all, so meeting one
+      abandons the numbering rather than guessing which of the survivors is
+      #0.
+    * the propagator's own descent test is WEAKER than the slicer's (it
+      checks invar arity; the slicer also checks outvar arity and that the
+      body's constvars pair with its consts). A wrapper only one of them
+      inlines shifts every later index, so a wrapper that fails the
+      SLICER's test abandons the numbering here too — this walk uses the
+      strict test on purpose, and disagreeing with the propagator's descent
+      is exactly what it is detecting.
+    * two declarations reachable at the same ``(scope, id)`` key. Ids are
+      unique per jaxpr under transcription and are whatever a document says
+      under ``from_dict``; a collision means the key does not identify a
+      declaration, so nothing is named.
+
+    Keyed by SCOPE PATH AND ID, never by id alone, for the reason
+    :data:`ScopePath` gives: an inner scope's ids are not the outer scope's,
+    and a lookup that ignores the scope resolves to a different variable
+    rather than to nothing.
+    """
+    names: dict[tuple, str] = {}
+    count = 0
+
+    def walk(j: ir.Jaxpr, path: tuple) -> bool:
+        nonlocal count
+        for pos, e in enumerate(j.eqns):
+            if e.primitive in DEFAULT_TRANSPARENT:
+                inner = call_body(e)
+                if (
+                    inner is None
+                    or len(inner.jaxpr.invars) != len(e.invars)
+                    or len(inner.jaxpr.outvars) != len(e.outvars)
+                    or len(inner.jaxpr.constvars) != len(inner.consts)
+                ):
+                    # the slicer leaves this wrapper opaque; the propagator
+                    # may still descend it — the two counts can differ from
+                    # here on, so neither is a name
+                    return False
+                if not walk(inner.jaxpr, path + (("call", pos),)):
+                    return False
+                continue
+            if _holds_a_declaration(e):
+                # a declaration this walk cannot reach and the slicer
+                # cannot name: a `cond` branch (the propagator descends,
+                # the slicer does not), a `scan`/`while_loop` body, or any
+                # other sub-jaxpr that is not an inlinable wrapper. Which
+                # of the survivors is #0 is then a guess.
+                return False
+            if e.primitive != "stelling_any" or not e.outvars:
+                continue
+            out = e.outvars[0]
+            if not isinstance(out, ir.Var):
+                return False
+            key = (path, out.id)
+            if key in names:
+                return False
+            names[key] = declaration_name(count)
+            count += 1
+        return True
+
+    return names if walk(jaxpr, ()) else None
+
+
+_UNSET = object()  # "not derived yet", distinct from "not derivable"
+
+
+def _holds_a_declaration(eqn: ir.JaxprEqn) -> bool:
+    """Whether any sub-jaxpr of ``eqn``, at any depth, declares an input.
+
+    Read through :func:`stelling.coverage.sub_jaxprs`, which is the walk
+    that enters a param holding a sub-jaxpr in a ``list`` as well as a
+    ``tuple`` — audit B9 measured what a narrower one misses."""
+    stack = list(sub_jaxprs(eqn))
+    while stack:
+        j = stack.pop()
+        for e in j.eqns:
+            if e.primitive == "stelling_any":
+                return True
+            stack.extend(sub_jaxprs(e))
+    return False
 
 
 @dataclass(frozen=True)
@@ -608,10 +711,18 @@ class ObligationReport:
     detail: str
     source_info: tuple[str, ...]
     # The Var IDs of the stelling_assert equation's invars (the predicate
-    # operand).  Populated by the propagator for top-level and descended-into
-    # obligations; empty for unexamined obligations (inside opaque sub-jaxprs).
-    # Used by the reaches-output reachability conjunct to determine whether
-    # the violated variable flows to a function output.
+    # operand), IN THE SCOPE THE WALK SAW THEM IN.  Populated by the
+    # propagator for top-level and descended-into obligations; empty for
+    # unexamined obligations (inside opaque sub-jaxprs).
+    #
+    # A RECORD, AND NO LONGER AN INPUT TO ANY VERDICT — audit 0.2.0 B8a,
+    # item 4. Its one consumer was `verdict._apply_reachability_conjunct`,
+    # which read these ids against a TOP-LEVEL live set; that conjunct is
+    # removed and the block comment where it stood says why. The ids are
+    # scope-local, so a reader comparing them against another scope's is
+    # comparing two different variables — which is exactly how the removed
+    # conjunct silenced a genuine REFUTED. Any future consumer must join on
+    # `top_level_eqn_pos` (or a scope path) first.
     operand_var_ids: tuple[int, ...] = ()
     # WHERE THIS OBLIGATION'S ASSERT LIVES, recorded by the walk that saw it:
     # the position of the `stelling_assert` equation in the TOP-LEVEL
@@ -1022,9 +1133,27 @@ def _int_bracket(v: int) -> tuple[float, float]:
     return iv._down(x), iv._up(x)
 
 
-def _elements(shape: tuple[int, ...]) -> int:
+def _elements(extents: tuple[int, ...]) -> int:
+    """The element count of extents ALREADY NORMALISED by
+    :func:`stelling.interval.check_shape` — never of a raw shape.
+
+    The argument name says what the type does not. ``for d in shape: n *=
+    d`` over the objects a caller supplied reaches ``__mul__``, a THIRD
+    protocol beside the ``__index__`` every shape guard in this library
+    validates with and the ``__eq__`` the shape comparisons use, so an
+    extent could be validated at 2 and counted as 1 (audit 0.2.0 B8a,
+    item 1 — the identical repair as :func:`stelling.obligation._size`,
+    which states the same rule for the emission side). Taking the guard's
+    RETURN VALUE rather than the shape is what makes the count and the
+    guard that validated it one read.
+
+    Its callers hand it :func:`stelling.interval.check_shape`'s return
+    directly, and the shapes they check are ``ir.Array`` fields
+    :meth:`stelling.ir.Array.__post_init__` has already installed as
+    plain ``int``s — so this is a containment of the READING, not a fix
+    for a live route through those two."""
     n = 1
-    for d in shape:
+    for d in extents:
         n *= d
     return n
 
@@ -1042,8 +1171,9 @@ def _decode_bfloat16(a: ir.Array) -> iv.IntervalArray:
     :data:`_BFLOAT16_DTYPE_STR`) — the `.str` alone cannot say a 2-byte
     void is this format.
     """
-    iv.check_shape(a.shape)
-    n = _elements(a.shape)
+    # ONE READ: the guard hands back the extents it validated and the
+    # count below is of THOSE (audit 0.2.0 B8a, item 1)
+    n = _elements(iv.check_shape(a.shape))
     if len(a.data) != 2 * n:
         raise iv.IntervalError(
             f"array constant of shape {a.shape} dtype "
@@ -1081,8 +1211,7 @@ def _decode_array(a: ir.Array, dtype_name: str | None = None) -> iv.IntervalArra
     # shape predicates first (fix re-attacks R1/N2): integral nonnegative
     # extents (a negative or string extent would reach struct.unpack as a
     # malformed format and raise raw), through the decline channel
-    iv.check_shape(a.shape)
-    n = _elements(a.shape)
+    n = _elements(iv.check_shape(a.shape))
     # ... and the PAYLOAD LENGTH against the shape (N2): a truncated,
     # oversized, or empty buffer under a positive shape raised raw
     # struct.error out of the walk — the exact sibling of the negative
@@ -1384,14 +1513,14 @@ def _refused_value_problem(aval_shape, value) -> str | None:
         return str(e)
     if isinstance(value, ir.Array):
         try:
-            iv.check_shape(value.shape)
+            extents = iv.check_shape(value.shape)
         except iv.IntervalError as e:
             return str(e)
         fmt = _STRUCT_FMT.get(value.dtype)
         if fmt is not None:
-            n = 1
-            for d in value.shape:
-                n *= d
+            # the count is of the extents the guard just validated, never
+            # a second raw read (audit 0.2.0 B8a, item 1)
+            n = _elements(extents)
             expect = struct.calcsize(f"<{n}{fmt}")
             if len(value.data) != expect:
                 return (
@@ -6927,6 +7056,40 @@ def _ulp_steps(a: float, b: float, cap: int = 3) -> int | None:
     return steps
 
 
+# WHAT A DISCHARGE OVER ZERO ELEMENTS SAYS, and where a reader meets it.
+#
+# Audit 0.2.0 B8a, item 6 (M18). A universal claim over a size-0 array is
+# vacuously true, and stelling said so — but only inside
+# `ObligationReport.detail`, as the words "for all 0 element(s)". Driven on
+# `aabb58d`: `any_array((0,), float64, (1.0, 2.0))` with `assert_(x <= 0.5)`
+# returns
+#
+#     STATUS: VERIFIED   coverage: 3 eqns: 3 known (100%)   notes: (none
+#     about the emptiness)
+#
+# so a consumer reading `status` and `notes` — which is what the rendered
+# verdict leads with, and what a CI gate reads — sees an ordinary VERIFIED
+# over a program about which nothing was checked. A shape that went to zero
+# by accident (a batch dimension, a filtered index set, an `n - 1` that hit
+# zero) verifies everything.
+#
+# The status is NOT changed: over the empty set the claim is true, and an
+# UNKNOWN there would be a false one in the other direction. What changes is
+# that the reader is told, in the channel they read.
+EMPTY_UNIVERSAL_DETAIL = (
+    "vacuously true: the predicate has ZERO elements, so the universal "
+    "claim holds with nothing to check"
+)
+
+EMPTY_UNIVERSAL_NOTE = (
+    "{what} #{index} at {where} is VACUOUSLY discharged: its predicate has "
+    "ZERO elements, so \"true for every element\" holds because there is no "
+    "element. Nothing about the program's arithmetic was checked by it. If "
+    "the empty shape is not deliberate, this VERIFIED is about a query you "
+    "did not mean to write"
+)
+
+
 def _bool_status(b: iv.IntervalArray, *, constrained: bool = False) -> tuple[str, str]:
     """``(status, detail)`` for a judged boolean box.
 
@@ -6949,6 +7112,17 @@ def _bool_status(b: iv.IntervalArray, *, constrained: bool = False) -> tuple[str
     n_true = sum(1 for lo, hi in zip(b.los, b.his) if (lo, hi) == iv.BOOL_TRUE)
     n_false = sum(1 for lo, hi in zip(b.los, b.his) if (lo, hi) == iv.BOOL_FALSE)
     n = b.size
+    if n == 0:
+        # THE EMPTY UNIVERSAL, SAID AS ONE (audit 0.2.0 B8a, item 6 / M18).
+        # `n_true == n` is satisfied by 0 == 0 and this used to fall through
+        # to it, so a claim over a zero-element array discharged with the
+        # words "definitely true for all 0 element(s)" — true, and read by
+        # every consumer as an ordinary discharge. It is a DIFFERENT FACT
+        # about the program: nothing was checked. The status is unchanged
+        # (a universal over the empty set IS true, and downgrading it would
+        # be a false UNKNOWN), the DETAIL says which kind of true it is, and
+        # the walk raises a note beside it — see :data:`EMPTY_UNIVERSAL_NOTE`.
+        return "discharged", EMPTY_UNIVERSAL_DETAIL
     if n_true == n:
         return "discharged", f"definitely true for all {n} element(s)"
     if n_false:
@@ -7371,6 +7545,13 @@ class _Propagator:
         # objects. Positions in a fixed `eqns` list are a property of the IR;
         # object addresses are not.
         self._scope_path: ScopePath = ()
+        # `(scope path, var id) -> "x{k}"` for the declarations this query's
+        # EMISSION names that way, or None when the numbering is not
+        # derivable (`_declaration_names` says exactly when). Filled at the
+        # first `run`, which is always the outermost jaxpr, and read only by
+        # `_name_of`/`_name_of_id` when WORDING a message. `_UNSET` rather
+        # than `None` because `None` is a decided answer here.
+        self._decl_names: dict[tuple, str] | None | object = _UNSET
         # probe index, or None on a real run. When set, every declaration's
         # box is replaced by a single POINT of that box (:func:`_probe_point`),
         # which is what turns propagation into a witness evaluator.
@@ -7480,7 +7661,7 @@ class _Propagator:
             # as the params whitelist: unknown primitives are fine, unknown
             # *structure* is not.
             raise ir.TranscriptionError(
-                f"equation reads var {atom.id} before any binding — "
+                f"equation reads IR var {atom.id} before any binding — "
                 f"transcription defect, refusing to widen it away"
             )
         return got
@@ -7561,6 +7742,48 @@ class _Propagator:
         * ``dot_general``: each output element is a sum of products of one
           lhs and one rhs element, so it is the two rules above composed;
           the same size guard covers an empty contraction.
+
+        **WHY THE ALGEBRA IS VALID, AND EXACTLY WHAT IT IS VALID ABOUT** —
+        the B5 follow-up's first item, recorded here beside the rules it is
+        about rather than in a log.
+
+        Every rule above is a theorem of the ORDERED FIELD ℝ, and of nothing
+        narrower. ℝ's nonzero elements are closed under multiplication and
+        under division, and its positive cone is closed under addition, so
+        "a product of nonzeros is nonzero" and "two same-signed nonzeros sum
+        to that sign" hold with no side condition at all — no magnitude
+        enters any of them, which is why none of these rules reads a box
+        endpoint and why outward rounding cannot defeat one. The two rules
+        that DO carry a side condition carry it for a reason that is also
+        algebraic and not numeric: ``reduce_sum`` and ``dot_general`` are
+        empty-sum IDENTITIES at size 0, and the identity of ``+`` is 0,
+        which is the one element the certificate excludes.
+
+        **THE FLOAT DOUBLE OF THAT FIELD IS NOT CLOSED UNDER
+        MULTIPLICATION, AND THAT IS NOT A GAP HERE — IT IS THE REASON THE
+        IEEE FACE DOES NOT CALL THIS FUNCTION AT ALL.** binary64's nonzero
+        values are NOT closed under ``*``: a product of two nonzeros can
+        underflow to zero, and the certificate would then be a false claim
+        about the executable. MEASURED, so a lowering change reddens the
+        suite rather than the log
+        (``tests/test_strict_sign_algebra.py``):
+
+            x  = -1e-120                       (declared, certified -1)
+            x*x   = 1e-240                     (this table: +1)
+            x*x*x = -0.0                       (this table: -1)
+
+        — in python's binary64 and in ``jnp.float64`` alike, both faces of
+        the ``mul`` chain certified nonzero and the third exactly ``-0.0``.
+        The real-mode verdict built on that certificate is not wrong: real
+        mode's whole posture is that obligations are judged *in exact real
+        arithmetic over the declared sets*, and its stamp says so in the
+        sentence a reader meets first. What would be wrong is the same
+        certificate under ieee semantics, where the value IS ``fl(x*y)``,
+        and that is exactly what ``0 if ieee else self._strict_sign_out(...)``
+        at this function's one call site refuses — the short-circuit is the
+        boundary between "a theorem of ℝ" and "a claim about the program's
+        floats", and this paragraph is the argument for why the boundary is
+        where it is.
         """
         prim = eqn.primitive
         if prim not in _STRICT_SIGN_PRIMITIVES or len(eqn.outvars) != 1:
@@ -7613,6 +7836,39 @@ class _Propagator:
                 self.taint[out.id] = any(
                     self.read_taint(a) for a in eqn.invars
                 )
+
+    def _name_of_id(self, var_id: int) -> str:
+        """How a MESSAGE names the value bound to ``var_id`` IN THE SCOPE
+        THIS WALK IS CURRENTLY IN.
+
+        A declared input is named the way the user will meet it again — by
+        the published witness name :func:`stelling.coverage.declaration_name`
+        mints and :class:`stelling.obligation.SliceInput` emits under — with
+        the internal id kept beside it so a reader tracing a note back into
+        the IR still can. Anything else is named "IR var {id}", which cannot
+        be read as a declaration index.
+
+        Audit 0.2.0 B8a, item 5 (M3): these messages used to say
+        `var {atom.id}` flat, and that number is NOT the witness's. Measured
+        on `aabb58d`, a two-declaration query numbers declaration #0 as IR
+        var 1 and declaration #1 as IR var 2 — so an unsatisfiable-assume
+        message read "var 2" for the input the witness calls `x1`, and a
+        message about declaration #0 read "var 1" for the input the witness
+        calls `x0`. Two 0-based namespaces, one reader, nothing relating
+        them.
+
+        MESSAGE TEXT ONLY. Nothing here is consulted by a transfer, a
+        judgment, a counter or a hash, and the fallback is total: a scope
+        the numbering could not cover simply gets the id."""
+        if isinstance(self._decl_names, dict):
+            name = self._decl_names.get((self._scope_path, var_id))
+            if name is not None:
+                return f"{name} (IR var {var_id})"
+        return f"IR var {var_id}"
+
+    def _name_of(self, atom: ir.Atom) -> str:
+        """:meth:`_name_of_id` for an atom that is a ``Var``."""
+        return self._name_of_id(atom.id)
 
     def _quiet_box(self, atom: ir.Atom) -> iv.IntervalArray | None:
         """The atom's box for MESSAGE TEXT only, or None: never raises and
@@ -8345,18 +8601,19 @@ class _Propagator:
             for var_id, box, changed, certified in narrowed:
                 if changed:
                     self.notes.append(
-                        f"assume CONSTRAINED at {where}: narrowed var "
-                        f"{var_id} to {_render_box(box)}"
+                        f"assume CONSTRAINED at {where}: narrowed "
+                        f"{self._name_of_id(var_id)} to {_render_box(box)}"
                     )
                 else:
                     self.notes.append(
-                        f"assume CONSTRAINED at {where}: var {var_id} "
-                        f"already within the assumed region {_render_box(box)}"
+                        f"assume CONSTRAINED at {where}: "
+                        f"{self._name_of_id(var_id)} is already within the "
+                        f"assumed region {_render_box(box)}"
                     )
                 self.assumptions.add(
                     f"constrained assume at {where}: "
-                    f"{CONDITIONAL_ON_PRECONDITION} — narrowed var {var_id} "
-                    f"to {_render_box(box)}"
+                    f"{CONDITIONAL_ON_PRECONDITION} — narrowed "
+                    f"{self._name_of_id(var_id)} to {_render_box(box)}"
                 )
                 if not certified:
                     # audit F7: the target's box is an over-approximation
@@ -8372,8 +8629,9 @@ class _Propagator:
                     self.narrowing_uncertified = True
                     self.notes.append(
                         f"precondition satisfiability UNCERTIFIED at "
-                        f"{where}: var {var_id} is an over-approximated "
-                        f"intermediate (its box may exceed its true image) "
+                        f"{where}: {self._name_of_id(var_id)} is an "
+                        f"over-approximated intermediate (its box may exceed "
+                        f"its true image) "
                         f"— the conditional claim may be vacuous"
                     )
                     self.assumptions.add(UNCERTIFIED_NARROWING_ASSUMPTION)
@@ -8558,7 +8816,10 @@ class _Propagator:
         self.assume_ledger.extend(
             AssumeDisposition(
                 kind=ASSUME_APPLIED,
-                reason=f"narrowed var {var_id} to {_render_box(box)}",
+                reason=(
+                    f"narrowed {self._name_of_id(var_id)} to "
+                    f"{_render_box(box)}"
+                ),
                 where=where,
                 eqn_id=id(eqn),
             )
@@ -9044,7 +9305,8 @@ class _Propagator:
             return
         if target_box is None:
             dropped.append(_drop(
-                f"var {target_atom.id} has no propagated interval to narrow"
+                f"{self._name_of(target_atom)} has no propagated interval "
+                f"to narrow"
             ))
             return
         # bound shape: a scalar broadcast over the variable, or an exact
@@ -9077,13 +9339,14 @@ class _Propagator:
         except iv.IntervalError:
             self._unsatisfiable(
                 where,
-                f"var {target_atom.id} ∈ {_render_box(target_box)} cannot "
-                f"satisfy {_CMP_SYMBOL[cmp]} {_render_bound(bound)} (empty "
-                f"meet)",
+                f"{self._name_of(target_atom)} ∈ "
+                f"{_render_box(target_box)} cannot satisfy "
+                f"{_CMP_SYMBOL[cmp]} {_render_bound(bound)} (empty meet)",
                 vacuous,
-                f"unsatisfiable assume at {where}: var {target_atom.id} has "
-                f"propagated interval {_render_box(target_box)}, but the "
-                f"assumed constraint requires var {target_atom.id} "
+                f"unsatisfiable assume at {where}: "
+                f"{self._name_of(target_atom)} has propagated interval "
+                f"{_render_box(target_box)}, but the assumed constraint "
+                f"requires {self._name_of(target_atom)} "
                 f"{_CMP_SYMBOL[cmp]} {_render_bound(bound)}; the "
                 f"precondition is definitely false on the whole "
                 f"over-approximated domain, so the declared set as assumed "
@@ -9105,12 +9368,13 @@ class _Propagator:
             # empties the universal predicate.
             self._unsatisfiable(
                 where,
-                f"strict constraint var {target_atom.id} {_CMP_SYMBOL[cmp]} "
-                f"{_render_bound(bound)} collapses onto the boundary point "
+                f"strict constraint {self._name_of(target_atom)} "
+                f"{_CMP_SYMBOL[cmp]} {_render_bound(bound)} collapses onto "
+                f"the boundary point "
                 f"— the true region is empty",
                 vacuous,
                 f"unsatisfiable assume at {where}: the strict constraint "
-                f"var {target_atom.id} {_CMP_SYMBOL[cmp]} "
+                f"{self._name_of(target_atom)} {_CMP_SYMBOL[cmp]} "
                 f"{_render_bound(bound)} collapses the narrowed interval "
                 f"onto the closed boundary point {_render_box(new)}, which "
                 f"the strict comparison itself excludes — the true assumed "
@@ -9219,7 +9483,8 @@ class _Propagator:
             # disclosed here so no verdict rests on it silently
             self.nan[target_atom.id] = False
             self.notes.append(
-                f"assume cleared maybe-NaN on var {target_atom.id} at "
+                f"assume cleared maybe-NaN on "
+                f"{self._name_of(target_atom)} at "
                 f"{where}: an assumed-true comparison excludes NaN"
             )
         narrowed.append(
@@ -9260,6 +9525,12 @@ class _Propagator:
     def run(
         self, jaxpr: ir.Jaxpr, consts, args, arg_flags=None, arg_taints=None
     ) -> list[iv.IntervalArray]:
+        if self._decl_names is _UNSET:
+            # the FIRST `run` is the outermost jaxpr on every entry point
+            # (`propagate`, `interval_env`, the probe runs); every later one
+            # is a descent this walk performs itself. Derived once, from the
+            # IR and from nothing a caller supplies.
+            self._decl_names = _declaration_names(jaxpr)
         ieee = self.semantics == "ieee"
         for var, c in zip(jaxpr.constvars, consts):
             if isinstance(c, iv.IntervalArray):
@@ -9382,20 +9653,29 @@ class _Propagator:
                 if problem is not None:
                     return f"carries a refused literal ({problem})"
                 continue
-            for d in atom.aval.shape:
-                try:
-                    k = _op_index(d)
-                except TypeError:
-                    return (
-                        f"carries a non-integer shape extent {d!r} "
-                        f"(malformed IR: from_dict does not coerce "
-                        f"shape entries)"
-                    )
-                if k < 0:
-                    return (
-                        "touches a negative-extent shape (no jax "
-                        "program constructs such a value)"
-                    )
+            # ONE PREDICATE FOR BOTH ATOM KINDS. The literal arm above has
+            # asked `iv.check_shape` (through `_refused_value_problem`)
+            # since it was written; this arm re-implemented the same two
+            # tests by hand, and the copy was wrong in both of the ways
+            # audit 0.2.0 B6 audit 3 closed one module over (item 2 of B8a):
+            #
+            #   * it caught only `TypeError`, and `operator.index` raises
+            #     whatever `__index__` raises — measured on `aabb58d`, an
+            #     extent whose `__index__` raises `ValueError` left
+            #     `interval_env()` and `propagate()` RAW, past every
+            #     `except iv.IntervalError` in the library;
+            #   * it interpolated `{d!r}` UNGUARDED, inside the screen's
+            #     own message path — so a hostile `__repr__` raised
+            #     `RuntimeError` out of the code that was trying to explain
+            #     why it refused the object. Measured the same way.
+            #
+            # `iv.check_shape` catches `Exception` and quotes both the
+            # shape and the extent through `iv._safe_repr`, so a second
+            # spelling of this predicate is a second thing to keep total.
+            try:
+                iv.check_shape(atom.aval.shape)
+            except iv.IntervalError as e:
+                return f"carries a refused shape ({e})"
         return None
 
     def _bind_refused(self, var: ir.Var) -> None:
@@ -10074,6 +10354,21 @@ class _Propagator:
             # obligation statuses across two corpora and disagrees 0 times
             # in 7392 suite-wide calls (see `_bool_status`).
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
+            if ins[0].size == 0:
+                # THE DISCLOSURE, IN THE CHANNEL A CONSUMER READS (audit
+                # 0.2.0 B8a, item 6 / M18). The detail already says it; a
+                # note is what `Verdict.notes` carries and what the render
+                # prints, and it is the difference between "an ordinary
+                # VERIFIED" and "a VERIFIED that checked nothing".
+                self.notes.append(EMPTY_UNIVERSAL_NOTE.format(
+                    what="obligation",
+                    index=len(self.obligations),
+                    where=(
+                        eqn.source_info[-1]
+                        if eqn.source_info
+                        else "unknown location"
+                    ),
+                ))
             if status == "unknown":
                 # the undecided detail quotes the straddle it was judged
                 # on (docs/proposed-decline-messages.md #1) — message
@@ -10156,6 +10451,21 @@ class _Propagator:
             # `_withhold_uncertified_refutations`. See the assert's note
             # for the argument and the measurements.
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
+            if ins[0].size == 0:
+                # the same disclosure on the nonvacuity face, where it is
+                # if anything louder: a "checked — N membership condition(s)
+                # definitely true (the declared set contains the stated
+                # point)" summary derived from a ZERO-element check says
+                # the declared set contains a point that was never tested.
+                self.notes.append(EMPTY_UNIVERSAL_NOTE.format(
+                    what="membership condition",
+                    index=len(self.nonvacuity_checks),
+                    where=(
+                        eqn.source_info[-1]
+                        if eqn.source_info
+                        else "unknown location"
+                    ),
+                ))
             if status == "unknown":
                 # the assert's hint, on the face that needs it MOST: an
                 # undecided membership condition alongside discharged
@@ -10166,11 +10476,11 @@ class _Propagator:
                 #
                 # The status guard is LOAD-BEARING, not belt-and-braces: a
                 # reduce_and whose output is SIZE-0 (a non-reduced axis of
-                # length zero) is `discharged` — measured, "definitely true
-                # for all 0 element(s)", matching jnp.all of an empty array —
-                # while its box is still stelling's ⊤ and the gate still says
-                # yes. Without the guard that decided face would carry a note
-                # calling itself UNDECIDED.
+                # length zero) is `discharged` — measured, vacuously
+                # (:data:`EMPTY_UNIVERSAL_DETAIL`), matching jnp.all of an
+                # empty array — while its box is still stelling's ⊤ and the
+                # gate still says yes. Without the guard that decided face
+                # would carry a note calling itself UNDECIDED.
                 self._note_membership_idiom(eqn, "nonvacuity condition")
             if ieee and in_flags and in_flags[0] and status != "unknown":
                 # same posture as the assert above: a maybe-NaN membership

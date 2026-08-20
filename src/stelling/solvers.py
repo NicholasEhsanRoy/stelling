@@ -3796,11 +3796,6 @@ def make_solver_verdict(
     else:
         status = "UNKNOWN"
 
-    # -- reaches-output conjunct ------------------------------------------------
-    obligations, reachability_notes, status = (
-        _verdict._apply_reachability_conjunct(closed, obligations, status)
-    )
-
     nonvacuity = _nonvacuity_summary(propagation.nonvacuity_checks)
     notes = propagation.notes + escalation.notes
     for record in escalation.records:
@@ -3811,7 +3806,7 @@ def make_solver_verdict(
     notes = notes + _verdict.undecided_cause_note(
         propagation.coverage, obligations,
         _unaccounted_solver_runs(escalation, ledger_stamps),
-    ) + reachability_notes
+    )
     # THE SCATTER VERIFIED BAR (stelling.verdict.VERIFIED_BARRED_PRIMITIVES).
     # Scoped to the SOLVER path deliberately, and this scoping is the whole
     # design decision: the bar exists because a new SMT EMISSION row that
