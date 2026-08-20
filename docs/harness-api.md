@@ -460,7 +460,7 @@ box you declared — computed in traced code, through the same transforms
 the box is stated in. It moves the stamp's `nonvacuity` field, and
 nothing else: the verdict's status is unaffected.
 
-The field takes five values, and each corresponds to what the membership
+The field takes six values, and each corresponds to what the membership
 conditions did:
 
 | stamp says | means |

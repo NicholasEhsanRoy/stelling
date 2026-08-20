@@ -373,7 +373,7 @@ They share the root "vacu-" and nothing else.
 | **appears as** | an `assumes:` line beginning `vacuity checked` / `vacuity instrument inert` | the `nonvacuity:` stamp field, plus a `note:` when it is not `checked` |
 | **how it runs** | automatic: on a VERIFIED, `check()` re-runs the identical query with declared bounds widened to (−inf, +inf) | only if your harness calls `nonvacuity(...)` |
 | **you control it with** | the required `vacuity_mode` argument | writing membership conditions |
-| **failing looks like** | `obligation #0: discharges with all declared bounds widened (vacuity mode=inputs-only) — envelope not load-bearing` | `nonvacuity: UNCHECKED` / `undecided` / `FAILED` and the may-be-vacuous note |
+| **failing looks like** | `obligation #0: discharges with all declared bounds widened (vacuity mode=inputs-only) — envelope not load-bearing` | `nonvacuity: UNCHECKED` / `undecided` / `FAILED` / `VACUOUS` and the may-be-vacuous note |
 
 So in the render above — `vacuity checked … no obligation discharges`
 beside `may be vacuous` — the two lines mean: *the widening re-check ran
