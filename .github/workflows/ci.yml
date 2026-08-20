@@ -320,6 +320,25 @@ jobs:
   # `property` job below is where that belongs and it already installs
   # `.[jax]`. What this job needs from the group is nothing; what it needs
   # from the extras is the absence of one.
+  #
+  # SO THE TWO SETS OF FIGURES IN THIS COMMENT ARE NOT THE SAME POPULATION,
+  # and saying both without saying that would invite the subtraction. The
+  # `72 / 3796 / 196` above was measured in the CONTRIBUTING.md environment,
+  # WITH the dev group; this job reports `3810 passed, 273 skipped`. They
+  # differ twice over:
+  #
+  #   * ENVIRONMENT. `hypothesis` is a dev-group dependency, so `tests/property`
+  #     collects and runs there and import-skips here. Measured on the same
+  #     commit (f82b87b), same jax 0.11.1, neither wheel: 4060 tests collected
+  #     with the group, 4044 without it.
+  #   * TREE. The `72 failed` is a BEFORE reading. Those 72 are the tests that
+  #     needed a solver and never said so; 71 of them carry `need_solver` now
+  #     (the 72nd row is interval-decided and needs none), so they are counted
+  #     among this job's skips rather than among its failures. That conversion
+  #     is what the job exists to hold in place.
+  #
+  # The one number to compare across a change is this job's own, and it is
+  # printed by this job on every run.
   test-jax-no-solvers:
     name: tests (jax, no solver wheels)
     runs-on: ubuntu-latest
@@ -328,23 +347,60 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
       - run: uv pip install -e ".[jax]" pytest
-      # The job's whole point is which wheels are ABSENT, so that is the thing
+      # The job's whole point is which SOLVERS are absent, so that is the thing
       # it must not take on trust: a transitive dependency that quietly pulled
-      # one in would leave this green while testing what `test-jax` already
-      # tests.
-      - name: assert NEITHER solver wheel is installed
+      # a wheel in would leave this green while testing what `test-jax`
+      # already tests.
+      #
+      # IT ASKS THE GATE, NOT A PROXY FOR IT. `tests/_solver_gate.py` is the
+      # one predicate that decides whether the 71 `need_solver` tests run, and
+      # it accepts THREE routes: the z3 wheel, the cvc5 wheel, and an external
+      # cvc5 binary named by `STELLING_CVC5` or found on PATH — the route the
+      # documentation actively recommends, since it is how you get a build the
+      # PyPI wheel does not ship. A guard that asked `find_spec("z3"|"cvc5")`
+      # proved WHEEL absence and was read as SOLVER absence. Driven, with a
+      # `cvc5` shim on PATH and neither wheel installed:
+      #
+      #   the find_spec guard   -> "jax 0.11.1 — and no solver wheel", exit 0
+      #   tests/_solver_gate.py -> HAVE_SOLVER = True
+      #   pytest tests/test_scatter_row_gates.py tests/test_inductive.py
+      #                         -> 2 failed, 21 passed
+      #
+      # `ubuntu-latest` ships no cvc5, so CI was never wrong; a contributor
+      # reproducing this lane locally was, and nothing told them. Prove
+      # absence at TEST time, by the predicate the tests actually consult.
+      - name: assert NO SOLVER IS REACHABLE — the gate's own predicate
         run: |
           set -euo pipefail
           .venv/bin/python - <<'PY'
-          import importlib.util, sys
-          found = [n for n in ("z3", "cvc5") if importlib.util.find_spec(n)]
-          if found:
+          import sys
+          sys.path.insert(0, "tests")
+          import _solver_gate
+          from stelling import _optional
+          if _solver_gate.HAVE_SOLVER:
+              routes = []
+              if _optional.available("z3"):
+                  routes.append("the z3 wheel is installed")
+              if _optional.available("cvc5"):
+                  routes.append("the cvc5 wheel is installed")
+              binary = _optional.cvc5_binary()
+              if binary is not None:
+                  routes.append(
+                      f"an external cvc5 binary is reachable at {binary!r} "
+                      "(STELLING_CVC5, or `cvc5` on PATH)"
+                  )
               sys.exit(
-                  "this lane exists to run with no solver wheel and has "
-                  f"{found}; something pulled one in transitively"
+                  "this lane exists to run with NO solver reachable, and "
+                  "tests/_solver_gate.py reports HAVE_SOLVER = True: "
+                  + "; ".join(routes)
+                  + ". The 71 `need_solver` tests would RUN here, so this "
+                  "job would be testing what test-jax already tests."
               )
           import jax
-          print("jax", jax.__version__, "— and no solver wheel")
+          print(
+              "jax", jax.__version__,
+              "— and tests/_solver_gate.py reports HAVE_SOLVER = False",
+          )
           PY
       # The verdict channel; see the block above `jobs:` for why it is here.
       - name: pytest, with the skip-inventory verdict asserted off a file channel

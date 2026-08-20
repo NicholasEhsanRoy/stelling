@@ -35,14 +35,32 @@ first — this workflow is more comment than code, deliberately — and what is
 left is scanned for job headers, ``uv pip install`` lines and ``pytest``
 invocations.
 
-**A job whose install line is a matrix expansion is classified ``"matrix"``
-and nothing is inferred from it.** ``acceptance-reproducer`` installs
-``.[${EXTRAS}]`` with ``EXTRAS`` coming from ``strategy.matrix``, and reading
-the series out of that would mean reading a second file's worth of YAML
-structure to learn something this module then must not use anyway: ci.yml's
-own policy says in as many words that the two acceptance jobs *must not* be
-required checks, so a coverage claim resting on them rests on a job whose red
-does not block. Classified, excluded from :data:`SERIES_BEARING`, and said so.
+**A JOB WHOSE INSTALL LINE IS A MATRIX EXPANSION IS EXPANDED, ENTRY BY ENTRY,
+AND A FIELD ITS ENTRIES DISAGREE ON IS A NAMED CAN'T-TELL.**
+``acceptance-reproducer`` installs ``.[${EXTRAS}]``, and one ``Lane`` cannot
+describe two provisionings. So :func:`_matrix_values` follows the one chain
+the install line actually names — ``${EXTRAS}`` to the step's
+``EXTRAS: ${{ matrix.extras }}`` to the ``strategy.matrix.include`` entries —
+and the resolution rule is the same for every field: **the entries agree and
+the value is theirs, or they do not and it is ``None``.** Today the two
+entries name ``solvers,jax`` and ``solvers``, which agree that a solver extra
+is installed, so :attr:`Lane.solvers` reads ``True`` because that is what
+ci.yml says and not because a matrix job is assumed to have everything.
+:attr:`Lane.jax` stays ``"matrix"``: the entries do disagree there — one pins
+``0.10`` and one floats — so there is no single series, which is also why the
+job is excluded from :data:`SERIES_BEARING`. That exclusion is a policy on top
+of the reading, not a substitute for it: ci.yml's own text says the two
+acceptance jobs *must not* be required checks, so a coverage claim resting on
+them rests on a job whose red does not block.
+
+THIS WAS A HARDCODED ``True``, and the sentence here said *"nothing is
+inferred from it"* while the code inferred the one thing a permissive constant
+can: that the solvers were there. The measured/declared pin could not see it —
+both sides were the same constant — so stripping ``solvers`` from **both**
+matrix entries left the whole file green. ``design/lessons-ledger.md`` L23 is
+about exactly that shape, and it was sitting inside the instrument that
+carries L23. A can't-tell that resolves to the permissive answer is not a
+reading.
 
 **WHAT THE FLOATING LANE DELIVERS IS AN INFERENCE, and it is the only one
 here.** ``test-jax`` installs ``.[solvers,jax]``, whose requirement carries no
@@ -85,7 +103,26 @@ _SERIES_PIN = re.compile(r'"jax>=(\d+\.\d+)[^"]*,\s*<\s*\d+\.\d+"')
 #: `"${HYP}"` requirement read out of pyproject.toml, and a pattern that
 #: matched any `${...}` classified that lane as a matrix and credited it
 #: with solvers it does not have.
-_MATRIX = re.compile(r"\.\[\$")
+#:
+#: RECOGNISING ONE IS NOT THE SAME AS FOLLOWING IT, and the two are separate
+#: groups here for that reason. `.[$` alone decides "this is a matrix job" —
+#: exactly the reach it has always had — while the capture is the shell
+#: variable name, present for `${NAME}` and `$NAME` and absent for a direct
+#: `${{ matrix.x }}` interpolation. No capture means the chain cannot be
+#: followed, which is a can't-tell; a narrower recogniser would instead have
+#: read such a job as an ordinary literal install with no solvers at all.
+_MATRIX = re.compile(r"\.\[\$(?:\{(\w+)\}|(\w+))?")
+#: `EXTRAS: ${{ matrix.extras }}` — a step's `env:` binding that shell
+#: variable to a matrix key. This is the link the install line names and the
+#: only reason this module can say which key to read.
+_ENV_FROM_MATRIX = re.compile(r"^\s*(\w+):\s*\$\{\{\s*matrix\.(\w+)\s*\}\}\s*$")
+#: The `include:` list header of a `strategy.matrix`.
+_INCLUDE = re.compile(r"^(\s*)include:\s*$")
+#: One `key: value` line inside a matrix entry, `- ` marking a new entry.
+_MATRIX_ITEM = re.compile(r"^\s*(-\s+)?([A-Za-z_][\w-]*):\s*(.*?)\s*$")
+#: The skip inventory's FILE channel, set by a job that asserts the
+#: completeness verdict off something pytest's exit code cannot be taken from.
+_VERDICT_CHANNEL = re.compile(r"\bSTELLING_SKIP_INVENTORY_VERDICT\b")
 
 
 @dataclass(frozen=True)
@@ -95,10 +132,21 @@ class Lane:
     job: str
     #: ``"absent"``, ``"floating"``, ``"matrix"``, or a series like ``"0.10"``.
     jax: str
-    solvers: bool
+    #: Whether the job installs a solver extra — or ``None``, the named
+    #: can't-tell, when the workflow does not say with one voice. A matrix job
+    #: whose expansions disagree, or whose expansions this module cannot read,
+    #: reads ``None`` rather than the permissive ``True``; a consumer that
+    #: needs a definite answer has to check for it, which is the whole
+    #: difference between a can't-tell and a guess.
+    solvers: bool | None
     #: Whether some step runs ``pytest`` over the WHOLE tree (no path argument).
     whole_suite: bool
     random_order: bool
+    #: Whether the job asserts the skip inventory's verdict off the FILE
+    #: channel (``STELLING_SKIP_INVENTORY_VERDICT``) rather than off pytest's
+    #: exit code. Six of the seven whole-suite lanes do; the seventh is named
+    #: in :data:`VERDICT_CHANNEL_EXEMPT` with its reason.
+    verdict_channel: bool
 
 
 def _code_lines(text: str) -> list[str]:
@@ -118,6 +166,74 @@ def _blocks(lines: list[str]) -> dict[str, list[str]]:
     return blocks
 
 
+def _matrix_include(body: list[str]) -> list[dict[str, str]]:
+    """The ``strategy.matrix.include`` entries of one job, as key/value maps.
+
+    Empty when there is no such block or its shape is not the one read here —
+    an unreadable matrix is a can't-tell, never an entry list that happens to
+    be short. Values are unquoted; a nested structure inside an entry is not
+    supported and reads as unreadable rather than as a partial entry.
+    """
+    entries: list[dict[str, str]] = []
+    depth: int | None = None
+    for line in body:
+        if depth is None:
+            m = _INCLUDE.match(line)
+            if m:
+                depth = len(m.group(1))
+            continue
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip()) <= depth:
+            break  # dedented out of the include block
+        item = _MATRIX_ITEM.match(line)
+        if not item or (item.group(1) is None and not entries):
+            return []  # a shape this cannot read
+        if item.group(1) is not None:
+            entries.append({})
+        value = item.group(3)
+        if value.startswith('"') and value.endswith('"') and len(value) >= 2:
+            value = value[1:-1]
+        entries[-1][item.group(2)] = value
+    return entries
+
+
+def _matrix_values(body: list[str], variable: str | None) -> list[str] | None:
+    """What ``${variable}`` expands to in each matrix entry, or ``None``.
+
+    Four links, and any of them failing is a can't-tell rather than a default:
+    the install line has to name a shell variable, the step's ``env:`` has to
+    bind it to a matrix key, the include block has to be readable, and every
+    entry has to carry that key.
+    """
+    if variable is None:
+        return None
+    key = None
+    for line in body:
+        m = _ENV_FROM_MATRIX.match(line)
+        if m and m.group(1) == variable:
+            key = m.group(2)
+            break
+    if key is None:
+        return None
+    entries = _matrix_include(body)
+    if not entries or any(key not in e for e in entries):
+        return None
+    return [e[key] for e in entries]
+
+
+def _agreed(values, read):
+    """``read`` applied to every expansion, if they all agree; else ``None``."""
+    if values is None:
+        return None
+    seen = {read(v) for v in values}
+    return seen.pop() if len(seen) == 1 else None
+
+
+def _has_solvers(extras: str) -> bool:
+    return bool(re.search(r"\bsolvers\b", extras))
+
+
 def _classify(body: list[str]) -> Lane | None:
     installs = [m.group(1) for line in body if (m := _INSTALL.search(line))]
     pytests = [m.group(1) for line in body if (m := _PYTEST.search(line))]
@@ -125,9 +241,15 @@ def _classify(body: list[str]) -> Lane | None:
         return None  # not a test lane at all (`reuse`, `dco`)
 
     joined = " ".join(installs)
-    if _MATRIX.search(joined):
+    matrix = _MATRIX.search(joined)
+    if matrix:
+        # THE EXPANSION IS READ, NOT ASSUMED. See the module docstring: the
+        # entries agree and the value is theirs, or they do not and it is the
+        # named can't-tell. `jax` is "matrix" because the entries genuinely
+        # disagree about the series and one `Lane` cannot hold two.
         jax = "matrix"
-        solvers = True  # every matrix entry names an extras set containing it
+        variable = matrix.group(1) or matrix.group(2)
+        solvers = _agreed(_matrix_values(body, variable), _has_solvers)
     else:
         pin = _SERIES_PIN.search(joined)
         if pin:
@@ -163,8 +285,9 @@ def _classify(body: list[str]) -> Lane | None:
     random_order = any("-p randomly" in a for a in pytests) or any(
         "pytest-randomly" in i for i in installs
     )
+    verdict = any(_VERDICT_CHANNEL.search(line) for line in body)
     return Lane(job="", jax=jax, solvers=solvers, whole_suite=whole,
-                random_order=random_order)
+                random_order=random_order, verdict_channel=verdict)
 
 
 def lanes() -> tuple[Lane, ...]:
@@ -174,7 +297,7 @@ def lanes() -> tuple[Lane, ...]:
         lane = _classify(body)
         if lane is not None:
             found.append(Lane(job, lane.jax, lane.solvers, lane.whole_suite,
-                              lane.random_order))
+                              lane.random_order, lane.verdict_channel))
     return tuple(sorted(found, key=lambda l: l.job))
 
 
@@ -184,23 +307,59 @@ def lanes() -> tuple[Lane, ...]:
 #: added, removed or re-provisioned is a line in a diff rather than a silent
 #: change in what CI measures.
 #:
-#: ``(jax, solvers, whole_suite, random_order)``.
-EXPECTED_LANES: dict[str, tuple[str, bool, bool, bool]] = {
-    "acceptance-any-pytree": ("floating", True, True, False),
-    "acceptance-reproducer": ("matrix", True, True, False),
-    "property": ("floating", False, False, False),
-    "random-order": ("floating", True, True, True),
-    "test-jax": ("floating", True, True, False),
-    "test-jax-0-10": ("0.10", True, True, False),
-    "test-jax-no-solvers": ("floating", False, True, False),
-    "test-no-jax": ("absent", True, True, False),
+#: ``(jax, solvers, whole_suite, random_order, verdict_channel)``. ``solvers``
+#: may be ``None`` — the named can't-tell — and no entry is ``None`` today,
+#: which is a measurement rather than a coincidence: every job in ci.yml either
+#: names its extras literally or has matrix entries that agree about them.
+EXPECTED_LANES: dict[str, tuple[str, bool | None, bool, bool, bool]] = {
+    "acceptance-any-pytree": ("floating", True, True, False, True),
+    "acceptance-reproducer": ("matrix", True, True, False, True),
+    "property": ("floating", False, False, False, False),
+    "random-order": ("floating", True, True, True, False),
+    "test-jax": ("floating", True, True, False, True),
+    "test-jax-0-10": ("0.10", True, True, False, True),
+    "test-jax-no-solvers": ("floating", False, True, False, True),
+    "test-no-jax": ("absent", True, True, False, True),
 }
+
+#: The whole-suite lanes that do NOT assert the skip-inventory verdict off the
+#: file channel, each with the reason. Six of the seven do; this is the
+#: seventh, and it was an undisclosed asymmetry until it was written down.
+#:
+#: ``random-order`` is not a required check and its green gates nothing — that
+#: is the workflow's own stated policy for it — so the property the file
+#: channel buys, *a verdict pytest's exit code cannot be taken from*, is
+#: bought for a signal nobody merges on. What its red has to be instead is
+#: ACTIONABLE, and the step is built around that: on failure it re-runs the
+#: same commit in file order and annotates which KIND of failure this was. A
+#: bare `exit 1` in front of that classification would replace the one thing
+#: this lane is for with a verdict every other lane already carries. And an
+#: order-dependent undisclosed skip — the failure this lane is most likely to
+#: find — reddens `test_no_session_skip_is_undisclosed` in the ordinary way,
+#: which the classification step then triages.
+VERDICT_CHANNEL_EXEMPT = {"random-order": "not a required check; see the comment above"}
 
 #: The lanes a documented-hash or series claim may rest on: whole-suite, and
 #: not one of the two the workflow's own policy says must NOT be a required
 #: check. Declared here rather than inferred from the prose beside those jobs —
 #: a fence that reads a comment is a fence a reflow can turn off — and held to
 #: the parse by ``test_lanes.py``.
+#:
+#: WHOLE-SUITE IS NECESSARY AND NOT SUFFICIENT, and the gap has a name.
+#: ``test_every_series_bearing_job_is_a_whole_suite_lane_that_exists`` checks
+#: that ``test_doc_example`` *may* run in each of these; it cannot check that a
+#: particular block's comparison EXECUTES there. ``test_doc_example`` skips any
+#: block whose source sets ``solver_timeout_ms`` when neither solver wheel is
+#: installed, so on ``test-jax-no-solvers`` those blocks do not run — while
+#: this tuple credits that job with a jax series for doc-hash coverage all the
+#: same. Measured on this tree: 2 of the 30 collected blocks opt in
+#: (``preconditions.md:63``, ``quickstart.md:160``) and NEITHER carries a
+#: documented query hash, so no entry of ``EXPECTED_HASH_COVERAGE`` rests on a
+#: skipped comparison; ``test-jax`` delivers the same 0.11 with the wheels
+#: present in any case. The day a hash-bearing block opts into escalation,
+#: this job's contribution to that hash becomes a skip and this tuple would
+#: still credit it. Same shape as ``test-no-jax``, whose ``"absent"`` reading
+#: ``lane_series`` already discards for exactly this reason.
 SERIES_BEARING = ("test-jax", "test-jax-0-10", "test-jax-no-solvers", "test-no-jax")
 
 

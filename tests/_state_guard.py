@@ -31,6 +31,41 @@ anything** — it does not own the state it watches, and a guard that quietly pu
 jax's registry back would be hiding the defect it exists to report.
 
 ────────────────────────────────────────────────────────────────────────────
+TWO ALTITUDES, BECAUSE ONE OF THEM COULD NOT SEE ITS OWN SHAPE OF DEFECT
+────────────────────────────────────────────────────────────────────────────
+
+:func:`state_guard` is function-scoped, so it brackets each test and the
+fixtures that test owns. **A module- or class-scoped fixture that never
+restores is outside every one of those windows** — it is set up before the
+first test's guard reads ``before`` and torn down after the last one has read
+``after`` — so it escaped entirely. Driven, with the restore deleted from the
+module-scoped ``_x64`` fixture in ``tests/test_0_2_0_regression.py`` (jax
+0.11.0)::
+
+    mutated : 21 passed   [X64PROBE] jax_enable_x64 at session finish = True
+    control : 21 passed   [X64PROBE] jax_enable_x64 at session finish = False
+
+Green, silent, and every later module inherits ``x64 = True``. The SAME
+deletion in a function-scoped fixture is named immediately. Two near-identical
+defects, one caught and one invisible.
+
+This module's own argument for having no outer guard was that it *"would
+report every module that sets x64 for its own duration"*, and that is
+**false**, measured: pytest sets a conftest's module-scoped autouse fixture up
+*before* the test module's own module-scoped fixtures and tears it down
+*after* them (lazily-requested module fixtures included), so a module that
+sets x64 and puts it back is bracketed and silent. :func:`module_state_guard`
+is therefore the same instrument one scope out.
+
+**IT REPORTS ONLY WHAT THE FUNCTION GUARD COULD NOT SEE**, which is what keeps
+"named exactly once" true and keeps :data:`PINNED_EXEMPTIONS` meaning what it
+says. Every entry a function-scoped guard observed moving inside this module —
+reported OR licensed by an exemption — is recorded in :data:`_DECIDED_HERE`
+and skipped at module teardown. A test's offence is named at the altitude that
+can name a test; what is left over happened outside every test, and only that
+is the module's.
+
+────────────────────────────────────────────────────────────────────────────
 WHAT IT WATCHES — the inventory, and it is enumerated
 ────────────────────────────────────────────────────────────────────────────
 
@@ -82,6 +117,16 @@ against what this suite actually mutates:
 * **Anything a test changes and changes back within its own body.** This is a
   before/after fingerprint, not a trace: a test that arms the tripwire and
   disarms it is silent here, which is the intent.
+* **A ``package``- or ``session``-scoped fixture that never restores, and
+  anything a plugin or a conftest does at import.** The two guards below reach
+  function and module scope; both of those are set up before the module guard
+  reads ``before`` and torn down after it reads ``after``, exactly as a
+  module-scoped fixture was outside the function guard. There is no such
+  fixture in this tree today — measured, ``grep`` finds ``scope="module"`` and
+  nothing wider — which is why the guard stops here rather than growing a
+  third altitude nothing would exercise. **Add one and it is unwatched**, so
+  the honest place to add the third guard is the commit that adds the first
+  session-scoped fixture.
 
 ────────────────────────────────────────────────────────────────────────────
 THE EXEMPTION LIST
@@ -314,43 +359,70 @@ def read_state() -> dict[str, object]:
     return {e.name: e.read() for e in ENTRIES}
 
 
+def changed(before: dict[str, object], after: dict[str, object]) -> list[Entry]:
+    """The entries whose reading moved, licence or no licence."""
+    return [e for e in ENTRIES if before.get(e.name) != after.get(e.name)]
+
+
 def offences(
     nodeid: str, before: dict[str, object], after: dict[str, object]
 ) -> list[str]:
     """Entries this test changed and was not licensed to change.
 
-    A pure function of three values on purpose: the fixture below is a wrapper
+    A pure function of three values on purpose: the fixtures below are wrappers
     around it, and the exemption logic is testable without planting a polluting
     test in a nested session.
     """
-    found = []
-    for entry in ENTRIES:
-        was, now = before.get(entry.name), after.get(entry.name)
-        if was == now or exempt(nodeid, entry.name) is not None:
-            continue
-        found.append(
-            f"  {entry.name}: {was!r} -> {now!r}\n"
-            f"      ({entry.what})"
-        )
-    return found
+    return [
+        f"  {entry.name}: {before.get(entry.name)!r} -> {after.get(entry.name)!r}\n"
+        f"      ({entry.what})"
+        for entry in changed(before, after)
+        if exempt(nodeid, entry.name) is None
+    ]
 
 
-def render(nodeid: str, found: list[str]) -> str:
-    return (
-        f"{nodeid} changed process-global state and did not put it back.\n"
-        + "\n".join(found)
-        + "\n\n"
-        "This is measured before and after THIS test, so this test is the one "
-        "that changed it — not a later test that inherits it. State left "
-        "behind here is inherited by every test that follows, and the failure "
-        "mode is not a red suite: it is a GREEN one. A battery in "
-        "tests/test_tripwire_arm.py was satisfied for two audit rounds by a "
-        "background branch a test in the same file had left armed.\n\n"
+def render(nodeid: str, found: list[str], subject: str = "test") -> str:
+    """The report. ``subject`` is the altitude that measured it.
+
+    Same first half either way — the entries, and why a green run is the
+    dangerous outcome — and a different remedy, because a module has no nodeid
+    for :data:`PINNED_EXEMPTIONS` to license.
+    """
+    remedy = (
         "Restore it (a `finally:`, a fixture, or `monkeypatch`), or, if "
         "leaving it changed is genuinely what the test is for, name the test "
         "and the entry in tests/_state_guard.py's PINNED_EXEMPTIONS with a "
         "reason."
+        if subject == "test"
+        else "Nothing INSIDE this module was named for these entries, so the "
+        "change happened outside every test in it — a module- or class-scoped "
+        "fixture that set something up and did not tear it down, or a "
+        "module-level statement with no matching restore. Put it back at the "
+        "same scope (`yield` then restore, in the fixture that changed it). "
+        "There is no exemption list at module scope: PINNED_EXEMPTIONS "
+        "licenses a TEST, and a module leaves its change to every test that "
+        "follows the whole file."
     )
+    return (
+        f"{nodeid} changed process-global state and did not put it back.\n"
+        + "\n".join(found)
+        + "\n\n"
+        f"This is measured before and after THIS {subject}, so this {subject} "
+        f"is the one that changed it — not a later {subject} that inherits it. "
+        "State left "
+        "behind here is inherited by every test that follows, and the failure "
+        "mode is not a red suite: it is a GREEN one. A battery in "
+        "tests/test_tripwire_arm.py was satisfied for two audit rounds by a "
+        "background branch a test in the same file had left armed.\n\n" + remedy
+    )
+
+
+#: Entry names a function-scoped guard has already DECIDED about within the
+#: module currently running — reported as an offence or licensed by an
+#: exemption. :func:`module_state_guard` skips them, so a test's offence is
+#: named once, at the altitude that can name a test, and an exemption is not
+#: undone one scope out. Cleared at every module's setup.
+_DECIDED_HERE: set[str] = set()
 
 
 @pytest.fixture(autouse=True)
@@ -364,12 +436,47 @@ def state_guard(request):
     autouse fixtures up outermost-first — session, then module, then function,
     and within a scope the conftest's before the test module's — so a
     module-scoped ``_x64`` fixture is already in force when this reads
-    ``before``, and is torn down after this reads ``after``. A guard that ran
-    outside those would report every module that sets x64 for its own duration.
+    ``before``, and is torn down after this reads ``after``. That is what makes
+    a module which sets x64 for its own duration silent HERE; it is also what
+    made such a module invisible when it did NOT put it back, which is what
+    :func:`module_state_guard` is for.
     """
     before = read_state()
     yield
-    found = offences(request.node.nodeid, before, read_state())
+    after = read_state()
+    _DECIDED_HERE.update(e.name for e in changed(before, after))
+    found = offences(request.node.nodeid, before, after)
     if found:
         pytest.fail(render(request.node.nodeid, found), pytrace=False)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def module_state_guard(request):
+    """The same instrument one scope out: fail the MODULE that moved one.
+
+    See "TWO ALTITUDES" in the module docstring for the measurement this
+    exists on, and for why it reports only entries no function-scoped guard
+    inside this module already decided about.
+
+    A module-scoped fixture cannot be exempted by nodeid, and that is
+    deliberate rather than an omission: :data:`PINNED_EXEMPTIONS` licenses a
+    TEST to leave a global changed, and a module that leaves one changed for
+    every test that follows it is not the same act. If one is ever genuinely
+    wanted, it needs its own list and its own argument.
+    """
+    _DECIDED_HERE.clear()
+    before = read_state()
+    yield
+    after = read_state()
+    found = [
+        f"  {entry.name}: {before.get(entry.name)!r} -> {after.get(entry.name)!r}\n"
+        f"      ({entry.what})"
+        for entry in changed(before, after)
+        if entry.name not in _DECIDED_HERE
+    ]
+    _DECIDED_HERE.clear()
+    if found:
+        pytest.fail(
+            render(request.node.nodeid, found, subject="module"), pytrace=False
+        )
 

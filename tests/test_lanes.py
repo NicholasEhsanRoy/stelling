@@ -33,7 +33,13 @@ def test_the_declared_lane_table_is_what_ci_yml_says():
     added, removed or re-provisioned is a line in a diff, never a silent
     change in what CI measures."""
     measured = {
-        lane.job: (lane.jax, lane.solvers, lane.whole_suite, lane.random_order)
+        lane.job: (
+            lane.jax,
+            lane.solvers,
+            lane.whole_suite,
+            lane.random_order,
+            lane.verdict_channel,
+        )
         for lane in _lanes.lanes()
     }
     assert measured == _lanes.EXPECTED_LANES, (
@@ -45,6 +51,154 @@ def test_the_declared_lane_table_is_what_ci_yml_says():
         "CI actually provisions; it is not a list to be re-typed until the "
         "suite goes green."
     )
+
+
+def test_a_matrix_job_is_EXPANDED_and_a_field_its_entries_disagree_on_is_None():
+    """THE DEFECT THIS INSTRUMENT HAD, WHICH IS THE ONE IT EXISTS TO CLOSE.
+
+    ``_classify`` used to write ``solvers = True`` for any job whose install
+    line was a matrix expansion, with the comment *"every matrix entry names an
+    extras set containing it"* — a permissive constant standing in for a
+    reading, inside the module whose docstring said in bold that nothing is
+    inferred from a matrix. The measured/declared pin could not see it: both
+    sides were the same constant. DRIVEN, with ``extras: jax`` in both
+    ``acceptance-reproducer`` entries and nothing else changed::
+
+        before: 8 passed
+                Lane(job='acceptance-reproducer', jax='matrix', solvers=True, …)
+
+    A can't-tell that resolves to the permissive answer is not a can't-tell;
+    it is a guess with an alibi. ``design/lessons-ledger.md`` L23.
+
+    The resolution rule is driven here on synthetic bodies rather than on
+    ci.yml, because ci.yml exercises exactly one case of it — entries that
+    agree, and agree the solvers are there — and every other case is one that
+    has to fail closed.
+    """
+    body = _reproducer_body()
+    assert _lanes._matrix_include(body), (
+        "the matrix include block is no longer readable, so every field a "
+        "matrix job carries has gone back to being a constant"
+    )
+    extras = _lanes._matrix_values(body, "EXTRAS")
+    assert extras and len(extras) >= 2, (
+        f"the `${{EXTRAS}}` chain — install line to step env to matrix key — "
+        f"no longer resolves to per-entry values, got {extras!r}"
+    )
+    # each case of the rule, each one a whole synthetic job
+    assert _synthetic(["solvers,jax", "solvers"]).solvers is True
+    assert _synthetic(["jax", ""]).solvers is False
+    assert _synthetic(["solvers,jax", "jax"]).solvers is None, (
+        "entries that disagree about the solver extra must read as the named "
+        "can't-tell; one Lane cannot describe two provisionings"
+    )
+    assert _lanes._classify(_UNREADABLE_MATRIX).solvers is None, (
+        "a matrix whose expansion this module cannot follow must read None, "
+        "not the permissive True"
+    )
+    # RECOGNISING A MATRIX AND FOLLOWING IT ARE SEPARATE. A `${{ matrix.x }}`
+    # interpolated straight into the install line names no shell variable, so
+    # the chain stops at its first link — and the reading has to be `"matrix"`
+    # plus a can't-tell, never an ordinary literal install with no solvers.
+    direct = _lanes._classify(_DIRECT_INTERPOLATION)
+    assert (direct.jax, direct.solvers) == ("matrix", None), direct
+    # and the substring trap the literal path already guards against
+    assert _synthetic(["not-solvers-really", "not-solvers-really"]).solvers is True
+    assert _synthetic(["nosolversatall", "nosolversatall"]).solvers is False
+
+
+def _reproducer_body() -> list[str]:
+    blocks = _lanes._blocks(
+        _lanes._code_lines(_lanes.CI.read_text(encoding="utf-8"))
+    )
+    return blocks["acceptance-reproducer"]
+
+
+_MATRIX_JOB = """\
+    strategy:
+      matrix:
+        include:
+{entries}
+    steps:
+      - name: install
+        env:
+          EXTRAS: ${{{{ matrix.extras }}}}
+        run: |
+          uv pip install -e ".[${{EXTRAS}}]" pytest
+      - run: python -m pytest -q
+"""
+
+#: A matrix job whose install line names a variable no ``env:`` binds to a
+#: matrix key — the chain broken at its second link.
+_UNREADABLE_MATRIX = _MATRIX_JOB.format(
+    entries='          - extras: "solvers"\n'
+).replace("EXTRAS: ${{ matrix.extras }}", "EXTRAS: solvers").splitlines()
+
+#: A matrix job that interpolates the matrix value straight into the install
+#: line, naming no shell variable at all — broken at the FIRST link.
+_DIRECT_INTERPOLATION = (
+    _MATRIX_JOB.format(entries='          - extras: "solvers"\n')
+    .replace('".[${EXTRAS}]"', '".[${{ matrix.extras }}]"')
+    .splitlines()
+)
+
+
+def _synthetic(extras_per_entry):
+    """One matrix job with these expansions, classified by the real parser."""
+    entries = "".join(f'          - extras: "{e}"\n' for e in extras_per_entry)
+    return _lanes._classify(_MATRIX_JOB.format(entries=entries).splitlines())
+
+
+def test_no_lane_a_claim_rests_on_is_a_cant_tell():
+    """The consumer side of the rule above: ``None`` must be HANDLED.
+
+    A named can't-tell is only worth more than a guess if something refuses to
+    proceed on it. These are the two lists in this module that say "this job
+    delivers configuration X", and neither may rest on a job whose
+    provisioning ci.yml does not state with one voice.
+    """
+    by_job = {lane.job: lane for lane in _lanes.lanes()}
+    for job in (*_lanes.SERIES_BEARING, *SUPPORTED.values()):
+        # existence is the fence next door's; this one is about the READING
+        if job not in by_job:
+            continue
+        assert by_job[job].solvers is not None, (
+            f"{job} is credited with a definite configuration, but ci.yml "
+            f"does not say with one voice whether it installs a solver extra "
+            f"— a matrix whose entries disagree, or one this module cannot "
+            f"read. Resolve it in the workflow or stop resting a claim on it."
+        )
+
+
+def test_every_whole_suite_lane_asserts_the_verdict_channel():
+    """The skip inventory's completeness verdict, off a channel the exit code
+    cannot be taken from — and the one lane that does without it is NAMED.
+
+    Six of the seven whole-suite lanes set
+    ``STELLING_SKIP_INVENTORY_VERDICT`` and fail the step on anything but
+    ``verdict=made``. That the seventh does not was true and undisclosed;
+    :data:`_lanes.VERDICT_CHANNEL_EXEMPT` carries the argument, and this holds
+    the exemption list to being a list rather than a habit.
+    """
+    missing = sorted(
+        lane.job
+        for lane in _lanes.lanes()
+        if lane.whole_suite and not lane.verdict_channel
+    )
+    assert missing == sorted(_lanes.VERDICT_CHANNEL_EXEMPT), (
+        f"whole-suite lanes without the verdict channel: {missing}, declared "
+        f"{sorted(_lanes.VERDICT_CHANNEL_EXEMPT)}. A whole-suite lane that "
+        f"asserts only pytest's exit code cannot tell a green session from "
+        f"one whose completeness claim was never made — see "
+        f"tests/conftest.py's `_write_the_verdict_somewhere_last_writer_wins_"
+        f"cannot_reach`. Either add the channel to the job or add it here "
+        f"with the reason."
+    )
+    for job, why in _lanes.VERDICT_CHANNEL_EXEMPT.items():
+        assert why.strip(), f"{job} is exempted with no reason given"
+    assert any(
+        lane.verdict_channel for lane in _lanes.lanes()
+    ), "no lane asserts the verdict channel at all, so this fence measures nothing"
 
 
 def test_every_series_bearing_job_is_a_whole_suite_lane_that_exists():
@@ -169,6 +323,10 @@ def test_every_supported_configuration_has_a_whole_suite_lane(config, job):
     )
     lane = by_job[job]
     assert lane.whole_suite, f"{job} does not run the whole suite"
+    assert lane.solvers is not None, (
+        f"{job} is meant to be the {config[1]} lane and ci.yml does not say "
+        f"with one voice which it is; see Lane.solvers"
+    )
     assert lane.solvers == (config[1] == "solvers"), (
         f"{job} is meant to be the {config[1]} lane and ci.yml provisions it "
         f"the other way"

@@ -108,9 +108,36 @@ def test_the_conftest_registers_the_real_fixture():
         "tests/conftest.py does not re-export tests/_state_guard.py's autouse "
         "fixture, so nothing in this tree is guarded"
     )
+    assert getattr(conftest, "module_state_guard", None) is G.module_state_guard, (
+        "tests/conftest.py does not re-export the MODULE-scoped guard, so a "
+        "module-scoped fixture that never restores is unwatched in this tree "
+        "— which is the state the whole suite was in until it was measured"
+    )
 
 
 # ── the decision, driven directly ───────────────────────────────────────────
+
+
+def test_changed_is_blind_to_the_exemption_list_and_offences_is_not():
+    """The split the two altitudes rest on.
+
+    ``changed`` answers "did this move", which is what
+    :data:`_state_guard._DECIDED_HERE` records so the module guard stays quiet
+    about it; ``offences`` answers "was this allowed", which is what fails a
+    test. If ``changed`` consulted the exemption list, a licensed change would
+    be un-licensed one scope out — the module guard would report at teardown
+    exactly what the exemption exists to permit.
+    """
+    entry = G.ENTRIES[0].name
+    before = {e.name: 0 for e in G.ENTRIES}
+    after = {**before, entry: 1}
+    original = G.PINNED_EXEMPTIONS
+    try:
+        G.PINNED_EXEMPTIONS = (G.Exemption("tests/test_x.py::test_y", entry, "driven"),)
+        assert [e.name for e in G.changed(before, after)] == [entry]
+        assert G.offences("tests/test_x.py::test_y", before, after) == []
+    finally:
+        G.PINNED_EXEMPTIONS = original
 
 
 def test_offences_names_exactly_the_entries_that_moved():
@@ -288,6 +315,124 @@ def test_the_tripwire_installation_entry_fires(tmp_path):
         """,
     )
     _assert_named(proc, "tripwire:installed")
+
+
+# ── the module-scoped altitude, driven the same way ─────────────────────────
+#
+# THE MEASUREMENT THESE THREE EXIST ON, taken before `module_state_guard`
+# existed: the restore deleted from the module-scoped `_x64` fixture in
+# `tests/test_0_2_0_regression.py`, jax 0.11.0 —
+#
+#     mutated : 21 passed   [X64PROBE] jax_enable_x64 at session finish = True
+#     control : 21 passed   [X64PROBE] jax_enable_x64 at session finish = False
+#
+# Green either way. The same deletion in a function-scoped fixture is named
+# immediately, so it was two near-identical defects with one instrument
+# between them. After the guard, the same mutation gives `21 passed, 1 error`
+# naming `tests/test_0_2_0_regression.py`.
+
+_MODULE_PLANT = '''
+import os
+import pytest
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _module_fixture():
+    {setup}
+    yield
+    {teardown}
+
+
+def test_one():
+    assert True
+
+
+def test_two():
+    {body}
+'''
+
+
+def _nested_module(tmp_path, setup: str, teardown: str = "pass", body: str = "pass"):
+    plant = tmp_path / "test_planted.py"
+    plant.write_text(
+        _MODULE_PLANT.format(
+            setup=textwrap.indent(textwrap.dedent(setup), "    ").strip(),
+            teardown=textwrap.indent(textwrap.dedent(teardown), "    ").strip(),
+            body=textwrap.indent(textwrap.dedent(body), "    ").strip(),
+        ),
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(TESTS), *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
+    )
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return subprocess.run(
+        [
+            sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+            "-p", "no:randomly", "-p", "_state_guard", str(plant),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        env=env,
+    )
+
+
+def test_a_module_scoped_fixture_that_never_restores_is_named(tmp_path):
+    """The blind spot itself. Outside every function-scoped window there is."""
+    proc = _nested_module(
+        tmp_path, setup='os.environ["STELLING_PLANTED_BY_A_MODULE"] = "1"'
+    )
+    assert proc.returncode != 0, (
+        f"a module-scoped fixture left a watched global changed and nothing "
+        f"said so\n{proc.stdout}\n{proc.stderr}"
+    )
+    assert "test_planted.py changed process-global state" in proc.stdout, (
+        f"the guard did not name the MODULE\n{proc.stdout}"
+    )
+    assert "env:STELLING_*/JAX_*" in proc.stdout, proc.stdout
+    assert "outside every test in it" in proc.stdout, (
+        f"the report does not say where to look\n{proc.stdout}"
+    )
+
+
+def test_a_module_that_sets_a_global_FOR_ITS_OWN_DURATION_is_silent(tmp_path):
+    """THE REFUTATION, AS A TEST, and it is why the outer guard can exist.
+
+    The argument against a guard above function scope was that it *"would
+    report every module that sets x64 for its own duration"*. pytest sets a
+    conftest's module-scoped autouse fixture up BEFORE the test module's own
+    and tears it down AFTER, so such a module is bracketed on both sides and
+    reads identical. A guard that fired here would be reporting the normal
+    case, and would be worth nothing.
+    """
+    proc = _nested_module(
+        tmp_path,
+        setup='os.environ["STELLING_PLANTED_FOR_THE_MODULE"] = "1"',
+        teardown='del os.environ["STELLING_PLANTED_FOR_THE_MODULE"]',
+    )
+    assert proc.returncode == 0, (
+        f"a module that put its own change back was reported anyway, which "
+        f"would make the outer guard fire on the ordinary case\n{proc.stdout}"
+    )
+
+
+def test_a_TEST_that_pollutes_is_named_once_and_not_again_at_module_scope(tmp_path):
+    """Two altitudes, one report. Otherwise every function-scoped offence
+    would arrive twice and every PINNED_EXEMPTIONS entry would be undone at
+    module teardown, since the module guard has no nodeid to license."""
+    proc = _nested_module(
+        tmp_path, setup="pass", body='os.environ["STELLING_PLANTED_BY_A_TEST"] = "1"'
+    )
+    assert proc.returncode != 0, proc.stdout
+    named = proc.stdout.count("changed process-global state and did not put it back")
+    assert named == 1, (
+        f"the offence was reported {named} times, not once:\n{proc.stdout}"
+    )
+    assert "test_planted.py::test_two changed process-global state" in proc.stdout, (
+        f"the report names something other than the test that did it\n{proc.stdout}"
+    )
 
 
 def test_a_test_that_restores_what_it_changed_is_silent(tmp_path):

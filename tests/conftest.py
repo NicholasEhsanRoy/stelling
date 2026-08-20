@@ -1281,10 +1281,20 @@ def _load_sibling(name: str):
 
 _state_guard_module = _load_sibling("_state_guard")
 
-#: The autouse fixture itself, re-exported into this conftest's namespace so
-#: pytest registers it for `tests/` and everything below it. See
-#: `tests/_state_guard.py` for what it watches and what it does not.
+#: The autouse fixtures themselves, re-exported into this conftest's namespace
+#: so pytest registers them for `tests/` and everything below it. See
+#: `tests/_state_guard.py` for what they watch and what they do not.
+#:
+#: TWO, AND THE SECOND IS NOT A DUPLICATE. The function-scoped one brackets a
+#: test and the fixtures that test owns; a MODULE-scoped fixture that never
+#: restores is set up before its `before` and torn down after its `after`, so
+#: it escaped every window the first one has. Measured: the restore deleted
+#: from `test_0_2_0_regression.py`'s module-scoped `_x64` left the file at
+#: `21 passed` with `jax_enable_x64` True at session finish and nothing said
+#: so. The module-scoped guard reports only what no test inside it was already
+#: named for.
 state_guard = _state_guard_module.state_guard
+module_state_guard = _state_guard_module.module_state_guard
 
 
 def deterministic_order_args() -> tuple[str, ...]:

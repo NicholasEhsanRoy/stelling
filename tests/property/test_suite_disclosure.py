@@ -137,6 +137,8 @@ def test_every_property_in_the_tree_has_a_registered_positive_control():
         "test_importing_another_local_module_does_not_move_the_pool",
         "tests/property/test_search_determinism.py::"
         "test_the_snapshot_reader_is_not_vacuous",
+        "tests/property/test_search_determinism.py::"
+        "test_the_provider_reaches_the_pool_through_the_name_the_pin_replaces",
     }
     uncontrolled = sorted(defined - pc.property_nodeids() - exempt)
     assert not uncontrolled, (
