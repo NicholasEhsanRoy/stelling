@@ -205,7 +205,24 @@ def _compile_fence(src: str):
         "any_array": any_array,
         "assert_": assert_,
     }
-    exec(compile(tree, "<SOUNDNESS.md fence>", "exec"), ns)  # noqa: S102
+    # A REGION DECLARATION, and this is the single site in the repository
+    # where it is least optional. The fence IS the defect: its first line
+    # writes 256 into an int8 and the whole page exists to record that jax
+    # destroys it in silence. With `--stelling-eager-truncation=error` armed
+    # that line raises -- correctly, because the detector is the fix for
+    # exactly this -- and the reproducer must still RUN, because a disclosure
+    # whose reproducer is only quoted is the state this file was written to
+    # end. `stelling.intentional_wrap` cannot serve here at all: the fence is
+    # read out of `SOUNDNESS.md` and executed verbatim, so there is no source
+    # to edit, and editing it would be editing the defect out of the
+    # disclosure.
+    from stelling._tripwire.eager import expected_truncation
+
+    with expected_truncation(
+        "SOUNDNESS.md's wrap reproducer is executed verbatim; the truncation "
+        "it performs is the defect this page discloses"
+    ):
+        exec(compile(tree, "<SOUNDNESS.md fence>", "exec"), ns)  # noqa: S102
     return ns
 
 
@@ -245,10 +262,19 @@ def _traced_constant(door, written, dtype):
     "wraps", "raises" and "keeps the value" are three answers from one
     instrument rather than three instruments.
     """
-    try:
-        return int(np.asarray(door((), written, dtype)))
-    except OverflowError as exc:
-        return type(exc)
+    from stelling._tripwire.eager import expected_truncation
+
+    # The same argument as the fence's own execution: this instrument's whole
+    # job is to report whether the door wraps, raises or keeps the value, so
+    # the wrap has to be allowed to happen for it to be reported.
+    with expected_truncation(
+        "measuring whether a construction door wraps, raises or keeps the "
+        "value -- the wrap is the measurement"
+    ):
+        try:
+            return int(np.asarray(door((), written, dtype)))
+        except OverflowError as exc:
+            return type(exc)
 
 
 def _inline_offset(written, dtype):

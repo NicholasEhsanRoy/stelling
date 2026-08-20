@@ -20,11 +20,28 @@ one-formula smoke test against each installed solver.
 
 The jax-free IR lives in :mod:`stelling.ir`; jax itself is touched only
 inside :mod:`stelling._jax_compat`, the designated churn boundary.
+
+Two names are exported here rather than from a submodule, because both are
+things a user writes in their own source and one of them is a type they may
+have to name in an ``except`` clause:
+
+* :func:`intentional_wrap` -- declare that an integer constant is MEANT to
+  wrap into a narrower dtype, and get the wrapped value. Pure Python, needs
+  no jax, and behaves identically whether or not anything is armed.
+* :class:`EagerTruncationError` -- what the opt-in eager construction-site
+  detector raises. It inherits from ``BaseException`` so that an ordinary
+  ``except Exception:`` cannot swallow a soundness alarm;
+  ``stelling/_tripwire/eager.py`` carries that argument in full, including
+  what the choice does NOT claim and what it costs.
+
+**Importing them imports no jax.** ``stelling._tripwire.eager`` is pure
+Python and reaches the adapter lazily, inside :func:`~stelling._tripwire.arm_eager`.
 """
 
 from __future__ import annotations
 
 from stelling._optional import OptionalDependencyError, available, require
+from stelling._tripwire.eager import EagerTruncationError, intentional_wrap
 
 # PEP 440 development version, and the reason it is not "0.1.0" or "0.2.0".
 # Every verdict stamps this as provenance (`Stamp.stelling_version`), and
@@ -40,8 +57,10 @@ from stelling._optional import OptionalDependencyError, available, require
 __version__ = "0.2.0.dev0"
 
 __all__ = [
+    "EagerTruncationError",
     "OptionalDependencyError",
     "__version__",
     "available",
+    "intentional_wrap",
     "require",
 ]

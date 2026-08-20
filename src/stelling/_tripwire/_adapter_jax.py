@@ -761,6 +761,17 @@ def install(recorder: record.Recorder) -> str:
     return "installed"
 
 
+def installed_recorder():
+    """The :class:`record.Recorder` the LIVE wrapper writes to, or None.
+
+    Exists so that :func:`_tripwire.arm` can hand back the recorder that is
+    actually connected when it finds the process already armed, instead of the
+    fresh one it built on the way in. A ``Recorder`` is strings, ints and
+    tuples, so nothing jax-shaped crosses this boundary by returning it.
+    """
+    return _installed.get("recorder")
+
+
 def restore() -> str:
     """Put the original rule back, **by identity**.
 
@@ -1035,3 +1046,1075 @@ def selfcheck() -> str:
         stack.pop()
         recorder.reset()
         recorder.absorb(saved)
+
+
+# ===========================================================================
+# THE EAGER CONSTRUCTION SITE (Mode 2)
+#
+# A SECOND private-jax hook, in the one file allowed to have one. It is here
+# and not in a new module because the exemption in
+# `design/private-jax-boundary.md` is pinned to this exact path by two
+# independent controls -- the `jax-import-hygiene` pre-commit hook's anchored
+# filter and `tests/test_import_hygiene.py`'s repo-relative comparison -- and
+# widening an exemption is a boundary change, not a convenience. What the
+# exemption bought was "one file may name a private jax module", not "one
+# private jax module may be named": a second hook inside the same file costs
+# the boundary nothing, and a second file would cost it its shape.
+#
+# WHAT IT ATTACHES TO, AND WHY IT IS AN ATTRIBUTE AND NOT A REGISTRY. The
+# const-fold tripwire above attaches to a registry ENTRY keyed on a primitive.
+# There is no registry here: the narrowing happens in straight-line code inside
+# `jax._src.lax.lax._convert_element_type`, at
+#
+#     if type(operand) is int and new_dtype != dtypes.float0:
+#       arr = np.asarray(operand).astype(new_dtype)
+#
+# and, one branch down, at the `isinstance(operand, np.ndarray)` `.astype`.
+# Measured on jax 0.11.0 and 0.10.2: every construction route that loses a
+# written constant eagerly reaches this one function WITH THE WRITTEN VALUE
+# INTACT, and every caller inside jax reaches it by MODULE ATTRIBUTE -- there
+# are zero `from ... import _convert_element_type` in the installed tree -- so
+# one attribute patch covers all of them at once.
+#
+# PUBLIC SURFACES ARE NOT SUFFICIENT, measured rather than assumed:
+# `jnp.full is not jax.lax.full`, and patching both of those public names gets
+# **0 hits** on `jnp.full_like` and on `jnp.stack`-of-`full`. There is no route
+# to this door that does not name a private module, which is the same finding
+# the const-fold hook rests on, one layer over.
+# ===========================================================================
+
+#: The private module the eager narrowing lives in, and the attribute on it.
+#: Data rather than an import statement, for the same reason
+#: :data:`PRIVATE_MODULE` is.
+EAGER_MODULE = "jax." + "_src.lax.lax"
+EAGER_ATTR = "_convert_element_type"
+
+#: The parameters :func:`_make_eager_wrapper` reads, by name and position. The
+#: wrapper forwards ``*args, **kwargs`` verbatim, so it does not depend on the
+#: rest of the signature -- but it DOES depend on ``operand`` being first and
+#: ``new_dtype`` second, and on both being passable positionally. That is the
+#: drift this pins, and :func:`eager_signature_check` refuses to arm when it
+#: moves. A hook that silently read the wrong argument would report a
+#: truncation that did not happen, at a line that did not write it, which is
+#: the one failure mode the report says costs more trust than a missing
+#: finding.
+EAGER_SIGNATURE = ("operand", "new_dtype")
+
+#: sha1[:12] of the eager narrowing function's source, keyed on the exact jax
+#: release, on exactly the discipline :data:`_KNOWN_HASHES` documents at
+#: length: a MAP and not a set, recorded and never gated on, every row written
+#: by someone who read the diff.
+#:
+#: THE SOURCE MOVES WHERE THE NARROWING DOES NOT, and this table is the
+#: evidence for that claim rather than an assertion of it: the three hashes
+#: below are three different strings, and the two lines that narrow are
+#: character-identical across all three. That is exactly why arming is gated
+#: on the BEHAVIOUR (:func:`eager_selfcheck` drives every route positively)
+#: and never on the hash.
+_KNOWN_EAGER_HASHES: dict[str, str] = {
+    # Read and diffed, not copied in. 0.10.2 -> 0.11.0 is ONE hunk, five lines
+    # added after the branch this hook exists for:
+    #
+    #     + elif (isinstance(operand, np.ndarray) and
+    #     +       operand.dtype != dtypes.float0 and new_dtype != dtypes.float0):
+    #     +   arr = operand.astype(new_dtype, copy=False)
+    #     +   aval = core.ShapedArray(arr.shape, arr.dtype, weak_type=weak_type)
+    #     +   operand = literals.TypedNdArray(arr, aval=aval)
+    #
+    # It ADDS a narrowing branch (a 0-d NumPy array now narrows here rather
+    # than downstream at the bind) and leaves `if type(operand) is int: arr =
+    # np.asarray(operand).astype(new_dtype)` character-identical. This hook
+    # reads the OPERAND at function entry, before either branch, so both
+    # releases are watched by the same wrapper and the added branch changes
+    # nothing about what is seen -- driven on both, seven routes each.
+    "0.10.2": "1390fde39809",
+    "0.11.0": "17355ab7e4e1",
+    # 0.11.0 -> 0.11.1: the function is BYTE-IDENTICAL. Read out of the
+    # 0.11.1 wheel and hashed by the same slice this file takes at run time
+    # (`inspect.getsource` and an `ast` extraction were checked against each
+    # other on both installed series and agree). Note the contrast with
+    # `_KNOWN_HASHES` directly above, where 0.11.0 and 0.11.1 DIFFER and
+    # 0.10.2 and 0.11.0 agree: the two sites move on different releases,
+    # which is the whole reason each carries its own map rather than sharing
+    # one "the jax internals moved" flag.
+    "0.11.1": "17355ab7e4e1",
+}
+
+#: THE EAGER TRUNCATIONS JAX ITSELF PERFORMS, ENUMERATED BY SITE AND VALUE.
+#:
+#: ``(jax-relative source file, function name) -> ((written, dtype, what it
+#: is), ...)``. ``eager._origin`` suppresses a narrowing when, and only when,
+#: one of these rows names a frame in the unbroken run of jax frames beneath
+#: the construction site AND the observed ``(written, dtype)`` is that row's.
+#: Everything else is the caller's and raises.
+#:
+#: WHY A MAP AND NOT A PREDICATE, WHICH IS THE SAME ARGUMENT
+#: :data:`_KNOWN_HASHES` MAKES ONE SCREEN UP. The revision this replaces asked
+#: a general question of the data -- *"is the narrowed integer among the
+#: arguments of the call that crossed out of non-jax code into jax?"* -- and
+#: suppressed when the answer was no. It is a reasonable proxy and it was
+#: wrong in both directions, measured:
+#:
+#: * MISSED NARROWINGS. A constant the user really wrote does not appear in
+#:   the boundary call's arguments when it is carried in a
+#:   ``functools.partial``, a ``jax.tree_util.Partial``, a bound method or a
+#:   registered-dataclass pytree carry -- so ``jax.tree.map(partial(full_like,
+#:   fill_value=300), tree)`` was SUPPRESSED, silently, in the DEFAULT
+#:   ``jit``-on configuration, on idiomatic jax. That is the defect
+#:   ``SOUNDNESS.md``'s integer-literal-wrap entry is about, reintroduced by
+#:   the filter meant to make the tool usable.
+#: * FALSE ALARMS. The scan has a depth, a breadth and a budget, and a scan
+#:   that ran out returned "not established" and therefore "the user's" -- so
+#:   a params-shaped five-level pytree under ``tree.map(random.key, ...)``
+#:   re-raised the very PRNG alarm the filter was built to stop.
+#:
+#: **AND THE PROBLEM IT GENERALISES OVER HAS ONE INSTANCE.** Measured twice,
+#: independently. A hand sweep of 649 scalar integer conversions across
+#: ``jax.random.*`` and ``jnp``'s integer ops over six integer dtypes, under
+#: ``JAX_DISABLE_JIT=1``, found **exactly one** eager truncation of jax's own
+#: in existence. :func:`eager_jax_constant_sweep` below re-derives it as
+#: shipped code, over a wider surface -- every key IMPLEMENTATION and seed
+#: spelling as well -- and gets 675 conversions and 13 truncation events, all
+#: 13 of them the one row below, byte-identically on jax 0.11.0 and 0.10.2.
+#: A predicate is the right shape for a class; this is not a class, it is a
+#: list of length one, and a list is exact where a predicate is a proxy.
+#:
+#: IT FAILS CLOSED, AND THAT IS A COST AS WELL AS A PROPERTY. A jax release
+#: that adds a SECOND internal eager truncation is not silently suppressed --
+#: it is attributed to the caller and RAISES, at a line inside jax that they
+#: did not write, in exactly the shape of the first audit's finding. That is
+#: the direction this instrument must fail in: an over-report is visible to a
+#: reader holding the quoted line and a suppression is not. The remedy is one
+#: row, and three things arrive before a user does:
+#: :func:`eager_jax_constant_sweep` runs as a test in both jax lanes and as a
+#: row on the nightly canary, ``eager._origin_control`` drives this row at ARM
+#: time through :func:`eager_origin_probes` and refuses to attach if it stops
+#: holding, and the alarm's own message prints jax's frames and tells a reader
+#: who did not write the constant to report it.
+#:
+#: KEYED ON THE FUNCTION THAT WRITES THE CONSTANT, not on the frame that
+#: performs the narrowing. Measured (jax 0.11.0 and 0.10.2, x64 off,
+#: ``jax.disable_jit()``), the mask is narrowed four frames below the line
+#: that spells it::
+#:
+#:     _src/numpy/util.py         promote_dtypes()     <- the narrowing
+#:     _src/numpy/util.py         promote_args()
+#:     _src/numpy/ufuncs.py       bitwise_and()
+#:     _src/numpy/ufunc_api.py    __call__()
+#:     _src/random/threefry2x32.py  _threefry_seed()   <- the row, and the
+#:                                                       line a reader goes
+#:                                                       and looks at
+#:
+#: ``promote_dtypes`` is jax's general-purpose promotion helper and every
+#: ``jnp`` binary op reaches it, so a row keyed there would suppress a user's
+#: ``jnp.bitwise_and(x, 4294967295)`` too. ``_threefry_seed`` is the PRNG and
+#: nothing else.
+#:
+#: KEYED ON THE SOURCE DTYPE AS WELL AS THE VALUE, and that field is the one
+#: an audit had to put back. A row of ``(value, to-dtype, site)`` cannot tell
+#: jax's constant from a CALLER'S constant of the same value narrowed at the
+#: same site, and at this site they collide::
+#:
+#:     jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))
+#:
+#: produces TWO truncations under ``_threefry_seed`` -- the caller's seed and
+#: jax's mask, both ``4294967295 -> -1`` at ``int32`` -- and the three-field
+#: row suppressed both, then printed *"written by jax at `_threefry_seed()`:
+#: the threefry PRNG's 32-bit mask"* at the caller's own line, which is false
+#: of one of the two. THE SOURCE DTYPE SEPARATES THEM, and that it does is
+#: measured rather than hoped: all **13** of jax's own truncation events in
+#: :func:`eager_jax_constant_sweep` arrive from ``uint32``
+#: (``np.uint32(0xFFFFFFFF)``, spelled in jax's own source), and a seed a
+#: caller hands this entry point arrives from ``int64`` -- so the collision
+#: is one field wide and the field is in hand at the hook.
+#:
+#: WHAT IS LEFT IS DISCLOSED RATHER THAN CLAIMED CLOSED. A row is still a
+#: VALUE match and not a proof of authorship, so a caller's narrowing that
+#: agreed with a row in ALL FOUR fields would still be suppressed. No route
+#: into ``_threefry_seed`` reaches that state on any jax this repository has
+#: measured -- a caller's ``uint32`` seed of the same value promotes to
+#: ``uint32`` and does not narrow at all (measured: 2 conversions, 0
+#: truncations) -- but a sweep is a sample, and the residue is in
+#: ``report.EAGER_UNCOVERED`` in the general form.
+#:
+#: A USER CALLBACK BREAKS THE MATCH BY CONSTRUCTION. The run of frames
+#: searched stops at the first non-jax, non-stelling frame, so a constant
+#: narrowed inside a function *the user* passed into jax is never matched by
+#: a row above it -- the user's own frame ends the run.
+#:
+#: NOT REACHABLE AT ``jax_enable_x64=True``, and the row is still correct
+#: there: with x64 on, ``promote_dtypes`` widens the mask to ``int64``, which
+#: holds it, and there is no truncation to attribute at all. Driven both
+#: ways.
+_JAX_EAGER_CONSTANTS: dict[
+    tuple[str, str], tuple[tuple[int, str, str, str], ...]
+] = {
+    ("_src/random/threefry2x32.py", "_threefry_seed"): (
+        (
+            4294967295,
+            "uint32",
+            "int32",
+            "the threefry PRNG's 32-bit mask -- `jnp.bitwise_and(seed, "
+            "np.uint32(0xFFFFFFFF))` -- which x64-off dtype promotion "
+            "narrows to int32, making it -1",
+        ),
+    ),
+}
+
+
+def jax_eager_constants() -> dict:
+    """:data:`_JAX_EAGER_CONSTANTS` as plain data, for :mod:`eager`.
+
+    A dict of tuples of ``(int, str, str)``: no jax objects, no jax names in
+    the CALLER. ``eager.py`` may not spell a private jax module and does not;
+    it is handed this at :func:`eager.arm` time exactly as it is handed
+    :func:`jax_root`, and consults it by frame rather than by import.
+    """
+    return {key: tuple(rows) for key, rows in _JAX_EAGER_CONSTANTS.items()}
+
+
+#: What this process installed over :data:`EAGER_ATTR`, or empty. Separate
+#: from :data:`_installed` because the two hooks arm, disarm and fail
+#: independently: a user may want the eager detector and not the tripwire, and
+#: a release may move one site and not the other.
+_eager_installed: dict = {}
+
+
+def _eager_module():
+    """The module carrying the narrowing, or None. Never raises."""
+    try:
+        return importlib.import_module(EAGER_MODULE)
+    except ImportError:
+        return None
+
+
+def _eager_original():
+    """jax's own function, whether or not we are armed over it."""
+    if _eager_installed:
+        return _eager_installed["original"]
+    module = _eager_module()
+    return None if module is None else getattr(module, EAGER_ATTR, None)
+
+
+def eager_locate() -> str:
+    """Whether the eager narrowing site is where this expects it.
+
+    ``no-module``
+        jax is not installed.
+    ``no-site-module``
+        jax is installed and ``jax._src.lax.lax`` did not import. A release
+        moved the module; refusing to guess is the designed behaviour.
+    ``no-site``
+        the module is there and carries no ``_convert_element_type``. The
+        eager narrowing this watches may now happen somewhere else entirely.
+    ``located``
+        both are there.
+    """
+    if not _optional.available("jax"):
+        return "no-module"
+    module = _eager_module()
+    if module is None:
+        return "no-site-module"
+    return "located" if getattr(module, EAGER_ATTR, None) is not None else "no-site"
+
+
+def eager_signature_check() -> str:
+    """``"ok"``, or a sentence naming exactly how the signature drifted.
+
+    THIS IS THE HALF OF FAIL-CLOSED A PRESENCE CHECK MISSES. ``locate()``
+    answers "is there a function called that", and a jax release that reordered
+    the parameters would leave it answering yes while the wrapper read a
+    ``sharding`` where it expected a dtype. The behaviour probe in
+    :func:`eager_selfcheck` would very likely catch it too -- but "very likely"
+    is not the standard for an instrument whose failure is a wrong line number
+    in an alarm, and this check costs one :func:`inspect.signature` call at arm
+    time.
+
+    Only the first two parameters are pinned, and only their names, order and
+    kind. Everything after them is forwarded verbatim, so a release that ADDS
+    a parameter must not disable the tool -- that is the same
+    additive-changes-are-free property :func:`_make_wrapper` argues for above.
+    """
+    original = _eager_original()
+    if original is None:
+        return "the eager narrowing site is not present"
+    try:
+        parameters = list(inspect.signature(original).parameters.values())
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
+        return f"the signature could not be read: {type(exc).__name__}: {exc}"
+    if len(parameters) < len(EAGER_SIGNATURE):
+        return (
+            f"{EAGER_MODULE}.{EAGER_ATTR} now takes {len(parameters)} "
+            f"parameter(s); this hook reads the first {len(EAGER_SIGNATURE)}"
+        )
+    for index, expected in enumerate(EAGER_SIGNATURE):
+        parameter = parameters[index]
+        if parameter.name != expected:
+            return (
+                f"parameter {index} of {EAGER_MODULE}.{EAGER_ATTR} is "
+                f"{parameter.name!r} and this hook reads it as {expected!r}"
+            )
+        if parameter.kind not in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            return (
+                f"parameter {index} of {EAGER_MODULE}.{EAGER_ATTR} "
+                f"({parameter.name!r}) is no longer passable positionally "
+                f"({parameter.kind})"
+            )
+    return "ok"
+
+
+def eager_site_hash() -> str | None:
+    """sha1[:12] of the narrowing function's source, or None if unreadable.
+
+    Recorded in the status; never gated on, for the reason :data:`_KNOWN_HASHES`
+    gives at length.
+    """
+    original = _eager_original()
+    if original is None:
+        return None
+    try:
+        return hashlib.sha1(inspect.getsource(original).encode()).hexdigest()[:12]
+    except Exception:  # noqa: BLE001 - a disclosure may not raise
+        return None
+
+
+def eager_site_name() -> str | None:
+    """The narrowing function's ``__name__``. Recorded, not gated on."""
+    return getattr(_eager_original(), "__name__", None)
+
+
+def known_eager_hash() -> str | None:
+    """The row :data:`_KNOWN_EAGER_HASHES` holds for the RUNNING release.
+
+    ``None`` means *this jax has never been read*, which is a third state and
+    not a synonym for "changed" -- :meth:`_tripwire.Status.hash_state` is the
+    one place that four-way distinction is made, and this feeds it.
+    """
+    return _KNOWN_EAGER_HASHES.get(jax_version() or "")
+
+
+def _eager_dtype_name(new_dtype) -> str | None:
+    """``new_dtype`` as one of :data:`record.INT_DTYPES`'s names, or None.
+
+    Asks the object for its own name and never converts it. Nothing here may
+    import numpy: this module must import cleanly with jax absent, and jax
+    absent means numpy may be absent too.
+    """
+    name = getattr(new_dtype, "name", None)
+    if not isinstance(name, str):
+        name = getattr(new_dtype, "__name__", None)
+    if not isinstance(name, str):
+        name = str(new_dtype)
+    return name if name in record.INT_DTYPES else None
+
+
+#: The source-dtype name for an operand that is a plain Python ``int`` and
+#: therefore has no dtype at all. Not a numpy name and not one of
+#: :data:`record.INT_DTYPES` -- numpy has ``int8`` through ``uint64`` and
+#: never a bare ``int`` -- so a row keyed on a numpy dtype can never be
+#: matched by a Python literal, and a row about a Python literal has a name
+#: to be keyed on.
+PYTHON_INT = "int"
+
+
+def _eager_scalar_int(operand):
+    """``(written integer, the dtype it arrived in)``, or None.
+
+    THE SOURCE DTYPE IS HALF THE ANSWER AND IT IS NOT DECORATION. It is the
+    field that separates jax's own constant from a caller's constant of the
+    same value at the same site, which is the one collision
+    :data:`_JAX_EAGER_CONSTANTS` is otherwise blind to: jax's threefry mask
+    arrives at ``_threefry_seed`` from ``uint32`` and a caller's seed of the
+    same integer arrives there from ``int64``. Measured: all 13 of jax's own
+    truncations in the sweep arrive from ``uint32``. It costs nothing new to
+    read: the numpy branch below already reads ``operand.dtype`` to decide
+    whether it wants this operand at all, and a Python ``int`` has no dtype
+    to read.
+
+    THREE SPELLINGS REACH THE NARROWING WITH THE WRITTEN VALUE INTACT, measured
+    on both series, and they take two different branches inside jax:
+
+    * a Python ``int`` -- ``type(operand) is int``, the branch whose
+      ``np.asarray(operand).astype(new_dtype)`` is the site this hook exists
+      for. Every one of ``jnp.full``, ``jnp.full_like``, ``lax.full``,
+      ``lax.full_like``, ``lax.convert_element_type`` and anything built on
+      them arrives here.
+    * a NumPy scalar (``np.int64(256)``) -- ``np.generic``, which reaches
+      ``np.asarray(operand, dtype=new_dtype)``, raises ``OverflowError``
+      INSIDE jax's own ``try``, is swallowed by design (jax's comment says so),
+      and narrows downstream instead. ``SOUNDNESS.md`` names this spelling
+      explicitly as one it could not close.
+    * a 0-d NumPy array -- ``operand.astype(new_dtype, copy=False)``.
+
+    **Scalars only, and jax objects never.** A non-scalar array reaching
+    ``.astype`` is a user converting DATA, not writing a constant, and firing
+    on it would make the detector unusable on any real program. A jax
+    ``Array`` or ``Tracer`` is a value the program computes; its conversion is
+    a ``convert_element_type`` the program performs at RUN time, which is the
+    ``deferred`` bucket in ``GATE_COVERAGE`` and is not a transcription loss at
+    all. The module test rather than an ``isinstance`` keeps this module free
+    of numpy and free of jax alike.
+    """
+    if type(operand) is int:
+        return operand, PYTHON_INT
+    if type(operand).__module__.split(".")[0] != "numpy":
+        return None
+    shape = getattr(operand, "shape", None)
+    dtype = getattr(operand, "dtype", None)
+    if shape != () or dtype is None:
+        return None
+    from_dtype = _eager_dtype_name(dtype)
+    if from_dtype is None:
+        return None
+    try:
+        return int(operand), from_dtype
+    except Exception:  # noqa: BLE001 - a probe may not raise
+        return None
+
+
+#: Errors the eager wrapper's OWN bookkeeping raised and swallowed. A plain
+#: module counter and NOT a key in :data:`_eager_installed`, which is where it
+#: lived for one draft: writing a key into that dict makes it truthy, and
+#: every reader there guards with ``if not _eager_installed`` and then indexes
+#: ``["module"]``. An orphaned wrapper -- one still bound after
+#: :func:`eager_restore` cleared the record -- would therefore have turned its
+#: own swallowed error into a ``KeyError`` out of :func:`eager_is_armed`. The
+#: count belongs to the process, not to an installation.
+_eager_internal_errors = [0]
+
+
+def _make_eager_wrapper(original):
+    """Wrap the narrowing site. The observer is read per call, by design.
+
+    ``*args, **kwargs`` FORWARDED VERBATIM. The wrapper never re-supplies a
+    default and never reorders anything: whatever jax passed is what jax's own
+    function receives, so a release that adds a parameter, changes a default,
+    or starts passing an existing one by keyword costs this hook nothing. The
+    two arguments it READS are pulled out by position-or-name, and
+    :func:`eager_signature_check` refuses to arm if either has moved.
+
+    THE OBSERVER IS LOOKED UP IN ``_eager_installed`` ON EVERY CALL rather than
+    closed over. That is what lets :func:`eager_selfcheck` swap in a collector
+    and drive the live wrapper -- the same object a user's code will meet --
+    instead of probing a re-implementation of it, which is the shape of vacuous
+    control this repository keeps having to withdraw.
+
+    THE OBSERVER IS CALLED BEFORE ``original``, and the raise it may perform
+    escapes through this frame untouched. Before, so that the truncation is
+    reported instead of performed: jax's narrowing has already happened by the
+    time ``original`` returns, and an alarm raised after it would be an alarm
+    about a value that had already been destroyed in a jaxpr somebody might be
+    holding. Untouched, because the whole point of a ``BaseException`` is that
+    handlers written for other purposes do not get to interfere -- including
+    this one's, which is why the ``except`` below re-raises it by type before
+    the blanket clause can count it as an internal error.
+    """
+
+    # CAPTURED AT BUILD TIME, not imported inside the handler. The handler
+    # runs on the one path where something has already gone wrong, and an
+    # import there is one more thing that can fail while deciding whether the
+    # thing that failed was the alarm.
+    from stelling._tripwire.eager import EagerTruncationError
+
+    def stelling_eager_truncation_probe(*args, **kwargs):
+        try:
+            operand = args[0] if args else kwargs.get("operand")
+            new_dtype = args[1] if len(args) > 1 else kwargs.get("new_dtype")
+            if new_dtype is not None:
+                scalar = _eager_scalar_int(operand)
+                if scalar is not None:
+                    to_dtype = _eager_dtype_name(new_dtype)
+                    if to_dtype is not None:
+                        observer = _eager_installed.get("observer")
+                        if observer is not None:
+                            observer(scalar[0], scalar[1], to_dtype)
+        except BaseException as exc:  # noqa: BLE001
+            if isinstance(exc, (EagerTruncationError, KeyboardInterrupt, SystemExit)):
+                raise
+            # An instrument that breaks the program it measures is worse than
+            # no instrument -- the same rule the const-fold wrapper follows,
+            # with the one exception this hook exists to raise carved out
+            # above by type rather than by hope.
+            _eager_internal_errors[0] += 1
+        return original(*args, **kwargs)
+
+    return stelling_eager_truncation_probe
+
+
+def eager_install(observer) -> str:
+    """Patch the narrowing site. ``installed``, ``already-armed``, or a code.
+
+    Never raises and never leaks a jax object: ``observer`` is a plain callable
+    of ``(int, str)`` and everything returned here is a string.
+    """
+    code = eager_locate()
+    if code != "located":
+        return code
+    if _eager_installed:
+        _eager_installed["observer"] = observer
+        return "already-armed"
+    try:
+        module = _eager_module()
+        original = getattr(module, EAGER_ATTR)
+        wrapper = _make_eager_wrapper(original)
+        _eager_installed.update(
+            {"module": module, "original": original,
+             "wrapper": wrapper, "observer": observer}
+        )
+        setattr(module, EAGER_ATTR, wrapper)
+    except Exception as exc:  # noqa: BLE001
+        _eager_installed.clear()
+        return f"unexpected:{type(exc).__name__}"
+    return "installed"
+
+
+def eager_restore() -> str:
+    """Put jax's own function back, **by identity**.
+
+    ``not-armed``, ``foreign-patch`` (someone rebound the attribute over us --
+    say so rather than clobbering whatever they put there), or ``restored``.
+
+    A PENDING :func:`eager_detach` IS FIXED UP FIRST, exactly as in
+    :func:`restore`, and this is not tidying -- it was MEASURED here before it
+    was written. ``eager_detach`` saves whatever the attribute held and
+    ``eager_reattach`` puts it back, and what it held may be THIS WRAPPER.
+    Retiring the wrapper makes that saved entry stale, and the sequence
+    ``eager_detach("rebind")`` -> ``disarm_eager()`` (which returns
+    ``foreign-patch`` and clears our record) -> ``eager_reattach()`` then
+    binds an ORPHANED wrapper as the live function: no ``_eager_installed``
+    record owns it, so its observer lookup finds nothing and it silently does
+    not watch, while ``eager_signature_check`` reads ITS signature
+    (``*args, **kwargs``) as jax's and reports ``signature-drift`` for ever
+    after. Driven: four later tests in ``tests/test_tripwire_eager.py``
+    skipped with ``signature-drift`` against a jax whose function had not
+    moved. ``eager_restore`` is the operation that invalidates the saved
+    entry, so it is the operation that corrects it.
+    """
+    if not _eager_installed:
+        return "not-armed"
+    module = _eager_installed["module"]
+    wrapper = _eager_installed["wrapper"]
+    original = _eager_installed["original"]
+    if _eager_detached and _eager_detached.get("entry") is wrapper:
+        _eager_detached["entry"] = original
+    current = getattr(module, EAGER_ATTR, None)
+    if current is not wrapper:
+        _eager_installed.clear()
+        return "foreign-patch"
+    setattr(module, EAGER_ATTR, original)
+    _eager_installed.clear()
+    return "restored"
+
+
+def eager_is_armed() -> bool:
+    """Whether the wrapper this process installed is still the live attribute."""
+    if not _eager_installed:
+        return False
+    module = _eager_installed["module"]
+    return getattr(module, EAGER_ATTR, None) is _eager_installed["wrapper"]
+
+
+def eager_live_check() -> str:
+    """``armed``, ``detached`` or ``foreign-patch``. Never raises.
+
+    Same three states, and the same reason for keeping the two "no"s apart, as
+    :func:`live_check`: ``detached`` means we hold no installation any more
+    and ``foreign-patch`` means we hold one and are not the live entry. They
+    are different failures and lead a reader to different places.
+    """
+    if not _eager_installed:
+        return "detached"
+    module = _eager_installed["module"]
+    if getattr(module, EAGER_ATTR, None) is _eager_installed["wrapper"]:
+        return "armed"
+    return "foreign-patch"
+
+
+def eager_detach(mode: str) -> str:
+    """Break the eager hook the way a jax release would. Test support.
+
+    Shipped rather than written in ``tests/`` for the reason :func:`detach` is:
+    rule 2 bans naming the private jax module in ``tests/`` with no exemption,
+    so a test that reached in to break this would have to name what only this
+    file may name. Asserting the fail-closed contract instead of driving it is
+    the shape of control this repository has been burned by.
+
+    ``mode="bypass"``
+        put jax's own function back while this process still believes it is
+        armed. The hook is attached and never invoked -- what a version bump
+        actually produces, and what a presence check misses.
+    ``mode="rebind"``
+        bind a THIRD function over the top, which is the ``foreign-patch``
+        displacement: neither ours nor jax's is live, and nothing about our
+        own bookkeeping has changed.
+    ``mode="signature"``
+        bind a function whose FIRST TWO PARAMETERS have moved, which is the
+        drift :func:`eager_signature_check` exists to refuse. It delegates, so
+        jax still works and only the signature has changed -- the point being
+        that a hook reading argument 0 as the operand would go on "working"
+        and reporting the wrong thing.
+    """
+    module = _eager_module()
+    if module is None:
+        return "no-site-module"
+    if _eager_detached:
+        return "already-detached"
+    current = getattr(module, EAGER_ATTR, None)
+    _eager_detached.update({"module": module, "entry": current})
+    if mode == "bypass":
+        setattr(module, EAGER_ATTR, _eager_installed.get("original", current))
+        return "detached"
+    if mode == "rebind":
+        original = _eager_installed.get("original", current)
+
+        def foreign(*args, **kwargs):
+            return original(*args, **kwargs)
+
+        setattr(module, EAGER_ATTR, foreign)
+        return "detached"
+    if mode == "signature":
+        original = _eager_installed.get("original", current)
+
+        def drifted(sharding=None, operand=None, new_dtype=None, *args, **kwargs):
+            return original(operand, new_dtype, *args, **kwargs)
+
+        setattr(module, EAGER_ATTR, drifted)
+        return "detached"
+    _eager_detached.clear()
+    return f"unknown-mode:{mode}"
+
+
+def eager_reattach() -> str:
+    """Undo :func:`eager_detach`. ``not-detached`` if there is nothing to undo."""
+    if not _eager_detached:
+        return "not-detached"
+    setattr(_eager_detached["module"], EAGER_ATTR, _eager_detached["entry"])
+    _eager_detached.clear()
+    return "reattached"
+
+
+_eager_detached: dict = {}
+
+#: The value the eager self-check writes, the dtype it writes it into, and the
+#: value that must survive. 256 into ``int8`` is one step over the edge, and 3
+#: is comfortably inside it -- the same pair, and for the same reason, as
+#: :mod:`_probe`'s.
+EAGER_OVER = 256
+EAGER_UNDER = 3
+EAGER_DTYPE = "int8"
+
+
+def _eager_routes():
+    """``(name, build)`` for every construction route this detector claims.
+
+    Each ``build(value)`` writes ``value`` into an ``int8`` array by one
+    spelling and returns the array. THE LIST IS THE CLAIM: :func:`eager_selfcheck`
+    drives every entry positively and refuses to arm if any one of them stops
+    reaching the hook, so a route added here without a hook that sees it fails
+    closed rather than quietly widening what the tool says it covers.
+
+    The last entry is a different jax BRANCH and not just a different spelling
+    -- ``np.int64(256)`` reaches ``np.asarray(operand, dtype=new_dtype)``
+    rather than the ``type(operand) is int`` ``.astype`` -- so it is the one
+    that would notice jax fixing one branch and not the other.
+    """
+    from stelling._jax_compat import jax as _jax
+    from stelling._jax_compat import jnp as _jnp
+
+    lax = _jax.lax
+    dt = getattr(_jnp, EAGER_DTYPE)
+
+    def like(value):
+        return _jnp.zeros((3,), dt)
+
+    return (
+        ("jnp.full", lambda v: _jnp.full((), v, dt)),
+        ("jnp.full_like", lambda v: _jnp.full_like(like(v), v)),
+        ("lax.full", lambda v: lax.full((), v, dt)),
+        ("lax.full_like", lambda v: lax.full_like(like(v), v)),
+        ("lax.convert_element_type", lambda v: lax.convert_element_type(v, dt)),
+        ("jnp.stack of jnp.full", lambda v: _jnp.stack([like(v), _jnp.full((3,), v, dt)])),
+        ("numpy scalar into jnp.full", lambda v: _jnp.full((), _np_scalar(v), dt)),
+    )
+
+
+def _np_scalar(value):
+    """``np.int64(value)``, reached through jax's own numpy rather than ours.
+
+    This module may not ``import numpy`` at module scope for the same reason it
+    may not import jax: it has to import cleanly in a bare interpreter. Inside
+    the self-check jax is already imported, and jax cannot exist without numpy.
+    """
+    numpy = importlib.import_module("numpy")
+    return numpy.int64(value)
+
+
+def eager_selfcheck() -> str:
+    """Probe the armed hook over **every route it claims**, both directions.
+
+    ``route-blind:<name>``
+        a route that must reach the hook did not. This is the failure the whole
+        design turns on: the attribute is still there, the wrapper is still
+        installed, and jax has stopped routing one construction spelling
+        through it. It is silent, it is what a jax release actually produces,
+        and a presence check cannot see it. **It refuses to arm.** Keeping five
+        routes and losing one quietly is not a trade this tool gets to make on
+        a user's behalf -- the whole value of Mode 2 is that a program either
+        cannot contain an undeclared truncation or the tool says it is not
+        watching.
+    ``cries-wolf``
+        an IN-RANGE value was reported as out of range, so every alarm this run
+        would be noise.
+    ``mis-attributed``
+        the hook reported a truncation and the array jax actually built does
+        not hold the value this tool's own arithmetic predicts. A finding that
+        describes something other than what happened costs more trust than a
+        missing one.
+    ``not-invoked``
+        the wrapper is attached and saw nothing at all.
+    ``armed``
+        every route fired positively, none fired negatively, and the observed
+        results agree with the independent recomputation.
+
+    The observer is swapped for a collector for the duration, so the live
+    wrapper -- the same object a user's code will meet -- is what is driven.
+    The user's counters are untouched: nothing here reaches
+    :func:`eager.observe`, so a self-check can never appear in a denominator.
+    """
+    if not _eager_installed:
+        return "not-invoked"
+    saved = _eager_installed.get("observer")
+    seen: list[tuple[int, str, str]] = []
+    _eager_installed["observer"] = lambda written, from_dtype, to_dtype: seen.append(
+        (written, from_dtype, to_dtype)
+    )
+    try:
+        try:
+            routes = _eager_routes()
+        except Exception as exc:  # noqa: BLE001
+            return f"unexpected:{type(exc).__name__}"
+        expected = record.narrow(EAGER_OVER, EAGER_DTYPE)
+        for name, build in routes:
+            del seen[:]
+            try:
+                built = build(EAGER_OVER)
+            except Exception as exc:  # noqa: BLE001
+                return f"unexpected:{type(exc).__name__}"
+            if not any(
+                written == EAGER_OVER and to == EAGER_DTYPE
+                for written, _from, to in seen
+            ):
+                return f"route-blind:{name}"
+            try:
+                got = int(built.ravel()[0]) if built.ndim else int(built)
+            except Exception:  # noqa: BLE001
+                return "mis-attributed"
+            if got != expected:
+                return "mis-attributed"
+
+        del seen[:]
+        for name, build in routes:
+            try:
+                build(EAGER_UNDER)
+            except Exception as exc:  # noqa: BLE001
+                return f"unexpected:{type(exc).__name__}"
+        if not seen:
+            return "not-invoked"
+        if any(not record.in_range(written, to) for written, _from, to in seen):
+            return "cries-wolf"
+        return "armed"
+    finally:
+        _eager_installed["observer"] = saved
+
+
+def eager_origin_probes():
+    """``(name, drive)`` for one narrowing of each ORIGIN, driven for real.
+
+    THE SELF-CHECK ABOVE CANNOT ANSWER FOR ``_origin``, and that is why this
+    exists. :func:`eager_selfcheck` swaps a collector in for the observer, so
+    arming drives every construction route for reachability and for
+    arithmetic and **never reaches** :func:`eager.observe` -- which is the
+    function that decides whether a narrowing is yours. A hook can pass every
+    route probe with an origin rule that suppresses everything.
+
+    So arming also drives one narrowing of each origin through the LIVE
+    policy:
+
+    ``user``
+        an out-of-range construction written in :mod:`_probe`, at no
+        enumerated jax site. It must be attributed to the caller and must
+        RAISE.
+    ``jax``
+        ``jax.random.key(0)`` inside ``jax.disable_jit()`` -- the exact
+        program the first audit found raising inside jax's own PRNG, in eight
+        real workloads and in chex's own suite. It must be attributed to jax
+        by a row of :data:`_JAX_EAGER_CONSTANTS`, or produce no truncation at
+        all (which is what ``jax_enable_x64=True`` does: the mask is widened
+        to int64 and there is nothing to attribute).
+
+    ``disable_jit()`` IS ENTERED AND LEFT AROUND ONE CALL. It is jax's own
+    context manager over jax's own config, so the caller's setting is
+    restored whatever it was, and ``jax.random.key`` under it binds primitives
+    eagerly rather than compiling, so no jit cache is warmed by this.
+    """
+    from stelling._jax_compat import jax as _jax
+    from stelling._jax_compat import jnp as _jnp
+    from stelling._tripwire import _probe
+
+    def user():
+        return _probe.construct_over(_jnp)
+
+    def jax_own():
+        with _jax.disable_jit():
+            return _jax.random.key(0)
+
+    return (("user", user), ("jax", jax_own))
+
+
+def _eager_sweep_programs():
+    """The programs :func:`eager_jax_constant_sweep` runs. THE LIST IS THE BASIS.
+
+    ``jax.random.*`` because that is where the one known instance lives, and
+    ``jnp``'s integer surface over six integer dtypes because a constant jax
+    writes into a narrow integer type has to be written by *something* that
+    handles narrow integer types. Every value handed in is IN RANGE for the
+    dtype it is handed to, so **every truncation this sweep sees is jax's
+    own** -- that is what makes the result an enumeration rather than a
+    mixture, and it is why the sweep can be compared against a map by
+    equality.
+
+    IT IS A SAMPLE AND NOT A PROOF, said plainly: it establishes that no
+    SECOND internal eager truncation exists on the surface it covers, not
+    that none exists in jax. The fail-closed direction is what covers the
+    rest -- an unenumerated one raises rather than hiding.
+    """
+    from stelling._jax_compat import jax as _jax
+    from stelling._jax_compat import jnp as _jnp
+
+    numpy = importlib.import_module("numpy")
+    key = _jax.random.PRNGKey(0)
+    dtypes_ = (_jnp.int8, _jnp.uint8, _jnp.int16, _jnp.uint16,
+               _jnp.int32, _jnp.uint32)
+
+    # SEEDING A KEY IS THE FIRST FAMILY AND IT IS NOT DECORATION: the one
+    # truncation this whole map is about happens while a seed becomes a key,
+    # and every other `jax.random` entry point below consumes a key that
+    # already exists. A sweep without these rows finds nothing and reports a
+    # clean bill of health for a map it never exercised -- measured, on the
+    # first draft of this function: 660 conversions, 0 truncations.
+    programs = [
+        ("random.key(0)", lambda: _jax.random.key(0)),
+        ("random.PRNGKey(0)", lambda: _jax.random.PRNGKey(0)),
+        ("random.key(2**32-1)", lambda: _jax.random.key(2 ** 32 - 1)),
+        ("random.PRNGKey(2**32-1)", lambda: _jax.random.PRNGKey(2 ** 32 - 1)),
+        ("random.key(2**31)", lambda: _jax.random.key(2 ** 31)),
+        ("random.PRNGKey(-1)", lambda: _jax.random.PRNGKey(-1)),
+        ("random.split(key(1))", lambda: _jax.random.split(_jax.random.key(1), 3)),
+        ("random.fold_in(key(1))", lambda: _jax.random.fold_in(_jax.random.key(1), 3)),
+        ("random.wrap_key_data", lambda: _jax.random.wrap_key_data(
+            _jax.random.key_data(_jax.random.key(2)))),
+    ]
+    # ...and the same seeding through every key IMPLEMENTATION this jax
+    # offers, because each one is a different constant-writing function and
+    # `threefry2x32` is only the default.
+    for impl in ("threefry2x32", "rbg", "unsafe_rbg"):
+        programs.append(
+            (f"random.key(0, impl={impl})",
+             lambda i=impl: _jax.random.key(0, impl=i))
+        )
+    for dtype in dtypes_:
+        name = numpy.dtype(dtype).name
+        info = numpy.iinfo(name)
+        x = _jnp.arange(8, dtype=dtype)
+        for label, program in (
+            ("random.randint", lambda d=dtype: _jax.random.randint(key, (4,), 0, 5, dtype=d)),
+            ("random.randint-full", lambda d=dtype, i=info: _jax.random.randint(key, (4,), i.min, i.max, dtype=d)),
+            ("random.bits", lambda d=dtype: _jax.random.bits(key, (4,), dtype=d)),
+            ("random.choice", lambda d=dtype: _jax.random.choice(key, _jnp.arange(4, dtype=d), (2,))),
+            ("random.permutation", lambda d=dtype: _jax.random.permutation(key, _jnp.arange(4, dtype=d))),
+            ("random.rademacher", lambda d=dtype: _jax.random.rademacher(key, (3,), dtype=d)),
+            ("random.categorical", lambda: _jax.random.categorical(key, _jnp.zeros((3,)))),
+            ("random.fold_in", lambda: _jax.random.fold_in(key, 3)),
+            ("random.split", lambda: _jax.random.split(key, 3)),
+            ("random.gumbel", lambda: _jax.random.gumbel(key, (3,))),
+            ("random.poisson", lambda: _jax.random.poisson(key, 1.0, (3,))),
+            ("random.bernoulli", lambda: _jax.random.bernoulli(key, 0.5, (3,))),
+            ("random.uniform", lambda: _jax.random.uniform(key, (3,))),
+            ("random.normal", lambda: _jax.random.normal(key, (3,))),
+            ("jnp.cumsum", lambda v=x: _jnp.cumsum(v)),
+            ("jnp.cumprod", lambda v=x: _jnp.cumprod(v)),
+            ("jnp.bincount", lambda v=x: _jnp.bincount(v.astype(_jnp.int32), length=4)),
+            ("jnp.unique", lambda v=x: _jnp.unique(v, size=4)),
+            ("jnp.sort", lambda v=x: _jnp.sort(v)),
+            ("jnp.argsort", lambda v=x: _jnp.argsort(v)),
+            ("jnp.searchsorted", lambda v=x: _jnp.searchsorted(v, v)),
+            ("jnp.clip", lambda v=x: _jnp.clip(v, 1, 3)),
+            ("jnp.take-fill", lambda v=x: _jnp.take(v, _jnp.array([9]), mode="fill")),
+            ("at[].get-fill", lambda v=x: v.at[9].get(mode="fill")),
+            ("at[].set", lambda v=x: v.at[1].set(2)),
+            ("jnp.pad", lambda v=x: _jnp.pad(v, (1, 1))),
+            ("jnp.roll", lambda v=x: _jnp.roll(v, -1)),
+            ("jnp.where", lambda v=x: _jnp.where(v > 2, v, 0)),
+            ("jnp.packbits", lambda: _jnp.packbits(_jnp.zeros((8,), _jnp.uint8))),
+            ("jnp.unpackbits", lambda: _jnp.unpackbits(_jnp.zeros((2,), _jnp.uint8))),
+            ("invert", lambda v=x: ~v),
+            ("negate", lambda v=x: -v),
+            ("shift", lambda v=x: v << 2),
+            ("iinfo.max into full", lambda d=dtype, i=info: _jnp.full((2,), i.max, d)),
+            ("jnp.histogram", lambda v=x: _jnp.histogram(v.astype(_jnp.float32), bins=4)),
+            ("jnp.diff", lambda v=x: _jnp.diff(v)),
+            ("jnp.repeat", lambda v=x: _jnp.repeat(v, 2)),
+            ("jnp.tile", lambda v=x: _jnp.tile(v, 2)),
+            ("jnp.nonzero", lambda v=x: _jnp.nonzero(v, size=4)),
+            ("jnp.argmax", lambda v=x: _jnp.argmax(v)),
+            ("jnp.mod", lambda v=x: _jnp.mod(v, 3)),
+            ("floordiv", lambda v=x: v // 3),
+            ("astype", lambda d=dtype: _jnp.arange(8, dtype=_jnp.int32).astype(d)),
+            ("nn.one_hot", lambda d=dtype: _jax.nn.one_hot(_jnp.array([0, 1]), 3, dtype=d)),
+            ("jnp.eye", lambda d=dtype: _jnp.eye(3, dtype=d)),
+            ("jnp.tri", lambda d=dtype: _jnp.tri(3, dtype=d)),
+            ("jnp.indices", lambda d=dtype: _jnp.indices((2, 2), dtype=d)),
+            ("jnp.arange", lambda d=dtype: _jnp.arange(4, dtype=d)),
+            ("jnp.linspace", lambda d=dtype: _jnp.linspace(0, 4, 3, dtype=d)),
+        ):
+            programs.append((f"{label}[{name}]", program))
+    return tuple(programs)
+
+
+def eager_jax_constant_sweep() -> dict:
+    """Re-derive :data:`_JAX_EAGER_CONSTANTS` from jax, rather than trusting it.
+
+    Runs :func:`_eager_sweep_programs` under ``jax.disable_jit()`` -- the mode
+    in which jax evaluates its own constants eagerly and this hook can see
+    them -- with a COLLECTOR in place of the observer, so nothing here reaches
+    :func:`eager.observe`, nothing raises, and no user counter moves.
+
+    Returns primitives only::
+
+        {"code": "swept" | "not-armed" | "unexpected:<Type>",
+         "conversions": int,          # the denominator: 0 means it went blind
+         "truncations": int,
+         "x64": bool,                 # the setting it ran under; see below
+         "unmatched": ((written, from_dtype, to_dtype, ((file, func), ...)), ...),
+         "matched": ((file, func, written, from_dtype, to_dtype), ...)}
+
+    ``unmatched`` non-empty is the signal: jax performs an eager truncation
+    this repository has not read and has no row for, and until someone reads
+    it and writes one down the detector will attribute it to whoever called
+    jax. ``matched`` missing a row that :data:`_JAX_EAGER_CONSTANTS` carries
+    is the other signal -- a row that has stopped being real, which at x64 off
+    means the site moved.
+
+    ``x64`` IS IN THE RESULT BECAUSE THE MEASUREMENT IS BLIND AT ONE SETTING
+    AND THE NUMBERS DO NOT SAY SO. With ``jax_enable_x64=True`` jax's own
+    threefry mask widens to ``int64``, it fits, and NOTHING of jax's narrows:
+    ``unmatched`` is then necessarily empty and ``matched`` necessarily
+    empty, whatever jax has grown. Measured on jax 0.11.0 -- x64 on: 729
+    conversions, 0 truncations, 0 rows exercised; x64 off: 675, 13, 1. A
+    caller that prints "0 unmatched" from an x64-on sweep is reporting that
+    it did not look, and the flag is what lets it say so.
+    """
+    # THE ARMED CHECK COMES BEFORE THE IMPORT, and that ordering is the
+    # difference between "not armed" and a traceback: this function is called
+    # by the nightly canary, which also runs in a lane with no jax at all, and
+    # `_jax_compat` raises there. Nothing is armed in that lane either, so the
+    # honest answer is reachable without importing anything.
+    if not _eager_installed:
+        return {"code": "not-armed", "conversions": 0, "truncations": 0,
+                "unmatched": (), "matched": ()}
+    from stelling._jax_compat import jax as _jax
+    from stelling._tripwire import eager
+
+    saved = _eager_installed.get("observer")
+    counters = [0, 0]
+    unmatched: dict = {}
+    matched: set = set()
+
+    def collect(written, from_dtype, to_dtype):
+        counters[0] += 1
+        if record.in_range(written, to_dtype):
+            return
+        counters[1] += 1
+        segment = eager.jax_segment(1)
+        row = eager.jax_constant(written, from_dtype, to_dtype, segment)
+        if row is None:
+            unmatched[(written, from_dtype, to_dtype, segment)] = True
+        else:
+            matched.add((row[0], row[1], written, from_dtype, to_dtype))
+
+    _eager_installed["observer"] = collect
+    try:
+        # BUILT INSIDE THE BLOCK, and that is load-bearing rather than tidy:
+        # `_eager_sweep_programs` seeds a key and builds six integer arrays
+        # while it runs, and a key seeded with `jit` on is a key seeded where
+        # this hook cannot see the constant that made it.
+        with _jax.disable_jit():
+            for _name, program in _eager_sweep_programs():
+                try:
+                    program()
+                except Exception:  # noqa: BLE001 - a probe may not raise
+                    # A program jax refuses is a program that measured
+                    # nothing, not a failure of the sweep: the surface is
+                    # swept across six dtypes and not every op accepts every
+                    # one of them.
+                    pass
+    except Exception as exc:  # noqa: BLE001 - a probe may not raise
+        return {"code": f"unexpected:{type(exc).__name__}", "conversions": counters[0],
+                "truncations": counters[1],
+                "x64": bool(_jax.config.jax_enable_x64),
+                "unmatched": (), "matched": ()}
+    finally:
+        _eager_installed["observer"] = saved
+    return {
+        "code": "swept",
+        "conversions": counters[0],
+        "truncations": counters[1],
+        # READ AFTER THE SWEEP, not before: this is the setting the numbers
+        # above were taken at, and at `True` they are blind by construction.
+        "x64": bool(_jax.config.jax_enable_x64),
+        "unmatched": tuple(sorted(unmatched, key=repr)),
+        "matched": tuple(sorted(matched)),
+    }
+
+
+def displacement_check() -> tuple[tuple[str, str], ...]:
+    """Every hook this process installed, and whether it is STILL the live one.
+
+    ONE INSTRUMENT FOR TWO DISPLACEMENTS, and the reason it is one and not two
+    is a finding rather than a preference. B15's audit established that
+    ``live_check() == "foreign-patch"`` is a FOURTH way the trace gate's watch
+    goes partial and that the gate does not consult it: rebinding the registry
+    entry after arming leaves the recorder's identity unchanged and
+    ``fires_count()`` unchanged, so the gate's two existing partiality tests
+    both pass, the fire counter stays at zero because our wrapper is no longer
+    called, and ``check()`` returns **VERIFIED on a watched route**. Building
+    the eager hook meant building a displacement instrument anyway; two of them
+    -- one per hook, each consulted by a different caller -- is two chances to
+    teach one caller about one hook and forget the other.
+
+    Returns ``()`` when nothing is armed, which is not the same as "clear":
+    a caller asks about the hooks it armed, and the empty tuple says none.
+    ``(name, state)`` pairs, states from the same vocabulary
+    :func:`live_check` uses.
+    """
+    states: list[tuple[str, str]] = []
+    if _installed:
+        states.append(("const-fold", live_check()))
+    if _eager_installed:
+        states.append(("eager", eager_live_check()))
+    return tuple(states)
+
+
+def displaced() -> tuple[str, ...]:
+    """The names of the armed hooks that are NOT live. Empty when all are.
+
+    The predicate form of :func:`displacement_check`, because that is what
+    every caller actually wants and computing it in three places is three
+    chances to spell ``!= "armed"`` as ``== "detached"``.
+    """
+    return tuple(
+        name for name, state in displacement_check() if state != "armed"
+    )

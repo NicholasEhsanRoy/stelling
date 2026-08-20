@@ -259,3 +259,100 @@ def test_require_fails_the_session_when_a_worker_cannot_arm(pytester):
         "require under xdist did not fail although no worker could arm"
     )
     assert "no-entry" in broken.stdout.str()
+
+
+# --- the eager detector across the same boundary ------------------------------
+
+EAGER_FILES = {
+    "test_gamma": """
+        import jax.numpy as jnp
+        from stelling import intentional_wrap
+
+        def test_gamma():
+            assert int(jnp.full((2,), intentional_wrap(300, "int8"), jnp.int8).sum()) == 88
+    """,
+    "test_delta": """
+        import jax.numpy as jnp
+        from stelling._tripwire.eager import expected_truncation
+
+        def test_delta():
+            with expected_truncation("this test's subject is the narrowing"):
+                out = jnp.full((2,), 300, jnp.int8)
+            assert int(out.sum()) == 88
+    """,
+}
+
+
+def _eager_run(pytester, *args):
+    """The eager detector ALONE, which is the spelling the docs recommend."""
+    return pytester.runpytest_subprocess(
+        *PLUGIN_ARGS,
+        "-p",
+        "no:cacheprovider",
+        "--stelling-overflow=off",
+        "--stelling-eager-truncation=error",
+        *args,
+    )
+
+
+def test_the_controller_keeps_the_eager_payload_WITHOUT_the_other_dial(pytester):
+    """The eager detector is a second dial and its payload must not travel on
+    the first one's ticket.
+
+    ``pytest_testnodedown`` gated on the TRIPWIRE's condition -- ``state.mode
+    == "off" or state.recorder is None`` -- and returned before touching the
+    eager keys, so a session running this detector alone dropped every
+    worker's report. Measured on a FULLY GREEN suite: ``-n 2
+    --stelling-overflow=off --stelling-eager-truncation=error`` printed ``NOT
+    ARMED [no-worker-reported]`` and exited 1, having been told the answer by
+    both workers.
+    """
+    pytester.makepyfile(**EAGER_FILES)
+    split = _eager_run(pytester, "-n", "2")
+    out = split.stdout.str()
+    split.assert_outcomes(passed=2)
+    assert "no-worker-reported" not in out, out[-3000:]
+    assert split.ret == 0, f"a green suite exited {split.ret}\n{out[-3000:]}"
+    assert "worker(s) armed the eager detector" in out
+
+
+def test_the_controller_prints_the_WORKERS_figures_and_not_its_own_zeros(pytester):
+    """The merge happens in ``pytest_testnodedown`` and then
+    ``pytest_sessionfinish`` ran ``_capture_eager`` over the top of it.
+
+    On a controller that reads the LOCAL module -- which never armed and never
+    constructed anything -- so the merged snapshot was replaced by zeros.
+    Measured before the fix: workers reporting ``conversions: 5, truncations:
+    1`` and one declaration printed ``0 scalar integer conversion(s)`` and no
+    declarations at all, which is the beautiful zero the section's own
+    docstring exists to prevent.
+
+    The single-process run is the control, and it is what makes this a
+    measurement rather than a shape check.
+    """
+    pytester.makepyfile(**EAGER_FILES)
+    split = _eager_run(pytester, "-n", "2")
+    single = _eager_run(pytester, "-p", "no:xdist")
+    split.assert_outcomes(passed=2)
+    single.assert_outcomes(passed=2)
+
+    def figures(result):
+        text = result.stdout.str()
+        line = next(
+            l for l in text.splitlines() if "scalar integer conversion(s)" in l
+        )
+        return (
+            line.strip(),
+            "1 wrap(s) DECLARED" in text,
+            "1 truncation(s) PERMITTED" in text,
+        )
+
+    assert figures(split) == figures(single), (
+        f"the controller and the single process disagree:\n"
+        f"  split : {figures(split)}\n  single: {figures(single)}"
+    )
+    assert figures(single)[1] and figures(single)[2], (
+        "the control itself reported no declaration and no permission, so "
+        "this test is comparing two silences"
+    )
+    assert "0 scalar integer conversion(s)" not in figures(split)[0]

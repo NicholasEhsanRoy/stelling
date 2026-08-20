@@ -329,12 +329,27 @@ def test_no_executable_form_of_the_program_carries_the_written_constant(
     ``x64`` cells because the whole ``SOUNDNESS.md`` page is sensitive to
     that dial.
     """
-    assert int(jnp.full((), 256, jnp.int8)) == 0, (
-        "jnp no longer destroys the int8 literal eagerly; if it now raises "
-        "or saturates, SOUNDNESS.md's open false VERIFIED has changed shape "
-        "and this whole file needs rewriting rather than patching"
-    )
-    assert int(jnp.array(5, jnp.int8) + 256) == 5
+    from stelling._tripwire.eager import expected_truncation
+
+    # A REGION DECLARATION. The two assertions below ARE the null result:
+    # they say that the object a probe would have to execute in order to see
+    # 256 does not exist, and they say it by destroying 256 twice. With
+    # `--stelling-eager-truncation=error` armed session-wide the first of
+    # them raises -- correctly, because that detector is the answer to this
+    # very door -- and the measurement still has to be made. `intentional_
+    # wrap` cannot serve: writing 0 asserts nothing about what jax does with
+    # a 256.
+    with expected_truncation(
+        "the null result IS the destruction of 256: these lines exist to "
+        "show that no executable form of the program carries it"
+    ):
+        assert int(jnp.full((), 256, jnp.int8)) == 0, (
+            "jnp no longer destroys the int8 literal eagerly; if it now "
+            "raises or saturates, SOUNDNESS.md's open false VERIFIED has "
+            "changed shape and this whole file needs rewriting rather than "
+            "patching"
+        )
+        assert int(jnp.array(5, jnp.int8) + 256) == 5
     with pytest.raises(OverflowError):
         np.int8(256)
 

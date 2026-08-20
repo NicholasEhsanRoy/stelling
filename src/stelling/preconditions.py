@@ -282,10 +282,11 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     and not two: observed-and-clean proceeds, observed-and-narrowed refuses
     with ``trace unfaithful``, and NOT-FULLY-OBSERVED refuses in its own
     words. The third exists because the gate's silence is evidence of
-    nothing when part of the trace was replayed from a cache or the
-    instrument stopped watching, and reporting that as "0 narrowings
-    detected" — or, as B14 left it, as "1 narrowing detected" — describes a
-    measurement nobody made. Observation is made complete — with respect to
+    nothing when part of the trace was replayed from a cache, the instrument
+    stopped watching, or the instrument was DISPLACED by something bound
+    over it, and reporting any of those as "0 narrowings detected" — or, as
+    B14 left it, as "1 narrowing detected" — describes a measurement nobody
+    made. Observation is made complete — with respect to
     JAX's caches, in a single-threaded process, which is the whole of what
     is claimed — by EVICTING those caches rather than by detecting
     incompleteness; the comment at the gate carries the measurement that
@@ -367,8 +368,8 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
         raise ValueError(LIBM_BUDGET_REAL_MODE_REFUSAL)
 
     from stelling._tripwire import (
-        _pop_gate, _push_gate, evict_trace_caches as _evict_trace_caches,
-        fires_count as _fires_count,
+        _pop_gate, _push_gate, displaced as _displaced,
+        evict_trace_caches as _evict_trace_caches, fires_count as _fires_count,
     )
     from stelling._tripwire import _adapter_jax as _adapter
 
@@ -410,19 +411,51 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
             cj = trace(lambda: harness())
         finally:
             narrowings = _pop_gate()
-        # Two ways the watch can be PARTIAL, and neither is a narrowing. The
-        # recorder changing identity, or the tripwire being disarmed, means
-        # the wrapper stopped counting partway through; a failed eviction
-        # means it never got to see the cached regions at all. Both are
-        # "we did not look", and B14's `narrowings = max(narrowings, 1)` said
-        # "1 integer narrowing(s) detected" about the first of them — sending
-        # a reader to hunt a narrowed constant that was never observed.
+        # THREE ways the watch can be PARTIAL, and none of them is a
+        # narrowing. The recorder changing identity, or the tripwire being
+        # disarmed, means the wrapper stopped counting partway through; a
+        # DISPLACEMENT means our wrapper is no longer the live entry, so it
+        # was never called at all; a failed eviction means it never got to
+        # see the cached regions. All three are "we did not look", and B14's
+        # `narrowings = max(narrowings, 1)` said "1 integer narrowing(s)
+        # detected" about the first of them — sending a reader to hunt a
+        # narrowed constant that was never observed.
+        #
+        # THE DISPLACEMENT CHECK IS B15's AUDIT FINDING, and it is the one
+        # that was silent rather than merely mislabelled. `live_check()`
+        # existed, cost nothing and was consulted NOWHERE on this path:
+        # rebinding the const-fold registry entry over our wrapper after
+        # arming leaves the recorder's identity unchanged and
+        # `fires_count()` unchanged — so both tests below pass — while our
+        # wrapper is never called again, so the gate's counter stays at zero
+        # and `check()` returns **VERIFIED on a route the inventory calls
+        # `watched`**. Measured on `main` before this batch, byte-identical.
+        # It is asked AFTER the trace so that a rebind performed DURING one
+        # is caught as well as one that pre-dates it; a patch installed and
+        # removed inside the window is not detectable by anything here and
+        # stays disclosed in `report.UNCOVERED`.
         recorder_after = _adapter._installed.get("recorder")
+        displaced = _displaced()
         if recorder_after is not recorder_before or _fires_count() is None:
             unobserved = (
                 "the overflow tripwire stopped watching partway through this "
                 "trace (it was disarmed, or re-armed onto a different "
                 "recorder, while the harness was being traced)"
+            )
+        elif displaced:
+            # NAMED RATHER THAN DESCRIBED, because more than one hook can be
+            # armed and the consequence differs. A displaced `const-fold`
+            # hook means the counter below is the count of a wrapper that was
+            # not running; a displaced `eager` hook means an out-of-range
+            # constant destroyed at construction inside this harness would
+            # have gone unreported instead of raising. Either way an
+            # instrument that was watching this process was not, and this
+            # verdict would rest on an observation nobody completed.
+            unobserved = (
+                f"one of stelling's hooks was DISPLACED — something else is "
+                f"bound over stelling's wrapper for: {', '.join(displaced)} — "
+                f"so an instrument that was watching this process was not "
+                f"running while this harness was traced"
             )
         elif eviction != "evicted":
             unobserved = (

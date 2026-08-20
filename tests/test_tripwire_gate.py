@@ -560,7 +560,20 @@ def test_the_eviction_does_not_reach_a_memo_that_is_not_jaxs():
         ("lru_cache", by_user_memo),
         ("closure_convert", by_closure_convert),
     ):
-        body = build()
+        # A REGION DECLARATION for `closure_convert`'s `lax.full((2,), 40000,
+        # int16)`. This test's SUBJECT is a constant that was already
+        # narrowed before the gate's trace -- the narrowing has to happen for
+        # there to be anything to measure, and the eager detector (which is
+        # what a session run with `--stelling-eager-truncation=error` arms)
+        # would otherwise refuse it. That refusal is correct and is exactly
+        # the point: the two instruments cover different halves.
+        from stelling._tripwire.eager import expected_truncation
+
+        with expected_truncation(
+            "this test's subject is a constant narrowed BEFORE the trace the "
+            "gate watches; the narrowing is the setup"
+        ):
+            body = build()
 
         def harness():
             a = any_array((2,), dt, (0, 100))
@@ -638,3 +651,123 @@ def test_the_gates_counter_is_per_thread_while_jaxs_cache_is_not():
         "thread traced was re-traced here), which would make the "
         "eviction-to-trace window safe — re-derive the thread disclosure"
     )
+
+
+# ---------------------------------------------------------------------------
+# B15's audit finding, driven: the FOURTH way the watch goes partial.
+# ---------------------------------------------------------------------------
+
+
+def test_a_DISPLACED_hook_is_not_read_as_a_clean_trace():
+    """A rebind over stelling's wrapper used to produce VERIFIED on a WATCHED
+    route, and nothing on this page could see it.
+
+    THE THREE TESTS THE GATE ALREADY HAD ALL PASS in this state, which is why
+    it survived: the recorder's identity is unchanged, ``fires_count()`` is
+    unchanged, and the eviction succeeds. What is not unchanged is that
+    stelling's wrapper is no longer the live registry entry, so it is never
+    called — and a fire counter that is never incremented reads exactly like a
+    trace with nothing to report.
+
+    Measured at ``8ed5ce5`` with ``x + 40000`` on ``int16``, a route
+    ``GATE_COVERAGE`` calls ``watched``: **VERIFIED**. Here: ``UNKNOWN`` with
+    ``trace NOT FULLY OBSERVED``, naming the hook.
+
+    ``_adapter_jax.detach`` rather than a rebind written here, because rule 2
+    bans naming the private jax module in ``tests/`` and a test that reached
+    into the registry would have to name what only that file may name. It is
+    the same seam the fail-closed battery uses.
+    """
+    from stelling._tripwire import _adapter_jax as adapter
+
+    over, dt, bound = 40000, jnp.int16, 200
+
+    def harness():
+        x = any_array((2,), dt, (0, 100))
+        assert_(x + over < bound)
+
+    # the control FIRST: with the hook live, this route is watched and the
+    # gate refuses. Without it, "UNKNOWN" below would be no evidence at all.
+    control = check(harness, vacuity_mode="inputs-only")
+    assert control.status == "UNKNOWN"
+    assert "trace unfaithful" in control.notes[0], control.notes
+
+    recorder_before = adapter._installed.get("recorder")
+    assert adapter.detach("bypass") == "detached"
+    try:
+        # everything the gate USED to look at still says the watch was whole
+        assert adapter._installed.get("recorder") is recorder_before
+        assert _tripwire.fires_count() is not None
+        assert _tripwire.live_check() == "foreign-patch"
+        assert _tripwire.displaced() == ("const-fold",)
+
+        verdict = check(harness, vacuity_mode="inputs-only")
+    finally:
+        adapter.reattach()
+
+    assert verdict.status == "UNKNOWN", (
+        "a displaced hook produced a verdict about a program nobody watched "
+        f"({verdict.status}). This is B15's audit finding and it was a "
+        "VERIFIED on a watched route."
+    )
+    assert "NOT FULLY OBSERVED" in verdict.notes[0], verdict.notes
+    assert "DISPLACED" in verdict.notes[0] and "const-fold" in verdict.notes[0], (
+        "the refusal does not say WHICH hook was displaced, so a reader has "
+        "no way to tell a rebound const-fold rule from a rebound "
+        "construction site"
+    )
+    assert "NOT A REPORT THAT A CONSTANT WAS NARROWED" in verdict.notes[0], (
+        "the third state's own sentence is gone, so this reads as a finding "
+        "about a narrowing nobody observed"
+    )
+
+    # ...and the gate goes back to refusing for the RIGHT reason afterwards,
+    # which is what says the detach was undone rather than merely survived
+    after = check(harness, vacuity_mode="inputs-only")
+    assert after.status == "UNKNOWN" and "trace unfaithful" in after.notes[0]
+
+    # AND THE HALF THAT IS STILL OPEN IS DISCLOSED. The check asks "is our
+    # wrapper live now", not "was it live throughout", so a rebind installed
+    # and removed inside one call is invisible to it -- the same shape as the
+    # thread race two bullets down. A fix that closed one case and left the
+    # reader believing the class was closed would be the over-claim this
+    # whole page exists to avoid.
+    from stelling._tripwire import report
+
+    text = " ".join(report.UNCOVERED)
+    assert "HOOK IS DISPLACED" in text, (
+        "the gate now refuses on a displaced hook and `report.UNCOVERED` "
+        "does not tell the reader what that covers"
+    )
+    assert "INSTALLED AND REMOVED inside that window is invisible" in text, (
+        "the residue of the displacement check is undisclosed, which makes "
+        "the disclosure read as a closed class"
+    )
+
+
+def test_the_displacement_check_reports_only_the_hooks_this_process_armed():
+    """It answers about the hooks THIS PROCESS ARMED and no others.
+
+    Two halves. The armed one is live, so ``displaced()`` is empty — without
+    that the test above could be satisfied by an instrument that reports
+    displacement unconditionally. And the eager detector, which this file
+    never arms, has no entry at all: a user who never switched it on can
+    never be told it was displaced, and the gate can never refuse a verdict
+    because of an instrument they did not ask for.
+    """
+    from stelling._tripwire import _adapter_jax as adapter
+    from stelling._tripwire import eager as _eager
+
+    # A SESSION RUN WITH `--stelling-eager-truncation=error` ARMS THE OTHER
+    # HOOK, and then it legitimately has an entry. The claim here is about
+    # hooks this process did NOT arm, so the eager one is taken out for the
+    # duration and put back.
+    eager_was_armed = _eager.is_armed()
+    if eager_was_armed:
+        _tripwire.disarm_eager()
+    try:
+        assert _tripwire.displaced() == ()
+        assert dict(adapter.displacement_check()) == {"const-fold": "armed"}
+    finally:
+        if eager_was_armed:
+            _tripwire.arm_eager()

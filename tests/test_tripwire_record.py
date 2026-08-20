@@ -23,6 +23,49 @@ import pytest
 from stelling._tripwire import record, report
 
 
+@pytest.fixture(autouse=True)
+def _neither_instrument_is_left_in_a_different_state():
+    """Every test in this file leaves the process's hooks as it found them.
+
+    THIS FILE IS PURE PYTHON AND STILL DRIVES THE CANARY, which arms and
+    disarms both instruments for real. One test here stubbed the tripwire's
+    half and not the eager one, so ``canary.main()`` called the real
+    ``disarm_eager()`` and a session running with
+    ``--stelling-eager-truncation=error`` lost its detector at this file and
+    ran every later file unwatched -- silently, because the escalation that
+    would have said so was unreachable. The rule is the same one
+    ``tests/test_tripwire_eager.py`` applies to itself, and it is asserted
+    rather than trusted because "silently" is the whole problem.
+
+    It reads the state through a helper that answers ``False`` with no jax
+    installed, so it costs the zero-dependency lane nothing.
+    """
+    from stelling._tripwire import eager as _eager
+
+    def state():
+        try:
+            return _eager.is_armed(), _tripwire_is_armed()
+        except Exception:  # noqa: BLE001 - a guard may not break the suite
+            return None
+
+    def _tripwire_is_armed():
+        try:
+            from stelling import _tripwire
+
+            return _tripwire.is_armed()
+        except Exception:  # noqa: BLE001
+            return None
+
+    before = state()
+    yield
+    assert state() == before, (
+        "a test in this file changed the process's arm state: it was "
+        f"{before} and is now {state()}. A test that takes an instrument out "
+        "must put it back -- a session armed session-wide runs every later "
+        "file unwatched otherwise."
+    )
+
+
 def test_record_and_report_pull_in_no_jax():
     """The boundary claim, measured in a fresh interpreter.
 
@@ -207,6 +250,132 @@ def test_an_all_jax_stack_with_no_frames_inside_the_entry_is_unattributed():
     index, origin = record.attribute(stack, JAXROOT)
     assert (index, origin) == (None, record.ORIGIN_JAX)
     assert record.attribute((), JAXROOT) == (None, record.ORIGIN_UNKNOWN)
+
+
+# --- the same question, asked at the EAGER site -----------------------------
+#
+# `attribute` answers "who wrote this constant?" from the FRAMES, using the
+# trace boundary. At an EAGER narrowing there is no trace boundary, and the
+# two stacks above collapse to the same shape -- a user frame with nothing but
+# jax frames beneath it. What answers it there is an ENUMERATION of jax's own
+# eager truncations rather than a rule over the data, and these are its pure
+# Python half; the jax half -- the sweep that re-derives the enumeration, and
+# the arm-time control that drives its one row -- is
+# `tests/test_tripwire_eager.py`.
+#
+# A GENERAL PREDICATE OVER THE DATA STOOD HERE and its tests stood here with
+# it: `record.carries(values, written)`, "is the narrowed integer among the
+# arguments of the call that crossed into jax?". It was withdrawn because it
+# was measurably wrong in both directions -- it suppressed
+# `jax.tree.map(partial(jnp.full_like, fill_value=300), tree)`, a constant the
+# user really wrote, in the default jit-on configuration, and it raised on
+# jax's own mask whenever its container scan ran out of budget. The argument
+# is in `_adapter_jax._JAX_EAGER_CONSTANTS`.
+
+
+def test_a_narrowing_at_no_enumerated_jax_site_is_the_CALLER_S():
+    """The default answer, and it is the one that fails closed.
+
+    An empty map -- which is what an unarmed process has -- must attribute
+    everything to the caller. A map that answered "jax's" by default would
+    turn every jax release this repository has not read into a silence.
+    """
+    from stelling._tripwire import eager
+
+    assert eager.jax_constant(4294967295, "uint32", "int32", ()) is None
+    assert eager.jax_constant(
+        300, "int", "int8", (("_src/lax/lax.py", "full"),)
+    ) is None
+
+
+def test_a_row_matches_on_the_SITE_and_the_VALUE_and_BOTH_DTYPES_together():
+    """A row is a statement about one constant, arriving one way, at one site.
+
+    Not a licence for the function it names -- a jax function that writes one
+    constant of its own still narrows the caller's constants too -- and not a
+    licence for the value anywhere else.
+
+    THE SOURCE DTYPE IS IN THE KEY, and an audit is why. Without it a row
+    about jax's own constant also suppresses a CALLER'S constant of the same
+    value narrowed at the same jax function, and at the one site the map
+    names those collide:
+    ``jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))``
+    narrows twice under ``_threefry_seed`` -- the caller's seed and jax's
+    mask, both ``4294967295 -> -1`` at ``int32`` -- and the three-field row
+    suppressed both, then printed "written by jax ... the threefry PRNG's
+    32-bit mask" at the caller's own line. The two differ in exactly one
+    observable, which is the field added here: jax's mask arrives from
+    ``uint32`` and a caller's seed from ``int64``. Driven against the real
+    jax in ``tests/test_tripwire_eager.py``.
+    """
+    from stelling._tripwire import eager
+
+    rows = {("f.py", "writer"): ((4294967295, "uint32", "int32", "the mask"),)}
+    saved = dict(eager._JAX_CONSTANTS)
+    eager._JAX_CONSTANTS.clear()
+    eager._JAX_CONSTANTS.update(rows)
+    try:
+        run = (("g.py", "narrower"), ("f.py", "writer"), ("h.py", "caller"))
+        assert eager.jax_constant(
+            4294967295, "uint32", "int32", run
+        )[:2] == ("f.py", "writer")
+        # the right site, the wrong value
+        assert eager.jax_constant(300, "uint32", "int32", run) is None
+        # the right site and value, the wrong TARGET dtype
+        assert eager.jax_constant(4294967295, "uint32", "int16", run) is None
+        # the right site, value and target -- the wrong SOURCE dtype. This is
+        # the caller's colliding constant, and it must NOT be suppressed.
+        assert eager.jax_constant(4294967295, "int64", "int32", run) is None
+        # the right value and dtypes, no site
+        assert eager.jax_constant(
+            4294967295, "uint32", "int32", (("g.py", "narrower"),)
+        ) is None
+        # the right file, a different function in it
+        assert eager.jax_constant(
+            4294967295, "uint32", "int32", (("f.py", "somebody_else"),)
+        ) is None
+    finally:
+        eager._JAX_CONSTANTS.clear()
+        eager._JAX_CONSTANTS.update(saved)
+
+
+def test_the_row_carries_a_SENTENCE_and_the_report_prints_it():
+    """A suppression nobody can read is the silence this instrument ends.
+
+    The third field of a row is what the constant IS, and it reaches the
+    report -- so a reader meets "the threefry PRNG's 32-bit mask" rather than
+    a number and a file path they have to go and interpret.
+    """
+    from stelling._tripwire import eager
+
+    saved = dict(eager._JAX_CONSTANTS)
+    eager._JAX_CONSTANTS.clear()
+    eager._JAX_CONSTANTS.update(
+        {("f.py", "writer"): ((4294967295, "uint32", "int32", "the threefry mask"),)}
+    )
+    try:
+        row = eager.jax_constant(
+            4294967295, "uint32", "int32", (("f.py", "writer"),)
+        )
+        assert row == ("f.py", "writer", "the threefry mask")
+    finally:
+        eager._JAX_CONSTANTS.clear()
+        eager._JAX_CONSTANTS.update(saved)
+
+
+def test_the_residue_the_enumeration_leaves_is_DISCLOSED():
+    """What a map cannot do is know a row nobody has written.
+
+    The direction it fails in is the loud one -- an unenumerated constant of
+    jax's own is attributed to the caller and raises -- and that is a claim
+    about this instrument that has to be printed rather than left in a
+    docstring.
+    """
+    text = " ".join(report.EAGER_UNCOVERED).upper()
+    assert "ENUMERAT" in text, "the map's residue is not disclosed anywhere"
+    assert "RAISES" in text, (
+        "the disclosure does not say which direction the residue fails in"
+    )
 
 
 def test_the_user_chain_is_the_traced_region_not_the_whole_stack():
@@ -863,7 +1032,10 @@ def _stub_jax(monkeypatch, probe):
 
     fake = types.ModuleType("stelling._jax_compat")
     fake.jax = types.SimpleNamespace(make_jaxpr=lambda fn: lambda *a, **k: fn(*a, **k))
-    fake.jnp = types.SimpleNamespace(zeros=lambda shape, dtype: _Array(), int8="int8")
+    fake.jnp = types.SimpleNamespace(
+        zeros=lambda shape, dtype: _Array(), int8="int8",
+        full=lambda shape, value, dtype: _Array(),
+    )
     monkeypatch.setitem(sys.modules, "stelling._jax_compat", fake)
     monkeypatch.setattr(stelling, "_jax_compat", fake, raising=False)
 
@@ -872,6 +1044,68 @@ def _stub_jax(monkeypatch, probe):
             raise RuntimeError("FORCED: the probe could not execute")
 
         monkeypatch.setattr(_probe, "over", _boom)
+
+
+#: The eager detector's states this battery can put the canary in, and what
+#: each one does to the two things `main()` reads: the status `arm_eager()`
+#: hands back, and what the live control does.
+#:
+#: STUBBED AT THE INSTRUMENT AND NOT AT THE DECISION, exactly as the tripwire's
+#: half is: `_eager_reasons` and `_eager_hash_row` are the shipped functions
+#: and are never replaced. What is chosen is what they are given.
+#:
+#: THE STUB IS NEEDED AT ALL because this file's copy runs WITHOUT jax -- the
+#: lane that runs on every PR -- and `arm_eager()` there would collapse every
+#: row to one state, which is the shape of table that measures one thing six
+#: times. `tests/test_tripwire_eager.py` drives the real detector against the
+#: real jax; this drives the decision.
+_EAGER_STATES = {
+    "clean": ("armed", "raise-truncation", "allow", ("abc", "abc"), ()),
+    "not-armed": ("no-site", "raise-truncation", "allow", ("abc", "abc"), ()),
+    "did-not-fire": ("armed", "allow", "allow", ("abc", "abc"), ()),
+    "cries-wolf": ("armed", "raise-truncation", "raise-truncation",
+                   ("abc", "abc"), ()),
+    "raised": ("armed", "raise-other", "allow", ("abc", "abc"), ()),
+    "displaced": ("armed", "raise-truncation", "allow", ("abc", "abc"),
+                  ("eager",)),
+    "hash-changed": ("armed", "raise-truncation", "allow", ("abc", "xyz"), ()),
+}
+
+
+def _stub_eager(monkeypatch, choice):
+    """Force the eager half of the canary into one of :data:`_EAGER_STATES`."""
+    from stelling import EagerTruncationError, _tripwire
+    from stelling._tripwire import Status, _probe
+
+    code, over, under, (rule_hash, known_hash), displaced = _EAGER_STATES[choice]
+    status = Status(
+        code=code,
+        jax_version="0.11.0",
+        rule_name="_convert_element_type",
+        rule_hash=rule_hash,
+        known_hash=known_hash,
+    )
+
+    def _behave(kind):
+        def probe(jnp):
+            if kind == "raise-truncation":
+                raise EagerTruncationError(
+                    "stelling: 256 was TRUNCATED to 0",
+                    written=256, to_dtype="int8", became=0,
+                    file="probe.py", line=1, func="construct",
+                )
+            if kind == "raise-other":
+                raise RuntimeError("FORCED: the eager control could not run")
+            return None
+
+        return probe
+
+    monkeypatch.setattr(_tripwire, "arm_eager", lambda: status)
+    monkeypatch.setattr(_tripwire, "disarm_eager", lambda: "restored")
+    monkeypatch.setattr(_tripwire, "displaced", lambda: displaced)
+    monkeypatch.setattr(_probe, "construct_over", _behave(over))
+    monkeypatch.setattr(_probe, "construct_under", _behave(under))
+    return status
 
 
 class _Run:
@@ -906,7 +1140,7 @@ def _drive_canary(
     capsys, tmp_path, *,
     require=False, armed=True, hash_state="as-tested",
     probe="runs", findings="one", narrowings="readable",
-    summary="writable",
+    summary="writable", eager="clean",
 ):
     """Run `main()` once with every input chosen, and collect what it emitted.
 
@@ -928,13 +1162,14 @@ def _drive_canary(
         return _drive_canary_once(
             mp, capsys, tmp_path, require=require, armed=armed,
             hash_state=hash_state, probe=probe, findings=findings,
-            narrowings=narrowings, summary=summary,
+            narrowings=narrowings, summary=summary, eager=eager,
         )
 
 
 def _drive_canary_once(
     monkeypatch, capsys, tmp_path, *,
     require, armed, hash_state, probe, findings, narrowings, summary,
+    eager="clean",
 ):
     import sys
 
@@ -943,6 +1178,7 @@ def _drive_canary_once(
 
     canary = _canary()
     _stub_jax(monkeypatch, probe)
+    _stub_eager(monkeypatch, eager)
 
     hashes = {
         "as-tested": ("abc", "abc"),
@@ -1013,64 +1249,100 @@ def _drive_canary_once(
 #: the wrong branch, and it cannot be masked by an extra one either: a run
 #: with a second live fault fails here, loudly, instead of passing quietly.
 _CANARY_TABLE = [
-    ("clean", {}, 0, [], "fired", "rendered"),
-    ("clean+require", {"require": True}, 0, [], "fired", "rendered"),
+    ("clean", {}, 0, [], "fired", "rendered", "fired"),
+    ("clean+require", {"require": True}, 0, [], "fired", "rendered", "fired"),
     # a release nobody has read is LOUD and not fatal -- the state a nightly
     # is in by construction, and the state the control leg enters the day jax
     # ships a release
     ("never-read", {"hash_state": "never-read", "require": True}, 0, [],
-     "fired", "rendered"),
+     "fired", "rendered", "fired"),
     ("hash-unreadable", {"hash_state": "unreadable", "require": True}, 0, [],
-     "fired", "rendered"),
+     "fired", "rendered", "fired"),
     ("hash-contradicted", {"hash_state": "changed"}, 1, ["hash:contradicted"],
-     "fired", "rendered"),
+     "fired", "rendered", "fired"),
     ("hash-contradicted+require", {"hash_state": "changed", "require": True}, 1,
-     ["hash:contradicted"], "fired", "rendered"),
+     ["hash:contradicted"], "fired", "rendered", "fired"),
     # THE DEAD HOOK. `--require` must not matter: `arm()` said the hook is
     # attached and the control says nothing reached it, so the armed status
     # is unverified either way. Gating this on `--require` is the exact
     # defect this branch exists to close.
     ("dead-hook", {"findings": "none"}, 1, ["control:did-not-fire"],
-     "did-not-fire", "rendered"),
+     "did-not-fire", "rendered", "fired"),
     ("dead-hook+require", {"findings": "none", "require": True}, 1,
-     ["control:did-not-fire"], "did-not-fire", "rendered"),
+     ["control:did-not-fire"], "did-not-fire", "rendered", "fired"),
     # THE PROBE NEVER RAN. Used to exit 0, because the check was a substring
     # test for "DID NOT FIRE" against a line a raised control does not
     # contain.
     ("probe-raised", {"probe": "raises"}, 1, ["control:raised"],
-     "raised", "not-run"),
+     "raised", "not-run", "fired"),
     ("probe-raised+require", {"probe": "raises", "require": True}, 1,
-     ["control:raised"], "raised", "not-run"),
+     ["control:raised"], "raised", "not-run", "fired"),
     # THE RECORDER MOVED, three ways, and none of them may report `raised`:
     # the probe RAN in all three, and an operator sent upstream to look for a
     # broken jax when the defect is in this repository has been sent to the
     # wrong place.
     ("findings-unreadable", {"findings": "unreadable"}, 1,
-     ["control:indeterminate"], "ran", "not-run"),
+     ["control:indeterminate"], "ran", "not-run", "fired"),
     ("narrowings-moved", {"narrowings": "moved"}, 1, ["control:unrenderable"],
-     "fired", "unrenderable"),
+     "fired", "unrenderable", "fired"),
     ("finding-field-moved", {"findings": "field-moved"}, 1,
-     ["control:unrenderable"], "fired", "unrenderable"),
+     ["control:unrenderable"], "fired", "unrenderable", "fired"),
     # BOTH AT ONCE, and both must be said. This is the case the previous
     # split lost: `unrenderable` overwrote `did-not-fire`, so the page told
     # the operator the probe completing "is not in doubt" and never mentioned
     # that the hook was dead.
     ("dead-hook+narrowings-moved", {"findings": "none", "narrowings": "moved"},
      1, ["control:did-not-fire", "control:unrenderable"],
-     "did-not-fire", "unrenderable"),
+     "did-not-fire", "unrenderable", "fired"),
     # NOT ARMED is `--require`'s question and nobody else's, and the control
     # never ran, so it is not a finding.
-    ("not-armed", {"armed": False}, 0, [], "not-run", "not-run"),
+    ("not-armed", {"armed": False}, 0, [], "not-run", "not-run", "fired"),
     ("not-armed+require", {"armed": False, "require": True}, 1, ["not-armed"],
-     "not-run", "not-run"),
+     "not-run", "not-run", "fired"),
     ("not-armed+require+hash", {"armed": False, "require": True,
                                 "hash_state": "changed"}, 1,
-     ["not-armed", "hash:contradicted"], "not-run", "not-run"),
+     ["not-armed", "hash:contradicted"], "not-run", "not-run", "fired"),
     # INFRASTRUCTURE MUST NOT PAGE -- Property 3 of the workflow. An
     # unwritable `$GITHUB_STEP_SUMMARY` used to raise `FileNotFoundError`
     # straight out of `main()`: a traceback and a 1, with no `canary:`
     # sentence, in the script that argues against exactly that.
-    ("summary-unwritable", {"summary": "unwritable"}, 0, [], "fired", "rendered"),
+    ("summary-unwritable", {"summary": "unwritable"}, 0, [], "fired", "rendered", "fired"),
+    # --- the EAGER half. Same three questions, one instrument over: did it
+    # attach, did its live control behave in BOTH directions, and is its own
+    # hash row contradicted. The states are stubbed at the instrument
+    # (`_EAGER_STATES`) and every decision below them is the shipped one.
+    #
+    # ARMING IS `--require`'s QUESTION AND THE CONTROL'S IS NOT, exactly as
+    # for the tripwire: a human running this by hand against a jax that moved
+    # the site wants to see it, not be paged by it. A detector that attached
+    # and then failed its own control is broken in either mode.
+    ("eager-not-armed", {"eager": "not-armed"}, 0, [], "fired", "rendered",
+     "not-run"),
+    ("eager-not-armed+require", {"eager": "not-armed", "require": True}, 1,
+     ["eager:not-armed"], "fired", "rendered", "not-run"),
+    # THE DEAD DETECTOR: it attached and allowed a construction it must
+    # refuse. `--require` must not matter.
+    ("eager-dead", {"eager": "did-not-fire"}, 1, ["eager:did-not-fire"],
+     "fired", "rendered", "did-not-fire"),
+    # ...and the other direction, which is why the control has two: a hook
+    # replaced by "refuse everything" passes the positive probe.
+    ("eager-cries-wolf", {"eager": "cries-wolf"}, 1, ["eager:cries-wolf"],
+     "fired", "rendered", "cries-wolf"),
+    ("eager-probe-raised", {"eager": "raised"}, 1, ["eager:raised"],
+     "fired", "rendered", "raised"),
+    # THE DISPLACEMENT, which is the one instrument B15's finding and this
+    # hook share: something is bound over stelling's wrapper.
+    ("hooks-displaced", {"eager": "displaced"}, 1, ["hooks:displaced"],
+     "fired", "rendered", "fired"),
+    ("eager-hash-contradicted", {"eager": "hash-changed"}, 1,
+     ["eager:hash-contradicted"], "fired", "rendered", "fired"),
+    # BOTH HALVES BROKEN AT ONCE, and both must be said -- the same lesson
+    # the `dead-hook+narrowings-moved` row above records, across the two
+    # instruments this time.
+    ("both-dead+require", {"findings": "none", "eager": "did-not-fire",
+                           "require": True}, 1,
+     ["control:did-not-fire", "eager:did-not-fire"], "did-not-fire",
+     "rendered", "did-not-fire"),
 ]
 
 
@@ -1100,12 +1372,15 @@ def test_the_canary_pages_for_the_reasons_it_measured_and_no_others(
     """
     failures = []
     seen = set()
-    for name, kw, expect_code, expect_reasons, control, report in _CANARY_TABLE:
+    for name, kw, expect_code, expect_reasons, control, report, eager in (
+        _CANARY_TABLE
+    ):
         run = _drive_canary(capsys, tmp_path, **kw)
         seen.update(run.reasons)
         got = (run.code, sorted(run.reasons), run.rows.get("control state"),
-               run.rows.get("control report"))
-        want = (expect_code, sorted(expect_reasons), control, report)
+               run.rows.get("control report"),
+               run.rows.get("eager control state"))
+        want = (expect_code, sorted(expect_reasons), control, report, eager)
         if got != want:
             failures.append(f"  {name}: got {got}, contract {want}\n    {run.err}")
     assert not failures, (
@@ -1127,6 +1402,16 @@ def test_the_canary_pages_for_the_reasons_it_measured_and_no_others(
     assert reported == set(canary.RENDER_STATES), (
         f"declared report states {sorted(canary.RENDER_STATES)} but the "
         f"table can only reach {sorted(reported)}"
+    )
+    # The same claim for the eager control's states, and it is not a copy of
+    # the one above: the two instruments' state sets are DIFFERENT sets --
+    # this one has no `indeterminate` (there is no recorder to read; the
+    # answer is whether one line raised) and gains `cries-wolf`.
+    eager_reached = {row[6] for row in _CANARY_TABLE}
+    assert eager_reached == set(canary.EAGER_CONTROL_STATES), (
+        f"declared eager control states "
+        f"{sorted(canary.EAGER_CONTROL_STATES)} but the table can only "
+        f"reach {sorted(eager_reached)}"
     )
 
 
@@ -1186,6 +1471,18 @@ def test_the_canarys_live_control_row_reports_the_recorder_and_not_a_constant(
         stack = pytest.MonkeyPatch.context()
         monkeypatch = stack.__enter__()
         _stub_jax(monkeypatch, "runs")
+        # THE EAGER HALF IS STUBBED TOO, and it is not decoration: without
+        # this, `canary.main()` calls the REAL `arm_eager()` and then the REAL
+        # `disarm_eager()`, which restores jax's own attribute and clears the
+        # installation record -- so a session running with
+        # `--stelling-eager-truncation=error` had its detector taken out HERE
+        # and every later file ran unwatched. Measured before the escalation
+        # in `plugin.py` was made reachable: the session-wide armed run
+        # printed `NOT ARMED [detached]` and exited 0. Same defect as the
+        # `finally: disarm()` in `tests/test_tripwire_eager.py`, one file
+        # over: a test that takes an instrument out must put it back, and the
+        # cheapest way to put it back is never to touch it.
+        _stub_eager(monkeypatch, "clean")
 
         from stelling import _tripwire
         from stelling._tripwire import Status
@@ -1235,6 +1532,92 @@ def test_an_unrecognised_control_state_pages_rather_than_passing():
 
     wedged_report = canary._control_reasons("fired", "sideways", "x")
     assert [c for c, _ in wedged_report] == ["control:unknown-state"]
+
+
+def test_an_UNENUMERATED_eager_truncation_of_jax_s_own_pages(monkeypatch):
+    """The canary's half of the map that decides a SUPPRESSION.
+
+    ``_adapter_jax._JAX_EAGER_CONSTANTS`` records the eager truncations jax
+    performs itself; a narrowing matching no row is attributed to whoever
+    called jax and RAISES there. So a jax release that adds one turns into a
+    false alarm inside jax in every armed user's code, and this job's control
+    leg meets a new release before any CI lane does.
+
+    Driven directly rather than through ``main()``, for the reason
+    ``control:unknown-state`` is: what the sweep finds depends on the jax
+    installed, and this file's copy runs in the lane that has none. The
+    SHIPPED decision function is what is called; only what it is given is
+    chosen. ``tests/test_tripwire_eager.py`` drives the real sweep against
+    the real jax.
+    """
+    canary = _canary()
+    from stelling._tripwire import _adapter_jax as adapter
+
+    # nothing to sweep is a NOTE and never a reason: no jax, or a hook that
+    # did not attach, is not evidence that jax grew a constant.
+    note, reason = canary._eager_sweep_row(False)
+    assert reason is None and "not attached" in note
+
+    def _sweep(result):
+        monkeypatch.setattr(
+            adapter, "eager_jax_constant_sweep", lambda: result, raising=False
+        )
+
+    _sweep({"code": "not-armed", "conversions": 0, "truncations": 0,
+            "unmatched": (), "matched": ()})
+    note, reason = canary._eager_sweep_row(True)
+    assert reason is None and "not-armed" in note
+
+    _sweep({"code": "swept", "conversions": 675, "truncations": 13,
+            "x64": False,
+            "unmatched": (),
+            "matched": (("_src/random/threefry2x32.py", "_threefry_seed",
+                         4294967295, "uint32", "int32"),)})
+    note, reason = canary._eager_sweep_row(True)
+    assert reason is None, note
+    assert "675 conversion(s)" in note and "1 row(s) exercised" in note
+    assert "JAX_ENABLE_X64=1" not in note, (
+        "an x64-off sweep is the one that CAN find something, and the note "
+        f"disclaimed it: {note}"
+    )
+
+    # ...AND THE SAME NUMBERS FROM AN x64-ON SWEEP ARE NOT A CLEARANCE. With
+    # x64 on jax's mask widens to int64 and nothing of jax's narrows, so a
+    # zero there says the sweep could not have looked. The qualification
+    # travels with the number or a reader reads "0 unmatched" as "clean".
+    _sweep({"code": "swept", "conversions": 729, "truncations": 0,
+            "x64": True, "unmatched": (), "matched": ()})
+    note, reason = canary._eager_sweep_row(True)
+    assert reason is None, note
+    assert "JAX_ENABLE_X64=1" in note and "could not have found" in note, (
+        "a blind sweep printed its zeroes with no qualification, which reads "
+        f"exactly like a sweep that looked and found nothing: {note}"
+    )
+
+    _sweep({"code": "swept", "conversions": 675, "truncations": 14,
+            "unmatched": ((511, "int", "uint8",
+                           (("_src/somewhere.py", "new_thing"),)),),
+            "matched": ()})
+    note, reason = canary._eager_sweep_row(True)
+    assert reason is not None, "an unenumerated jax constant did not page"
+    code, sentence = reason
+    assert code == "eager:unenumerated-jax-constant"
+    assert "new_thing" in sentence, (
+        "the page does not name the jax function, so a reader has nothing to "
+        "write a row from"
+    )
+    assert "UNENUMERATED" in note
+
+    # a sweep that could not run says so and does not page: an instrument
+    # that did not measure has not measured that nothing happened.
+    def _boom():
+        raise RuntimeError("FORCED")
+
+    monkeypatch.setattr(
+        adapter, "eager_jax_constant_sweep", _boom, raising=False
+    )
+    note, reason = canary._eager_sweep_row(True)
+    assert reason is None and "RuntimeError" in note
 
 
 def test_the_four_fatal_control_findings_do_not_read_as_each_other(
@@ -1360,8 +1743,9 @@ def test_the_canarys_documented_exit_codes_are_exactly_the_ones_it_produces():
     # match: every code a real driven run printed must be in it. That is the
     # table, and the two codes no input can drive, which their own tests
     # above call directly.
-    driven = {code for _, _, _, reasons, _, _ in _CANARY_TABLE for code in reasons}
-    driven |= {"control:unknown-state", "hash:unknown-state"}
+    driven = {code for row in _CANARY_TABLE for code in row[3]}
+    driven |= {"control:unknown-state", "hash:unknown-state",
+               "eager:unenumerated-jax-constant"}
     assert driven <= produced, (
         f"runs of this script printed {sorted(driven - produced)}, which the "
         "parse above did not find in its source: the reasons are no longer "
@@ -1459,6 +1843,17 @@ def test_the_canary_and_the_workflow_agree_about_the_two_legs():
             "leg goes green with the alarm switched off -- `auto` is right "
             f"for a user's suite and wrong for the canary: {runs}"
         )
+        # AND NEITHER LEG SWITCHES OFF THE CONSTANT SWEEP. `--no-sweep` is
+        # default-off and exists for this repository's own exit-code battery,
+        # which drives the script a dozen times in a subprocess and would
+        # otherwise pay twelve times for one measurement. On a WORKFLOW leg it
+        # would silently retire the earliest signal there is that jax has
+        # grown an eager truncation nobody has written a row for.
+        assert all("--no-sweep" not in line for line in runs), (
+            f"the `{job}` leg passes `--no-sweep`, which turns off the "
+            "re-derivation of `_JAX_EAGER_CONSTANTS` on the only job that "
+            f"meets a new jax release before any CI lane does: {runs}"
+        )
 
     # AND NEITHER LEG WAITS FOR THE OTHER. The comment over the `control` job
     # says the two run concurrently and argues that sequencing them would be
@@ -1490,6 +1885,72 @@ def test_the_canary_and_the_workflow_agree_about_the_two_legs():
         assert not claims, (
             f"{where} describes a leg as pinned and no leg pins its jax "
             f"version: {[m.group(0) for m in claims]}"
+        )
+
+
+def test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN():
+    """An alarm wired to a condition that cannot occur is not an alarm.
+
+    The canary's eager CONSTANT SWEEP is the earliest signal there is that jax
+    has grown an internal eager truncation nobody has written a row for -- and
+    it can only find one with ``JAX_ENABLE_X64`` OFF. With x64 on, jax's own
+    threefry mask widens to ``int64``, it fits, and NOTHING of jax's narrows,
+    so ``unmatched`` is empty by construction whatever the installed jax does.
+    Measured on jax 0.11.0: 729 conversion(s), 0 truncation(s), 0 row(s)
+    exercised at x64=1 against 675, 13, 1 at x64=0.
+
+    For one commit both legs of that workflow set ``JAX_ENABLE_X64: "1"`` and
+    nothing else, while `docs/overflow-tripwire.md` said the nightly canary
+    runs the sweep. Both halves were true and the conjunction was not: the
+    page could not fire on either leg. This reads the workflow rather than the
+    sentence, because the sentence is what was already wrong.
+    """
+    import re
+
+    workflow = (
+        _pathlib_for_canary() / ".github" / "workflows" / "nightly-jax-canary.yml"
+    ).read_text(encoding="utf-8")
+
+    starts = [
+        (m.start(), m.group(1))
+        for m in re.finditer(r"\n  ([a-z-]+):\n    name: ", workflow)
+    ]
+    assert starts, "no jobs found; the workflow layout this test reads has moved"
+    bounds = [pos for pos, _ in starts] + [len(workflow)]
+    for index, (_, job) in enumerate(starts):
+        block = workflow[bounds[index]:bounds[index + 1]]
+        # RESOLVE THE SETTING THE WAY THE RUNNER DOES: a step's own `env:`
+        # wins, else the job's (which lives in the block HEAD, before
+        # `steps:`), else the workflow's top-level one. Reading only the step
+        # chunk and calling a miss "unset" is how this guard first went blind:
+        # hoisting the repeated `env:` up to the job -- a tidy-up this
+        # workflow openly invites, four steps repeat it -- left every canary
+        # run at x64=1 with the guard still green. What must NOT leak is
+        # ANOTHER STEP's `env:`, so the per-step search stays per-step and the
+        # job's is taken from the head alone. Anchored, because a comment
+        # QUOTING the setting is not the workflow setting it -- two of the
+        # mutants that killed the old guard were caught only by that accident.
+        setting_re = re.compile(r'^\s*JAX_ENABLE_X64:\s*"?([01])"?', re.M)
+        head = block.split("\n    steps:", 1)[0]
+        inherited = setting_re.search(head) or setting_re.search(
+            workflow.split("\njobs:", 1)[0]
+        )
+        cells = []
+        for step in re.split(r"\n      - (?=name:|uses:|run:)", block)[1:]:
+            if not re.search(r"^\s*run:[^\n]*tripwire_canary\.py", step, re.M):
+                continue
+            setting = setting_re.search(step) or inherited
+            cells.append(setting.group(1) if setting else "unset")
+        assert cells, (
+            f"the `{job}` leg does not run the canary at all"
+        )
+        assert any(cell in ("0", "unset") for cell in cells), (
+            f"every `tripwire_canary.py` step on the `{job}` leg runs at "
+            f"JAX_ENABLE_X64={cells}, and the eager constant sweep cannot "
+            "find an unenumerated jax constant at x64=1: jax's own mask "
+            "widens to int64, nothing of jax's narrows, and `unmatched` is "
+            "empty by construction. That leg cannot go red for the reason "
+            "`eager:unenumerated-jax-constant` exists"
         )
 
 

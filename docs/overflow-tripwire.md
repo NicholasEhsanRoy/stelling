@@ -209,6 +209,309 @@ the jaxpr intact and the narrowing is a run-time `convert_element_type` (`x //
 N`, `x % N`, `where`, `clip`, `pad`) — the trace gate has nothing to see there,
 and the propagation's convert transfer declines the form instead.
 
+## The eager door, and the second instrument that closes it
+
+Everything above is about ONE door: a constant that survives into the trace and
+dies in jax's const-fold rule. There is a second door, and the tripwire cannot
+see through it at all.
+
+<!-- doc-example: illustrative -->
+```python
+OFFSET = jnp.full((), 256, jnp.int8)   # this is 0. jax says nothing.
+```
+
+The 256 is narrowed at array *construction*, inside
+`jax._src.lax.lax._convert_element_type`, before any primitive is bound. There
+is no fold to observe, no jaxpr that ever held a 256, and nothing for a
+const-fold hook to see — which is why `jnp.full` and everything built on it are
+UNCOVERED rows in the table above. `SOUNDNESS.md` records what that costs: a
+harness whose obligation is false at every declared point, and a **VERIFIED**.
+
+`--stelling-eager-truncation=error` attaches a second, independent instrument
+to that construction site. It does not report; it **raises**, at the line that
+wrote the constant:
+
+```console
+$ pytest --stelling-eager-truncation=error
+```
+
+```
+stelling: 300 was TRUNCATED to 44 at its construction site, and 300 does not
+exist anywhere in the program jax will run.
+
+    written   300
+    dtype     int8  (range -128 .. 127)
+    became    44
+    arithmetic  300 mod 2**8 = 44, which is < 2**7, so 44
+    at        /home/you/project/offsets.py:12, in build()
+              return jnp.full((4,), 300, jnp.int8)
+```
+
+**It is off by default and it is not turned on by `--stelling-overflow`.** Two
+dials, because they are two instruments: the tripwire is a *report* over a
+session and can be armed on a suite that has undeclared truncations in it,
+while this is a *rule* — a session it is armed on either contains no undeclared
+truncation or does not finish.
+
+### It raises `BaseException`, deliberately
+
+`stelling.EagerTruncationError` inherits **directly from `BaseException`**, so
+an ordinary `except Exception:` cannot swallow it. That is not defensiveness:
+the alarm fires inside arbitrary code — inside `jnp.full`, inside a library's
+constructor, inside a `jit` body — and numerical Python is full of
+`except Exception:` written for retries, fallback kernels and warnings shims.
+An alarm saying *the constant you wrote does not exist in the program that will
+run*, caught by a handler written for something else, is a silent program with
+extra steps. `KeyboardInterrupt` and `SystemExit` sit under `BaseException` for
+the same reason.
+
+**"Uncatchable" is not achievable in Python and stelling does not claim it.**
+`except BaseException:`, a bare `except:` and `contextlib.suppress(BaseException)`
+all still catch this. The claim is exactly one thing: the *common* swallow does
+not. And it has a cost worth knowing before you switch it on — `finally:` blocks
+still run, but cleanup written as `except Exception: release()` does **not**, so
+a caller who releases a resource there and not in a `finally:` will leak it.
+
+### If the wrap is what you meant, declare it
+
+<!-- doc-example: illustrative -->
+```python
+from stelling import intentional_wrap
+
+MASK = jnp.full((4,), intentional_wrap(0xFF, "int8"), jnp.int8)   # -1
+```
+
+`intentional_wrap(value, dtype)` returns the wrapped integer, so the value that
+reaches jax is the value jax would have produced anyway — the program is
+byte-identical with the detector on, off, or uninstalled. It needs no jax and
+no numpy, and it is recorded: the session report prints every declaration with
+its site.
+
+Three properties, and they are why this shape and not a flag or a suppression
+list:
+
+* **it is exact**, because you assert it rather than the tool inferring it;
+* **it cannot license a different site** — it is a value, not a mode;
+* **it cannot hide a truncation at a different dtype**. The dtype is half the
+  declaration, and sometimes a declaration that drifted from its use fires:
+  `intentional_wrap(0xFF, "int8")` is `-1`, which `uint8` cannot hold. Often
+  it does not: `intentional_wrap(300, "int8")` is `44`, which every other
+  integer dtype holds — 53 of 98 measured (declaration, misuse) pairs pass
+  silently. What is guaranteed is narrower and is the part that matters: in
+  every silent case the declared value is *in range* at the new dtype, so
+  nothing is narrowed there and no truncation is hidden. Writing the wrong
+  constant is a bug; it is not one this detector claims to catch.
+
+**There is no value-based exemption, and there will not be one.**
+`jnp.full((4,), 0xFF, jnp.int8)` and `jnp.full((4,), 255, jnp.int8)` produce
+*identical* observations at the hook — same written value, same dtype, same
+result, same frame — and differ only in source text, which a variable, an
+imported constant or a computed value does not carry at all, so a rule that
+read the line would work for literals and abstain for exactly the mask idiom
+it was meant to recognise. Two candidate heuristics were driven over a
+corpus of real narrowings: "a negative into an unsigned dtype is deliberate"
+hard-errors correct code 7 times and lets a real bug through once; "an all-ones
+result is deliberate" is 5 and 2. Both are wrong in both directions.
+
+For code whose *subject* is the truncation — a test that demonstrates a door
+narrows in silence, a reproducer in a disclosure — there is
+`stelling._tripwire.eager.expected_truncation(reason)`, a context manager
+taking a mandatory reason. Everything it permits is counted and printed with
+that reason. It is deliberately the awkward one.
+
+It is **dynamically scoped**, not lexically bounded: the region is open from
+`__enter__` to `__exit__`, in whatever code runs between them. Another thread
+is not licensed, and neither is another `asyncio` task on the same loop — the
+region stack is a `contextvars.ContextVar`. A **generator** suspended inside a
+region is the exception and it is not fixable: a plain generator shares its
+caller's context, so a region it entered and has not left is open in the code
+that resumed it. Prefer `intentional_wrap`, which has no scope beyond the
+expression it is written in.
+
+### What it closes, and what it does not
+
+Six of the seven `unwatched` routes in
+`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` move from "silently
+certifies a destroyed constant" to "cannot be traced at all": `jnp.full`,
+`jnp.full_like`, `lax.full`, `lax.full_like`, `lax.convert_element_type` and
+`jnp.stack`-of-`full`, plus `lax.select`-of-`full` and `jnp.take`'s
+`fill_value`. A scoped `with jax.disable_jit():` closes too, and for the same
+reason: the constant it wraps is narrowed at this very site on the way in.
+
+Two named routes remain, and both are numpy finishing before jax is reached:
+
+* `np.asarray(N).astype(dt)` is **permanently** unhookable —
+  `np.ndarray.astype` is an immutable type attribute, so there is nothing to
+  patch, and numpy emits no warning for it even under
+  `warnings.simplefilter("error")`;
+* `jnp.asarray(np.array(N), dtype=dt)` is a second spelling into the same
+  residue.
+
+Both are declared `unwatched` in `GATE_COVERAGE`, declared `silent` in
+`EAGER_COVERAGE` beside it, and a test asserts the residue is exactly those
+two — so a third cannot join them quietly.
+
+**And most of the table above is untouched by this**, which is worth saying
+plainly because "six of seven" invites the wrong reading. The rows this
+detector does NOT close, each re-measured with it armed:
+
+* **eager execution of the inline door** — `a + 256` outside `jit` still
+  wraps, and the construction site is reached **0** times. The constant is
+  promoted to an array before it gets there;
+* **`jnp.where(pred, N, x)`, `jnp.clip` at either bound, `jnp.pad`** — 0
+  conversions at this site, for the same reason they reach 0 invocations of
+  the const-fold rule: the literal sits at the enclosing call site and the
+  narrowing happens on a sub-jaxpr *variable*;
+* **`x % N`, `x // N`, `jnp.searchsorted`** — same mechanism, same answer.
+
+Those are `report.UNCOVERED`'s bullets 1, 2 and 3, and they stay open. What
+closes is bullet 4 except its numpy clause, and bullet 5's scoped
+`disable_jit` door.
+
+**With `jit` off, jax narrows its OWN constants eagerly**, and this detector
+sits where that happens. Its threefry PRNG mask is `4294967295 -> -1` at
+`int32`, and a rule that raised on it would stop every test that touches
+`jax.random` under `jax.disable_jit()` or `JAX_DISABLE_JIT=1` — and, because
+`chex.fake_jit()` installs `jax.disable_jit()` around a test body, **also with
+jax's own defaults untouched**: any suite using `chex.variants(without_jit=True)`
+in its default configuration meets jax's eager mask with `jit` ON. That is not
+a `JAX_DISABLE_JIT=1` special case; it is a public chex API, confirmed at
+`chex/_src/fake.py:256`. Such a rule would ask you to declare a constant you
+never wrote, sometimes at a line inside a library you cannot edit.
+
+So the detector does not GUESS whether a constant is jax's. **It looks it up.**
+A map records what jax writes, keyed on the jax function that writes it, the
+exact value, the dtype the value ARRIVES in, and the dtype it is narrowed to:
+
+```
+("_src/random/threefry2x32.py", "_threefry_seed"): 4294967295, uint32 -> int32
+```
+
+A narrowing is attributed to jax when, and only when, one of those functions is
+in the unbroken run of jax frames beneath your line AND the value and both
+dtypes are that row's. **Everything else is yours and raises.** Each
+suppression is counted and printed with the site of your call, the jax function
+that wrote the constant, and what the constant is.
+
+**The source dtype is in the key because without it a row can suppress YOUR
+constant.** At that one site your seed and jax's mask collide:
+`jax.extend.random.threefry_prng_impl.seed(np.int64(2**32 - 1))`, **under
+`jax.disable_jit()`**, narrows twice under `_threefry_seed` — your seed and
+jax's mask, both `4294967295 -> -1` at `int32` — and a row without the source
+dtype suppressed both, then printed
+*"written by jax … the threefry PRNG's 32-bit mask"* at your own line. They
+differ in one field the hook can see: all 13 of jax's own truncations arrive
+from `uint32`, and a seed you pass arrives from `int64`.
+
+That map has **one row**, and that is the measurement rather than an omission.
+A sweep of jax's own integer surface under `disable_jit` — every key
+implementation and seed spelling, then `jax.random`'s consumers and `jnp`'s
+integer ops over six integer dtypes — sees 675 conversions and 13 truncations
+of jax's own, and **all 13 are that one row**, identically on jax 0.11.0 and
+0.10.2. It is shipped code, not a note: it runs as a test on both jax series,
+so a release that adds a second one turns a lane red, and **both legs of the
+nightly jax canary run it too, at `JAX_ENABLE_X64=0`** — which is the only
+setting it can find anything at. With x64 on, jax's mask widens to `int64`, it
+fits, and nothing of jax's narrows: the sweep sees 729 conversions, 0
+truncations and 0 rows exercised, against 675 / 13 / 1 with x64 off (jax
+0.11.0), so its zeroes there mean it did not look rather than that it looked
+and found nothing. For one commit both canary legs ran at x64 on only, which
+made that page an alarm wired to a condition that could not occur; each leg
+now runs the canary in both cells and the x64-on run prints the
+qualification.
+
+**The residue is the one an enumeration has, and it is loud.** A jax release
+that adds an internal eager truncation nobody has written a row for is
+attributed to *whoever called jax* and raises, at a line inside jax you did not
+write. The alarm says so in its own message and prints jax's own frames beneath
+your line, so a report is one paste away. That is the direction this instrument
+fails in on purpose: an over-report is visible to you, holding the quoted line;
+a suppression is not.
+
+**The other residue is a collision, and it is the quiet one.** A row is a value
+lookup, not a proof of authorship, so a narrowing of yours that agrees with a
+row in every field — value, source dtype, target dtype, and a jax function in
+the run — is attributed to jax and does not raise. No route this repository has
+measured reaches that state any more (a `uint32` seed of the same value
+promotes to `uint32` and does not narrow at all), but a sweep is a sample and
+the shape stands. It is `report.EAGER_UNCOVERED`'s bullet on collisions.
+
+### A seed that does not survive, which this detector cannot see
+
+**`jax.random.PRNGKey(2**32)` is `jax.random.PRNGKey(0)`, silently, and nothing
+here says so.** `PRNGKey` and `key` cast the seed with
+`jnp.asarray(np.int64(seeds))` inside jax's own `random_seed`
+(`jax/_src/random/prng.py`, line 558 on jax 0.11.0), and that cast is
+NUMPY-level — it happens before the construction site this detector patches, so
+the hook records **zero** observations of your seed, with `jit` on and with
+`jit` off alike. Measured on jax 0.11.0 with x64 off:
+
+```
+PRNGKey(2**32 - 1) == PRNGKey(-1)     True
+PRNGKey(2**32)     == PRNGKey(0)      True
+PRNGKey(2**33 + 5) == PRNGKey(5)      True
+```
+
+The one observation that program *does* produce at the hook is jax's own mask
+(`4294967295` from `uint32`, `jit` off only), which is correctly suppressed. So
+**`no alarm` on `jax.random.PRNGKey(N)` means "stelling saw nothing of yours",
+not "your seed survived."** A seed wider than `int32` is not covered, and
+closing it needs a hook at a numpy cast rather than at jax's constructor —
+a different design, not a patch. It is disclosed in the section's own coverage
+list.
+
+**The lower-level entry point is the same story with `jit` ON — and it is the
+program the source-dtype fix above is sold on.** `_threefry_seed` is `@jit`, so
+in the **default** configuration your seed is canonicalised to `int32` at jax's
+argument boundary, before any trace begins. Measured on jax 0.11.0, x64 off:
+
+```
+threefry_prng_impl.seed(np.int64(2**32 - 1))   ==  seed(np.int64(-1))   True
+                                                   both [0 4294967295]
+
+  jit ON   eager detector:      0 conversions of your seed, no alarm
+           const-fold tripwire: 1 narrowing — jax's own mask at
+                                threefry2x32.py:73, uint32 4294967295,
+                                correctly suppressed
+  jit OFF  eager detector:      1 conversion, 1 truncation, RAISES at your
+                                line, 4294967295 -> -1
+```
+
+So **with jax's defaults that call kills your seed and neither instrument
+reports it.** Turning `jit` off is what makes it visible, which means the
+collision worked through above is a `disable_jit` phenomenon; with
+`JAX_ENABLE_X64=1` the seed survives and there is nothing to report. Closing
+this is the same numpy-cast hook as the paragraph above, and it is not
+attempted here.
+
+### It fails closed
+
+This patches a private jax function, so drift must refuse rather than stop
+watching. Arming verifies the module and the attribute are where they are
+expected, that `inspect.signature`'s first two parameters are still
+`operand` and `new_dtype` and still passable positionally, and then **drives
+every construction route it claims, in both directions**. If one route stops
+reaching the site — the silent failure a jax release actually produces — it
+reports `route-blind:<route>` and does not attach. Keeping five routes and
+losing one quietly is not a trade the tool makes on your behalf.
+
+Arming also drives **the attribution itself**, which the route probes cannot:
+they swap in a collector, so they never reach the function that decides whether
+a narrowing raises. One narrowing of each origin goes through the live policy —
+a constant written at no enumerated jax site, which must raise, and
+`jax.random.key(0)` under `jax.disable_jit()`, which must be attributed to jax.
+If the second one stops holding, the map no longer names jax's own mask, the
+next `jax.random` call under `disable_jit` would raise inside jax, and arming
+reports `origin-blind:jax-attributed-to-you` and does not attach. The control
+leaves your counters exactly as it found them.
+
+The nightly jax canary arms it, drives a live control both ways, and checks
+the site's source hash against a per-release map (`_KNOWN_EAGER_HASHES`, keyed
+on the exact release, recorded and never gated on). It also asks, once and
+while both hooks are live, the one displacement question that covers **both**
+of them: is stelling's wrapper still the live one? A `no` there is
+`hooks:displaced` and it names which.
+
 ## Reading the report
 
 **The denominator is always printed**, in the form the tool actually prints it:
@@ -260,11 +563,23 @@ this tool at any time. When that happens:
 
 The codes are stable and greppable: `no-module`, `no-registry`, `no-entry`,
 `not-invoked`, `cries-wolf`, `mis-attributed`, `below-floor`, `foreign-patch`,
-`detached`, `no-worker-reported`, `mixed`, `unexpected:<ExcType>`.
+`detached`, `no-worker-reported`, `mixed`, `no-site-module`, `no-site`,
+`signature-drift`, `route-blind`, `unexpected:<ExcType>`.
 
-The last two belong to an xdist **controller**, which never arms and whose
-status is its workers' agreement: `no-worker-reported` when not one worker
-sent a status back, `mixed` when they disagreed.
+`no-worker-reported` and `mixed` belong to an xdist **controller**, which never
+arms and whose status is its workers' agreement: the first when not one worker
+sent a status back, the second when they disagreed.
+
+The last four belong to the **eager construction-site detector**, which
+attaches to a private jax *function* rather than a registry entry:
+`no-site-module` and `no-site` are the module and the attribute not being where
+they are expected; `signature-drift` is the function being there with its first
+two parameters moved, which a presence check would pass; and
+`route-blind:<route>` is the one that matters — the function is there, the hook
+is installed, and jax has stopped sending one construction route through it.
+That last failure is silent, it is what a jax release actually produces, and
+the detector refuses to attach rather than watching five routes and quietly
+losing the sixth.
 
 ### It can also stop being armed part-way through
 
@@ -395,7 +710,9 @@ trace time, never of whether the plugin is installed.
 | `--stelling-overflow=auto` | switch on; report if it cannot arm, exit code unaffected |
 | `--stelling-overflow=require` | switch on; **fail the session** if it cannot arm |
 | `--stelling-overflow=off` | off, even if the plugin above is loaded |
-| *(nothing)* | off — the default |
+| `--stelling-eager-truncation=error` | switch on the **eager construction-site detector**; an undeclared truncation raises, and the session **fails** if the detector cannot attach |
+| `--stelling-eager-truncation=off` | off — the default, and `--stelling-overflow` does not change it |
+| *(nothing)* | both off — the default |
 
 ### If your CI sets `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`
 
@@ -410,6 +727,15 @@ not**, and it does not fail quietly — pytest exits 4 with
 
 ```console
 $ pytest -p stelling.overflow --stelling-overflow=require
+```
+
+**`--stelling-eager-truncation` is registered by the same plugin and has the
+same property.** Naming `stelling.overflow` loads the plugin without arming
+the tripwire — the two dials are independent — so this is the spelling for the
+eager detector alone under `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`:
+
+```console
+$ pytest -p stelling.overflow --stelling-overflow=off --stelling-eager-truncation=error
 ```
 
 Tested against JAX 0.10.2 and 0.11.0. A newer JAX arms anyway and the report

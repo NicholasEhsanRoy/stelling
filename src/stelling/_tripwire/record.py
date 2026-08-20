@@ -23,6 +23,19 @@ verdict that is replayed before it is reported.
 often the writer and sometimes only the *caller* of a jax function that wrote
 the constant itself — jax's own PRNG mask is exactly that shape. Measured
 stacks for both are in :func:`attribute`'s docstring.
+
+**The same question is asked at a second site, and NOT by this function.**
+:func:`attribute` answers it from the FRAMES, which is what the const-fold
+site affords: a trace boundary separates the traced function from its caller.
+The eager construction site has no trace boundary and, measured, no frame
+shape that separates the two cases at all. A general predicate over the DATA
+crossing the call — *"is the narrowed integer among the arguments the caller
+handed over?"* — lived here for one revision and was withdrawn: it was a
+proxy, it was measurably wrong in both directions, and a sweep found that
+the problem it generalises over has exactly ONE instance. What replaced it
+is an enumerated map of jax's own eager truncations, in
+``_adapter_jax._JAX_EAGER_CONSTANTS``, consulted by ``eager._origin``. The
+argument is in that map's own comment.
 """
 
 from __future__ import annotations

@@ -71,10 +71,25 @@ def _isolate(pytester, monkeypatch):
         "PYTHONPATH", os.pathsep.join([src, existing]) if existing else src
     )
     monkeypatch.setenv("JAX_PLATFORMS", "cpu")
+    from stelling._tripwire import eager as _eager
+
+    eager_was_armed = _eager.is_armed()
     yield
     from stelling import _tripwire
 
     _tripwire.disarm()
+    # BOTH HOOKS. `runpytest` is in-process by default, so a nested session
+    # that arms the EAGER detector arms it here -- and leaving it armed would
+    # turn every later test in the outer suite into a test of it. Restored
+    # rather than disarmed, for the same reason the tripwire's own fixtures
+    # are: this suite is meant to be runnable with the detector armed for the
+    # whole session, and unconditionally disarming would take that out.
+    if _eager.is_armed() != eager_was_armed:
+        if eager_was_armed:
+            _tripwire.arm_eager()
+        else:
+            _tripwire.disarm_eager()
+    _eager.reset_counters()
 
 
 def _run(pytester, *args):
@@ -573,3 +588,322 @@ def test_naming_the_opt_in_module_is_never_a_DOUBLE_registration(
         assert "already registered under a different name" not in both
         result.assert_outcomes(passed=1)
         assert "the constant written there is 300" in result.stdout.str()
+
+
+# --- the eager construction-site detector's dial -----------------------------
+#
+# THESE MEASURE A PROCESS WITH NOTHING ARMED, and `pytester.runpytest` is
+# in-process by default, so "nothing armed" has to be arranged rather than
+# assumed: a session run with `--stelling-eager-truncation=error` arms the
+# detector HERE, and a nested session's wrapping construction would then be
+# refused by the outer process's hook rather than by the one under test.
+# Measured, running this suite with that flag: three of the tests below failed
+# for that reason and for no other.
+
+
+@pytest.fixture
+def outer_detector_off():
+    """The detector off for this test, and back as it was afterwards."""
+    from stelling import _tripwire
+    from stelling._tripwire import eager as _eager
+
+    was_armed = _eager.is_armed()
+    if was_armed:
+        _tripwire.disarm_eager()
+    try:
+        yield
+    finally:
+        if was_armed:
+            _tripwire.arm_eager()
+
+
+WRAPPING_CONSTRUCTION = """
+    import jax.numpy as jnp
+
+    def build():
+        return jnp.full((4,), 300, jnp.int8)
+
+    def test_construct():
+        assert int(build().ravel()[0]) == 44
+"""
+
+DECLARED_CONSTRUCTION = """
+    import jax.numpy as jnp
+    from stelling import intentional_wrap
+
+    def build():
+        return jnp.full((4,), intentional_wrap(300, "int8"), jnp.int8)
+
+    def test_construct():
+        assert int(build().ravel()[0]) == 44
+"""
+
+
+def test_the_eager_dial_is_registered_always_and_off_always(
+    pytester, outer_detector_off
+):
+    """The property a user who never asked for this depends on, for the
+    SECOND instrument now as well as the first.
+
+    The flag is in ``--help`` — the positive control that the plugin really
+    is loaded — and a session that does not pass it constructs a wrapping
+    array, passes, prints no eager section, and leaves the private jax
+    attribute untouched.
+    """
+    from stelling._tripwire import eager
+
+    pytester.makepyfile(WRAPPING_CONSTRUCTION)
+    assert "--stelling-eager-truncation" in _run(pytester, "--help").stdout.str()
+    result = _run(pytester)
+    result.assert_outcomes(passed=1)
+    assert "stelling eager truncation detector" not in result.stdout.str()
+    assert not eager.is_armed()
+
+
+def test_switching_the_tripwire_on_does_NOT_switch_the_eager_detector_on(
+    pytester, outer_detector_off,
+):
+    """Two dials, and neither implies the other.
+
+    The tripwire is a report and can be armed on a suite that contains
+    undeclared truncations; the eager detector is a rule. Turning on the
+    first must not turn on the second, or a user who wanted a report gets a
+    suite that stops.
+    """
+    from stelling._tripwire import eager
+
+    pytester.makepyfile(WRAPPING_CONSTRUCTION)
+    result = _run(pytester, "--stelling-overflow=auto")
+    result.assert_outcomes(passed=1)
+    assert "stelling overflow tripwire" in result.stdout.str()
+    assert "stelling eager truncation detector" not in result.stdout.str()
+    assert not eager.is_armed()
+
+
+def test_the_eager_dial_turns_a_silent_wrap_into_a_stopped_session(pytester):
+    """The whole feature, through a real session.
+
+    The same test file passes with the dial off and does not pass with it on,
+    and the alarm arrives in the report as itself: the written value, the
+    dtype, what it became, and the line that wrote it.
+
+    IT IS A FAILURE AND NOT AN ERROR, measured rather than assumed. An
+    earlier version of this test asserted ``errors=1`` on the reasoning that
+    a ``BaseException`` from a test body is not a failed assertion; pytest
+    does not agree, and files a ``BaseException`` raised in a body exactly
+    where it files any other. What the ``BaseException`` choice buys is which
+    handlers cannot swallow the alarm, not how pytest categorises it.
+    """
+    pytester.makepyfile(WRAPPING_CONSTRUCTION)
+    result = _run(pytester, "--stelling-eager-truncation=error")
+    assert result.ret != 0
+    result.assert_outcomes(failed=1)
+    out = result.stdout.str()
+    assert "stelling eager truncation detector" in out
+    assert "300 was TRUNCATED to 44" in out
+    assert "intentional_wrap(300, 'int8')" in out, (
+        "the alarm does not tell the reader what to write instead"
+    )
+
+
+def test_a_DECLARED_wrap_passes_the_same_session_and_is_printed(pytester):
+    """The declaration, end to end, and the report that discloses it.
+
+    A premise nobody can see is indistinguishable from the silence the
+    detector exists to end, so the section names the site and the arithmetic.
+    """
+    pytester.makepyfile(DECLARED_CONSTRUCTION)
+    result = _run(pytester, "--stelling-eager-truncation=error")
+    result.assert_outcomes(passed=1)
+    assert result.ret == 0
+    out = result.stdout.str()
+    assert "1 wrap(s) DECLARED" in out
+    assert "300 -> 44 (int8)" in out
+
+
+def test_the_eager_section_prints_its_denominator_with_nothing_to_report(
+    pytester,
+):
+    """"0 truncations" is what a hook that was never called reports too."""
+    pytester.makepyfile(
+        """
+        import jax.numpy as jnp
+
+        def test_in_range():
+            assert int(jnp.full((4,), 44, jnp.int8).ravel()[0]) == 44
+        """
+    )
+    result = _run(pytester, "--stelling-eager-truncation=error")
+    result.assert_outcomes(passed=1)
+    out = result.stdout.str()
+    assert "scalar integer conversion(s) observed" in out
+    assert "of them were out of range" in out
+    assert "what this detector does NOT see" in out
+
+
+def test_a_session_that_asked_for_the_rule_and_cannot_get_it_FAILS(
+    pytester, outer_detector_off
+):
+    """There is no degraded mode, and this is what that means in practice.
+
+    The tripwire has a ``require`` spelling because it has a degraded mode
+    worth having — an unarmed tripwire still lets a suite run and still says
+    why it is not watching. This has none: a detector that could not attach
+    is not a quieter rule, it is no rule, and a session that asked for one and
+    silently did not get it is the false assurance the instrument exists to
+    remove. So arming failure is fatal with no flag to ask for it.
+    """
+    from stelling._tripwire import _adapter_jax as adapter
+
+    pytester.makepyfile(WRAPPING_CONSTRUCTION)
+    assert adapter.eager_detach("signature") == "detached"
+    try:
+        result = _run(pytester, "--stelling-eager-truncation=error")
+    finally:
+        adapter.eager_reattach()
+    assert result.ret != 0, "a session that could not attach the rule passed"
+    assert "signature-drift" in result.stderr.str() + result.stdout.str()
+
+    # the control: the same session on the same jax passes
+    control = _run(pytester, "--stelling-eager-truncation=error")
+    assert control.ret != 0  # the wrapping construction still stops it
+    assert "signature-drift" not in control.stdout.str()
+
+
+EAGER_DETACHES_MIDWAY = """
+    import jax.numpy as jnp
+
+    def test_1_before():
+        assert int(jnp.full((2,), 5, jnp.int8).sum()) == 10
+
+    def test_2_displace_the_hook():
+        from stelling._tripwire import _adapter_jax as adapter
+        module = adapter._eager_module()
+        setattr(module, adapter.EAGER_ATTR, adapter._eager_installed["original"])
+
+    def test_3_after_and_unwatched():
+        assert int(jnp.full((2,), 300, jnp.int8).sum()) == 88
+"""
+
+
+@pytest.mark.parametrize(
+    "overflow",
+    [(), ("--stelling-overflow=off",), ("--stelling-overflow=auto",)],
+    ids=["eager-alone", "overflow-off", "overflow-auto"],
+)
+def test_the_eager_ESCALATION_does_not_depend_on_the_OTHER_dial(pytester, overflow):
+    """A rule that could not stay attached must fail the session, in every
+    spelling of "the eager detector on".
+
+    THE ESCALATION USED TO SIT BELOW ``if state.recorder is None: return``,
+    which is the tripwire's guard, and ``state.recorder`` is None exactly when
+    ``--stelling-overflow=off`` -- the spelling ``docs/overflow-tripwire.md``
+    recommends for running this detector alone. Measured, with the hook
+    displaced mid-session: eager-alone exited 0, ``--stelling-overflow=off``
+    exited 0, and only ``--stelling-overflow=auto`` exited 1. The two
+    instruments are two dials and neither may need the other switched on.
+    """
+    pytester.makepyfile(EAGER_DETACHES_MIDWAY)
+    result = _run(pytester, "--stelling-eager-truncation=error", *overflow)
+    out = result.stdout.str()
+    assert result.ret != 0, (
+        "the eager detector was displaced mid-session and the session passed:"
+        f"\n{out[-3000:]}"
+    )
+    assert "foreign-patch" in out or "detached" in out, out[-3000:]
+
+
+def test_the_same_session_with_the_eager_hook_LEFT_ALONE_is_green(pytester):
+    """The control. A check that failed every session would satisfy the test
+    above, so the same three tests without the displacement must pass."""
+    pytester.makepyfile(
+        EAGER_DETACHES_MIDWAY.replace(
+            'setattr(module, adapter.EAGER_ATTR, adapter._eager_installed["original"])',
+            "assert module is not None",
+        ).replace("jnp.full((2,), 300, jnp.int8).sum()) == 88",
+                  "jnp.full((2,), 3, jnp.int8).sum()) == 6")
+    )
+    result = _run(
+        pytester, "--stelling-eager-truncation=error", "--stelling-overflow=off"
+    )
+    assert result.ret == 0, result.stdout.str()[-3000:]
+    assert "NOT ARMED" not in result.stdout.str()
+
+
+# --- the eager detector's xdist aggregation, without xdist --------------------
+#
+# `tests/test_tripwire_xdist.py` drives a real worker split and SKIPS in every
+# environment this repository routinely measures in (no venv here carries
+# `pytest-xdist`; only the `test-jax` CI lane does). The two pieces of
+# controller logic that do not need a worker are the merge arithmetic and the
+# agreement rule, and those are driven here so that they are covered
+# somewhere that runs. This is not a substitute for that file and does not
+# claim to be: what is untested here is that a payload CROSSES.
+
+
+def test_two_workers_eager_snapshots_are_summed_and_their_sites_kept():
+    """A sum, and the per-site rows survive it.
+
+    The totals alone cannot answer the question the section exists for --
+    WHERE was a wrap declared -- and two workers that each declared a wrap at
+    the same line are two declarations at one site, not one.
+    """
+    from stelling._tripwire.plugin import _merge_eager
+
+    a = {
+        "conversions": 10, "truncations": 2, "internal_errors": 1,
+        "suppressed_jax": 1,
+        "declared": {"f.py:1": [1, "300 -> 44 (int8)"]},
+        "permitted": {"g.py:9": [2, "because"]},
+        "suppressed": {"y.py:3": [1, "4294967295 -> -1 (int32)"]},
+    }
+    b = {
+        "conversions": 5, "truncations": 1, "internal_errors": 0,
+        "suppressed_jax": 2,
+        "declared": {"f.py:1": [3, "300 -> 44 (int8)"],
+                     "h.py:7": [1, "255 -> -1 (int8)"]},
+        "permitted": {},
+        "suppressed": {"y.py:3": [2, "4294967295 -> -1 (int32)"]},
+    }
+    merged = _merge_eager(_merge_eager(None, a), b)
+    assert merged["conversions"] == 15
+    assert merged["truncations"] == 3
+    assert merged["internal_errors"] == 1
+    assert merged["declared"]["f.py:1"][0] == 4, "the same site did not sum"
+    assert merged["declared"]["h.py:7"][0] == 1
+    assert merged["permitted"]["g.py:9"] == [2, "because"]
+    # EVERY KEY THE SNAPSHOT CARRIES HAS TO BE IN THE MERGE, or a worker's
+    # figure is silently dropped on the controller. Asserted against the
+    # snapshot itself rather than against a list typed here.
+    assert merged["suppressed_jax"] == 3
+    assert merged["suppressed"]["y.py:3"][0] == 3
+    from stelling._tripwire import eager as _eager
+
+    dropped = set(_eager.snapshot()) - set(merged)
+    assert not dropped, (
+        f"the merge drops {sorted(dropped)}, so an xdist controller prints a "
+        "total that is missing a worker's figure"
+    )
+
+
+def test_the_controller_reports_its_workers_agreement_and_says_so_when_there_is_none():
+    """The controller runs no tests, so it never arms and has nothing of its
+    own to report. Its status is what its workers agreed on -- and "no worker
+    reported" is NOT a clean run, which is the case a sum over an empty dict
+    would have rendered as a confident zero."""
+    from stelling._tripwire.plugin import _State, _eager_controller_status
+
+    state = _State()
+    assert _eager_controller_status(state).code == "no-worker-reported"
+
+    state.eager_worker_statuses = {"gw0": "armed", "gw1": "armed"}
+    agreed = _eager_controller_status(state)
+    assert agreed.armed and "2 worker(s) armed" in agreed.detail
+
+    state.eager_worker_statuses = {"gw0": "armed", "gw1": "no-site"}
+    mixed = _eager_controller_status(state)
+    assert mixed.code == "mixed"
+    assert "armed" in mixed.detail and "no-site" in mixed.detail
+
+    state.eager_worker_statuses = {"gw0": "no-site", "gw1": "no-site"}
+    assert _eager_controller_status(state).code == "no-site"
