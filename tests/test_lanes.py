@@ -96,6 +96,26 @@ def test_a_matrix_job_is_EXPANDED_and_a_field_its_entries_disagree_on_is_None():
         "a matrix whose expansion this module cannot follow must read None, "
         "not the permissive True"
     )
+    # A TRAILING COMMENT IS NOT PART OF THE VALUE. This is the whole finding
+    # one level down: `extras: jax   # solvers come in with jaxfluids` in both
+    # entries — nothing else changed — used to read `solvers = True`, because
+    # the comment was unquoted along with the value and `\bsolvers\b` found
+    # itself in the prose. `11 passed`, and the lane credited with a solver
+    # extra it does not install: a can't-tell resolved permissively by a
+    # comment, in the module whose own docstring says this file "is more
+    # comment than code, deliberately".
+    assert _synthetic(
+        ["jax   # solvers come in with jaxfluids"] * 2, quoted=False
+    ).solvers is False
+    assert _synthetic(
+        ['"jax"   # quoted value, comment outside it'] * 2, quoted=False
+    ).solvers is False
+    assert _synthetic(["solvers   # and not jax"] * 2, quoted=False).solvers is True
+    # the quote-aware half: inside quotes a `#` is three characters of the
+    # value, not the start of a comment, so this one really does name an
+    # extras set with `solvers` in it — absurd as an install, correct as a
+    # reading, and the control that keeps the strip from eating quoted text.
+    assert _synthetic(["jax # solvers"]).solvers is True
     # RECOGNISING A MATRIX AND FOLLOWING IT ARE SEPARATE. A `${{ matrix.x }}`
     # interpolated straight into the install line names no shell variable, so
     # the chain stops at its first link — and the reading has to be `"matrix"`
@@ -105,6 +125,131 @@ def test_a_matrix_job_is_EXPANDED_and_a_field_its_entries_disagree_on_is_None():
     # and the substring trap the literal path already guards against
     assert _synthetic(["not-solvers-really", "not-solvers-really"]).solvers is True
     assert _synthetic(["nosolversatall", "nosolversatall"]).solvers is False
+
+
+def test_every_link_of_the_matrix_CHAIN_fails_closed_when_it_is_broken():
+    """The four links :func:`_lanes._matrix_values` enumerates, each broken.
+
+    The docstring above it names four — the install line has to name a shell
+    variable, an ``env:`` has to bind it to a matrix key, the include block has
+    to be readable, and every entry has to carry that key — and the fence next
+    door drove the first two. The code failed closed at all four; NOTHING
+    pinned links 3 and 4, so the day one of them starts returning a partial
+    reading instead of ``None`` the permissive answer is back and no test in
+    this tree moves.
+
+    Failing closed means ``solvers is None``: the named can't-tell, which
+    ``test_no_lane_a_claim_rests_on_is_a_cant_tell`` then refuses to let any
+    coverage claim rest on. Reading ``False`` would be just as wrong as
+    reading ``True`` — it is a lane about which this module knows nothing.
+    """
+    # 1 — the install line names no shell variable
+    assert _lanes._classify(_DIRECT_INTERPOLATION).solvers is None
+    # 2 — no `env:` binds that variable to a matrix key
+    assert _lanes._classify(_UNREADABLE_MATRIX).solvers is None
+    # 3 — there is no readable include block
+    assert _lanes._matrix_include(_NO_INCLUDE_BLOCK) == []
+    assert _lanes._classify(_NO_INCLUDE_BLOCK).solvers is None
+    # 4 — an entry does not carry the key
+    assert _lanes._matrix_include(_KEY_MISSING_FROM_AN_ENTRY), (
+        "this case must break at link 4, not earlier: the entries have to PARSE"
+    )
+    assert _lanes._matrix_values(_KEY_MISSING_FROM_AN_ENTRY, "EXTRAS") is None
+    assert _lanes._classify(_KEY_MISSING_FROM_AN_ENTRY).solvers is None
+    # and the two nested shapes, which are link 3 in the shape it really has
+    assert _lanes._matrix_include(_BARE_LIST_ITEM) == []
+    assert _lanes._classify(_BARE_LIST_ITEM).solvers is None
+    assert _lanes._matrix_include(_NESTED_KEY_SHADOWS_THE_ENTRY) == [], (
+        "a nested mapping repeating a key the entry already has used to "
+        "OVERRIDE it: entry-level `extras: \"jax\"` with a nested `extras: "
+        "solvers` read solvers=True, out of a structure this parser does not "
+        "model"
+    )
+    assert _lanes._classify(_NESTED_KEY_SHADOWS_THE_ENTRY).solvers is None
+
+
+def test_a_comment_is_stripped_the_same_way_everywhere():
+    """:func:`_lanes._strip_comment`, which is why there is one of it.
+
+    Three readings in ``_lanes.py`` were each defeated by a trailing comment,
+    in three different places, all in the permissive direction. The unit is
+    here so the rule itself — ``#`` opens a comment when it begins a word and
+    is not inside quotes — is pinned once rather than three times, and so that
+    the two things it must NOT do are pinned at all.
+    """
+    strip = _lanes._strip_comment
+    assert strip("extras: jax   # solvers arrive transitively") == "extras: jax"
+    assert strip("# whole-line") == ""
+    assert strip("    # indented whole-line") == ""
+    assert strip("plain, no comment") == "plain, no comment"
+    # NOT a comment: `#` inside a word, and `#` inside a quoted string. The
+    # first is how a colour or a fragment is spelled; the second is ordinary
+    # shell, and `run:` bodies in this workflow are shell.
+    assert strip("url: https://example.test/x#frag") == "url: https://example.test/x#frag"
+    assert strip("""echo "a # b" """.rstrip()) == 'echo "a # b"'
+    assert strip("""echo 'a # b' # tail""") == "echo 'a # b'"
+    # and a `#` at column 0 wins over any later quote, which is what makes a
+    # comment line carrying an apostrophe safe
+    assert strip("# pytest's own exit code") == ""
+
+
+def test_a_COMMENT_cannot_change_what_a_LANE_INSTALLS():
+    """The third site of the same strip: :func:`_lanes._code_lines`.
+
+    It dropped whole-line comments and nothing else, so every pattern
+    ``_classify`` runs — the series pin, the matrix recogniser, the install
+    line — was reading the workflow's prose as well as its code. This file is
+    mostly prose, on purpose, and prose is where a jax version gets QUOTED
+    while being discussed.
+
+    Driven on a job that floats: a comment mentioning a pinned requirement
+    makes it read as a lane that pins the series, which is exactly the claim
+    ``test_every_tested_series_has_a_lane`` exists to hold.
+    """
+    job = """\
+  test-jax:
+    steps:
+      - run: uv pip install -e ".[solvers,jax]" pytest{comment}
+      - run: python -m pytest -q
+"""
+
+    def read(comment: str):
+        text = job.format(comment=comment)
+        body = _lanes._blocks(_lanes._code_lines(text))["test-jax"]
+        return _lanes._classify(body)
+
+    assert read("").jax == "floating"
+    assert read('   # NOT "jax>=0.11,<0.12" — the ceiling is what pins').jax == "floating", (
+        "a version RANGE written in a comment read as this job's pin"
+    )
+    assert read("   # installs from .[${EXTRAS}] in the reproducer lane").jax == "floating", (
+        "a comment mentioning a matrix expansion read as this job BEING one"
+    )
+    # the positive half: the same text in the code still reads
+    assert read(' "jax>=0.11,<0.12"').jax == "0.11"
+
+
+def test_a_COMMENT_cannot_narrow_a_whole_suite_lane():
+    """The conservative direction of the same missing strip, pinned anyway.
+
+    ``python -m pytest -q  # the whole tree`` read ``the``, ``whole`` and
+    ``tree`` as path arguments, so a whole-suite step read as a narrowed one.
+    That under-credits rather than over-credits — it would have gone red, not
+    silently green — but a fence whose reading a comment can move is a fence
+    that a reflow of this workflow's prose can turn off, and this file is
+    mostly prose on purpose.
+    """
+    commented = [
+        line.replace("python -m pytest -q", "python -m pytest -q  # the whole tree")
+        for line in _MATRIX_JOB.format(entries='          - extras: "solvers"\n').splitlines()
+    ]
+    assert _lanes._classify(commented).whole_suite is True
+    # the negative half: a real path argument still narrows it
+    narrowed = [
+        line.replace("python -m pytest -q", "python -m pytest -q tests/test_lanes.py")
+        for line in _MATRIX_JOB.format(entries='          - extras: "solvers"\n').splitlines()
+    ]
+    assert _lanes._classify(narrowed).whole_suite is False
 
 
 def _reproducer_body() -> list[str]:
@@ -142,10 +287,84 @@ _DIRECT_INTERPOLATION = (
     .splitlines()
 )
 
+#: A matrix job with no ``include:`` block at all — the THIRD link.
+_NO_INCLUDE_BLOCK = [
+    line
+    for line in _MATRIX_JOB.format(entries='          - extras: "solvers"\n').splitlines()
+    if "include:" not in line and "- extras:" not in line
+]
 
-def _synthetic(extras_per_entry):
-    """One matrix job with these expansions, classified by the real parser."""
-    entries = "".join(f'          - extras: "{e}"\n' for e in extras_per_entry)
+#: Two entries, and the second does not carry ``extras`` — the FOURTH link.
+#: The entries themselves parse, which is what makes this link 4 and not 3.
+_KEY_MISSING_FROM_AN_ENTRY = _MATRIX_JOB.format(
+    entries='          - extras: "solvers"\n          - series: "0.10"\n'
+).splitlines()
+
+#: An entry whose value is a nested LIST. No ``key: value`` on the item line,
+#: so the block is refused — the half of the nesting story that was already
+#: true.
+_BARE_LIST_ITEM = _MATRIX_JOB.format(
+    entries='          - extras:\n              - solvers\n'
+).splitlines()
+
+#: A job with both halves of the verdict channel — the ``env:`` binding that
+#: makes ``tests/conftest.py`` write the file, and the assertion that fails the
+#: step on anything but ``verdict=made``. Trimmed from ``test-no-jax``.
+_VERDICT_JOB = """\
+    steps:
+      - name: pytest, with the skip-inventory verdict asserted off a file channel
+        env:
+{binding}
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q -ra
+          verdict="${{RUNNER_TEMP}}/skip-inventory-verdict.txt"
+{assertion}
+"""
+
+_BINDING = "          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/v.txt"
+_ASSERTION = """\
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            exit 1
+          fi\
+"""
+
+_VERDICT_BOTH = _VERDICT_JOB.format(
+    binding=_BINDING, assertion=_ASSERTION
+).splitlines()
+#: The ``env:`` binding kept, the assertion deleted — an ordinary refactor,
+#: and no comment involved anywhere.
+_VERDICT_BINDING_ONLY = _VERDICT_JOB.format(
+    binding=_BINDING, assertion="          cat \"${verdict}\""
+).splitlines()
+#: The assertion kept, the binding gone: a grep against a file nothing writes.
+_VERDICT_ASSERTION_ONLY = _VERDICT_JOB.format(
+    binding="          UNRELATED: 1", assertion=_ASSERTION
+).splitlines()
+#: The step gutted, the variable's NAME surviving in the comment left behind.
+_VERDICT_IN_A_COMMENT = _VERDICT_JOB.format(
+    binding="          UNRELATED: 1",
+    assertion="          cat log   # the STELLING_SKIP_INVENTORY_VERDICT channel was here",
+).splitlines()
+
+#: An entry with a nested MAPPING that repeats a key the entry already has.
+#: This is the half that was NOT true: the scan is flat, so the nested
+#: ``extras: solvers`` used to overwrite the entry's own ``extras: "jax"`` and
+#: the job read as installing a solver extra.
+_NESTED_KEY_SHADOWS_THE_ENTRY = _MATRIX_JOB.format(
+    entries='          - extras: "jax"\n            with:\n              extras: solvers\n'
+).splitlines()
+
+
+def _synthetic(extras_per_entry, quoted: bool = True):
+    """One matrix job with these expansions, classified by the real parser.
+
+    ``quoted=False`` writes the value bare, which is how ``ci.yml`` writes
+    ``extras`` and is the only spelling in which a trailing ``#`` is a COMMENT
+    rather than three more characters of the string.
+    """
+    fmt = '          - extras: "{}"\n' if quoted else "          - extras: {}\n"
+    entries = "".join(fmt.format(e) for e in extras_per_entry)
     return _lanes._classify(_MATRIX_JOB.format(entries=entries).splitlines())
 
 
@@ -156,6 +375,14 @@ def test_no_lane_a_claim_rests_on_is_a_cant_tell():
     proceed on it. These are the two lists in this module that say "this job
     delivers configuration X", and neither may rest on a job whose
     provisioning ci.yml does not state with one voice.
+
+    THERE ARE TWO SPELLINGS OF THE CAN'T-TELL AND ONLY ONE WAS REFUSED.
+    ``Lane.solvers`` says ``None``; ``Lane.jax`` says ``"matrix"``, because it
+    is a ``str`` field and a matrix job's series is not read per-entry (see
+    ``_lanes.py``'s docstring for why). This used to check the first only, so
+    a series-bearing lane whose series ci.yml does not state would have got
+    past here and died inside ``_lanes._newest`` on ``int("matrix")`` — a
+    can't-tell reported as a crash in a helper.
     """
     by_job = {lane.job: lane for lane in _lanes.lanes()}
     for job in (*_lanes.SERIES_BEARING, *SUPPORTED.values()):
@@ -168,6 +395,29 @@ def test_no_lane_a_claim_rests_on_is_a_cant_tell():
             f"— a matrix whose entries disagree, or one this module cannot "
             f"read. Resolve it in the workflow or stop resting a claim on it."
         )
+        assert by_job[job].jax != "matrix", (
+            f"{job} is credited with a definite configuration, but its jax is "
+            f"a matrix expansion, and `matrix` is Lane.jax's can't-tell — one "
+            f"Lane cannot hold two series. Pin the series in the job or stop "
+            f"resting a claim on it."
+        )
+    # and the helper refuses it too, rather than carrying it into `int()`
+    matrix_lane = _lanes.Lane(
+        job=_lanes.SERIES_BEARING[0], jax="matrix", solvers=True,
+        whole_suite=True, random_order=False, verdict_channel=True,
+    )
+    with pytest.raises(ValueError, match="can't-tell"):
+        _drive_lane_series((matrix_lane,))
+
+
+def _drive_lane_series(fake_lanes):
+    """``_lanes.lane_series()`` over a substituted reading of ci.yml."""
+    original = _lanes.lanes
+    try:
+        _lanes.lanes = lambda: tuple(fake_lanes)
+        return _lanes.lane_series()
+    finally:
+        _lanes.lanes = original
 
 
 def test_every_whole_suite_lane_asserts_the_verdict_channel():
@@ -199,6 +449,41 @@ def test_every_whole_suite_lane_asserts_the_verdict_channel():
     assert any(
         lane.verdict_channel for lane in _lanes.lanes()
     ), "no lane asserts the verdict channel at all, so this fence measures nothing"
+
+
+def test_the_verdict_channel_reading_needs_the_BINDING_AND_THE_ASSERTION():
+    """What ``Lane.verdict_channel`` claims, held to what it measures.
+
+    Its docstring says the job *asserts* the verdict and the fence above says
+    the lanes *"fail the step on anything but ``verdict=made``"*. The reading
+    was one pattern for the variable's NAME, anywhere in the job body, and two
+    ordinary edits walked through it — ``11 passed`` both times:
+
+    * the ``grep -qx 'verdict=made'`` block deleted, the ``env:`` binding
+      kept. **This one needs no comment at all**: it is what a refactor looks
+      like, and the binding alone only makes ``tests/conftest.py`` WRITE a
+      file. Nothing reads it.
+    * the whole step gutted, the variable's name surviving in the comment left
+      where it had been — the same missing comment-strip as everywhere else in
+      ``_lanes.py``.
+
+    Both halves are required now, and both directions are driven here, because
+    a conjunction that is really a constant is the shape this whole batch is
+    about.
+    """
+    assert _lanes._classify(_VERDICT_BOTH).verdict_channel is True
+    assert _lanes._classify(_VERDICT_BINDING_ONLY).verdict_channel is False, (
+        "a job that binds STELLING_SKIP_INVENTORY_VERDICT and never reads the "
+        "file it names asserts nothing"
+    )
+    assert _lanes._classify(_VERDICT_ASSERTION_ONLY).verdict_channel is False, (
+        "a job that greps for verdict=made without binding the variable is "
+        "reading a file conftest.py was never told to write"
+    )
+    assert _lanes._classify(_VERDICT_IN_A_COMMENT).verdict_channel is False, (
+        "the channel survived in a comment, which is where a deleted step "
+        "leaves its name"
+    )
 
 
 def test_every_series_bearing_job_is_a_whole_suite_lane_that_exists():
@@ -330,6 +615,14 @@ def test_every_supported_configuration_has_a_whole_suite_lane(config, job):
     assert lane.solvers == (config[1] == "solvers"), (
         f"{job} is meant to be the {config[1]} lane and ci.yml provisions it "
         f"the other way"
+    )
+    # BOTH FIELDS HAVE A CAN'T-TELL AND `jax`'s IS A STRING. `"matrix"` is not
+    # a series; read through `!= "absent"` it silently means "has jax", which
+    # is the permissive answer to a question ci.yml has not answered.
+    assert lane.jax != "matrix", (
+        f"{job} is meant to be the {config[0]} lane and ci.yml expands it from "
+        f"a matrix whose entries this module cannot reduce to one series; "
+        f"`matrix` is Lane.jax's can't-tell, not a reading"
     )
     assert (lane.jax != "absent") == (config[0] == "jax"), (
         f"{job} is meant to be the {config[0]} lane and ci.yml provisions it "

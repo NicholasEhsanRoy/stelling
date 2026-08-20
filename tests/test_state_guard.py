@@ -119,14 +119,18 @@ def test_the_conftest_registers_the_real_fixture():
 
 
 def test_changed_is_blind_to_the_exemption_list_and_offences_is_not():
-    """The split the two altitudes rest on.
+    """Two questions, kept apart: *did this move* and *was that allowed*.
 
-    ``changed`` answers "did this move", which is what
-    :data:`_state_guard._DECIDED_HERE` records so the module guard stays quiet
-    about it; ``offences`` answers "was this allowed", which is what fails a
-    test. If ``changed`` consulted the exemption list, a licensed change would
-    be un-licensed one scope out — the module guard would report at teardown
-    exactly what the exemption exists to permit.
+    ``changed`` answers the first and knows nothing about
+    :data:`_state_guard.PINNED_EXEMPTIONS`; ``offences`` answers the second
+    and is the one that fails a test. Only the second may consult a licence,
+    because a licence is about a nodeid and movement is not.
+
+    The module guard consults NEITHER — it reads where the state is between
+    tests (see the comment above ``_state_guard._SHADOW``). An earlier version
+    did drive it from ``changed``, as a set of entry names to suppress, and
+    that is precisely how the guard's own printed remedy came to switch the
+    guard off; the two controls for that are further down this file.
     """
     entry = G.ENTRIES[0].name
     before = {e.name: 0 for e in G.ENTRIES}
@@ -214,13 +218,14 @@ def test_planted_mutation():
 '''
 
 
-def _nested(tmp_path, body: str) -> subprocess.CompletedProcess:
-    """Run one planted, mutating test under the real guard, in a fresh process."""
-    plant = tmp_path / "test_planted.py"
-    plant.write_text(
-        _PLANT.format(body=textwrap.indent(textwrap.dedent(body), "    ").strip()),
-        encoding="utf-8",
-    )
+def _run_nested(tmp_path, plant) -> subprocess.CompletedProcess:
+    """Run one already-written plant under the REAL guard, in a fresh process.
+
+    ``-p _state_guard`` loads the same file ``tests/conftest.py`` registers;
+    ``tests/`` goes on ``PYTHONPATH`` so that it is importable under that name.
+    Shared by every plant below so that they cannot drift into testing
+    different things.
+    """
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
         [str(TESTS), *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
@@ -237,6 +242,16 @@ def _nested(tmp_path, body: str) -> subprocess.CompletedProcess:
         cwd=str(tmp_path),
         env=env,
     )
+
+
+def _nested(tmp_path, body: str) -> subprocess.CompletedProcess:
+    """Run one planted, mutating test under the real guard, in a fresh process."""
+    plant = tmp_path / "test_planted.py"
+    plant.write_text(
+        _PLANT.format(body=textwrap.indent(textwrap.dedent(body), "    ").strip()),
+        encoding="utf-8",
+    )
+    return _run_nested(tmp_path, plant)
 
 
 def _assert_named(proc, entry: str) -> None:
@@ -343,40 +358,54 @@ def _module_fixture():
     {teardown}
 
 
+{one_mark}
 def test_one():
-    assert True
+    {one_body}
 
 
 def test_two():
     {body}
 '''
 
+#: A ``conftest.py`` for the nested tree that installs one exemption — the
+#: remedy the guard's own report prints — using the REAL
+#: :data:`_state_guard.PINNED_EXEMPTIONS`, not a copy of it.
+_EXEMPTION_CONFTEST = '''
+import _state_guard as G
 
-def _nested_module(tmp_path, setup: str, teardown: str = "pass", body: str = "pass"):
+G.PINNED_EXEMPTIONS = (
+    G.Exemption({nodeid!r}, {entry!r}, "driven: the report's own remedy"),
+)
+'''
+
+
+def _nested_module(
+    tmp_path,
+    setup: str,
+    teardown: str = "pass",
+    body: str = "pass",
+    one_mark: str = "",
+    one_body: str = "assert True",
+    exempt: tuple[str, str] | None = None,
+):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     plant = tmp_path / "test_planted.py"
     plant.write_text(
         _MODULE_PLANT.format(
             setup=textwrap.indent(textwrap.dedent(setup), "    ").strip(),
             teardown=textwrap.indent(textwrap.dedent(teardown), "    ").strip(),
             body=textwrap.indent(textwrap.dedent(body), "    ").strip(),
+            one_mark=one_mark,
+            one_body=textwrap.indent(textwrap.dedent(one_body), "    ").strip(),
         ),
         encoding="utf-8",
     )
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(TESTS), *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
-    )
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    return subprocess.run(
-        [
-            sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-            "-p", "no:randomly", "-p", "_state_guard", str(plant),
-        ],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-        env=env,
-    )
+    if exempt is not None:
+        (tmp_path / "conftest.py").write_text(
+            _EXEMPTION_CONFTEST.format(nodeid=exempt[0], entry=exempt[1]),
+            encoding="utf-8",
+        )
+    return _run_nested(tmp_path, plant)
 
 
 def test_a_module_scoped_fixture_that_never_restores_is_named(tmp_path):
@@ -392,7 +421,7 @@ def test_a_module_scoped_fixture_that_never_restores_is_named(tmp_path):
         f"the guard did not name the MODULE\n{proc.stdout}"
     )
     assert "env:STELLING_*/JAX_*" in proc.stdout, proc.stdout
-    assert "outside every test in it" in proc.stdout, (
+    assert "moved BETWEEN the tests of this module" in proc.stdout, (
         f"the report does not say where to look\n{proc.stdout}"
     )
 
@@ -432,6 +461,133 @@ def test_a_TEST_that_pollutes_is_named_once_and_not_again_at_module_scope(tmp_pa
     )
     assert "test_planted.py::test_two changed process-global state" in proc.stdout, (
         f"the report names something other than the test that did it\n{proc.stdout}"
+    )
+
+
+# ── the OVER-suppression direction, which had no control at all ─────────────
+#
+# THE VERSION THESE REFUSE. The module guard used to skip any entry a
+# function-scoped guard had DECIDED about inside the module — a set of entry
+# NAMES, updated from `changed()` unconditionally and before any report was
+# computed. Every test above passed under it. What it bought was that a single
+# test could blind the outer guard to a completely different offence, and the
+# two cheapest ways to make a test "decide about" an entry are the two here:
+# license it, or xfail it. `env:STELLING_*/JAX_*` is ONE entry covering every
+# prefixed variable, so one licensed key blinded the module guard to all of
+# them.
+#
+# Measured on the version that had it, and the baseline beside them — the same
+# module with the test's leak neither licensed nor absorbed:
+#
+#     baseline                   2 passed, 1 error       EXIT 1
+#       (the TEST named; the module's own leak silently not)
+#     + the printed remedy       2 passed                EXIT 0
+#     + an xfail instead         1 passed, 2 xfailed     EXIT 0
+#
+#   and in both green cases a probe at session finish still shows
+#   ['STELLING_MODULE_LEAK', 'STELLING_TEST_LEAK'].
+#
+# Both plants have TWO leaks: one from the module fixture and one from a test.
+# Only the test's is licensed or absorbed. The module's is a different act at a
+# different altitude and has to survive.
+
+
+def test_a_module_leak_survives_the_PINNED_EXEMPTION_of_a_test_in_it(tmp_path):
+    """The guard's own printed remedy, applied — and the guard stays on.
+
+    `render()` tells a reader whose test tripped the function guard to name
+    that test in PINNED_EXEMPTIONS. Doing exactly that used to switch the
+    MODULE guard off as well, for every ``STELLING_*``/``JAX_*`` key rather
+    than the one exempted, with no output anywhere saying so. An instrument
+    whose documented remedy disables it is worse than no instrument, because
+    the green afterwards reads as a fix.
+    """
+    proc = _nested_module(
+        tmp_path,
+        setup='os.environ["STELLING_MODULE_LEAK"] = "1"',
+        body='os.environ["STELLING_TEST_LEAK"] = "1"',
+        exempt=("test_planted.py::test_two", "env:STELLING_*/JAX_*"),
+    )
+    assert proc.returncode != 0, (
+        f"exempting the TEST silenced the MODULE's separate leak\n{proc.stdout}"
+    )
+    assert "test_planted.py changed process-global state" in proc.stdout, (
+        f"the module's own leak was not named\n{proc.stdout}"
+    )
+    assert "STELLING_MODULE_LEAK" in proc.stdout, proc.stdout
+    # and the exemption still does its job: the TEST is not named
+    assert "test_planted.py::test_two changed process-global" not in proc.stdout, (
+        f"the exemption did not license the test it names\n{proc.stdout}"
+    )
+
+
+def test_a_module_leak_survives_an_XFAILING_polluter_in_the_same_module(tmp_path):
+    """The same blinding for free, with no exemption list involved.
+
+    An ``xfail`` absorbs the function guard's report, so under the
+    name-filtering version the entry was still recorded as decided-about and
+    the module's own leak went unnamed — ``EXIT 0``. This needs no
+    configuration and no licence: one xfail-marked test that happens to touch
+    an environment key was enough to blind the outer guard to every other one.
+    """
+    proc = _nested_module(
+        tmp_path,
+        setup='os.environ["STELLING_MODULE_LEAK"] = "1"',
+        one_mark='@pytest.mark.xfail(reason="driven: absorbs the guard\'s report")',
+        one_body=(
+            'os.environ["STELLING_TEST_LEAK"] = "1"\n'
+            "assert False"
+        ),
+    )
+    assert proc.returncode != 0, (
+        f"an xfailing polluter silenced the MODULE's separate leak\n{proc.stdout}"
+    )
+    assert "test_planted.py changed process-global state" in proc.stdout, (
+        f"the module's own leak was not named\n{proc.stdout}"
+    )
+    assert "STELLING_MODULE_LEAK" in proc.stdout, proc.stdout
+
+
+def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_path):
+    """A limit, pinned as a limit. Both halves are the point.
+
+    pytest imports test modules during COLLECTION, before any fixture of any
+    scope is set up, so a column-0 ``os.environ[...] = ...`` in a test module
+    is already in force when the module guard reads ``before`` — it reads
+    identical either side and the session ends polluted at ``EXIT 0``. That is
+    not fixable at this altitude; it is the session guard's, and there is no
+    session guard because there is nothing at session scope to watch yet.
+
+    What WAS fixable is the report: it used to offer *"a module-level
+    statement with no matching restore"* as something to go and look for,
+    which is a cause this guard is incapable of having observed. A remedy that
+    names a cause the instrument cannot see sends the reader to look for the
+    wrong thing, and it makes the LIMITS list look shorter than it is.
+    """
+    plant = tmp_path / "test_planted.py"
+    plant.write_text(
+        'import os\n\nos.environ["STELLING_IMPORT_TIME_LEAK"] = "1"\n\n\n'
+        "def test_one():\n    assert True\n\n\n"
+        "def test_two():\n    assert True\n",
+        encoding="utf-8",
+    )
+    proc = _run_nested(tmp_path, plant)
+    assert proc.returncode == 0, (
+        f"the import-time case is reported now, so this control is stale and "
+        f"the LIMITS list needs the entry removed\n{proc.stdout}"
+    )
+    # the other half: the remedy must not send the reader after it
+    reported = _nested_module(
+        tmp_path / "reported",
+        setup='os.environ["STELLING_PLANTED_BY_A_MODULE"] = "1"',
+    )
+    assert "or a module-level statement with no matching restore" not in reported.stdout, (
+        f"the module guard's remedy still OFFERS a cause it cannot observe\n"
+        f"{reported.stdout}"
+    )
+    assert "NOT a module-level statement at import" in reported.stdout, (
+        f"the remedy no longer rules out the cause a reader would reach for "
+        f"first, so the reader goes looking for it\n{reported.stdout}"
     )
 
 

@@ -422,8 +422,6 @@ RULES = (
                 "needs an SMT solver",
                 "needs a solver",
                 "no SMT solver installed",
-                "no SMT backend installed",
-                "no solver installed",
                 "block opts into solver escalation; no backend installed",
             }
         ),

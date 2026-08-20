@@ -353,7 +353,7 @@ jobs:
       # already tests.
       #
       # IT ASKS THE GATE, NOT A PROXY FOR IT. `tests/_solver_gate.py` is the
-      # one predicate that decides whether the 71 `need_solver` tests run, and
+      # one predicate that decides whether every `need_solver` test runs, and
       # it accepts THREE routes: the z3 wheel, the cvc5 wheel, and an external
       # cvc5 binary named by `STELLING_CVC5` or found on PATH — the route the
       # documentation actively recommends, since it is how you get a build the
@@ -393,7 +393,7 @@ jobs:
                   "this lane exists to run with NO solver reachable, and "
                   "tests/_solver_gate.py reports HAVE_SOLVER = True: "
                   + "; ".join(routes)
-                  + ". The 71 `need_solver` tests would RUN here, so this "
+                  + ". Every `need_solver` test would RUN here, so this "
                   "job would be testing what test-jax already tests."
               )
           import jax

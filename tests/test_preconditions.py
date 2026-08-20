@@ -228,7 +228,7 @@ def test_check_interval_only_fills_stamps_and_records_absence():
 
 
 def test_check_escalates_only_with_an_explicit_timeout():
-    from stelling._optional import available
+    from _solver_gate import HAVE_SOLVER
     from stelling.preconditions import check
 
     def h():
@@ -237,8 +237,8 @@ def test_check_escalates_only_with_an_explicit_timeout():
 
     v = check(h, vacuity_mode="inputs-only")  # no timeout: interval-only, honest UNKNOWN
     assert v.status == "UNKNOWN"
-    if not (available("z3") or available("cvc5")):
-        pytest.skip("no solver installed")
+    if not HAVE_SOLVER:
+        pytest.skip("needs an SMT solver")
     v2 = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20000)
     assert v2.status == "REFUTED"
     assert v2.witnesses and dict(v2.witnesses[0].values)["x0"] == "0"

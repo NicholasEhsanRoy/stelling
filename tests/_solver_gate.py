@@ -3,27 +3,31 @@
 
 """One definition of "this test needs an SMT solver", for the whole suite.
 
-WHY IT IS ONE AND NOT NINE. This predicate was written out **nine** times in
-``tests/``, and exactly **one** of them — ``test_contracts.py``'s
-``_HAVE_SOLVER = available("z3") or available("cvc5")`` — read only the two
-wheels, while the other eight also accept an EXTERNAL ``cvc5`` binary: the
-``STELLING_CVC5`` / ``cvc5``-on-PATH route that ``_optional.cvc5_binary``
-exists for and that ``docs`` tell a user to use to get a build the PyPI wheel
-does not ship. In an environment with that binary and no wheels the narrow
-spelling skips tests that would have passed, which is a false skip: the
-instrument reports "not applicable here" about a configuration in which it
-applies perfectly well.
+WHY IT IS ONE. There are three routes to a solver here, not two: the z3 wheel,
+the cvc5 wheel, and an EXTERNAL ``cvc5`` binary named by ``STELLING_CVC5`` or
+found on ``PATH`` — the route ``_optional.cvc5_binary`` exists for and the one
+``docs`` tell a user to take, since it is how you get a build the PyPI wheel
+does not ship. A test that asks ``available("z3") or available("cvc5")``
+therefore says "no solver" in an environment that has one, and skips a test
+that would have run. That is a FALSE SKIP: the instrument reporting "not
+applicable here" about a configuration in which it applies perfectly well.
 
-THE COUNT AND THE NAMES ARE CORRECTED HERE, and the correction is the point
-rather than a tidy-up. This file first said *"seven times … two of them
-(``test_0_2_0_regression.py``, ``test_contracts.py``) read only the two
-wheels"*. At ``f82b87b``, ``test_0_2_0_regression.py:73`` read
-``available("cvc5") or cvc5_binary() is not None`` — it accepted the binary,
-and naming it as narrow was simply wrong. Eight definitions were folded in
-when this file was written and a NINTH survived under the same name in
-``test_three_rows_acceptance.py`` (with its own reason string, ``"needs a
-solver"``), so *"one definition for the whole suite"* was not true either. It
-is now; the ninth was folded in and this sentence counts it.
+**THERE IS NO COUNT IN THIS DOCSTRING, AND THAT IS THE CORRECTION.** How many
+copies there were has been stated here three times and been wrong three times
+— *seven*, then *eight*, then *nine* — because each correction was made by
+counting by hand, which is the act that produced the wrong number in the first
+place. (For the record, since the specific claims were wrong and not merely
+stale: the first version named ``test_0_2_0_regression.py:73`` as reading only
+the wheels when at ``f82b87b`` it already accepted the binary; the second
+missed a copy in ``test_three_rows_acceptance.py``; the third still left
+``test_membership_idiom_hint.py``, ``test_preconditions.py`` and
+``test_doc_examples.py`` deciding for themselves.)
+
+What is stated instead is a RULE — *no module under ``tests/`` spells the
+either-solver question for itself* — with its exceptions named, and
+``tests/test_solver_gate.py`` parses the tree and holds it. A backend-specific
+question (``available("z3")``, or ``not (HAVE_Z3 and HAVE_CVC5)``) is a
+different question with a different answer and is untouched by that rule.
 
 WHAT THE REASON STRING IS FOR. ``"needs an SMT solver"`` is not free text. It
 is a key into ``tests/test_skip_inventory.py``'s ``RULES``, which pairs it with

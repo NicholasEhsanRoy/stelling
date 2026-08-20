@@ -1291,8 +1291,12 @@ _state_guard_module = _load_sibling("_state_guard")
 #: it escaped every window the first one has. Measured: the restore deleted
 #: from `test_0_2_0_regression.py`'s module-scoped `_x64` left the file at
 #: `21 passed` with `jax_enable_x64` True at session finish and nothing said
-#: so. The module-scoped guard reports only what no test inside it was already
-#: named for.
+#: so. The module-scoped guard reports what moved BETWEEN the tests of a
+#: module — where the state sits whenever no test is running — so a test's own
+#: change is outside its reading by construction. It used to suppress by entry
+#: NAME instead, which meant one exempted or xfailing test blinded it to every
+#: `STELLING_*`/`JAX_*` key there is; `tests/_state_guard.py` carries the
+#: drive.
 state_guard = _state_guard_module.state_guard
 module_state_guard = _state_guard_module.module_state_guard
 

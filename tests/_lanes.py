@@ -30,10 +30,31 @@ HOW IT PARSES, AND WHAT IT REFUSES TO GUESS
 
 By text, not by a YAML parser: this suite has no yaml dependency and is not
 acquiring one for a fence (``tests/test_release_gates.py`` reads
-``release.yml`` the same way, for the same reason). Comment-only lines go
-first — this workflow is more comment than code, deliberately — and what is
-left is scanned for job headers, ``uv pip install`` lines and ``pytest``
-invocations.
+``release.yml`` the same way, for the same reason). Comments go first — this
+workflow is more comment than code, deliberately — and what is left is scanned
+for job headers, ``uv pip install`` lines and ``pytest`` invocations.
+
+**COMMENTS ARE STRIPPED IN ONE PLACE, :func:`_strip_comment`, AND THAT IS THE
+POINT.** This module used to drop *whole-line* comments only, and a comment is
+the cheapest thing there is to add to this file. Three readings were defeated
+by a trailing one, each in the permissive direction and none of them noisy:
+
+* ``extras: jax   # solvers come in with jaxfluids`` in both
+  ``acceptance-reproducer`` entries — nothing else changed — read as an extras
+  set literally containing the characters ``solvers``, so the lane was
+  credited with a solver extra it does not install and
+  ``tests/test_lanes.py`` stayed green (``11 passed``). The same edit WITHOUT
+  the comment is caught.
+* a job whose verdict-channel step was deleted kept the reading, because the
+  token survived in the comment left where the step had been.
+* ``python -m pytest -q  # the whole tree`` read ``the``, ``whole`` and
+  ``tree`` as path arguments, so a whole-suite lane read as narrowed. That one
+  is conservative — it under-credits — but it is the same missing strip.
+
+The rule is YAML's and the shell's alike, which is why one function serves
+both: ``#`` opens a comment when it *begins a word* — at the start of the
+line, or after whitespace — and is not inside a quoted string. ``foo#bar`` and
+a URL fragment are left alone.
 
 **A JOB WHOSE INSTALL LINE IS A MATRIX EXPANSION IS EXPANDED, ENTRY BY ENTRY,
 AND A FIELD ITS ENTRIES DISAGREE ON IS A NAMED CAN'T-TELL.**
@@ -41,17 +62,33 @@ AND A FIELD ITS ENTRIES DISAGREE ON IS A NAMED CAN'T-TELL.**
 describe two provisionings. So :func:`_matrix_values` follows the one chain
 the install line actually names — ``${EXTRAS}`` to the step's
 ``EXTRAS: ${{ matrix.extras }}`` to the ``strategy.matrix.include`` entries —
-and the resolution rule is the same for every field: **the entries agree and
-the value is theirs, or they do not and it is ``None``.** Today the two
-entries name ``solvers,jax`` and ``solvers``, which agree that a solver extra
-is installed, so :attr:`Lane.solvers` reads ``True`` because that is what
-ci.yml says and not because a matrix job is assumed to have everything.
-:attr:`Lane.jax` stays ``"matrix"``: the entries do disagree there — one pins
-``0.10`` and one floats — so there is no single series, which is also why the
-job is excluded from :data:`SERIES_BEARING`. That exclusion is a policy on top
-of the reading, not a substitute for it: ci.yml's own text says the two
-acceptance jobs *must not* be required checks, so a coverage claim resting on
-them rests on a job whose red does not block.
+and :func:`_agreed` resolves it: **the entries agree and the value is theirs,
+or they do not and it is ``None``.** Today the two entries name
+``solvers,jax`` and ``solvers``, which agree that a solver extra is installed,
+so :attr:`Lane.solvers` reads ``True`` because that is what ci.yml says and
+not because a matrix job is assumed to have everything.
+
+**THAT RULE IS APPLIED TO EXACTLY ONE FIELD, AND SAYING OTHERWISE WAS THE
+OVERCLAIM.** This paragraph used to read *"the resolution rule is the same for
+every field"*. It is not: ``solvers`` goes through :func:`_agreed`, and
+:attr:`Lane.jax` is the constant ``"matrix"`` written down the moment the
+install line is recognised as an expansion — a SECOND SPELLING OF THE SAME
+CAN'T-TELL, in a field whose other values are strings, and not a reading of
+the entries at all. It is not read per-entry because the series is decided by
+a *different* variable on the same install line (``${PIN}``, bound to
+``matrix.pin``, empty for the floating entry), and following a second chain to
+learn what ``"matrix"`` already says would be new inference for no new claim.
+What the constant costs is that every consumer has to treat it as the
+can't-tell it is: :func:`lane_series` REFUSES a ``"matrix"`` series-bearing
+lane by name rather than crashing on it, and
+``test_no_lane_a_claim_rests_on_is_a_cant_tell`` refuses both spellings —
+``jax == "matrix"`` and ``solvers is None`` — for any job a claim rests on.
+
+The two entries do disagree about the series — one pins ``0.10`` and one
+floats — which is also why the job is excluded from :data:`SERIES_BEARING`.
+That exclusion is a policy on top of the reading, not a substitute for it:
+ci.yml's own text says the two acceptance jobs *must not* be required checks,
+so a coverage claim resting on them rests on a job whose red does not block.
 
 THIS WAS A HARDCODED ``True``, and the sentence here said *"nothing is
 inferred from it"* while the code inferred the one thing a permissive constant
@@ -120,9 +157,25 @@ _ENV_FROM_MATRIX = re.compile(r"^\s*(\w+):\s*\$\{\{\s*matrix\.(\w+)\s*\}\}\s*$")
 _INCLUDE = re.compile(r"^(\s*)include:\s*$")
 #: One `key: value` line inside a matrix entry, `- ` marking a new entry.
 _MATRIX_ITEM = re.compile(r"^\s*(-\s+)?([A-Za-z_][\w-]*):\s*(.*?)\s*$")
-#: The skip inventory's FILE channel, set by a job that asserts the
-#: completeness verdict off something pytest's exit code cannot be taken from.
-_VERDICT_CHANNEL = re.compile(r"\bSTELLING_SKIP_INVENTORY_VERDICT\b")
+#: THE VERDICT CHANNEL TAKES TWO LINES TO ASSERT, AND BOTH ARE REQUIRED. This
+#: was one pattern matching the variable's NAME anywhere in a job body, while
+#: :attr:`Lane.verdict_channel` said it measured whether the job *asserts* the
+#: verdict. Two ordinary edits went straight through it:
+#:
+#:   the `verdict=made` assertion deleted, `env:` kept   ->  11 passed (missed)
+#:   the step gutted, the name surviving in a comment    ->  11 passed (missed)
+#:
+#: The first needs no comment at all — deleting the check while leaving the
+#: binding is what a refactor looks like — and it is the one that matters,
+#: because the binding alone only makes ``tests/conftest.py`` WRITE the file.
+#: Reading it and failing the step is the other line, and a job with the first
+#: and not the second asserts nothing.
+#:
+#: `env:` binding, as a mapping key with a value — not a mention:
+_VERDICT_BOUND = re.compile(r"^\s*STELLING_SKIP_INVENTORY_VERDICT:\s*\S")
+#: and the assertion the step fails on, which is the file's first line
+#: compared against `verdict=made`.
+_VERDICT_ASSERTED = re.compile(r"\bgrep\b.*\bverdict=made\b")
 
 
 @dataclass(frozen=True)
@@ -144,13 +197,49 @@ class Lane:
     random_order: bool
     #: Whether the job asserts the skip inventory's verdict off the FILE
     #: channel (``STELLING_SKIP_INVENTORY_VERDICT``) rather than off pytest's
-    #: exit code. Six of the seven whole-suite lanes do; the seventh is named
-    #: in :data:`VERDICT_CHANNEL_EXEMPT` with its reason.
+    #: exit code. BOTH HALVES ARE MEASURED — the ``env:`` binding that makes
+    #: the file get written, and a ``verdict=made`` assertion in the same job
+    #: that fails the step on anything else — because a job with the binding
+    #: alone writes a file nobody reads. Six of the seven whole-suite lanes
+    #: have both; the seventh is named in :data:`VERDICT_CHANNEL_EXEMPT` with
+    #: its reason.
     verdict_channel: bool
 
 
+def _strip_comment(text: str) -> str:
+    """``text`` with a trailing ``#`` comment removed. THE ONE STRIP.
+
+    Every reading in this module goes through here — the line scan below, the
+    matrix values, the ``pytest`` argv — because they were written three times
+    and were wrong three times, each in the direction that credits a lane with
+    something it does not have. See the module docstring for the three drives.
+
+    The rule is the one YAML and the shell share: ``#`` opens a comment when it
+    begins a word — at the start, or after whitespace — and never inside a
+    quoted string. So ``foo#bar`` survives, ``"a # b"`` survives, and
+    ``value  # note`` becomes ``value``. Quoting is tracked by the first quote
+    character seen, which is all a single line of either language needs.
+    """
+    quote: str | None = None
+    for i, ch in enumerate(text):
+        if quote is not None:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i == 0 or text[i - 1] in " \t"):
+            return text[:i].rstrip()
+    return text.rstrip()
+
+
 def _code_lines(text: str) -> list[str]:
-    return [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    """``text``'s lines with every comment removed, indentation kept.
+
+    A whole-line comment becomes an empty string rather than disappearing —
+    every reader below already skips blanks, and keeping the line means the
+    list still indexes like the file.
+    """
+    return [_strip_comment(line) for line in text.splitlines()]
 
 
 def _blocks(lines: list[str]) -> dict[str, list[str]]:
@@ -171,8 +260,30 @@ def _matrix_include(body: list[str]) -> list[dict[str, str]]:
 
     Empty when there is no such block or its shape is not the one read here —
     an unreadable matrix is a can't-tell, never an entry list that happens to
-    be short. Values are unquoted; a nested structure inside an entry is not
-    supported and reads as unreadable rather than as a partial entry.
+    be short.
+
+    WHAT A NESTED STRUCTURE ACTUALLY DOES HERE, because the sentence that used
+    to be in this place named the wrong failure. It said a nested structure
+    *"reads as unreadable rather than as a partial entry"*. It does not: this
+    is a flat scan, so nesting FLATTENS, and there are two shapes of it —
+
+    * a bare list item (``- solvers`` on its own line under a key) carries no
+      ``key: value``, so :data:`_MATRIX_ITEM` does not match and the whole
+      block is refused. That half was true.
+    * a nested MAPPING flattens into the entry, and if it repeats a key the
+      entry already has, the inner one used to WIN. Driven: entry-level
+      ``extras: "jax"`` with a nested ``extras: solvers`` two lines below read
+      ``solvers: True`` — a value from a place this parser does not model,
+      silently overriding the one it does.
+
+    So a repeated key inside one entry is refused, which is the only shape in
+    which flattening can change an answer rather than merely add junk keys
+    beside it: a nested mapping whose keys are all new leaves the field this
+    module reads exactly where it was.
+
+    Values are unquoted, and a trailing comment is stripped BEFORE unquoting
+    (:func:`_strip_comment`) — ``extras: jax  # solvers arrive with jaxfluids``
+    otherwise reads as an extras set containing ``solvers``.
     """
     entries: list[dict[str, str]] = []
     depth: int | None = None
@@ -191,10 +302,13 @@ def _matrix_include(body: list[str]) -> list[dict[str, str]]:
             return []  # a shape this cannot read
         if item.group(1) is not None:
             entries.append({})
-        value = item.group(3)
+        key = item.group(2)
+        if key in entries[-1]:
+            return []  # a nested mapping shadowing a key of the entry itself
+        value = _strip_comment(item.group(3))
         if value.startswith('"') and value.endswith('"') and len(value) >= 2:
             value = value[1:-1]
-        entries[-1][item.group(2)] = value
+        entries[-1][key] = value
     return entries
 
 
@@ -266,7 +380,11 @@ def _classify(body: list[str]) -> Lane | None:
     whole = False
     for argv in pytests:
         words = []
-        for word in argv.split():
+        # The trailing comment goes first, by the same function the rest of
+        # this module uses: `python -m pytest -q  # the whole tree` read
+        # `the`, `whole` and `tree` as path arguments and made a whole-suite
+        # lane read as narrowed.
+        for word in _strip_comment(argv).split():
             # the shell's, not pytest's: a `| tee "$log"` or a `> file` ends
             # the command, and `tee` counted as a path argument once, which
             # read a whole-suite step as a narrowed one.
@@ -285,7 +403,11 @@ def _classify(body: list[str]) -> Lane | None:
     random_order = any("-p randomly" in a for a in pytests) or any(
         "pytest-randomly" in i for i in installs
     )
-    verdict = any(_VERDICT_CHANNEL.search(line) for line in body)
+    # BOTH LINES, not the name anywhere. See `_VERDICT_BOUND` above for the
+    # two edits the one-pattern version missed.
+    verdict = any(_VERDICT_BOUND.match(line) for line in body) and any(
+        _VERDICT_ASSERTED.search(line) for line in body
+    )
     return Lane(job="", jax=jax, solvers=solvers, whole_suite=whole,
                 random_order=random_order, verdict_channel=verdict)
 
@@ -331,12 +453,18 @@ EXPECTED_LANES: dict[str, tuple[str, bool | None, bool, bool, bool]] = {
 #: channel buys, *a verdict pytest's exit code cannot be taken from*, is
 #: bought for a signal nobody merges on. What its red has to be instead is
 #: ACTIONABLE, and the step is built around that: on failure it re-runs the
-#: same commit in file order and annotates which KIND of failure this was. A
-#: bare `exit 1` in front of that classification would replace the one thing
-#: this lane is for with a verdict every other lane already carries. And an
-#: order-dependent undisclosed skip — the failure this lane is most likely to
-#: find — reddens `test_no_session_skip_is_undisclosed` in the ordinary way,
-#: which the classification step then triages.
+#: same commit in file order and annotates which KIND of failure this was.
+#: And an order-dependent undisclosed skip — the failure this lane is most
+#: likely to find — reddens `test_no_session_skip_is_undisclosed` in the
+#: ordinary way, which the classification step then triages.
+#:
+#: THE MECHANICAL HALF OF THIS ARGUMENT WAS FALSE AND IS DELETED. It said a
+#: bare `exit 1` "would sit in front of that classification". It would not:
+#: the step's classification runs only on `status != 0`, behind
+#: `if [ "${status}" -eq 0 ]; then exit 0; fi`, so a verdict check belongs in
+#: the `status -eq 0` branch and could never reach it. What is left is the
+#: cost/benefit half, which stands on its own: the channel's guarantee is
+#: about a verdict a merge gate can trust, and nothing merges on this lane.
 VERDICT_CHANNEL_EXEMPT = {"random-order": "not a required check; see the comment above"}
 
 #: The lanes a documented-hash or series claim may rest on: whole-suite, and
@@ -373,6 +501,14 @@ def lane_series() -> tuple[str, ...]:
     This is what a coverage claim about "a lane" means. See the module
     docstring for why the floating lane contributes ``max(TESTED_JAX_SERIES)``
     and for the one direction in which that inference can be wrong.
+
+    ``"matrix"`` IS REFUSED BY NAME. It is :attr:`Lane.jax`'s spelling of the
+    can't-tell, and this function used to carry it into ``_newest``'s
+    ``int(p)`` and die on ``ValueError: invalid literal for int() with base 10:
+    'matrix'`` — a can't-tell reported as a crash in an unrelated helper, one
+    line away from being reported as itself. ``test_lanes.py``'s
+    ``test_no_lane_a_claim_rests_on_is_a_cant_tell`` reaches it first and says
+    so in the workflow's terms; this is the backstop for every other caller.
     """
     by_job = {lane.job: lane for lane in lanes()}
     found = set()
@@ -380,5 +516,14 @@ def lane_series() -> tuple[str, ...]:
         lane = by_job.get(job)
         if lane is None or lane.jax == "absent":
             continue
+        if lane.jax == "matrix":
+            raise ValueError(
+                f"{job} is credited with delivering a jax series, but ci.yml "
+                f"expands it from a matrix whose entries do not agree on one "
+                f"— `matrix` is Lane.jax's can't-tell. Pin the series in the "
+                f"job, or drop {job!r} from SERIES_BEARING; a coverage claim "
+                f"may not rest on a lane whose series the workflow does not "
+                f"state."
+            )
         found.add(_newest(TESTED_JAX_SERIES) if lane.jax == "floating" else lane.jax)
     return tuple(sorted(found, key=lambda s: tuple(int(p) for p in s.split("."))))

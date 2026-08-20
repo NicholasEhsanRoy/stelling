@@ -79,7 +79,7 @@ import pytest
 jax = pytest.importorskip("jax")  # zero-dep CI has no jax
 import jax.numpy as jnp  # noqa: E402
 
-from stelling import _optional  # noqa: E402
+from _solver_gate import need_solver  # noqa: E402
 from stelling import propagate as P  # noqa: E402
 from stelling import solvers as S  # noqa: E402
 from stelling._jax_compat import transcribe  # noqa: E402
@@ -874,10 +874,7 @@ def test_the_hint_survives_the_front_door_without_a_solver():
     assert any(HINT in n for n in v.notes)
 
 
-@pytest.mark.skipif(
-    not (_optional.available("cvc5") or _optional.available("z3")),
-    reason="no SMT backend installed",
-)
+@need_solver
 def test_the_hint_survives_escalation_which_replaces_the_detail():
     """Why the hint is a NOTE and not the obligation detail. Measured: the
     escalation record's detail REPLACES the propagation's, so a detail-only
