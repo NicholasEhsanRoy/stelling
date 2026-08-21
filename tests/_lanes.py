@@ -171,10 +171,28 @@ _MATRIX_ITEM = re.compile(r"^\s*(-\s+)?([A-Za-z_][\w-]*):\s*(.*?)\s*$")
 #: Reading it and failing the step is the other line, and a job with the first
 #: and not the second asserts nothing.
 #:
-#: `env:` binding, as a mapping key with a value — not a mention:
+#: `env:` binding, as a mapping key with a value — not a mention. BOTH HALVES
+#: OF THAT SENTENCE ARE HELD by
+#: `test_the_verdict_channel_reading_needs_the_BINDING_AND_THE_ASSERTION`, and
+#: neither was: the fence pinned the CONJUNCTION while every string it matched
+#: stayed intact under either conjunct being dropped. Driven, as mutations of
+#: these two lines with the whole lane suite green afterwards:
+#:
+#:   `\bgrep\b.*\bverdict=made\b` -> `\bverdict=made\b`  the fence GREEN
+#:   `...VERDICT:\s*\S`           -> `...VERDICT:`        the fence GREEN
+#:
+#: The second is the one that matters. A key bound to NOTHING —
+#: `STELLING_SKIP_INVENTORY_VERDICT:` with no value — makes
+#: `conftest._write_the_verdict_somewhere_last_writer_wins_cannot_reach`
+#: return early on `if not destination`, so the file is never written: the
+#: exact "binds and nothing reads it" case the second half exists to refuse.
+#: The `^\s*` anchor is what separates a mapping key from a mention, and it had
+#: no control either — `_VERDICT_IN_A_COMMENT` is caught by the comment strip
+#: one step earlier, not by the anchoring.
 _VERDICT_BOUND = re.compile(r"^\s*STELLING_SKIP_INVENTORY_VERDICT:\s*\S")
 #: and the assertion the step fails on, which is the file's first line
-#: compared against `verdict=made`.
+#: compared against `verdict=made`. `grep` is required, not just the string:
+#: a step that ECHOES `verdict=made` into the file asserts nothing about it.
 _VERDICT_ASSERTED = re.compile(r"\bgrep\b.*\bverdict=made\b")
 
 
@@ -237,7 +255,11 @@ def _code_lines(text: str) -> list[str]:
 
     A whole-line comment becomes an empty string rather than disappearing —
     every reader below already skips blanks, and keeping the line means the
-    list still indexes like the file.
+    list still indexes like the file. NOTHING INDEXES IT TODAY, so that second
+    half is a property rather than a use, and
+    ``test_a_comment_is_stripped_the_same_way_everywhere`` pins it: dropping
+    the emptied lines instead leaves every reader in this module green, which
+    makes it exactly the stated-but-unheld shape this file is a fence against.
     """
     return [_strip_comment(line) for line in text.splitlines()]
 
@@ -270,16 +292,28 @@ def _matrix_include(body: list[str]) -> list[dict[str, str]]:
     * a bare list item (``- solvers`` on its own line under a key) carries no
       ``key: value``, so :data:`_MATRIX_ITEM` does not match and the whole
       block is refused. That half was true.
-    * a nested MAPPING flattens into the entry, and if it repeats a key the
-      entry already has, the inner one used to WIN. Driven: entry-level
-      ``extras: "jax"`` with a nested ``extras: solvers`` two lines below read
-      ``solvers: True`` — a value from a place this parser does not model,
-      silently overriding the one it does.
+    * a nested MAPPING flattens into the entry, and BOTH DIRECTIONS OF THAT
+      CHANGE THE ANSWER. Driven: entry-level ``extras: "jax"`` with a nested
+      ``extras: solvers`` two lines below read ``solvers: True`` — the inner
+      one won — and an entry carrying NO ``extras`` OF ITS OWN whose nested
+      mapping supplies one read ``solvers: True`` as well, from a key the
+      entry does not have. Either way the field this module actually reads was
+      decided by a structure this parser does not model.
 
-    So a repeated key inside one entry is refused, which is the only shape in
-    which flattening can change an answer rather than merely add junk keys
-    beside it: a nested mapping whose keys are all new leaves the field this
-    module reads exactly where it was.
+    So ALL NESTING IS REFUSED, BY COLUMN: an entry's own keys are the ones at
+    the column of the key on its ``- `` line, and an item line at any other
+    column ends the read at ``[]``. Refusing the repeated-key shape alone was
+    not enough, and the sentence that claimed it was — that a repeat is *"the
+    only shape in which flattening can change an answer rather than merely add
+    junk keys beside it"* — was false in the second case above. Column is the
+    discriminator rather than a key check because YAML puts every key of one
+    mapping at one column, so this refuses the shape itself instead of one
+    symptom of it; ``ci.yml``'s own two entries are flat at one column and
+    read unchanged.
+
+    The repeated-key check stays in front of the value all the same: a key
+    repeated at the SAME column is a duplicate key in one mapping, which the
+    column rule cannot reach and which is unreadable for its own reasons.
 
     Values are unquoted, and a trailing comment is stripped BEFORE unquoting
     (:func:`_strip_comment`) — ``extras: jax  # solvers arrive with jaxfluids``
@@ -287,6 +321,7 @@ def _matrix_include(body: list[str]) -> list[dict[str, str]]:
     """
     entries: list[dict[str, str]] = []
     depth: int | None = None
+    column: int | None = None
     for line in body:
         if depth is None:
             m = _INCLUDE.match(line)
@@ -302,9 +337,12 @@ def _matrix_include(body: list[str]) -> list[dict[str, str]]:
             return []  # a shape this cannot read
         if item.group(1) is not None:
             entries.append({})
+            column = item.start(2)  # this entry's own keys live here
+        elif item.start(2) != column:
+            return []  # nested under one of them, or otherwise not a key of it
         key = item.group(2)
         if key in entries[-1]:
-            return []  # a nested mapping shadowing a key of the entry itself
+            return []  # the same key twice at the entry's own column
         value = _strip_comment(item.group(3))
         if value.startswith('"') and value.endswith('"') and len(value) >= 2:
             value = value[1:-1]

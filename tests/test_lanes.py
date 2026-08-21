@@ -142,6 +142,12 @@ def test_every_link_of_the_matrix_CHAIN_fails_closed_when_it_is_broken():
     ``test_no_lane_a_claim_rests_on_is_a_cant_tell`` then refuses to let any
     coverage claim rest on. Reading ``False`` would be just as wrong as
     reading ``True`` — it is a lane about which this module knows nothing.
+
+    THE NESTED SHAPES ARE THE SAME LINK MEASURED THREE WAYS, and the third of
+    them is why ``_matrix_include`` refuses nesting by COLUMN now rather than
+    by a repeated key. A repeat is not the only way flattening changes an
+    answer: an entry with no ``extras`` of its own whose nested mapping
+    supplies one reads ``solvers = True`` with nothing repeated anywhere.
     """
     # 1 — the install line names no shell variable
     assert _lanes._classify(_DIRECT_INTERPOLATION).solvers is None
@@ -166,6 +172,22 @@ def test_every_link_of_the_matrix_CHAIN_fails_closed_when_it_is_broken():
         "model"
     )
     assert _lanes._classify(_NESTED_KEY_SHADOWS_THE_ENTRY).solvers is None
+    # ... and the shape the "only a REPEATED key can change an answer"
+    # sentence said could not exist. Nothing is repeated here: the entry has
+    # no `extras` at all and the nesting supplies it. Read flat, that is
+    # `solvers = True` out of a structure this parser does not model — the
+    # permissive answer, from the one field this module actually reads.
+    assert _lanes._matrix_include(_NESTED_KEY_SUPPLIES_A_NEW_ONE) == [], (
+        "an entry with no `extras` of its own read one out of a NESTED "
+        "mapping: every key the nesting contributed was new, so the "
+        "repeated-key check never fired and the lane was credited with a "
+        "solver extra by a structure this parser does not model"
+    )
+    assert _lanes._classify(_NESTED_KEY_SUPPLIES_A_NEW_ONE).solvers is None
+    # and the repeated-key check is still the one refusing a duplicate key at
+    # the entry's OWN column, which no column rule can reach
+    assert _lanes._matrix_include(_KEY_REPEATED_AT_THE_ENTRYS_OWN_COLUMN) == []
+    assert _lanes._classify(_KEY_REPEATED_AT_THE_ENTRYS_OWN_COLUMN).solvers is None
 
 
 def test_a_comment_is_stripped_the_same_way_everywhere():
@@ -188,9 +210,21 @@ def test_a_comment_is_stripped_the_same_way_everywhere():
     assert strip("url: https://example.test/x#frag") == "url: https://example.test/x#frag"
     assert strip("""echo "a # b" """.rstrip()) == 'echo "a # b"'
     assert strip("""echo 'a # b' # tail""") == "echo 'a # b'"
+    # a TAB opens a comment exactly as a space does — legal in YAML after a
+    # scalar and legal in the shell — and dropping `\t` from the rule left
+    # every reader in `_lanes.py` green with the permissive reading back
+    assert strip("extras: jax\t# solvers come in with jaxfluids") == "extras: jax"
     # and a `#` at column 0 wins over any later quote, which is what makes a
     # comment line carrying an apostrophe safe
     assert strip("# pytest's own exit code") == ""
+    # `_code_lines` KEEPS THE EMPTIED LINE, which is the property its own
+    # docstring states — "the list still indexes like the file" — and which
+    # nothing in this module indexes today. Dropping the emptied lines instead
+    # leaves every reader in `_lanes.py` green, so the claim is either pinned
+    # here or it is decoration.
+    assert _lanes._code_lines("a: 1\n# whole-line\nb: 2  # tail\n") == [
+        "a: 1", "", "b: 2",
+    ], "a comment line vanished instead of becoming an empty one"
 
 
 def test_a_COMMENT_cannot_change_what_a_LANE_INSTALLS():
@@ -347,12 +381,65 @@ _VERDICT_IN_A_COMMENT = _VERDICT_JOB.format(
     assertion="          cat log   # the STELLING_SKIP_INVENTORY_VERDICT channel was here",
 ).splitlines()
 
+#: The binding kept, and the token `verdict=made` PRESENT but only as
+#: something the step WRITES. Pins the `grep` half of `_VERDICT_ASSERTED`,
+#: which nothing did: dropping `\bgrep\b.*` from that pattern left every job
+#: below reading exactly as before.
+_VERDICT_ECHOED_NOT_GREPPED = _VERDICT_JOB.format(
+    binding=_BINDING,
+    assertion="          echo 'verdict=made' >> \"${verdict}\"",
+).splitlines()
+
+#: The `env:` key present and bound to NOTHING. Pins the `\s*\S` half of
+#: `_VERDICT_BOUND`, and it is the half that matters: `conftest.py`'s
+#: `_write_the_verdict_somewhere_last_writer_wins_cannot_reach` returns early
+#: on `if not destination`, so a null-valued key means the file is never
+#: written at all — the "binds and nothing reads it" case this reading exists
+#: to refuse, wearing the binding's own spelling.
+_VERDICT_BOUND_TO_NOTHING = _VERDICT_JOB.format(
+    binding="          STELLING_SKIP_INVENTORY_VERDICT:",
+    assertion=_ASSERTION,
+).splitlines()
+
+#: The name MENTIONED mid-line, in a shell string, with the assertion intact
+#: and no `env:` binding anywhere. Pins the `^\s*` anchor — the part of the
+#: pattern that makes it a mapping KEY rather than an occurrence — which
+#: `_VERDICT_IN_A_COMMENT` does not reach, because the comment strip catches
+#: that one a step earlier.
+_VERDICT_MENTIONED_MID_LINE = _VERDICT_JOB.format(
+    binding="          UNRELATED: 1",
+    assertion=(
+        '          echo "set STELLING_SKIP_INVENTORY_VERDICT: yes" >> log\n'
+        + _ASSERTION
+    ),
+).splitlines()
+
 #: An entry with a nested MAPPING that repeats a key the entry already has.
 #: This is the half that was NOT true: the scan is flat, so the nested
 #: ``extras: solvers`` used to overwrite the entry's own ``extras: "jax"`` and
 #: the job read as installing a solver extra.
 _NESTED_KEY_SHADOWS_THE_ENTRY = _MATRIX_JOB.format(
     entries='          - extras: "jax"\n            with:\n              extras: solvers\n'
+).splitlines()
+
+#: An entry with NO ``extras`` OF ITS OWN whose nested mapping supplies one.
+#: The shape the "only shape in which flattening can change an answer"
+#: sentence said could not exist: every key the nesting contributes is NEW,
+#: and one of them is the field this module reads. Both entries are written
+#: this way so that :func:`_lanes._agreed` sees agreement rather than a
+#: disagreement that would mask the reading.
+_NESTED_KEY_SUPPLIES_A_NEW_ONE = _MATRIX_JOB.format(
+    entries=(
+        '          - series: "0.10"\n            with:\n              extras: solvers\n'
+        '          - series: floating\n            with:\n              extras: solvers\n'
+    )
+).splitlines()
+
+#: The same key twice at the entry's OWN column — a duplicate key in one
+#: mapping. Unreachable by the column rule above, which is why the
+#: repeated-key check is still in front of the value.
+_KEY_REPEATED_AT_THE_ENTRYS_OWN_COLUMN = _MATRIX_JOB.format(
+    entries='          - extras: "jax"\n            extras: solvers\n'
 ).splitlines()
 
 
@@ -452,7 +539,7 @@ def test_every_whole_suite_lane_asserts_the_verdict_channel():
 
 
 def test_the_verdict_channel_reading_needs_the_BINDING_AND_THE_ASSERTION():
-    """What ``Lane.verdict_channel`` claims, held to what it measures.
+    r"""What ``Lane.verdict_channel`` claims, held to what it measures.
 
     Its docstring says the job *asserts* the verdict and the fence above says
     the lanes *"fail the step on anything but ``verdict=made``"*. The reading
@@ -470,6 +557,26 @@ def test_the_verdict_channel_reading_needs_the_BINDING_AND_THE_ASSERTION():
     Both halves are required now, and both directions are driven here, because
     a conjunction that is really a constant is the shape this whole batch is
     about.
+
+    AND SO IS EACH CONJUNCT ON ITS OWN, WHICH THIS DID NOT DO AT FIRST. The
+    four cases above pin the ``and``: drop either half of the reading and one
+    of them moves. They do not pin either half's own SHAPE, and two mutations
+    walked through all four with every matched string intact —
+
+    * ``_VERDICT_ASSERTED`` reduced from ``\bgrep\b.*\bverdict=made\b`` to
+      ``\bverdict=made\b``: a step that merely WRITES the token now asserts
+      the verdict.
+    * ``_VERDICT_BOUND`` reduced from ``...VERDICT:\s*\S`` to
+      ``...VERDICT:``: a key bound to NOTHING now counts as the binding —
+      and that is the worst of the four, because a null-valued key makes
+      ``conftest._write_the_verdict_somewhere_last_writer_wins_cannot_reach``
+      return early on ``if not destination``, so the file is never written.
+      "Binds and nothing reads it" is exactly what the conjunction exists to
+      refuse, and this is that case wearing the binding's spelling.
+
+    The ``^\s*`` anchor had no control either. ``_VERDICT_IN_A_COMMENT``
+    looks like one and is not: the comment strip removes that line before any
+    pattern sees it, so the anchoring was never what refused it.
     """
     assert _lanes._classify(_VERDICT_BOTH).verdict_channel is True
     assert _lanes._classify(_VERDICT_BINDING_ONLY).verdict_channel is False, (
@@ -483,6 +590,21 @@ def test_the_verdict_channel_reading_needs_the_BINDING_AND_THE_ASSERTION():
     assert _lanes._classify(_VERDICT_IN_A_COMMENT).verdict_channel is False, (
         "the channel survived in a comment, which is where a deleted step "
         "leaves its name"
+    )
+    assert _lanes._classify(_VERDICT_ECHOED_NOT_GREPPED).verdict_channel is False, (
+        "a step that WRITES `verdict=made` into the file was read as one that "
+        "asserts it; the `grep` is the assertion and nothing held the pattern "
+        "to containing one"
+    )
+    assert _lanes._classify(_VERDICT_BOUND_TO_NOTHING).verdict_channel is False, (
+        "`STELLING_SKIP_INVENTORY_VERDICT:` with no value was read as a "
+        "binding. conftest.py returns early on an empty destination, so that "
+        "job writes no file at all and the grep it runs is against nothing"
+    )
+    assert _lanes._classify(_VERDICT_MENTIONED_MID_LINE).verdict_channel is False, (
+        "the variable's name MENTIONED mid-line was read as an `env:` mapping "
+        "key; `^\\s*` is what makes the pattern a key rather than an "
+        "occurrence, and only this drives it"
     )
 
 

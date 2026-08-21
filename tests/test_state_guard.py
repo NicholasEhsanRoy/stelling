@@ -127,10 +127,10 @@ def test_changed_is_blind_to_the_exemption_list_and_offences_is_not():
     because a licence is about a nodeid and movement is not.
 
     The module guard consults NEITHER — it reads where the state is between
-    tests (see the comment above ``_state_guard._SHADOW``). An earlier version
-    did drive it from ``changed``, as a set of entry names to suppress, and
-    that is precisely how the guard's own printed remedy came to switch the
-    guard off; the two controls for that are further down this file.
+    tests (see the comment above ``_state_guard._TRAJECTORY``). An earlier
+    version did drive it from ``changed``, as a set of entry names to
+    suppress, and that is precisely how the guard's own printed remedy came to
+    switch the guard off; the two controls for that are further down this file.
     """
     entry = G.ENTRIES[0].name
     before = {e.name: 0 for e in G.ENTRIES}
@@ -546,6 +546,17 @@ def test_a_module_leak_survives_an_XFAILING_polluter_in_the_same_module(tmp_path
         f"the module's own leak was not named\n{proc.stdout}"
     )
     assert "STELLING_MODULE_LEAK" in proc.stdout, proc.stdout
+    # AND THE LIMIT THIS PLANT ALSO CARRIES, PINNED HERE BECAUSE IT IS HERE.
+    # The xfail absorbs the FUNCTION guard's report, and a test's own window is
+    # outside the module trajectory by construction, so the xfailing test's own
+    # leak is named at NEITHER altitude. That is the one exception to "a test's
+    # offence is named at the altitude that can name a test"; it is in LIMITS
+    # in tests/_state_guard.py, and this is what holds the LIMITS entry to
+    # being a measurement. If this ever goes red the entry comes out.
+    assert "STELLING_TEST_LEAK" not in proc.stdout, (
+        f"the xfailing test's own leak IS named somewhere now, so the LIMITS "
+        f"entry in tests/_state_guard.py is stale\n{proc.stdout}"
+    )
 
 
 def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_path):
@@ -588,6 +599,142 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
     assert "NOT a module-level statement at import" in reported.stdout, (
         f"the remedy no longer rules out the cause a reader would reach for "
         f"first, so the reader goes looking for it\n{reported.stdout}"
+    )
+
+
+# ── a SECOND SESSION IN THE SAME PROCESS, which is where this last broke ────
+#
+# THE REGRESSION THESE TWO REFUSE, and it was a strict one. The trajectory
+# lived in three MODULE-LEVEL dicts and `module_state_guard` cleared all three
+# at its teardown — so an inner session that loaded the same module cleared the
+# OUTER session's bookkeeping halfway through the outer module. Driven at the
+# commit before this one, plant = a module fixture leaking one key and
+# `test_one` running `pytest.main([..., "-p", "_state_guard", inner])`:
+#
+#     module-level dicts, leaky module    EXIT 0   silent
+#       ... and at session finish:        ['STELLING_LEAK_MODULE']
+#     the SAME plant, no nested session   EXIT 1   names the module
+#     the entry-NAME version it replaced  EXIT 1   names the module
+#
+# so the mechanism this file exists to argue for failed OPEN exactly where the
+# one it replaced failed SAFE. The other direction reads worse: a WELL-BEHAVED
+# module was reported for moving `()` to `()`, because `module_before.get(name)`
+# had become `None` under it — and a report a maintainer cannot reproduce is
+# how a guard gets weakened.
+#
+# Latent when it was found, and counted rather than assumed:
+# `tests/test_tripwire_plugin.py` reaches `pytester.runpytest` — IN-PROCESS —
+# through the `_run` helper at its line 83, from FOURTEEN call sites, and not
+# one of them passes `-p _state_guard` (its args are
+# `tripwire_plugin_args()` and `deterministic_order_args()`). The nested
+# sessions in THIS file do pass it and are `subprocess.run`. What made it worth fixing rather than
+# recording is that the reaching edit is the idiom this very file already uses,
+# one argument away. The trajectory hangs off the session's `Config` now, so a
+# nested session gets a fresh one and the separation is BY CONSTRUCTION.
+
+#: ``test_one``'s body for the two controls below: an in-process pytest session
+#: over a trivial, well-behaved tree, loading the SAME ``_state_guard`` module
+#: object the outer session is guarded by. ``pytest.main`` rather than a
+#: subprocess because a second PROCESS shares nothing and is not the shape at
+#: issue, and rather than ``pytester`` because that is a plugin the plant would
+#: have to request — this is the spelling that reaches the defect with the
+#: least machinery between it and the guard.
+_RUNS_A_NESTED_SESSION = """
+import pathlib
+import tempfile
+
+inner = pathlib.Path(tempfile.mkdtemp()) / "test_inner.py"
+inner.write_text("def test_inner():\\n    assert True\\n", encoding="utf-8")
+assert pytest.main([
+    "-q", "-p", "no:cacheprovider", "-p", "no:randomly",
+    "-p", "_state_guard", str(inner),
+]) == 0
+"""
+
+
+def test_a_module_leak_is_still_named_when_a_TEST_RUNS_A_NESTED_SESSION(tmp_path):
+    """The failing-open half: the leak is real and must still be named."""
+    proc = _nested_module(
+        tmp_path,
+        setup='os.environ["STELLING_LEAK_MODULE"] = "1"',
+        one_body=_RUNS_A_NESTED_SESSION,
+    )
+    assert proc.returncode != 0, (
+        f"a module-scoped fixture leaked and the guard went silent because a "
+        f"test in the module happened to run a nested pytest session\n"
+        f"{proc.stdout}\n{proc.stderr}"
+    )
+    assert "test_planted.py changed process-global state" in proc.stdout, (
+        f"the guard did not name the MODULE\n{proc.stdout}"
+    )
+    assert "STELLING_LEAK_MODULE" in proc.stdout, proc.stdout
+
+
+def test_a_WELL_BEHAVED_module_stays_silent_when_a_test_runs_a_nested_session(
+    tmp_path,
+):
+    """The failing-noisy half, and it is the one that gets a guard weakened.
+
+    Under the module-level dicts this module — which puts its own change back
+    at teardown, the ordinary case — was reported for moving ``()`` to ``()``.
+    A maintainer who meets that report and cannot reproduce it turns the guard
+    off, so the silent direction is a control in its own right.
+    """
+    proc = _nested_module(
+        tmp_path,
+        setup='os.environ["STELLING_WELL_BEHAVED_MODULE"] = "1"',
+        teardown='del os.environ["STELLING_WELL_BEHAVED_MODULE"]',
+        one_body=_RUNS_A_NESTED_SESSION,
+    )
+    assert proc.returncode == 0, (
+        f"a module that put its own change back was reported anyway, because "
+        f"a test in it ran a nested pytest session\n{proc.stdout}"
+    )
+
+
+def test_the_module_report_does_not_claim_a_restore_a_TEST_performed_never_happened(
+    tmp_path,
+):
+    """The module altitude's WORDING, held to what the module altitude measures.
+
+    The shape: the module fixture sets ``K`` at setup, a TEST deletes ``K``,
+    and the fixture's teardown restore is therefore a no-op. The session ends
+    CLEAN — and the module is still reported, correctly, because its own move
+    out was never undone by the module and the clean-up belongs to a test that
+    can be skipped, deleted or reordered away.
+
+    What was wrong was the sentence: *"changed process-global state and did
+    not put it back"* is what the FUNCTION guard measures, and here it is
+    false — it was put back. A report whose first line a reader can disprove
+    by looking at the process is a report that gets the guard weakened rather
+    than the fixture fixed, which is the same failure mode as the ``() -> ()``
+    one above.
+    """
+    proc = _nested_module(
+        tmp_path,
+        setup='os.environ["STELLING_MODULE_SETS_IT"] = "1"',
+        teardown='os.environ.pop("STELLING_MODULE_SETS_IT", None)',
+        one_body='del os.environ["STELLING_MODULE_SETS_IT"]',
+    )
+    assert proc.returncode != 0, (
+        f"the module moved a watched global outside every test and nothing "
+        f"put it back THERE; that is the report this altitude exists for\n"
+        f"{proc.stdout}"
+    )
+    assert "test_planted.py changed process-global state BETWEEN its tests" in proc.stdout, (
+        f"the module was not named, or not in the terms it measured\n{proc.stdout}"
+    )
+    assert "STELLING_MODULE_SETS_IT" in proc.stdout, proc.stdout
+    # the wording that is false HERE. `test_planted.py::test_one` legitimately
+    # carries it — that IS a before/after reading of one test — so the check is
+    # on the module's own line, which has no `::`.
+    assert "test_planted.py changed process-global state and did not put it back" not in proc.stdout, (
+        f"the MODULE is told it did not put something back that a test in it "
+        f"did put back, and the process is clean at session finish\n{proc.stdout}"
+    )
+    assert "A TEST that happens to put it back leaves the process clean" in proc.stdout, (
+        f"the module report no longer explains why it fires on a process that "
+        f"looks clean, which is the half a reader needs\n{proc.stdout}"
     )
 
 

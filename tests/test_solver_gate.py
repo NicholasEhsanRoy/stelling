@@ -56,6 +56,48 @@ NARROW_BY_DECLARATION = {
     ),
 }
 
+# WHAT THIS SCAN DOES NOT SEE — a floor, not a ceiling, and an AST matcher is
+# incomplete by nature rather than by oversight. `either_solver_decisions`
+# matches ONE syntactic shape: an `or` whose operands call `available()` with
+# LITERAL "z3" and "cvc5", resolving module-level `NAME = …` bindings one level
+# deep. Every other spelling of the same decision walks past it. Driven, each
+# of these reads as clean:
+#
+#   importlib.util.find_spec("z3") or find_spec("cvc5")   <- AND THIS ONE HAS
+#     ALREADY BITTEN THIS REPOSITORY. `_solver_gate.py`'s docstring records
+#     `ci.yml`'s no-solver guard step asking exactly it: WHEEL absence proved
+#     and read as SOLVER absence, with a `cvc5` on PATH making the real
+#     predicate true and two tests failing behind it.
+#   "z3" in sys.modules or "cvc5" in sys.modules
+#   two `try: import …` / `except ImportError:` flags and then
+#     `HAVE_Z3 or HAVE_CVC5` — the flags are bound inside the `try`, and
+#     `_module_level_names` walks `tree.body` only
+#   any(available(w) for w in ("z3", "cvc5")), and the same over a named tuple
+#   `if available("z3"): … elif available("cvc5"): …` — no BoolOp at all
+#   `available(name)` with a non-literal argument
+#   the two halves bound inside a FUNCTION rather than at module level
+#   pytest.importorskip("z3") or pytest.importorskip("cvc5")
+#   flags read off another module: `_flags.HAVE_Z3 or _flags.HAVE_CVC5`
+#
+# NONE OF THEM IS IN THIS TREE TODAY, grepped, and each near miss checked
+# rather than counted: no `find_spec` call under `tests/` names a solver wheel
+# (the calls ask about `jax`; the other hits are meta-path finders' own
+# `def find_spec` methods); the one `sys.modules` membership test that names a
+# solver asserts `"z3" not in sys.modules` after `available("z3")`
+# (`test_import_hygiene.py`), which is a no-import assertion and not a
+# run/skip decision; and the `importorskip("z3")`/`("cvc5")` pairs are
+# CONSECUTIVE calls — the two-backend `and`, a different question with a
+# different answer, which the module docstring above already excludes. So the
+# rule holds by measurement, and this list is what stops a green run here
+# being read as "no such decision can exist".
+#
+# AND NOTHING ELSE WOULD CATCH ONE. The environment a narrow spelling
+# misbehaves in is an external `cvc5` with NEITHER wheel, and no lane in
+# `ci.yml` runs it: `test-jax-no-solvers` has no binary either, so the narrow
+# and the wide predicate agree there and the false skip is invisible. That
+# lane's guard step asserting `_solver_gate.HAVE_SOLVER` keeps the DEFINITION
+# honest; it cannot see a copy of the question written somewhere else.
+
 
 def _module_level_names(tree: ast.Module) -> dict[str, ast.expr]:
     """``NAME = <expr>`` at module level, so ``HAVE_Z3 or HAVE_CVC5`` resolves.

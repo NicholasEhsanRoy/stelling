@@ -60,12 +60,15 @@ is therefore the same instrument one scope out.
 **IT REPORTS ONLY WHAT THE FUNCTION GUARD COULD NOT SEE**, which is what keeps
 "named exactly once" true and keeps :data:`PINNED_EXEMPTIONS` meaning what it
 says. It does that by tracking WHERE THE STATE IS WHENEVER NO TEST IS RUNNING —
-see the comment above :data:`_SHADOW` — so a test's own window simply never
+see the comment above :data:`_TRAJECTORY` — so a test's own window simply never
 enters the outer reading. A test's offence is named at the altitude that can
 name a test; what moved between those windows happened outside every test, and
 only that is the module's. Both altitudes fire when both offences are real:
 a module fixture that leaks AND a test that leaks are two reports, because
-they are two acts.
+they are two acts. **THAT SENTENCE HAS ONE EXCEPTION AND IT IS AN ``xfail``** —
+pytest absorbs the guard's teardown failure along with every other failure of
+an xfail-marked test, so such a test's own leak is named at neither altitude.
+It is in LIMITS below, with the measurement.
 
 **THAT SENTENCE WAS FALSE FOR ONE VERSION AND THE WAY IT WAS FALSE IS THE
 LESSON.** The first implementation filtered by entry NAME: whatever a
@@ -133,6 +136,30 @@ against what this suite actually mutates:
 * **Anything a test changes and changes back within its own body.** This is a
   before/after fingerprint, not a trace: a test that arms the tripwire and
   disarms it is silent here, which is the intent.
+* **A leak by an** ``xfail``**-marked test**, and it is the one hole in "named
+  at the altitude that can name a test". ``pytest.mark.xfail`` turns every
+  failure of the marked test into an expected one, the guard's teardown
+  ``pytest.fail`` included, so the FUNCTION altitude's report is absorbed; and
+  the MODULE altitude cannot pick it up either, because a test's own window is
+  outside the trajectory by construction — which is the same property that
+  makes "named exactly once" true. So the offence is named NOWHERE, and
+  ``test_a_module_leak_survives_an_XFAILING_polluter_in_the_same_module``
+  plants exactly that shape and pins it: the module's separate leak is named,
+  the xfailing test's is not. Not a regression — the entry-name version
+  absorbed it too, and worse, since the absorbed report still blinded the
+  outer guard.
+
+  HARMLESS IN THIS TREE TODAY, AND MEASURED RATHER THAN HOPED. Grepped, one
+  collected test carries the marker —
+  ``tests/property/test_oracle.py::test_a_verified_is_true_at_every_admitted_point``;
+  every other ``@pytest.mark.xfail`` and the one ``pytest.xfail()`` call are
+  inside plant SOURCE STRINGS in ``tests/test_skip_inventory.py`` and
+  ``tests/test_state_guard.py``, or in prose. A probe reading
+  :func:`read_state` around every test of that module (a
+  ``pytest_runtest_protocol`` wrapper; jax 0.11.0, hypothesis 6.165.10)
+  reports ``(none)`` over ``2 passed, 1 xfailed``. The altitude that could see
+  such a leak is a report-reading HOOK rather than a fixture raising into one,
+  which is a different instrument from this file.
 * **A ``package``- or ``session``-scoped fixture that never restores, and
   anything a plugin or a conftest does at import.** The two guards below reach
   function and module scope; both of those are set up before the module guard
@@ -412,10 +439,42 @@ def offences(
 def render(nodeid: str, found: list[str], subject: str = "test") -> str:
     """The report. ``subject`` is the altitude that measured it.
 
-    Same first half either way — the entries, and why a green run is the
-    dangerous outcome — and a different remedy, because a module has no nodeid
-    for :data:`PINNED_EXEMPTIONS` to license.
+    Same entries either way, and the same reason a green run is the dangerous
+    outcome — and a different HEADLINE and remedy, because the two altitudes
+    measured different things and a module has no nodeid for
+    :data:`PINNED_EXEMPTIONS` to license.
+
+    **THE MODULE MAY NOT BE TOLD IT "DID NOT PUT IT BACK", BECAUSE SOMETIMES
+    IT DID.** The function guard reads before and after one test, so that
+    sentence is literally what it measured. The module guard reads a
+    TRAJECTORY of what moved outside every test, and the state can be back
+    where it started when it fires: a module fixture that sets ``K`` at setup,
+    a test that deletes ``K``, and a teardown restore that is therefore a
+    no-op ends the session CLEAN and is still reported — correctly, because
+    the module's own move was never undone by the module, and the clean-up
+    belongs to a test that can be skipped, deleted or reordered away. Telling
+    that module's author it did not put something back sends them to look at a
+    process that looks fine, and a report a reader cannot reproduce is how a
+    guard comes to be weakened.
     """
+    headline = (
+        f"{nodeid} changed process-global state and did not put it back."
+        if subject == "test"
+        else f"{nodeid} changed process-global state BETWEEN its tests, and "
+        f"nothing between them put it back."
+    )
+    measured = (
+        f"This is measured before and after THIS {subject}, so this {subject} "
+        f"is the one that changed it — not a later {subject} that inherits it. "
+        if subject == "test"
+        else "This is the trajectory of the moves made OUTSIDE every test of "
+        "this module, so no test of this module did it — and the reading on "
+        "the right is where those moves left the state, which need not be "
+        "where the process is now. A TEST that happens to put it back leaves "
+        "the process clean and this still fires, correctly: the module's own "
+        "change is unrestored, and the restore belongs to a test that can be "
+        "skipped, deleted or reordered away. "
+    )
     remedy = (
         "Restore it (a `finally:`, a fixture, or `monkeypatch`), or, if "
         "leaving it changed is genuinely what the test is for, name the test "
@@ -434,12 +493,11 @@ def render(nodeid: str, found: list[str], subject: str = "test") -> str:
         "follows the whole file."
     )
     return (
-        f"{nodeid} changed process-global state and did not put it back.\n"
+        headline + "\n"
         + "\n".join(found)
         + "\n\n"
-        f"This is measured before and after THIS {subject}, so this {subject} "
-        f"is the one that changed it — not a later {subject} that inherits it. "
-        "State left "
+        + measured
+        + "State left "
         "behind here is inherited by every test that follows, and the failure "
         "mode is not a red suite: it is a GREEN one. A battery in "
         "tests/test_tripwire_arm.py was satisfied for two audit rounds by a "
@@ -471,30 +529,67 @@ def render(nodeid: str, found: list[str], subject: str = "test") -> str:
 #     Following the instrument's printed instructions switched the instrument
 #     off. An xfail on the polluting test did the same thing for free.
 #
-# So the trajectory is tracked instead of names being filtered. `_LAST` is the
-# reading at the close of the last window some guard held; `_SHADOW` is where
+# So the trajectory is tracked instead of names being filtered. `last` is the
+# reading at the close of the last window some guard held; `shadow` is where
 # the state has been carried by moves observed OUTSIDE any test. A test's own
-# window advances `_LAST` and never `_SHADOW`, so what a test does is invisible
+# window advances `last` and never `shadow`, so what a test does is invisible
 # here by construction rather than by suppression — which is what makes "named
 # exactly once" true, and what keeps an exemption from being undone one scope
-# out. The module is reported iff `_SHADOW` ends somewhere other than where
-# `_MODULE_BEFORE` started.
+# out. The module is reported iff `shadow` ends somewhere other than where
+# `module_before` started.
 #
 # Exact, and it needs nothing to be cleared conditionally: a module that sets
 # a global at setup and puts it back at teardown moves the shadow out and then
 # back, and reads silent.
-_MODULE_BEFORE: dict[str, object] = {}
-_LAST: dict[str, object] = {}
-_SHADOW: dict[str, object] = {}
+#
+# IT HANGS OFF THE SESSION'S `Config` AND NOT OFF THIS MODULE, and that is not
+# tidiness. `module_before`, `last` and `shadow` were MODULE-LEVEL dicts,
+# cleared at `module_state_guard`'s teardown — so a SECOND pytest session in
+# the SAME PROCESS that loaded this module cleared the OUTER session's
+# bookkeeping halfway through a module. Driven, with a module fixture leaking
+# one key and `test_one` running
+# `pytest.main([..., "-p", "_state_guard", inner])`:
+#
+#     module-level dicts   EXIT 0   silent, and the key live at session finish
+#     on the Config        EXIT 1   naming the module
+#
+# and the other direction was worse to read: a module that DID put its change
+# back was reported for moving `()` to `()`, because `module_before.get(name)`
+# had become `None` under it. A report a maintainer cannot reproduce is how a
+# guard gets weakened. It was also a STRICT REGRESSION from the entry-name
+# filtering this replaced, which over-reported on the same plant and so failed
+# SAFE where this failed OPEN.
+#
+# A nested session builds a fresh `Config`, so the separation is BY
+# CONSTRUCTION — the same argument the trajectory itself is sold on, one level
+# up — rather than by anybody remembering to key a module-level dict on the
+# session. The two controls are
+# `test_a_module_leak_is_still_named_when_a_TEST_RUNS_A_NESTED_SESSION` and
+# `test_a_WELL_BEHAVED_module_stays_silent_when_a_test_runs_a_nested_session`.
+_TRAJECTORY: pytest.StashKey[dict[str, dict[str, object]]] = pytest.StashKey()
 
 
-def _outside_a_test(reading: dict[str, object]) -> None:
-    """Fold a reading taken outside any test into the trajectory."""
+def _trajectory(config) -> dict[str, dict[str, object]]:
+    """This session's trajectory: ``module_before``, ``last`` and ``shadow``.
+
+    Created on first use and never shared: two sessions in one process have
+    two ``Config`` objects and therefore two of these.
+    """
+    return config.stash.setdefault(
+        _TRAJECTORY, {"module_before": {}, "last": {}, "shadow": {}}
+    )
+
+
+def _outside_a_test(
+    traj: dict[str, dict[str, object]], reading: dict[str, object]
+) -> None:
+    """Fold a reading taken outside any test into ``traj``."""
+    last, shadow = traj["last"], traj["shadow"]
     for name, value in reading.items():
-        if _LAST.get(name) != value:
-            _SHADOW[name] = value
-    _LAST.clear()
-    _LAST.update(reading)
+        if last.get(name) != value:
+            shadow[name] = value
+    last.clear()
+    last.update(reading)
 
 
 @pytest.fixture(autouse=True)
@@ -518,12 +613,13 @@ def state_guard(request):
     outside every test, and this test's ``after`` is where the next window
     starts from.
     """
+    traj = _trajectory(request.config)
     before = read_state()
-    _outside_a_test(before)
+    _outside_a_test(traj, before)
     yield
     after = read_state()
-    _LAST.clear()
-    _LAST.update(after)
+    traj["last"].clear()
+    traj["last"].update(after)
     found = offences(request.node.nodeid, before, after)
     if found:
         pytest.fail(render(request.node.nodeid, found), pytrace=False)
@@ -534,7 +630,7 @@ def module_state_guard(request):
     """The same instrument one scope out: fail the MODULE that moved one.
 
     See "TWO ALTITUDES" in the module docstring for the measurement this
-    exists on, and the comment above :data:`_SHADOW` for why it reports a
+    exists on, and the comment above :data:`_TRAJECTORY` for why it reports a
     TRAJECTORY rather than filtering by entry name.
 
     A module-scoped fixture cannot be exempted by nodeid, and that is
@@ -543,20 +639,22 @@ def module_state_guard(request):
     every test that follows it is not the same act. If one is ever genuinely
     wanted, it needs its own list and its own argument.
     """
+    traj = _trajectory(request.config)
     before = read_state()
-    for shared in (_MODULE_BEFORE, _LAST, _SHADOW):
+    for shared in traj.values():
         shared.clear()
         shared.update(before)
     yield
     after = read_state()
-    _outside_a_test(after)  # module teardown is outside every test too
+    _outside_a_test(traj, after)  # module teardown is outside every test too
+    shadow, module_before = traj["shadow"], traj["module_before"]
     found = [
-        f"  {entry.name}: {before.get(entry.name)!r} -> {_SHADOW.get(entry.name)!r}\n"
+        f"  {entry.name}: {before.get(entry.name)!r} -> {shadow.get(entry.name)!r}\n"
         f"      ({entry.what})"
         for entry in ENTRIES
-        if _SHADOW.get(entry.name) != _MODULE_BEFORE.get(entry.name)
+        if shadow.get(entry.name) != module_before.get(entry.name)
     ]
-    for shared in (_MODULE_BEFORE, _LAST, _SHADOW):
+    for shared in traj.values():
         shared.clear()
     if found:
         pytest.fail(
