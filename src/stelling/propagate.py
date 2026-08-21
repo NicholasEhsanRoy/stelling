@@ -5810,6 +5810,155 @@ def _ieee_cmp_get_min_normal(eqn) -> float:
     return max(bands)
 
 
+# --- the real-mode subnormal TELL -------------------------------------------
+#
+# THE ROWS THAT TOOK THE DEPARTURE, AND THE ROW THAT DID NOT. `_t_sign` and
+# `_t_rem` gate their definite branches on `interval.MIN_NORMAL` rather than
+# on zero, and `_refuse_non_f64_float` calls that what it is: *"A DELIBERATE
+# DEPARTURE FROM A STATED POSTURE"*. The comparisons never took it, and
+# `_t_sign`'s own docstring records the residue in advance:
+#
+#     STRICTER THAN ITS NEIGHBOURS, deliberately, and recorded rather than
+#     hidden: real-mode ``gt([1e-320, 1e-300], 0)`` returns definite TRUE
+#     today — the same device-dependence answered the other way. […] this
+#     transfer takes the answer that is sound under either reading and
+#     changes nothing else to match.
+#
+# THE POSTURE IS KEPT AND NOTHING BELOW JUDGES. The departure is NOT
+# extended to comparisons: a real-mode comparison still returns the ℝ
+# answer, at the same tier, with the same coverage accounting, and the
+# `semantics: real` stamp's own disclaimer ("a predicate can hold in ℝ and
+# fail in floats") still says what mode this is. What is added is a NOTE, on
+# the one shape where that sentence stops being a general disclaimer and
+# becomes a specific, known divergence — so that a 100%-coverage VERIFIED
+# with no decline and no ⊤, over a box whose values the target reads as
+# zero, SAYS WHICH SEMANTICS IT IS SPEAKING and cannot be mistaken for a
+# claim about what the hardware computes.
+#
+# The mode question itself — whether real mode brackets the EXECUTED program
+# or the real-arithmetic idealization — is not answered here. It predates
+# these rows, it reaches every comparison, and it is the principal's to
+# settle. A tell is what an unsettled question is allowed to ship with.
+_SUBNORMAL_TELL_ROWS = frozenset({"lt", "gt", "le", "ge", "eq", "ne"})
+
+
+def _subnormal_flush_tell(eqn, params, ins, out):
+    """Would the target's DAZ flush take this real-mode comparison's
+    definite answer away? ``(lost, min_normal, float_dtypes)`` if it would,
+    ``None`` if it would not.
+
+    ``lost`` counts elements answered DEFINITELY in ℝ whose answer is not
+    established once the operands are read the way the measured target reads
+    them. ``None`` is the ordinary case and the one that must stay
+    byte-identical: this function is the whole of the tell's trigger, and a
+    ``None`` here means not one byte of the verdict moves.
+
+    **THE PREDICATE IS A DIFFERENCE, NOT A SIZE TEST.** "Is the box small"
+    would fire on everything with a zero in it. What is compared here is two
+    runs of THE SAME ROW — the row's ℝ answer, which is what the verdict
+    carries, against the row's answer over operands hulled with 0 across the
+    subnormal band of their own format. The haze is
+    :func:`stelling.interval.subnormal_haze_fmt`, the DAZ model ieee mode
+    already carries, applied at the band :func:`_ieee_cmp_get_min_normal`
+    picks — so the tell and the ieee face read the same band off the same
+    dtypes, and there is no second spelling of either to drift. The row is
+    fetched from :data:`TRANSFERS` rather than re-derived, for the same
+    reason.
+
+    So it is SILENT wherever the flush cannot change an answer, which is
+    where the ordinary harness lives:
+
+      * a box clear of the band — the haze is the identity;
+      * a box that already contains 0 — the haze is the identity too, which
+        is why a declaration like ``[-10, 10]`` never reaches this, and why
+        ⊤ never does;
+      * an integer or bool comparison — no subnormal band exists;
+      * a claim the flush does not decide differently — ``[1e-320, 1e-300]
+        < 1.0`` is still definitely true with the low end read as ``0.0``.
+
+    And it is LOUD on the shape that motivated it: ``x > 0.0`` over a
+    float64 ``[1e-320, 1e-300]``, VERIFIED at 100% coverage with no decline,
+    no ⊤ and — before this — nothing in the verdict to distinguish it from a
+    statement about the running program. Both directions are pinned in
+    tests/test_subnormal_tell.py; a tell that cannot fire and a tell that
+    fires on everything are the same defect, and neither is caught by an
+    example that only fires.
+
+    **THE ``moved`` EXIT IS A FAST PATH AND NOT A GUARD, and it is written
+    down that way because a comment claiming otherwise is the failure this
+    file is full of warnings about.** When the haze is the identity on every
+    operand the hazed answer IS the ℝ answer, so ``lost`` is 0 and the
+    function returns ``None`` by the last gate anyway. Measured: with the
+    ``moved`` exit deleted, tests/test_subnormal_tell.py is still 20 passed
+    — no test moves, because no OUTCOME moves. What it buys is that an
+    ordinary program does not pay for a second transfer call at every
+    comparison it contains.
+    """
+    if eqn.primitive not in _SUBNORMAL_TELL_ROWS:
+        return None
+    floats = sorted(
+        {d for d in (v.aval.dtype or "" for v in eqn.invars) if "float" in d}
+    )
+    if not floats:
+        return None
+    try:
+        min_normal = _ieee_cmp_get_min_normal(eqn)
+    except iv.IntervalError:
+        # A float format with no band on file. Silence here means the tell
+        # was not AVAILABLE, never that the flush is absent — and the row it
+        # would have annotated is unchanged either way, because this
+        # function only ever returns a message.
+        return None
+    hazed, moved = [], False
+    for x in ins:
+        h, changed = iv.subnormal_haze_fmt(x, min_normal)
+        hazed.append(h)
+        moved = moved or changed
+    if not moved:
+        return None
+    try:
+        flushed = TRANSFERS[eqn.primitive][0](eqn, params, hazed)[0]
+    except iv.IntervalError:
+        # the row declining over the hazed operands says nothing about the
+        # answer it gave over the real ones; no tell rather than a guess.
+        return None
+    lost = sum(
+        1
+        for lo, hi, flo, fhi in zip(out.los, out.his, flushed.los, flushed.his)
+        if lo == hi and (flo, fhi) != (lo, hi)
+    )
+    if not lost:
+        return None
+    return lost, min_normal, floats
+
+
+def _subnormal_tell_text(eqn, where, lost, min_normal, floats, provenance):
+    """The tell's sentence. Split out from the walk so a test can read it
+    without driving a whole propagation, and so the band it names is the
+    band :func:`_subnormal_flush_tell` measured with."""
+    bands = ", ".join(
+        f"{d}: 0 < |x| < {iv._FORMAT_MIN_NORMAL_TEXT.get(d, '?')}"
+        for d in floats
+    )
+    return (
+        f"SUBNORMAL-SENSITIVE DEFINITE ANSWER: {eqn.primitive!r} at {where} "
+        f"answers definitely for {lost} element(s) under semantics='real', "
+        f"which judges the declared set in exact real arithmetic — and an "
+        f"operand box reaches into the subnormal band of its own format "
+        f"({bands}; the band applied here is the widest of them, "
+        f"{min_normal!r}). Whether the target flushes subnormals is "
+        f"device/compiler-dependent, and the measured one does (DAZ on "
+        f"operands: jax 0.11.0 CPU reads 5e-324 > 0 as False), so it "
+        f"answers from 0.0 where ℝ reads a nonzero value — and {lost} of "
+        f"those element(s) then have no definite answer at all. THE VERDICT "
+        f"IS UNCHANGED AND IS AN ℝ CLAIM over the declared set, which is the "
+        f"registered posture of this mode; it is NOT a claim about what the "
+        f"hardware computes. semantics='ieee' is the dial that models the "
+        f"flush — it hazes these same operands at this same band and does "
+        f"not answer these element(s) definitely{provenance}"
+    )
+
+
 def _ieee_cmp_f64_only(eqn) -> None:
     """Legacy comparison guard — kept for backward compatibility with test
     assertions that check for 'binary64 only' in decline notes. Now only
@@ -10399,6 +10548,30 @@ class _Propagator:
                 self.counter.record_unknown(eqn.primitive)
                 self.top_out(eqn)
                 return
+        if (
+            not ieee
+            and self.pin is None
+            and eqn.primitive in _SUBNORMAL_TELL_ROWS
+        ):
+            # THE REAL-MODE SUBNORMAL TELL. It reads `outs` and writes a
+            # note; it touches no box, no counter, no tier and no flag, so
+            # every verdict this run would have produced it still produces.
+            # `self.pin is None` skips PROBE runs (the region and
+            # reachability certificates), whose notes are discarded — a note
+            # nobody reads is only cost. The predicate and its silence are
+            # `_subnormal_flush_tell`'s.
+            tell = _subnormal_flush_tell(eqn, params, ins, outs[0])
+            if tell is not None:
+                lost, min_normal, floats = tell
+                self.notes.append(_subnormal_tell_text(
+                    eqn,
+                    eqn.source_info[-1] if eqn.source_info
+                    else "unknown location",
+                    lost,
+                    min_normal,
+                    floats,
+                    self._operand_provenance(eqn),
+                ))
         self.counter.record_known(eqn.primitive)
         if eqn.primitive == "scatter-add":
             # the accumulate row is the first registered transfer whose

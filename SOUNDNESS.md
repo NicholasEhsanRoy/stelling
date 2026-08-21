@@ -102,6 +102,24 @@ Every verdict object stamps, at minimum:
   declining is safe under both readings while admitting is safe under only
   one; closing that divergence is a mode-wide decision, not a two-row fix.
 
+  **THE `gt` ROW ABOVE IS UNCHANGED AND NOW SAYS SO IN THE VERDICT
+  (2026-08-21).** The mode question is still open, the comparison rows still
+  answer in ℝ, and the `sign`/`rem` departure was deliberately NOT extended
+  to them — but a real-mode comparison that answers DEFINITELY while an
+  operand box reaches into the subnormal band of its own dtype now writes a
+  note into the verdict, naming that dtype's own smallest normal, what the
+  measured target does instead (DAZ), and that the claim is an ℝ one rather
+  than a statement about the hardware. It fires on `x > 0.0` over float64
+  `[1e-320, 1e-300]` — VERIFIED at 100% coverage, no decline, no ⊤, and
+  before this nothing in the verdict distinguished it from a
+  hardware-compliance claim — and it is silent on `x < 1.0` over that same
+  box, where the flush changes no answer, and on `[-10, 10]`, which merely
+  CONTAINS the band. It is a difference between two runs of the same row,
+  not a size test on the box: `propagate._subnormal_flush_tell`, both
+  directions in `tests/test_subnormal_tell.py`. **It adds no judgement** —
+  same status, same boxes, same coverage, same tiers; the `ieee` dial
+  remains the only thing that decides this shape differently.
+
   **The campaign's strongest result met this question before it was named, and
   answered it by withholding.** The flagship declares `float32` and its
   recorded verdicts are REFUTED with a witness that EXECUTES — safe under
