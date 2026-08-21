@@ -455,7 +455,14 @@ def test_a_TEST_that_pollutes_is_named_once_and_not_again_at_module_scope(tmp_pa
         tmp_path, setup="pass", body='os.environ["STELLING_PLANTED_BY_A_TEST"] = "1"'
     )
     assert proc.returncode != 0, proc.stdout
-    named = proc.stdout.count("changed process-global state and did not put it back")
+    # COUNT THE REPORTS, NOT THE ECHOES. pytest prints each error twice: once
+    # in the ERRORS block and once in `short test summary info`, where the
+    # reason is truncated to the TERMINAL WIDTH. Counting the whole of stdout
+    # therefore made this test pass at COLUMNS=80 and fail at 200 -- green on
+    # the machine that wrote it, red in CI, for a reason that has nothing to
+    # do with the property. The summary is an echo of the same report.
+    body = proc.stdout.split("short test summary info", 1)[0]
+    named = body.count("changed process-global state and did not put it back")
     assert named == 1, (
         f"the offence was reported {named} times, not once:\n{proc.stdout}"
     )
