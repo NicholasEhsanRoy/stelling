@@ -42,6 +42,7 @@ from __future__ import annotations
 
 from stelling._optional import OptionalDependencyError, available, require
 from stelling._tripwire.eager import EagerTruncationError, intentional_wrap
+from stelling._tripwire.perimeter import NarrowingError
 
 # PEP 440 development version, and the reason it is not "0.1.0" or "0.2.0".
 # Every verdict stamps this as provenance (`Stamp.stelling_version`), and
@@ -58,6 +59,7 @@ __version__ = "0.2.0.dev0"
 
 __all__ = [
     "EagerTruncationError",
+    "NarrowingError",
     "OptionalDependencyError",
     "__version__",
     "available",

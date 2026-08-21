@@ -176,6 +176,111 @@ reaches it: Mode 2 is 0.2.0 development work throughout.
   function it patches and drives every construction route it claims, in both
   directions. Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#m2-020-06)
+### The narrowing perimeter (Mode 3), DEFAULT-OFF
+
+A THIRD instrument, opt-in and switched on by nothing else. The detail is
+inline here rather than routed to `SOUNDNESS.md`: routing is for text that
+LEFT this file and is pinned by the sha256 of what it left as
+(`tests/_soundness_routing_manifest.py`), and none of this was ever here.
+
+*Versions.* `v0.1.0` is the only release and nothing here reaches it: Mode 3
+is 0.2.0 development work throughout.
+
+- **The defect it closes.** `x <= 2**31 - 1` on a `float32` array is a
+  program about `2147483648.0` — the literal has no `float32` and jax
+  converts it to the next one up, so the comparison that runs is one greater
+  than the one written. `stelling.preconditions.check` returned **VERIFIED**
+  about that harness, correctly, with every layer below it doing its job: the
+  trace is faithful and the moved constant really is in the jaxpr. The
+  written number simply never existed. Neither instrument that shipped before
+  this can see it — the const-fold tripwire watches integer RANGE, and
+  `2147483647` is out of range for nothing; the eager detector watches array
+  CONSTRUCTION, and no array is being constructed. Under
+  `--stelling-narrowing-perimeter=error` it raises `stelling.NarrowingError`
+  at the line that wrote the literal. Driven both ways in
+  `tests/test_narrowing_perimeter.py`: VERIFIED disarmed, refused armed, in
+  the same process, for `2**31 - 1` and for `16777219`, with `1000`
+  unaffected in both directions.
+
+- **What it attaches to.** The six comparison slots on jax's tracer type,
+  which is the face verification runs through: inside a harness the operand
+  is a `DynamicJaxprTracer` and **not** a concrete array, so an array-only
+  perimeter never fires during `check()` at all. Six slots and not two,
+  because Python maps `N >= x` onto `x.__le__(N)` and `N > x` onto
+  `x.__lt__(N)` — a spelling and its reflection share a slot, while a
+  spelling and its opposite do not, and users write both. The type is FOUND
+  rather than named: the adapter asks jax for a traced value and walks its
+  `__mro__` for the class that owns the slots, so a rename is a refusal at
+  arm time rather than a hard-coded private import.
+
+- **The predicate is vendored, not written.** `stelling/_tripwire/prop_guard.py`
+  is the artefact of the 0.2.0 dunder-perimeter fuzz round, copied in with
+  four import-route edits and no others, its self-test and its provenance
+  comment intact. Its 24 cases run in this repository's suite. **The evidence
+  behind it is two kinds and they are not interchangeable**: a 482,691-check
+  real-corpus census with zero false positives, which establishes that the
+  predicate is not trigger-happy on code people write — and a
+  204,300-evaluation property census, which is what the thirteen individual
+  mitigations are answerable to. The corpus is not evidence about the
+  individual rules: `__pow__` carried 4,647 checks with no fires, truediv
+  421, bfloat16 214, float16 130, complex64 5, complex128 6, bool 3, there
+  was no int4/uint4/float8 or extended-dtype traffic at all, and 14 of the 34
+  slots carried none. `docs/overflow-tripwire.md` states that distinction
+  where a reader meets the zero.
+
+- **Arm and disarm are SESSION-scoped.** `arm()` takes an owner and `disarm()`
+  restores only when the last owner releases. Without that, an idempotent arm
+  beside an unconditional disarm means a nested in-process pytest session
+  unhooks its parent — the inner session installs nothing (correctly), its
+  teardown restores everything (catastrophically), and every remaining outer
+  test runs unprotected with **nothing red**. The plugin's owner is the
+  session's `Config`, so a nested session is a different owner by
+  construction. All four lifecycles are driven — double arm, arm/disarm/arm,
+  a raise between the two, and a real nested session — with the original slot
+  object's identity asserted at the end of each, and with the counterfactual
+  (an anonymous release DOES unhook) driven beside the nested one.
+
+- **It perturbs `source_info`, and that is disclosed rather than denied.**
+  Every equation built through an armed slot carries one extra traceback
+  frame. `content_hash`, `consts`, `to_dict(include_metadata=False)`, that
+  document's `eqns`, the StableHLO text and `check()`'s status and notes are
+  byte-identical armed and disarmed; `str(jaxpr)`,
+  `to_dict(include_metadata=True)` and any raw `repr()` carrying
+  `source_info` are **not**. Do not byte-compare a persisted document across
+  an armed boundary. `source_info_util.register_exclusion` does not fix this
+  — driven — and has no un-register API, so it is not used.
+
+- **`stelling.NarrowingError` is public and inherits `BaseException`**, so an
+  ordinary `except Exception:` cannot swallow a soundness alarm — and, one
+  reason further than Mode 2's, because an `Exception` raised inside a
+  binary-operator slot can be caught by the operator protocol and turned into
+  a silent retry of the reflected operation. The vendored predicate's own
+  `OverflowError` subclass is untouched and unused by this module.
+
+- **The escape is the one Mode 2 already has.** `intentional_wrap(value,
+  dtype)` needs no support from the perimeter — it returns a value already in
+  range, so nothing is left to detect — and `expected_truncation(reason)`
+  covers this instrument too, counting, siting and printing every narrowing
+  it permits with the reason its author gave. The refusal message also names
+  the value the program actually uses, which is the first answer.
+
+- **The report carries the predicate's two decline counters.** A run
+  reporting zero refusals with a non-zero decline count is not a clean run,
+  it is an unmeasured one, and the terminal section says so in those words.
+  The armed slot list is printed with them, as the whole perimeter rather
+  than a summary of one.
+
+- **Fail-closed, and the nightly canary keys on the facts it rests on.**
+  Arming drives the reference defect through the live slots in **both**
+  directions and refuses on `not-invoked` or `cries-wolf`; a missing slot is
+  `no-slot`, a moved type is `no-type`. The canary asserts positively that
+  the type is still a heap type, still owns the slots, still rebinds and
+  restores by identity, that a **warm** traced operation still enters Python,
+  and that no in-place slot has appeared — plus the predicate's promotion
+  identity against the dtype jax actually converts a literal into. Three
+  injected faults are driven against those rows. A displaced perimeter now
+  also reaches `_tripwire.displaced()`, which the trace gate consults.
+
 ### Verification pipeline
 
 - **`check(..., falsify="sample")` — the falsification probe, DEFAULT-OFF

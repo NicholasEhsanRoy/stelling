@@ -547,6 +547,162 @@ while both hooks are live, the one displacement question that covers **both**
 of them: is stelling's wrapper still the live one? A `no` there is
 `hooks:displaced` and it names which.
 
+## The third door: a literal that never existed
+
+`x <= 2**31 - 1` on a `float32` array is not the program it looks like.
+`2147483647` has no `float32`, so jax converts it to `2147483648.0` and the
+comparison the machine runs is **one greater** than the one written.
+
+Nothing above catches this, and not by oversight:
+
+* the const-fold tripwire watches integer **range**, and `2147483647` is not
+  out of range for anything;
+* the eager detector watches array **construction**, and no array is being
+  constructed.
+
+Everything else does its job perfectly. The trace is faithful to the Python,
+the constant really is in the jaxpr, and `stelling.preconditions.check`
+returns **VERIFIED** — about a program nobody wrote:
+
+```console
+$ pytest --stelling-narrowing-perimeter=error
+```
+
+<!-- doc-example: illustrative -->
+```python
+def h():
+    x = any_array((4,), "float32", (0.0, 1e9))
+    return assert_(x <= 2**31 - 1)     # NarrowingError: the literal 2147483647
+                                       # written in `__le__` is not exactly
+                                       # representable in float32: the program
+                                       # uses 2147483648.0
+```
+
+The perimeter attaches to the Python operator slot the literal passes through
+on its way into jax and refuses it there, at the line that wrote it. It is
+**off by default** and neither of the other two dials switches it on.
+
+### What it covers
+
+The **six comparison slots** on jax's tracer type — `<`, `<=`, `==`, `!=`,
+`>`, `>=` — which is the face verification runs through: inside a harness the
+operand is a tracer, not a concrete array. The armed slot list is printed in
+the report on every run, and it is the whole perimeter rather than a summary
+of one: an operator missing from it is unwatched.
+
+Six and not two, because a spelling and its reflection **share** a slot while
+a spelling and its opposite do not. Python maps `N >= x` onto `x.__le__(N)`
+and `N > x` onto `x.__lt__(N)`, so `x <= N` and `N >= x` land in the same
+place — and `x <= N` and `x >= N` do not. A user writes both.
+
+### If the narrowing is what you meant
+
+The error names the value the program actually uses, and the first answer is
+to write that value: `x <= 2147483648.0` is the program either way, and now
+the source says so.
+
+For an integer wrap, `stelling.intentional_wrap(value, dtype)` is the same
+declaration it is for the eager detector, and it needs no support from the
+perimeter at all — it returns a value that is already in range, so there is
+nothing left to detect.
+
+For code whose **subject** is the narrowing — a reproducer that must perform
+it and observe the result — `stelling._tripwire.eager.expected_truncation(reason)`
+covers this instrument too. One declaration, both instruments; the reason is
+mandatory, and every narrowing a region permits is counted, sited and printed
+in the report with the reason its author gave.
+
+### It raises `BaseException`
+
+For the reason the eager detector's exception does — an ordinary `except
+Exception:` must not be able to swallow a soundness alarm — plus one of its
+own: this is raised from inside a binary-operator slot, and an `Exception`
+there can be caught by the operator protocol and turned into a silent retry of
+the reflected operation. Catch `stelling.NarrowingError` if you need to.
+
+### What it does to your jaxprs
+
+**It perturbs `source_info`, and this page will not claim otherwise.** Every
+equation built through an armed slot carries one extra traceback frame: the
+perimeter's own wrapper.
+
+Measured on a harness with a `scan`, a `cond`, a `vmap` and a `while_loop`,
+armed against disarmed:
+
+| artefact | armed == disarmed |
+|---|---|
+| `ClosedJaxpr.content_hash()` | **identical** |
+| `consts` | **identical** |
+| `to_dict(include_metadata=False)` | **identical** |
+| the `eqns` of that metadata-free document | **identical** |
+| StableHLO text (`jit(...).lower().as_text()`) | **identical** |
+| `check()` status and notes | **identical** |
+| `to_dict(include_metadata=True)` | **DIFFERS** |
+| `str(jaxpr)` | **DIFFERS** |
+| a raw `repr()` of an equation's params, which carries `source_info` | **DIFFERS** |
+
+`content_hash` is unaffected by design and not by luck: `ir.py`'s
+`CANONICALIZATIONS` declares `source_info` and `debug_info` outside the hash
+scope, and the perimeter perturbs exactly the field the IR already calls
+non-semantic. But **do not byte-compare a persisted document across an armed
+boundary** — that document keeps its metadata, and the extra frame is in it.
+
+(`jax._src.source_info_util.register_exclusion` does not fix this — driven,
+registered, no change — and it has no un-register API, so calling it would be
+an irreversible process-global write that `disarm()` could not undo. It is not
+used.)
+
+### What the evidence is, and what it is not
+
+The predicate is not written in `perimeter.py`. It is
+`stelling/_tripwire/prop_guard.py`, vendored essentially unchanged from the
+artefact that was measured, and it carries **two different kinds of evidence
+that are not interchangeable**:
+
+* **A real-corpus census.** 482,691 guard-eligible checks — jax's own shipped
+  harness corpus in both x64 cells, the shipped test suites of optax and of
+  jax-md, and eight eval-target libraries driven both normally and under
+  `JAX_DISABLE_JIT=1`, which turns each library's whole interior into concrete
+  operations. **Zero false positives**, scored twice end to end by a context
+  that did not write the predicate, with its unknown-slot and internal-decline
+  counters empty in all nine configurations.
+
+  What that census establishes is one specific thing: **the predicate is not
+  trigger-happy on code people actually write.**
+
+  What it does **not** establish is that any individual rule inside the
+  predicate is right, and the traffic table says why. `__pow__` carried 4,647
+  checks and no fires, so the exclusion that keeps it quiet was never
+  exercised. `truediv` carried 421, so the float redirect was never exercised.
+  bfloat16 carried 214, float16 130, complex64 5, complex128 6 and bool 3 —
+  real traffic, no narrowing literal. There was **no int4, uint4, float8 or
+  extended-dtype traffic at all**, and **14 of the 34 slots carried no traffic
+  whatsoever.** A zero on an axis with no traffic on it is not a measurement
+  of that axis.
+
+* **A property-based census.** The individual rules rest on a different
+  instrument: 204,300 evaluations of a generated matrix over the slots, dtypes
+  and literal magnitudes, which is where each of the thirteen mitigations
+  named in `prop_guard.py` came from and what each is answerable to.
+
+The two are complementary and **neither is more of the other**. Read a zero
+from the corpus as "not noisy on real code", and read the per-rule claims off
+the property census — the predicate's own 24-case self-test, which runs in
+this repository's suite on every jax it is tested against, is the part of that
+evidence that travels with the code.
+
+### The canary
+
+The nightly canary arms the perimeter, drives its live control in both
+directions, and asserts the facts the perimeter **rests on** — that the type
+is still findable and still a heap type, that it still owns the slots, that
+`setattr` still rebinds and restores identity, that a **warm** traced
+operation still enters Python, and that no in-place slot has appeared to
+bypass the forward ones. Each is a positive assertion, so a jax that takes one
+away turns a row red rather than passing quietly. It also re-checks the
+predicate's promotion identity against the dtype jax actually converts a
+literal into, on every dtype it can build.
+
 ## Reading the report
 
 **The denominator is always printed**, in the form the tool actually prints it:
@@ -599,7 +755,8 @@ this tool at any time. When that happens:
 The codes are stable and greppable: `no-module`, `no-registry`, `no-entry`,
 `not-invoked`, `cries-wolf`, `mis-attributed`, `below-floor`, `foreign-patch`,
 `detached`, `no-worker-reported`, `mixed`, `no-site-module`, `no-site`,
-`signature-drift`, `route-blind`, `unexpected:<ExcType>`.
+`signature-drift`, `route-blind`, `no-type`, `no-slot`, `no-face`,
+`unexpected:<ExcType>`.
 
 `no-worker-reported` and `mixed` belong to an xdist **controller**, which never
 arms and whose status is its workers' agreement: the first when not one worker
@@ -615,6 +772,16 @@ is installed, and jax has stopped sending one construction route through it.
 That last failure is silent, it is what a jax release actually produces, and
 the detector refuses to attach rather than watching five routes and quietly
 losing the sixth.
+
+The last three belong to the **narrowing perimeter**, which rebinds operator
+slots on a jax type: `no-type` is that type no longer being findable through
+any public route, or being found and no longer owning the slots; `no-slot` is
+one slot of the set being absent, which would leave a hole in a perimeter
+whose whole value is that it has none; and `no-face` is a caller asking for a
+face that does not exist. The perimeter also returns `not-invoked` and
+`cries-wolf` — the same two failures the tripwire has, asked of a different
+hook — because its arm-time self-check drives the reference defect through the
+live slots in both directions and refuses on either going wrong.
 
 ### It can also stop being armed part-way through
 
@@ -747,7 +914,9 @@ trace time, never of whether the plugin is installed.
 | `--stelling-overflow=off` | off, even if the plugin above is loaded |
 | `--stelling-eager-truncation=error` | switch on the **eager construction-site detector**; an undeclared truncation raises, and the session **fails** if the detector cannot attach |
 | `--stelling-eager-truncation=off` | off — the default, and `--stelling-overflow` does not change it |
-| *(nothing)* | both off — the default |
+| `--stelling-narrowing-perimeter=error` | switch on the **narrowing perimeter**; an integer literal that does not survive the conversion into the dtype it meets raises, and the session **fails** if the perimeter cannot attach |
+| `--stelling-narrowing-perimeter=off` | off — the default, and neither dial above changes it |
+| *(nothing)* | all three off — the default |
 
 ### If your CI sets `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`
 
