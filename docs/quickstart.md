@@ -120,6 +120,14 @@ it on, and `stelling.intentional_wrap(value, dtype)` is how you say a wrap is
 deliberate. It closes seven of the nine unwatched routes; the two it cannot
 close are numpy's and are named on that page.
 
+And a third dial, for a narrowing neither of those two can see at all:
+`pytest --stelling-narrowing-perimeter=error`. An integer literal written in
+a comparison against a float array need not be out of *range* to be destroyed
+— `x <= 2**31 - 1` on `float32` runs as `x <= 2147483648.0`, one greater than
+what you wrote, and it is a VERIFIED today. This raises
+`stelling.NarrowingError` at the line that wrote the literal. Off by default,
+and neither dial above turns it on.
+
 ## 2. The three judgments
 
 Save as `statuses.py`:

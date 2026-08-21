@@ -19,8 +19,8 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                49
-      marked illustrative — not run                 19
+    ```python blocks                                50
+      marked illustrative — not run                 20
       EXECUTED (exit 0 required)                    30
         marked run-only — output not compared        3
         OUTPUT COMPARED against a fence             27
@@ -162,8 +162,14 @@ EXPECTED_INVENTORY = {
     # the eager detector armed it raises by design, and with it off it prints
     # nothing, so there is no output to compare either way; it is a record of
     # what jax does, which is what `illustrative` means.
-    "python_blocks": 49,
-    "illustrative": 19,
+    #
+    # B17 added one, illustrative for the same reason one level over: the
+    # narrowing perimeter's section shows a harness whose comparison threshold
+    # does not exist in the program jax runs. With the perimeter armed it
+    # raises by design and with it off it prints nothing, so there is no
+    # output to compare in either direction.
+    "python_blocks": 50,
+    "illustrative": 20,
     "executed": 30,
     "run_only": 3,
     "compared": 27,

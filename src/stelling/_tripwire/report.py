@@ -44,6 +44,12 @@ HEADER = "stelling overflow tripwire"
 #: of them must not have to work out which half of one banner applies.
 EAGER_HEADER = "stelling eager truncation detector"
 
+#: The dunder perimeter's own section header. A THIRD separate section, for
+#: the reason the second one is separate: three instruments that arm, fail and
+#: switch on independently, and a reader who ran one of them must not have to
+#: work out which third of one banner applies to it.
+PERIMETER_HEADER = "stelling narrowing perimeter"
+
 #: How many frames of the call chain to print per finding. The chain is
 #: already narrowed to the traced region; this bounds a deeply recursive one
 #: without ever hiding the writer, which is the innermost frame and therefore
@@ -861,4 +867,130 @@ def render_eager(status, snapshot) -> list[str]:
         )
     lines.append("    what this detector does NOT see:")
     lines.extend(f"      - {item}" for item in EAGER_UNCOVERED)
+    return lines
+
+
+#: What the perimeter provably does not see. Printed on every run, findings or
+#: not, for the reason :data:`UNCOVERED` is: "no narrowing in the code you ran"
+#: is true and "no narrowing" is the false clearance this project has already
+#: had to withdraw twice.
+PERIMETER_UNCOVERED = (
+    "any operator that is not in the armed list printed above. The list is "
+    "not a summary of a wider perimeter: it is the whole of it, and an "
+    "operator missing from it is unwatched.",
+    "a literal that is not a Python `int`: `x <= 2147483647.0` is a float on "
+    "the way in and there is nothing to convert, so nothing is checked. Only "
+    "`type(b) is int` reaches the predicate, and `bool` is excluded with it.",
+    "a constant that never meets an operator: `jnp.full((), 256, jnp.int8)` "
+    "is 0 before any slot is entered. That door is the EAGER detector's "
+    "(`--stelling-eager-truncation`), and neither instrument covers the "
+    "other's.",
+    "an operand that is neither an array nor a tracer -- a numpy array or a "
+    "numpy scalar meets numpy's own rules, and numpy raises its own "
+    "OverflowError for an out-of-range int rather than narrowing silently.",
+    "a size-0 operand, which is exempt by measurement: 2,988 (literal, "
+    "narrowed-image) outcome comparisons on empty arrays across all 34 slots, "
+    "zero differences. An empty array narrows nothing observably.",
+    "an operand carrying a jax EXTENDED dtype (`key<fry>`), which the "
+    "predicate declines before touching any attribute of it: those dtypes "
+    "have no `.kind` and reading one raises.",
+    "any narrowing that happens on a route with no Python operator on it at "
+    "all -- inside a jitted function jax has already traced, inside a "
+    "primitive's own lowering, or in code that never re-enters Python "
+    "because a trace cache answered for it.",
+)
+
+
+def render_perimeter(status, snapshot) -> list[str]:
+    """The perimeter's section, as lines. **No jax; primitives in, text out.**
+
+    Takes a :func:`perimeter.snapshot` dict rather than the module's live
+    globals, for :func:`render_eager`'s reason: under xdist the numbers printed
+    are a SUM over several processes and none of them is this one's.
+
+    **THE PREDICATE'S TWO COUNTERS ARE PRINTED HERE AND THEY ARE NOT
+    DECORATION.** ``prop_guard`` fails safe -- an internal fault returns "no
+    finding" and is counted, and a slot name it does not recognise is handled
+    as the majority case and counted. Both are silent by construction, and a
+    run that reports zero fires with a non-zero decline count is **not a clean
+    run, it is an unmeasured one**. The only way an operator learns which of
+    the two they had is if the numbers are in front of them, so they are
+    printed whenever they are non-zero and the sentence that says what they
+    mean is printed with them.
+    """
+    if status is None and not snapshot:
+        return []
+    lines: list[str] = []
+    lines.extend(render_status(status) if status is not None else ["status unknown"])
+    snapshot = snapshot or {}
+    checks = snapshot.get("checks", 0)
+    findings = snapshot.get("findings", 0)
+    permitted = snapshot.get("permitted") or {}
+    permitted_total = sum(row[0] for row in permitted.values())
+
+    # THE DENOMINATOR, FIRST AND ALWAYS.
+    faces = snapshot.get("faces") or {}
+    if faces:
+        for face, slots in sorted(faces.items()):
+            lines.append(
+                f"    armed on the {face} face, {len(slots)} slot(s): "
+                + " ".join(sorted(slots))
+            )
+    lines.append(
+        f"    {checks} integer literal(s) met an array or tracer in a "
+        f"guarded operator and were checked; {findings} of them do not exist "
+        f"in the program jax would run"
+    )
+    if findings > permitted_total:
+        lines.append(
+            f"    {findings - permitted_total} of those was/were NOT inside an "
+            "expected_truncation region, which means it RAISED: this session "
+            "did not finish normally."
+        )
+    if permitted:
+        lines.append(
+            f"    {permitted_total} narrowing(s) PERMITTED by an "
+            f"expected_truncation region, at {len(permitted)} site(s). A "
+            "region permits ANY narrowing inside it, so each is named here "
+            "with the reason its author gave:"
+        )
+        for site, row in sorted(permitted.items()):
+            lines.append(f"      {site}  x{row[0]}  {row[1]}")
+
+    declines = snapshot.get("declines") or {}
+    unknown = snapshot.get("unknown_slots") or ()
+    internal = snapshot.get("internal_errors", 0)
+    if declines or unknown or internal:
+        lines.append(
+            "    THIS RUN IS NOT CLEAN, IT IS PARTLY UNMEASURED. The guard "
+            "fails safe -- it answers 'nothing wrong' and counts the failure "
+            "-- so the figures above are a lower bound over the checks it "
+            "actually completed:"
+        )
+        if declines:
+            lines.append(
+                f"      {sum(declines.values())} check(s) declined inside the "
+                f"predicate: {', '.join(f'{k} x{v}' for k, v in sorted(declines.items()))}"
+            )
+        if unknown:
+            lines.append(
+                f"      slot name(s) the predicate did not recognise, handled "
+                f"as dtype-preserving: {', '.join(sorted(unknown))}"
+            )
+        if internal:
+            lines.append(
+                f"      {internal} error(s) inside the wrapper itself were "
+                "caught and counted rather than raised into your program."
+            )
+        lines.append(
+            "      Please report this: a guard that fails into silence is the "
+            "defect this instrument exists to remove."
+        )
+    else:
+        lines.append(
+            "    the predicate declined nothing and recognised every slot it "
+            "was given, so the figures above cover every check that was made"
+        )
+    lines.append("    what this perimeter does NOT see:")
+    lines.extend(f"      - {item}" for item in PERIMETER_UNCOVERED)
     return lines

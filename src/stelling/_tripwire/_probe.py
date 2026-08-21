@@ -81,3 +81,60 @@ def construct_under(jnp):
     "raise on everything" passes the positive control and fails this one.
     """
     return jnp.full((), 3, jnp.int8)
+
+
+# ---------------------------------------------------------------------------
+# The DUNDER PERIMETER's control programs (Mode 3).
+#
+# Here for the reason the four above are here: a probe written inside the
+# adapter or inside the perimeter is a probe on a code path no user takes, and
+# the perimeter attributes a refusal to its wrapper's immediate caller — so a
+# probe in the wrapper's own package would be attributed to stelling and the
+# attribution leg of the self-check would be vacuous. These take the array as
+# an argument, exactly as :func:`over` and :func:`under` do, so this module
+# still names no jax.
+# ---------------------------------------------------------------------------
+
+#: The literal :func:`compare_over` writes, and the dtype it is compared
+#: against. `2**31 - 1` is the smallest positive integer whose float32 image
+#: is not itself — it becomes 2147483648.0, one greater — so it is one step
+#: over the edge of REPRESENTABILITY rather than of range. Nothing about it is
+#: out of range: this is the defect no range check can find, which is why the
+#: perimeter's positive control is this and not `40000` into `int16`.
+PERIMETER_OVER = 2**31 - 1
+PERIMETER_UNDER = 1000
+PERIMETER_DTYPE = "float32"
+
+
+def compare_over(x):
+    """Not representable in float32: the perimeter MUST refuse this."""
+    return x <= 2**31 - 1
+
+
+def compare_under(x):
+    """Exactly representable in float32: it must NOT be refused.
+
+    The negative direction, and it is not decoration: a perimeter replaced by
+    "refuse every int" passes the positive control and fails this one.
+    """
+    return x <= 1000
+
+
+def _literal_line(fn) -> int:
+    """The line the function's one statement is written on.
+
+    DERIVED FROM THE LINE TABLE AND NOT FROM ``co_firstlineno + 2``, which is
+    what :data:`OVER_LINE` above can afford because those two functions have
+    one-line docstrings and a standing "do not reformat" note. These two do
+    not: :func:`compare_under`'s docstring is four lines, so the offset form
+    silently pointed at a blank line, and an attribution check comparing
+    against a blank line is a check that can only be satisfied by accident.
+    ``co_lines()`` is 3.10+, which is this package's floor.
+    """
+    return max(line for _start, _end, line in fn.__code__.co_lines() if line)
+
+
+#: Line numbers of the two literals, derived from the code objects so that
+#: editing this file cannot silently make the attribution check vacuous.
+COMPARE_OVER_LINE = _literal_line(compare_over)
+COMPARE_UNDER_LINE = _literal_line(compare_under)

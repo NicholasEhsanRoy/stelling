@@ -2115,6 +2115,21 @@ def displacement_check() -> tuple[tuple[str, str], ...]:
         states.append(("const-fold", live_check()))
     if _eager_installed:
         states.append(("eager", eager_live_check()))
+    # THE THIRD HOOK, ON THE SAME ARGUMENT. A displaced perimeter is a fourth
+    # way the trace gate's watch goes partial, and the gate consults exactly
+    # this function -- so a third instrument that kept its own displacement
+    # answer somewhere else would be a third thing to teach every caller
+    # about, which is the shape B15's finding took the first time. Only the
+    # hooks THIS PROCESS ARMED are reported, so a process that never armed the
+    # perimeter is unaffected: `perimeter.live_check()` answers `detached`
+    # when nothing is installed and the row is not added at all.
+    try:
+        from stelling._tripwire import perimeter as _perimeter
+
+        if _perimeter._installed:
+            states.append(("perimeter", _perimeter.live_check()))
+    except Exception:  # noqa: BLE001 - no numpy means no perimeter to displace
+        pass
     return tuple(states)
 
 
@@ -2128,3 +2143,149 @@ def displaced() -> tuple[str, ...]:
     return tuple(
         name for name, state in displacement_check() if state != "armed"
     )
+
+
+# ---------------------------------------------------------------------------
+# Mode 3: the dunder perimeter.
+#
+# THIS SECTION HOLDS ONLY THE TWO QUESTIONS THAT NEED JAX — which type carries
+# the slots, and what the self-check's programs are. The installation itself
+# is ``setattr`` on a type object and lives in ``perimeter.py`` with the policy
+# it enforces; nothing about it needs this file's exemption.
+#
+# **NOTHING BELOW NAMES A PRIVATE JAX MODULE, AND THAT IS DELIBERATE RATHER
+# THAN INCIDENTAL.** The type is found by ASKING JAX FOR AN INSTANCE and
+# reading its ``__mro__`` — `type(jnp.zeros(...))` for the concrete array, and
+# the type of the argument inside a real ``make_jaxpr`` for the tracer. A
+# hard-coded ``jax._src.core.Tracer`` would be one import away from working
+# and would be exactly the wrong shape for a perimeter whose whole risk is a
+# jax release moving something: a rename would be an ImportError at arm time
+# rather than a located type whose slots no longer behave, and this file's
+# exemption exists for a registry nothing public exports, not as a licence to
+# reach for the private name whenever it is shorter.
+# ---------------------------------------------------------------------------
+
+#: The slots a candidate type must OWN before :func:`perimeter_locate` will
+#: accept it. Two, and both comparisons, because ``object`` owns the six
+#: comparison slots too and a walk that accepted the first class answering to
+#: ``__le__`` would happily hand back ``object`` — rebinding which would put a
+#: narrowing guard on every comparison in the interpreter. The anchor pair is
+#: checked against ``cls.__dict__`` (own attributes only), and ``object`` is
+#: excluded by name as well, so neither control is load-bearing alone.
+_PERIMETER_ANCHOR = ("__le__", "__ge__")
+
+#: Bumped once per perimeter probe, and used as the probe's input length, for
+#: the reason :data:`_probe_seq` is: jax's trace cache is process-wide, so a
+#: probe that traced the same avals twice would not re-run the harness's
+#: Python at all — and a hook that is never entered looks exactly like a hook
+#: that is entered and stays quiet. Measured on the traced face: ``trace(h)``
+#: reaches the slot on call #1 and not on #2 or #3.
+_perimeter_probe_seq: int = 0
+
+
+def _perimeter_owner(instance_type):
+    """The class in ``instance_type``'s MRO that OWNS the perimeter's slots.
+
+    The slots the perimeter rebinds are inherited: a ``DynamicJaxprTracer``
+    defines none of them and gets all six from ``Tracer``. Rebinding them on
+    the subclass would install a *shadow* that covers that one tracer class and
+    leaves every other one — batching, differentiation — going straight to the
+    unwatched original. So the owner is what is returned, and it is found
+    rather than named.
+
+    ``None`` when no class between the instance's own type and ``object`` owns
+    the anchor pair, which is the fail-closed answer: :func:`perimeter_locate`
+    turns it into ``no-type`` and ``arm()`` refuses.
+    """
+    for cls in getattr(instance_type, "__mro__", ()):
+        if cls is object:
+            break
+        if all(slot in cls.__dict__ for slot in _PERIMETER_ANCHOR):
+            return cls
+    return None
+
+
+def perimeter_locate(face: str):
+    """The TYPE whose slots ``face`` rebinds, or a status code. Never raises.
+
+    ``no-module``
+        jax is not importable, so there are no slots.
+    ``no-type``
+        jax is here and the type could not be found, or was found and does not
+        own the slots this perimeter rebinds. A release that restructured
+        either face lands here, loudly, instead of arming over nothing.
+    """
+    global _perimeter_probe_seq
+    try:
+        from stelling._jax_compat import jax as _jax  # public jax, via the boundary
+        from stelling._jax_compat import jnp as _jnp
+    except Exception:  # noqa: BLE001 - jax absent is a status, not a crash
+        return "no-module"
+
+    try:
+        if face == "array":
+            found = type(_jnp.zeros((0,), _jnp.int8))
+        elif face == "tracer":
+            seen: dict = {}
+
+            def _capture(z):
+                seen["type"] = type(z)
+                return z
+
+            # A FRESH SHAPE, for `_perimeter_probe_seq`'s reason: traced twice
+            # at the same avals, the second `make_jaxpr` is answered from the
+            # cache, `_capture` never runs, and `seen` stays empty -- which
+            # would report `no-type` on a perfectly healthy jax.
+            _perimeter_probe_seq += 1
+            _jax.make_jaxpr(_capture)(_jnp.zeros((_perimeter_probe_seq,), _jnp.int8))
+            found = seen.get("type")
+        else:  # pragma: no cover - `arm()` rejects an unknown face first
+            return "no-type"
+    except Exception:  # noqa: BLE001
+        return "no-type"
+
+    owner = _perimeter_owner(found)
+    return owner if owner is not None else "no-type"
+
+
+def perimeter_probes(face: str) -> dict:
+    """The self-check's programs for ``face``, as ``{"bad": [...], "good": [...]}``.
+
+    Each entry is ``(label, callable, line)``: the callable runs one reference
+    program, and ``line`` is the line in ``_probe.py`` the literal is written
+    on, which is what the attribution leg compares against.
+
+    BOTH DIRECTIONS, AND THE PROGRAMS ARE THE SAME TWO SHAPES ON EITHER FACE:
+    a literal that does not survive the conversion, and one that does. A
+    perimeter that refuses everything passes the first and fails the second,
+    which is the whole reason the second exists.
+    """
+    global _perimeter_probe_seq
+    from stelling._jax_compat import jax as _jax  # public jax, via the boundary
+    from stelling._jax_compat import jnp as _jnp
+
+    from stelling._tripwire import _probe
+
+    def _fresh():
+        global _perimeter_probe_seq
+        _perimeter_probe_seq += 1
+        return _jnp.zeros((_perimeter_probe_seq,), _jnp.float32)
+
+    if face == "tracer":
+        return {
+            "bad": [
+                (
+                    "traced float32 <= 2**31-1",
+                    lambda: _jax.make_jaxpr(_probe.compare_over)(_fresh()),
+                    _probe.COMPARE_OVER_LINE,
+                )
+            ],
+            "good": [
+                (
+                    "traced float32 <= 1000",
+                    lambda: _jax.make_jaxpr(_probe.compare_under)(_fresh()),
+                    _probe.COMPARE_UNDER_LINE,
+                )
+            ],
+        }
+    raise ValueError(f"no perimeter probes for face {face!r}")

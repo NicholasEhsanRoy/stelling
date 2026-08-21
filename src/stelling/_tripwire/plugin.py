@@ -118,6 +118,14 @@ class _State:
         self.eager_status = None
         self.eager_snapshot: dict | None = None
         self.eager_worker_statuses: dict[str, str] = {}
+        #: The dunder perimeter's dial, status and aggregated counters. A
+        #: THIRD set of fields for a third instrument, on the same argument
+        #: that keeps the eager detector's separate: they share a role and an
+        #: xdist payload and nothing else.
+        self.perimeter_mode = "off"
+        self.perimeter_status = None
+        self.perimeter_snapshot: dict | None = None
+        self.perimeter_worker_statuses: dict[str, str] = {}
 
 
 def pytest_addoption(parser):
@@ -150,6 +158,23 @@ def pytest_addoption(parser):
             "stelling.EagerTruncationError at the line that wrote it. "
             "Declare a deliberate wrap with stelling.intentional_wrap(value, "
             "dtype). 'error' fails the session if the detector cannot attach. "
+            "Default: off, and NOT turned on by --stelling-overflow."
+        ),
+    )
+
+
+    group.addoption(
+        "--stelling-narrowing-perimeter",
+        action="store",
+        dest="stelling_narrowing_perimeter",
+        default="off",
+        choices=("off", "error"),
+        help=(
+            "Arm the dunder perimeter: an integer literal that does not "
+            "survive the conversion into the dtype it meets -- `x <= 2**31-1` "
+            "on a float32 array, which jax runs as `<= 2147483648.0` -- "
+            "raises stelling.NarrowingError at the line that wrote it. "
+            "'error' fails the session if the perimeter cannot attach. "
             "Default: off, and NOT turned on by --stelling-overflow."
         ),
     )
@@ -197,7 +222,10 @@ def pytest_configure(config):
     state = _state(config)
     state.mode = _resolve_mode(config)
     state.eager_mode = config.getoption("stelling_eager_truncation", "off") or "off"
-    if state.mode == "off" and state.eager_mode == "off":
+    state.perimeter_mode = (
+        config.getoption("stelling_narrowing_perimeter", "off") or "off"
+    )
+    if state.mode == "off" and state.eager_mode == "off" and state.perimeter_mode == "off":
         return
 
     from stelling import _tripwire
@@ -206,7 +234,8 @@ def pytest_configure(config):
     if _is_controller(config):
         # The controller runs no tests. Arming here would import jax into a
         # process that never traces, and would report a denominator of zero.
-        # TRUE OF BOTH INSTRUMENTS, and for the eager one it is sharper still:
+        # TRUE OF ALL THREE INSTRUMENTS, and for the eager one it is sharper
+        # still:
         # a detector armed where nothing constructs an array cannot raise, so
         # a green controller would be a green with no program behind it.
         state.role = "controller"
@@ -255,15 +284,44 @@ def pytest_configure(config):
                 "whose green means nothing, so it fails here instead."
             )
 
+    if state.perimeter_mode == "error":
+        # THE OWNER IS THE SESSION'S `Config`, AND THAT IS THE WHOLE OF THE
+        # SESSION SCOPING. A nested in-process `pytest.main()` builds a fresh
+        # `Config`, so it is a different owner by construction: its
+        # `pytest_unconfigure` releases its own hold and the outer session's
+        # slots stay armed. The alternative -- an idempotent arm beside an
+        # unconditional disarm -- is exactly the asymmetry that let a nested
+        # session unhook its parent and leave every remaining outer test
+        # running unprotected with nothing red.
+        state.perimeter_status = _tripwire.arm_perimeter(owner=config)
+        if not state.perimeter_status.armed and state.role == "single":
+            raise pytest.UsageError(
+                f"--stelling-narrowing-perimeter=error: the dunder perimeter "
+                f"could not attach [{state.perimeter_status.code}] -- "
+                f"{state.perimeter_status.explanation} There is no degraded "
+                "mode for this instrument either: a session that asked for "
+                "the rule and did not get it would be a session whose green "
+                "means nothing."
+            )
+
 
 def pytest_unconfigure(config):
     state = config.stash.get(_KEY, None)
     if state is None or state.role == "controller":
         return
-    if state.mode == "off" and state.eager_mode == "off":
+    if (
+        state.mode == "off"
+        and state.eager_mode == "off"
+        and state.perimeter_mode == "off"
+    ):
         return
     from stelling import _tripwire
 
+    if state.perimeter_mode == "error":
+        # BY OWNER, so that a nested session's teardown releases its own hold
+        # and nobody else's. `still-armed` here is the CORRECT answer when an
+        # outer session is still running, not a failure.
+        _tripwire.disarm_perimeter(config)
     if state.eager_mode == "error":
         _tripwire.disarm_eager()
     if state.mode == "off":
@@ -311,6 +369,38 @@ def _revalidate(state) -> None:
     if live == "armed":
         return
     state.status = dataclasses.replace(state.status, code=live)
+
+
+def _capture_perimeter(state) -> None:
+    """Read the perimeter's counters, and re-validate it, before disarming.
+
+    SAME ARGUMENT AS :func:`_revalidate` AND :func:`_capture_eager`, one
+    instrument over. A status fixed at ``pytest_configure`` is a claim about
+    the first millisecond of the session; a type slot can be rebound over
+    stelling's wrapper at any point after that, and the perimeter then stops
+    refusing with no other symptom at all -- the denominator goes flat, but
+    nothing prints a denominator except this. It has to be read HERE, in the
+    last hook that can still reach both the exit code and the report.
+    """
+    if state.perimeter_mode == "off":
+        return
+    if state.role == "controller":
+        # The controller never arms, so its counters are zeros -- and by the
+        # time this runs, `pytest_testnodedown` has merged every worker's
+        # snapshot into `state.perimeter_snapshot`. Reading the local module
+        # here would overwrite that merge with the zeros, which is the defect
+        # `_capture_eager` records having had.
+        return
+    from stelling import _tripwire
+
+    state.perimeter_snapshot = _tripwire.perimeter_snapshot()
+    if state.perimeter_status is None or not state.perimeter_status.armed:
+        return
+    live = _tripwire.perimeter_live_check()
+    if live != "armed":
+        state.perimeter_status = dataclasses.replace(
+            state.perimeter_status, code=live
+        )
 
 
 def _capture_eager(state) -> None:
@@ -390,11 +480,16 @@ def pytest_sessionfinish(session, exitstatus):
     state = config.stash.get(_KEY, None)
     if state is None:
         return
-    if state.mode == "off" and state.eager_mode == "off":
+    if (
+        state.mode == "off"
+        and state.eager_mode == "off"
+        and state.perimeter_mode == "off"
+    ):
         return
 
     _revalidate(state)
     _capture_eager(state)
+    _capture_perimeter(state)
 
     if _is_worker(config):
         from stelling._tripwire import record
@@ -411,6 +506,10 @@ def pytest_sessionfinish(session, exitstatus):
             state.eager_status.code if state.eager_status else "off"
         )
         payload["eager_snapshot"] = state.eager_snapshot or {}
+        payload["perimeter_status_code"] = (
+            state.perimeter_status.code if state.perimeter_status else "off"
+        )
+        payload["perimeter_snapshot"] = state.perimeter_snapshot or {}
         config.workeroutput[WORKER_KEY] = payload
         return
 
@@ -438,6 +537,19 @@ def pytest_sessionfinish(session, exitstatus):
         if (
             eager_status is not None
             and not eager_status.armed
+            and session.exitstatus == 0
+        ):
+            session.exitstatus = REQUIRE_EXITSTATUS
+
+    if state.perimeter_mode == "error":
+        perimeter_status = (
+            _perimeter_controller_status(state)
+            if state.role == "controller"
+            else state.perimeter_status
+        )
+        if (
+            perimeter_status is not None
+            and not perimeter_status.armed
             and session.exitstatus == 0
         ):
             session.exitstatus = REQUIRE_EXITSTATUS
@@ -482,7 +594,11 @@ def pytest_testnodedown(node, error):
     been told the answer by both workers.
     """
     state = _state(node.config)
-    if state.mode == "off" and state.eager_mode == "off":
+    if (
+        state.mode == "off"
+        and state.eager_mode == "off"
+        and state.perimeter_mode == "off"
+    ):
         return
     payload = (getattr(node, "workeroutput", None) or {}).get(WORKER_KEY)
     if payload is None:
@@ -499,6 +615,15 @@ def pytest_testnodedown(node, error):
     state.eager_snapshot = _merge_eager(
         state.eager_snapshot, payload.get("eager_snapshot") or {}
     )
+    perimeter_code = payload.get("perimeter_status_code")
+    if perimeter_code is not None and perimeter_code != "off":
+        state.perimeter_worker_statuses[worker_id] = perimeter_code
+    if payload.get("perimeter_snapshot"):
+        from stelling._tripwire import perimeter as _perimeter
+
+        state.perimeter_snapshot = _perimeter._merge(
+            state.perimeter_snapshot, payload["perimeter_snapshot"]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -539,6 +664,8 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     state = config.stash.get(_KEY, None)
     if state is None:
         return
+    if state.perimeter_mode != "off":
+        _write_perimeter_summary(terminalreporter, state)
     if state.eager_mode != "off":
         _write_eager_summary(terminalreporter, state)
     if state.mode == "off":
@@ -674,4 +801,62 @@ def _eager_controller_status(state):
     return _tripwire.Status(
         code=codes[0] if len(codes) == 1 else "mixed",
         detail=f"worker eager statuses: {', '.join(codes)}",
+    )
+
+
+def _write_perimeter_summary(terminalreporter, state) -> None:
+    """The perimeter's section, printed whether or not anything fired.
+
+    THE DENOMINATOR IS ALWAYS PRINTED, this project's standing rule, and it is
+    load-bearing here for the reason it is for the eager detector: this
+    instrument's success case is that nothing happened, and "0 narrowings" is
+    also exactly what a perimeter nobody entered produces.
+
+    AND SO ARE THE PREDICATE'S DECLINE COUNTERS. The guard never raises; it
+    answers "nothing wrong" and counts the failure. A run reporting zero fires
+    with a non-zero decline count is not a clean run, it is an unmeasured one,
+    and this is the one place an operator meets that distinction.
+    """
+    from stelling._tripwire import report
+
+    status = state.perimeter_status
+    if state.role == "controller":
+        status = _perimeter_controller_status(state)
+    lines = report.render_perimeter(status, state.perimeter_snapshot)
+    if not lines:
+        return
+    terminalreporter.write_sep("=", report.PERIMETER_HEADER)
+    for line in lines:
+        terminalreporter.write_line(line)
+
+
+def _perimeter_controller_status(state):
+    """The controller does not arm, so its status is its workers' agreement.
+
+    The same shape, and the same three answers, as :func:`_controller_status`
+    and :func:`_eager_controller_status`.
+    """
+    from stelling import _tripwire
+
+    codes = sorted(set(state.perimeter_worker_statuses.values()))
+    if not codes:
+        return _tripwire.Status(
+            code="no-worker-reported",
+            detail=(
+                "no worker reported a perimeter status, so nothing about "
+                "this run was measured by it."
+            ),
+        )
+    if codes == ["armed"]:
+        return _tripwire.Status(
+            code="armed",
+            detail=(
+                f"{len(state.perimeter_worker_statuses)} worker(s) armed the "
+                "dunder perimeter. The controller runs no tests and is "
+                "deliberately not instrumented."
+            ),
+        )
+    return _tripwire.Status(
+        code=codes[0] if len(codes) == 1 else "mixed",
+        detail=f"worker perimeter statuses: {', '.join(codes)}",
     )
