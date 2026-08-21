@@ -289,6 +289,229 @@ jobs:
             exit 1
           fi
 
+  # THE CONFIGURATION NOBODY RAN, and it is the one a contributor gets.
+  #
+  # `CONTRIBUTING.md` tells a reader to `pip install -e ".[jax]" --group dev`.
+  # That produces jax and no solver wheels — and until this job, no lane in
+  # either workflow ran the suite in it. `test-no-jax` has the solvers and no
+  # jax; the three jax lanes all install `.[solvers,jax]`; the `property` job
+  # is the only one that installs `.[jax]` alone, and it runs
+  # `pytest tests/property` and nothing else. So the cell was empty.
+  #
+  # MEASURED IN THAT CELL BEFORE THIS JOB EXISTED (a real venv with neither
+  # wheel, jax 0.11.1, 2026-08-20): **72 failed, 3796 passed, 196 skipped**.
+  # Not one of them was a soundness defect — every one was a test that needs a
+  # solver to reach the state it asserts and never said so, so what CI was
+  # missing was not a broken tool but a whole population of undeclared
+  # requirements. Five skips were undisclosed too, in reason strings
+  # (`needs z3 wheel`, `z3 not installed`, `needs the cvc5 wheel`) that
+  # `tests/test_skip_inventory.py`'s RULES do not carry — invisible in every
+  # other lane, because in every other lane those tests do not skip.
+  #
+  # An earlier count of 16 for this cell was taken by BLOCKING the wheels in a
+  # process that had them installed. That method does not survive a session:
+  # `tests/test_import_hygiene.py` restores `sys.modules`, and the block was
+  # gone from there on. A lane is the only honest way to measure a lane.
+  #
+  # NO `--group dev` HERE, and the difference is deliberate. The dev group
+  # carries `pre-commit` and `reuse`, which this job has no use for, and
+  # `hypothesis`, which would make `tests/property` run in a lane that is
+  # about the solver-less configuration rather than about properties — the
+  # `property` job below is where that belongs and it already installs
+  # `.[jax]`. What this job needs from the group is nothing; what it needs
+  # from the extras is the absence of one.
+  #
+  # SO THE TWO SETS OF FIGURES IN THIS COMMENT ARE NOT THE SAME POPULATION,
+  # and saying both without saying that would invite the subtraction. The
+  # `72 / 3796 / 196` above was measured in the CONTRIBUTING.md environment,
+  # WITH the dev group; this job reports `3810 passed, 273 skipped`. They
+  # differ twice over:
+  #
+  #   * ENVIRONMENT. `hypothesis` is a dev-group dependency, so `tests/property`
+  #     collects and runs there and import-skips here. Measured on the same
+  #     commit (f82b87b), same jax 0.11.1, neither wheel: 4060 tests collected
+  #     with the group, 4044 without it.
+  #   * TREE. The `72 failed` is a BEFORE reading. Those 72 are the tests that
+  #     needed a solver and never said so; 71 of them carry `need_solver` now
+  #     (the 72nd row is interval-decided and needs none), so they are counted
+  #     among this job's skips rather than among its failures. That conversion
+  #     is what the job exists to hold in place.
+  #
+  # The one number to compare across a change is this job's own, and it is
+  # printed by this job on every run.
+  test-jax-no-solvers:
+    name: tests (jax, no solver wheels)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv
+      - run: uv pip install -e ".[jax]" pytest
+      # The job's whole point is which SOLVERS are absent, so that is the thing
+      # it must not take on trust: a transitive dependency that quietly pulled
+      # a wheel in would leave this green while testing what `test-jax`
+      # already tests.
+      #
+      # IT ASKS THE GATE, NOT A PROXY FOR IT. `tests/_solver_gate.py` is the
+      # one predicate that decides whether every `need_solver` test runs, and
+      # it accepts THREE routes: the z3 wheel, the cvc5 wheel, and an external
+      # cvc5 binary named by `STELLING_CVC5` or found on PATH — the route the
+      # documentation actively recommends, since it is how you get a build the
+      # PyPI wheel does not ship. A guard that asked `find_spec("z3"|"cvc5")`
+      # proved WHEEL absence and was read as SOLVER absence. Driven, with a
+      # `cvc5` shim on PATH and neither wheel installed:
+      #
+      #   the find_spec guard   -> "jax 0.11.1 — and no solver wheel", exit 0
+      #   tests/_solver_gate.py -> HAVE_SOLVER = True
+      #   pytest tests/test_scatter_row_gates.py tests/test_inductive.py
+      #                         -> 2 failed, 21 passed
+      #
+      # `ubuntu-latest` ships no cvc5, so CI was never wrong; a contributor
+      # reproducing this lane locally was, and nothing told them. Prove
+      # absence at TEST time, by the predicate the tests actually consult.
+      - name: assert NO SOLVER IS REACHABLE — the gate's own predicate
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          import sys
+          sys.path.insert(0, "tests")
+          import _solver_gate
+          from stelling import _optional
+          if _solver_gate.HAVE_SOLVER:
+              routes = []
+              if _optional.available("z3"):
+                  routes.append("the z3 wheel is installed")
+              if _optional.available("cvc5"):
+                  routes.append("the cvc5 wheel is installed")
+              binary = _optional.cvc5_binary()
+              if binary is not None:
+                  routes.append(
+                      f"an external cvc5 binary is reachable at {binary!r} "
+                      "(STELLING_CVC5, or `cvc5` on PATH)"
+                  )
+              sys.exit(
+                  "this lane exists to run with NO solver reachable, and "
+                  "tests/_solver_gate.py reports HAVE_SOLVER = True: "
+                  + "; ".join(routes)
+                  + ". Every `need_solver` test would RUN here, so this "
+                  "job would be testing what test-jax already tests."
+              )
+          import jax
+          print(
+              "jax", jax.__version__,
+              "— and tests/_solver_gate.py reports HAVE_SOLVER = False",
+          )
+          PY
+      # The verdict channel; see the block above `jobs:` for why it is here.
+      - name: pytest, with the skip-inventory verdict asserted off a file channel
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          .venv/bin/python -m pytest -q -ra
+          verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it — the recorder was ignored, filtered out, or never loaded. pytest's own exit code cannot report that, which is why this is a separate assertion."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. A 'failed' verdict is an undisclosed skip or a silently dropped item; 'withdrawn' means this session was not entitled to claim the suite, and an unnarrowed CI run must be."
+            exit 1
+          fi
+
+  # THE UNENUMERATED BACKSTOP. Every other lane in this file runs a plain
+  # `pytest`, which collects in deterministic file order, so an
+  # order-dependent failure is invisible in this repository BY CONSTRUCTION.
+  # That is not a theoretical gap: a test in `tests/test_tripwire_arm.py` left
+  # stelling's own wrapper installed as jax's live const-fold rule, an
+  # unrelated exit-code battery two hundred lines below it went vacuous, and
+  # it survived two audit rounds. `tests/_state_guard.py` is the instrument
+  # that names such a test; this job is the one that finds the pollution
+  # nobody enumerated.
+  #
+  # NOT A REQUIRED CHECK, and the argument is not the usual third-party one.
+  # A shuffled suite is flaky BY DESIGN — it explores a different order every
+  # run — and it reports a SYMPTOM ("this test fails after that one") rather
+  # than a culprit. Blocking a merge on it would price a real regression and
+  # an unlucky ordering the same. It belongs beside the state guard's declared
+  # inventory, not instead of it: the inventory says who, this says whether
+  # the inventory missed anybody.
+  #
+  # HOW A RED RUN IS MADE ACTIONABLE, which is the whole difference between
+  # this job and noise. Three things, in this order:
+  #
+  #   1. THE SEED IS PRINTED AND IT IS THE REPRODUCER. `pytest-randomly` puts
+  #      `Using --randomly-seed=NNN` in the header; the step below lifts it
+  #      into a `::error` annotation together with the exact command that
+  #      replays that order. Without it a red run is unreproducible and
+  #      therefore unfixable.
+  #   2. THE SAME COMMIT IS RE-RUN IN FILE ORDER, in this job, on failure. A
+  #      red shuffled run is ambiguous between "an order dependence" and "the
+  #      suite is broken", and those have different owners: the second is
+  #      already reported by every other lane. `-p no:randomly` in the same
+  #      environment separates them, and the annotation says WHICH.
+  #   3. NESTED SESSIONS ARE NOT SHUFFLED. `pytester.runpytest` builds a
+  #      fresh config and autoloads entry-point plugins, so an installed
+  #      `pytest-randomly` reaches the sessions this suite SPAWNS whatever the
+  #      parent was told — and several of those plant two or three tests whose
+  #      ORDER is the property. Measured before `conftest.deterministic_order_
+  #      args` existed, with `-p no:randomly` on the outer command: three runs
+  #      of `tests/test_tripwire_plugin.py` gave 2, 2 and 1 failures, against
+  #      19 passed every time in a venv without the plugin. That is this job
+  #      reporting an order-dependent defect in stelling that is not one.
+  #   4. `-p no:cacheprovider` IS NOT SET, on purpose: `--randomly-seed=last`
+  #      is how a developer replays the previous order locally, and it reads
+  #      the cache.
+  #
+  # WHAT IT FOUND ON ITS FIRST RUN, recorded because a backstop's first
+  # measurement is the only one taken before anybody could design for it: ONE
+  # failure in 4136 tests — `test_cvc5_protocol.py`'s anti-vacuity census
+  # floor, whose own docstring named the collection order it depended on. It
+  # is a module finalizer now, which cannot run before the tests it measures.
+  # Nothing else in the suite moved.
+  #
+  # `pytest-randomly` IS INSTALLED IN THIS LANE AND NOWHERE ELSE, exactly as
+  # `pytest-xdist` is installed only in `test-jax`. It is a CI-only tool, not
+  # a dev-group dependency: a contributor whose local suite reordered itself
+  # every run would learn to distrust it.
+  random-order:
+    name: whole suite, randomised order (NOT a required check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv
+      - run: uv pip install -e ".[solvers,jax]" pytest pytest-randomly
+      - name: the suite, shuffled — and the seed, which is the reproducer
+        run: |
+          set -euo pipefail
+          # THE SEED IS CHOSEN HERE, NOT SCRAPED. `pytest-randomly` prints
+          # `Using --randomly-seed=N` in the report HEADER, and `-q` suppresses
+          # the header — measured: no seed line anywhere in a `-q -ra` log. A
+          # reproducer read out of output that may not contain it is a
+          # reproducer that is absent exactly when it is needed, so the seed is
+          # decided by this step and passed in. Derived from the run's own
+          # identity so that it is stable across a re-read of the log and
+          # DIFFERENT on a re-run attempt, which is what makes "run it again"
+          # explore a second order instead of repeating the first.
+          seed="$(( (GITHUB_RUN_ID + GITHUB_RUN_ATTEMPT) % 4294967296 ))"
+          echo "randomly-seed=${seed}"
+          status=0
+          .venv/bin/python -m pytest -q -ra -p randomly --randomly-seed="${seed}" || status=$?
+          if [ "${status}" -eq 0 ]; then
+            exit 0
+          fi
+          echo "the shuffled run failed; re-running the SAME commit in file order to say which kind of failure this is"
+          if .venv/bin/python -m pytest -q -ra -p no:randomly > "${RUNNER_TEMP}/file-order.txt" 2>&1; then
+            echo "::error title=order-dependent failure (seed ${seed})::The suite passed in file order and failed shuffled, so this is a test depending on another test having run. Reproduce exactly with: pytest -q -ra -p randomly --randomly-seed=${seed}. tests/_state_guard.py names a test that leaves declared process-global state changed; a failure it did NOT name is state outside that inventory, and the inventory's own docstring lists what it does not watch."
+          else
+            echo "::error title=the suite is red in file order too (seed ${seed})::This is not an ordering problem — the same failures are in the merge-bearing lanes. Fix those first; this job has nothing to add until they are green."
+            tail -40 "${RUNNER_TEMP}/file-order.txt"
+          fi
+          exit 1
+
   # The two any_pytree acceptance tests hold the bar for "faithful sugar" —
   # a sugar declaration must trace to a content-hash-IDENTICAL query to the
   # hand-written one, against a REAL third-party library's pytrees (blackjax's

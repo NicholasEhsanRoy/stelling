@@ -24,6 +24,7 @@ import jax.numpy as jnp
 
 from stelling.harness import any_array, assert_
 from stelling.preconditions import check
+from _solver_gate import need_solver  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -91,6 +92,7 @@ def test_scatter_add_with_a_present_none_combiner_is_not_modelled_as_add():
     )
 
 
+@need_solver
 def test_plain_scatter_add_still_verifies():
     """Anti-vacuity for the test above: the add row must still work.
 

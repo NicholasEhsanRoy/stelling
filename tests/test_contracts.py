@@ -46,7 +46,6 @@ def _x64():
 
 from stelling import interval as iv  # noqa: E402
 from stelling._jax_compat import trace  # noqa: E402
-from stelling._optional import available  # noqa: E402
 from stelling.contracts import (  # noqa: E402
     check_contract,
     coefficient_contrast,
@@ -58,10 +57,7 @@ from stelling.verdict import SolverStamp  # noqa: E402
 KAPPA = 8.0
 RHS_COEFF = KAPPA + 1.0 / KAPPA + 2.0  # 10.125, exact in binary64
 
-_HAVE_SOLVER = available("z3") or available("cvc5")
-needs_solver = pytest.mark.skipif(
-    not _HAVE_SOLVER, reason="no SMT solver installed"
-)
+from _solver_gate import need_solver  # noqa: E402
 
 
 def _t1(a_range, c_range, b_range, kappa=KAPPA):
@@ -107,7 +103,7 @@ def test_t1_ka1_interval_only_is_unknown_with_straddle_quoted():
     assert cv.ensures_status == ENSURES_DECLARED
 
 
-@needs_solver
+@need_solver
 def test_t1_ka1_with_solver_budget_is_verified_via_qf_nra():
     contract = _t1((1, 2), (1, 2), (-0.5, 0.5))
     cv = check_contract(
@@ -143,7 +139,7 @@ def test_t1_ka1_with_solver_budget_is_verified_via_qf_nra():
 # --- T1 known answer 2: b in ±1.4 — satisfiable, witness-backed --------------
 
 
-@needs_solver
+@need_solver
 def test_t1_ka2_sliver_region_refuted_with_replayed_witness():
     cv = check_contract(
         _t1((1, 2), (1, 2), (-1.4, 1.4)),
@@ -214,7 +210,7 @@ def test_t1_pin_reduction_constant_kappa_plus_inverse_plus_two():
     assert cv.requires_status == "VERIFIED"
 
 
-@needs_solver
+@need_solver
 def test_t1_pin_closed_inequality_at_the_conditioning_boundary():
     """Pins the closed (non-strict) posing of the ratio conjunct.
 
@@ -272,7 +268,7 @@ def test_t2_ka2_interval_only_is_honest_unknown_with_straddle():
     assert not any("straddles" in n for n in cv.requires.notes)
 
 
-@needs_solver
+@need_solver
 def test_t2_ka2_with_solver_refuted_witness_names_high_and_low_elements():
     cv = check_contract(
         _t2((64,), (1e-6, 1e5)),
@@ -327,7 +323,7 @@ def test_t2_pin_division_free_and_reduction_free_query():
     assert {"slice", "max", "min"} <= prims  # the fold is really there
 
 
-@needs_solver
+@need_solver
 def test_t2_pin_exact_closed_extremum_encoding_at_the_contrast_boundary():
     """Pins the fold encoding's exactness and the closed contrast form.
 
@@ -365,7 +361,7 @@ def test_t2_pin_exact_closed_extremum_encoding_at_the_contrast_boundary():
     assert ob.detail.startswith("definitely true for all")
 
 
-@needs_solver
+@need_solver
 def test_t2_pin_the_fold_still_escalates_where_intervals_cannot_decide():
     """The escalation companion the test above used to be.
 
@@ -399,6 +395,7 @@ def test_t2_pin_the_fold_still_escalates_where_intervals_cannot_decide():
 # --- T2: the budget decline is loud ------------------------------------------
 
 
+@need_solver
 def test_t2_over_budget_declines_loudly_with_both_numbers_quoted():
     """mu = 1+chi at n elements costs 4n element terms; n = 200 is over
     the 512 budget: the obligation must stay UNKNOWN with the decline
@@ -425,7 +422,7 @@ def test_t2_over_budget_declines_loudly_with_both_numbers_quoted():
 # --- the two-faced render and the emptiness asymmetry ------------------------
 
 
-@needs_solver
+@need_solver
 def test_contract_render_states_both_faces_in_words():
     cv = check_contract(
         _t1((1, 2), (1, 2), (-0.5, 0.5)),
@@ -559,7 +556,7 @@ def test_point_envelope_vacuity_is_inert_not_falsely_load_bearing():
 # --- audit F3: widen re-check solver invocations are stamped -----------------
 
 
-@needs_solver
+@need_solver
 def test_widen_recheck_solver_invocations_are_stamped_and_tagged(monkeypatch):
     """The VERIFIED widen re-check runs at the same pipeline depth, so on
     the escalated path it makes real transport spawns the vacuity line
@@ -898,7 +895,7 @@ def test_t3_symmetric_family_symmetry_straddles_then_solver_discharges():
     assert not any("straddles" in n for n in cv.requires.notes)
 
 
-@needs_solver
+@need_solver
 def test_t3_symmetry_pair_discharged_trivially_by_solver():
     def family(t):
         b01 = t[0] * t[1]
@@ -917,7 +914,7 @@ def test_t3_symmetry_pair_discharged_trivially_by_solver():
         assert "solver escalation" in ob.detail and "unsat" in ob.detail
 
 
-@needs_solver
+@need_solver
 def test_t3_posed_symmetry_refutes_asymmetric_transform_with_witness():
     """The symmetry rule's bite: a deliberately asymmetric family (m10 =
     2*m01, undecidable by intervals since the boxes overlap) REFUTES with
@@ -956,7 +953,7 @@ def test_t3_identity_family_over_a_box_is_honestly_undecided():
     assert cv.requires.obligations[5].status != "discharged"
 
 
-@needs_solver
+@need_solver
 def test_t3_identity_family_refuted_with_confirmed_witnesses():
     """The identity family over a box REFUTES under escalation: with all
     four entries independent it contains non-PSD members and asymmetric
@@ -1005,7 +1002,7 @@ def test_t3_known_conditioning_refuted_by_intervals_at_the_mesh_point():
     assert not cv.requires.stamp.solver.invoked
 
 
-@needs_solver
+@need_solver
 def test_t3_known_conditioning_solver_verified_through_a_transform():
     """Probe Part 2's well-shaped region through a triple transform
     (a, c in [1, 2] via 1 + t, b in ±0.5 via t - 0.5 scaling): solver

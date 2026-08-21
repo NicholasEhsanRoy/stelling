@@ -71,11 +71,8 @@ from stelling.preconditions import check  # noqa: E402
 
 HAVE_Z3 = _optional.available("z3")
 HAVE_CVC5 = _optional.available("cvc5") or _optional.cvc5_binary() is not None
-HAVE_SOLVER = HAVE_Z3 or HAVE_CVC5
 
-need_solver = pytest.mark.skipif(
-    not HAVE_SOLVER, reason="needs an SMT solver"
-)
+from _solver_gate import need_solver  # noqa: E402
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -233,6 +230,7 @@ def test_pow_integer_exponent_refutes():
     )
 
 
+@need_solver
 def test_pow_rational_exponent_verifies():
     """x in [1, 4], x**0.5 >= 1 with rational exponent auxiliary encoding.
 
@@ -310,6 +308,7 @@ def test_pow_three_quarters_verifies():
     )
 
 
+@need_solver
 def test_pow_large_denominator_exponent_declines():
     """x in [1, 4], x**(1.0/191.0) must decline — its exact denominator is huge.
 
@@ -377,7 +376,7 @@ def test_pow_rational_straddle_base_declines():
 
 
 need_z3 = pytest.mark.skipif(
-    not HAVE_Z3, reason="needs z3 wheel"
+    not HAVE_Z3, reason="needs the z3 wheel"
 )
 
 

@@ -33,6 +33,7 @@ def _x64():
 import jax.numpy as jnp  # noqa: E402
 
 from stelling.inductive import check_inductive_step  # noqa: E402
+from _solver_gate import need_solver  # noqa: E402
 
 
 # --- Contractive (VERIFIED) -------------------------------------------------
@@ -305,6 +306,7 @@ def test_array_shape_damping_verifies():
     )
 
 
+@need_solver
 def test_array_shape_one_element_escapes_refutes():
     """A body where one element of a vector escapes should REFUTE.
 

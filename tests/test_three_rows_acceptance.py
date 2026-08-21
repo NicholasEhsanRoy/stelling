@@ -33,18 +33,12 @@ jax = pytest.importorskip("jax")
 
 import jax.numpy as jnp  # noqa: E402
 
-from stelling import _optional  # noqa: E402
+from _solver_gate import HAVE_SOLVER, need_solver  # noqa: E402
 from stelling.harness import any_array, assert_, trace  # noqa: E402
 from stelling.solvers import (  # noqa: E402
     SolverConfig,
     escalate,
     make_solver_verdict,
-)
-
-HAVE_Z3 = _optional.available("z3")
-HAVE_CVC5 = _optional.available("cvc5") or _optional.cvc5_binary() is not None
-need_solver = pytest.mark.skipif(
-    not (HAVE_Z3 or HAVE_CVC5), reason="needs a solver"
 )
 
 VERSIONS = dict(
@@ -250,7 +244,7 @@ def test_int32_wraparound_never_mints_a_definite_verdict(expr, label):
     assert all(isinstance(i, DeclinedObligation) for i in items)
     assert all("wraps on overflow" in i.reason for i in items)
 
-    if HAVE_Z3 or HAVE_CVC5:
+    if HAVE_SOLVER:
         v = make_solver_verdict(cj, p, escalate(cj, p, CONFIG), **VERSIONS)
         assert v.status == "UNKNOWN", f"{label} minted {v.status}"
 

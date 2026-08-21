@@ -31,6 +31,7 @@ from stelling import solvers as S  # noqa: E402
 from stelling._jax_compat import transcribe  # noqa: E402
 from stelling.harness import any_array, assert_, assume  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
+from _solver_gate import need_solver  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -105,6 +106,7 @@ def test_both_semantics_modes_mark_and_withhold(semantics):
     assert all(r.witness is None for r in esc.records)
 
 
+@need_solver
 def test_the_SOLVER_half_is_load_bearing_on_its_own():
     """0e's split mutation. The interval withhold and the solver withhold are
     separate consumers of one marking, and a test exercising only the interval

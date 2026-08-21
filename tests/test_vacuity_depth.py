@@ -32,6 +32,7 @@ import jax.numpy as jnp  # noqa: E402
 from stelling.harness import any_array, assert_  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
 from stelling.vacuity import NestedDeclaration  # noqa: E402
+from _solver_gate import need_solver  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -67,6 +68,7 @@ def _query(f):
     return q
 
 
+@need_solver
 @pytest.mark.parametrize("f,depth", [(_d1, 1), (_d2, 2)])
 def test_no_false_load_bearing_note_at_any_depth(f, depth):
     v = check(_query(f), vacuity_mode="inputs-only", solver_timeout_ms=20000)
@@ -82,6 +84,7 @@ def test_no_false_load_bearing_note_at_any_depth(f, depth):
     )
 
 
+@need_solver
 def test_the_envelope_really_is_load_bearing():
     """ANTI-VACUITY. If the claim were true without the nested envelope, the
     suppression above would be protecting nothing and these tests would pass
@@ -98,6 +101,7 @@ def test_the_envelope_really_is_load_bearing():
     )
 
 
+@need_solver
 def test_top_level_declarations_still_get_a_real_measurement():
     """ANTI-VACUITY, the other direction: the fix must not suppress
     everything. A top-level declaration is still widened and still measured."""
@@ -130,6 +134,7 @@ def test_the_guard_raises_rather_than_asserts():
 # actually moved EVERY declared bound.
 
 
+@need_solver
 def test_mixed_point_and_nonpoint_suppresses_rather_than_claiming():
     """The audit's sharpest instance, with its executed control."""
     def q(s_lo, s_hi):

@@ -29,6 +29,7 @@ from stelling.harness import any_array, assert_
 from stelling.obligation import _Slicer
 from stelling.preconditions import check
 from stelling.propagate import interval_env
+from _solver_gate import need_solver  # noqa: E402
 
 N = 3
 
@@ -94,6 +95,7 @@ def test_the_renumbering_path_is_actually_exercised():
     )
 
 
+@need_solver
 @pytest.mark.parametrize("n_calls", [2, 3])
 def test_repeated_callee_now_decides_and_agrees_with_executed_jax(n_calls):
     """The decision must be RIGHT, not merely present. The whole risk of this
@@ -119,6 +121,7 @@ def test_repeated_callee_now_decides_and_agrees_with_executed_jax(n_calls):
     )
 
 
+@need_solver
 def test_distinct_shallow_callees_are_unchanged():
     """The no-change side. These escaped the ceiling already, so renumbering
     must leave them exactly as they were."""

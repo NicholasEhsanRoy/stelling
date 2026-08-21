@@ -73,6 +73,7 @@ jax = pytest.importorskip("jax")  # zero-dep CI has no jax
 import jax.numpy as jnp
 
 from stelling.harness import any_array, assert_, trace
+from _solver_gate import need_solver  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -484,6 +485,7 @@ def test_SITE_make_verdict_refuses_a_stranger_propagation():
         assert v.notes and v.notes[0].startswith("unpaired propagation:")
 
 
+@need_solver
 def test_SITE_escalate_refuses_a_stranger_propagation():
     """`solvers.escalate` — it selects obligations off the propagation and
     slices them out of `closed`, so a stranger's obligation NUMBERING would
@@ -867,6 +869,7 @@ def test_EVERY_site_fails_CLOSED_on_EVERY_hostile_propagation_shape():
     assert len(prop_shapes) * len(esc_shapes) == 16
 
 
+@need_solver
 def test_the_reads_ABOVE_make_solver_verdicts_gate_refuse_rather_than_raise():
     """A GATE CANNOT GUARD A READ THAT HAPPENS ABOVE IT.
 
@@ -981,6 +984,7 @@ def test_the_reads_ABOVE_make_solver_verdicts_gate_refuse_rather_than_raise():
     assert "semantics='<unreadable>'" in str(exc3.value), str(exc3.value)
 
 
+@need_solver
 def test_a_SENTINEL_is_recognised_by_is_and_never_by_a_COMPARISON():
     """THE THREE GATES DECIDE BY COMPARING, AND A COMPARISON IS THE OTHER
     OPERAND'S TO ANSWER — audit 0.2.0 B11 re-audit, fix 2.
@@ -1086,6 +1090,7 @@ def test_a_SENTINEL_is_recognised_by_is_and_never_by_a_COMPARISON():
     assert "semantics='<unreadable>'" in str(exc_s.value), str(exc_s.value)
 
 
+@need_solver
 def test_the_ieee_GATE_and_the_STAMP_read_ONE_ANSWER_and_not_two():
     """ONE DECISION PER VALUE — audit 0.2.0 B11 re-audit, fix 1.
 
@@ -2071,6 +2076,7 @@ def test_EVERY_Propagation_annotated_parameter_is_ACCOUNTED_for():
     )
 
 
+@need_solver
 def test_the_library_driver_pairs_by_construction():
     """`preconditions._pipeline` is the one internal driver — `check()` and
     `contracts.check_contract()` are both it — and it is correct by

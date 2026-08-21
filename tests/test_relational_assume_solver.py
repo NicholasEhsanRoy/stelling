@@ -339,15 +339,7 @@ class TestEmission:
 # Test 3: End-to-end solver integration (requires z3 or cvc5)
 # ---------------------------------------------------------------------------
 
-try:
-    from stelling import _optional
-    HAVE_Z3 = _optional.available("z3")
-    HAVE_CVC5 = _optional.available("cvc5") or _optional.cvc5_binary() is not None
-    HAVE_SOLVER = HAVE_Z3 or HAVE_CVC5
-except Exception:
-    HAVE_SOLVER = False
-
-need_solver = pytest.mark.skipif(not HAVE_SOLVER, reason="needs an SMT solver")
+from _solver_gate import need_solver  # noqa: E402
 
 
 @need_solver

@@ -102,6 +102,43 @@ FORBIDDEN = frozenset(
 ALLOWED_STELLING = frozenset({"stelling._jax_compat", "stelling._optional"})
 
 
+def _every_stelling_module() -> frozenset[str]:
+    """Every importable module in the package, read off the tree."""
+    names = set()
+    for path in sorted(SRC.rglob("*.py")):
+        parts = path.relative_to(SRC.parent).with_suffix("").parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        if parts:
+            names.add(".".join(parts))
+    return frozenset(names)
+
+
+#: WHAT THE TWO RUNTIME HALVES WATCH, and it is the COMPLEMENT OF THE
+#: ALLOW-LIST rather than :data:`FORBIDDEN`.
+#:
+#: Both halves used to watch :data:`FORBIDDEN`, which is a deny-list of the
+#: fourteen analysis modules. A reach into a stelling module that is not on it
+#: was invisible to both. Driven at f82b87b:
+#: ``importlib.import_module("stelling.census")`` inside ``probe()`` passed all
+#: six tests in this file. ``census`` decides nothing on its own, so that
+#: particular reach is not a soundness defect — the defect is that the
+#: instrument could not see it, and the next module added to this package
+#: inherits the same blindness by default.
+#:
+#: The static half next door has always been an ALLOW-list
+#: (:func:`test_the_only_stelling_imports_are_the_permitted_two`), for exactly
+#: this reason and in as many words: *"a module added to stelling tomorrow is
+#: not in FORBIDDEN"*. The two runtime halves now ask the same question the
+#: same way. ``stelling.falsify`` itself and the package root are excluded
+#: because they are the probe and its container, not something it reaches for.
+WATCHED = frozenset(
+    _every_stelling_module()
+    - ALLOWED_STELLING
+    - {"stelling", "stelling.falsify", "stelling.__main__"}
+)
+
+
 
 def _imported_modules(path: pathlib.Path) -> set[str]:
     """Every module name imported anywhere in a file, at any nesting depth."""
@@ -117,6 +154,32 @@ def _imported_modules(path: pathlib.Path) -> set[str]:
             elif node.module:
                 names.add(node.module)
     return names
+
+
+def test_the_runtime_watch_set_is_wider_than_the_deny_list():
+    """The two runtime halves watch the ALLOW-list's complement, and this is
+    what keeps them there.
+
+    Without it, :data:`WATCHED` can be quietly redefined back to
+    :data:`FORBIDDEN` — which is what it was — and the two halves go blind to
+    every stelling module nobody thought to deny. Driven at f82b87b:
+    ``importlib.import_module("stelling.census")`` inside ``probe()`` passed
+    all six tests in this file; with the watch set widened the same mutation
+    fails the difference half on ``ADDED ['stelling.census']``.
+    """
+    assert FORBIDDEN <= WATCHED, sorted(FORBIDDEN - WATCHED)
+    outside = WATCHED - FORBIDDEN
+    assert outside, (
+        "the runtime watch set has narrowed to the deny-list, so a reach into "
+        "any stelling module nobody denied is invisible again"
+    )
+    # the modules the deny-list never named, and `census` is the one the
+    # mutation used
+    assert "stelling.census" in outside
+    # the allow-list is not watched: those two are what the probe MAY use
+    assert not (ALLOWED_STELLING & WATCHED)
+    # and the probe itself is not watched, or every call would report itself
+    assert "stelling.falsify" not in WATCHED
 
 
 def test_the_probe_imports_no_analysis_module():
@@ -312,7 +375,11 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
         for m in before:
             w = _Watched(sys.modules[m])
             sys.modules[m] = w
-            setattr(stelling, m.rsplit(".", 1)[1], w)
+            # only DIRECT children get the package attribute: `stelling.a.b`
+            # would otherwise be published as `stelling.b`, which is a name
+            # nothing reads and a module object nothing owns.
+            if m.count(".") == 1:
+                setattr(stelling, m.rsplit(".", 1)[1], w)
 
         # NOTHING IS CLEARED BETWEEN THE IMPORT AND THE RUN.  This line
         # used to be `del REACHES[:]`, on the reasoning that "importing
@@ -346,7 +413,7 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
              if os.path.abspath(f) == PROBE}
         ))
         '''
-        % sorted(FORBIDDEN)
+        % sorted(WATCHED)
     )
     proc = subprocess.run(
         [sys.executable, "-c", script],

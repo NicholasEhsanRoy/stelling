@@ -58,6 +58,7 @@ from stelling.propagate import (  # noqa: E402
     AssumeDisposition,
     unaccounted_assumes,
 )
+from _solver_gate import need_solver  # noqa: E402
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -309,6 +310,7 @@ def test_an_inert_mode_assume_is_still_recorded():
 # end to end: the verdicts the rule decides
 # ---------------------------------------------------------------------------
 
+@need_solver
 @pytest.mark.parametrize(
     "harness",
     [_s6_mixed_drop_reasons, _f1_mixed_branch_scoped, _only_branch_scoped],
@@ -323,6 +325,7 @@ def test_an_unaccounted_assume_withholds_the_violation(harness):
     assert "WITHHELD from REFUTED" in v.render()
 
 
+@need_solver
 def test_the_withholding_NAMES_the_conjunct_that_caused_it():
     """A refusal that only restates the rule leaves the reader unable to tell
     WHICH of their assumes the solver never saw."""
@@ -332,6 +335,7 @@ def test_the_withholding_NAMES_the_conjunct_that_caused_it():
     assert "branch-scoped" in rendered
 
 
+@need_solver
 def test_a_fully_emitted_query_still_refutes():
     """The one-sidedness has a cost and the cost is bounded: when every
     assume IS accounted for, the violation is released as before. Without
@@ -354,6 +358,7 @@ def _noop_only():
     return (assert_(x <= 5.0),)
 
 
+@need_solver
 def test_an_assume_that_excludes_nothing_no_longer_withholds_forever():
     """The one direction in which this rule releases MORE than the count it
     replaced, disclosed in SOUNDNESS.md rather than left to be found.
@@ -380,6 +385,7 @@ def test_an_assume_that_excludes_nothing_no_longer_withholds_forever():
         raise AssertionError("no witness rendered")
 
 
+@need_solver
 def test_the_released_witness_satisfies_the_assume_it_was_released_under():
     """The release rule's own claim, checked rather than assumed."""
     from fractions import Fraction as F
@@ -395,6 +401,7 @@ def test_the_released_witness_satisfies_the_assume_it_was_released_under():
     assert vals["x0"] + vals["x1"] > 5, "the released witness is not violating"
 
 
+@need_solver
 def test_an_invented_disposition_withholds_a_query_that_otherwise_refutes():
     """THE END-TO-END FORM OF THE WHITELIST. Same query, same solver, same
     emitted axiom — one extra ledger entry naming a disposition this build
@@ -429,6 +436,7 @@ def test_an_invented_disposition_withholds_a_query_that_otherwise_refutes():
     assert "a-drop-reason-added-by-a-later-batch" in esc.records[0].detail
 
 
+@need_solver
 def test_the_release_rule_reads_no_count_at_all():
     """The specific failure both rounds shared: an equality between two
     populations. Adding a forwarded-but-unemitted assume to the ledger must

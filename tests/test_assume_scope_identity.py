@@ -80,17 +80,7 @@ def _x64():
     yield
     jax.config.update("jax_enable_x64", old)
 
-try:
-    from stelling import _optional
-    HAVE_SOLVER = (
-        _optional.available("z3")
-        or _optional.available("cvc5")
-        or _optional.cvc5_binary() is not None
-    )
-except Exception:  # pragma: no cover - environment probe only
-    HAVE_SOLVER = False
-
-need_solver = pytest.mark.skipif(not HAVE_SOLVER, reason="needs an SMT solver")
+from _solver_gate import need_solver  # noqa: E402
 
 LO, HI = -10.0, 10.0
 
