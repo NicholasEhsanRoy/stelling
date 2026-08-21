@@ -132,6 +132,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, because the routing verification reads
+          # `CHANGELOG.md` AT THE COMMIT THE MANIFEST NAMES and a depth-1
+          # clone cannot reach it. With the default depth those checks SKIP,
+          # so the one guarantee batch B8c exists to provide -- that every
+          # routed block arrived, checked against the source it left -- was
+          # not exercised by any job. Measured on a `--depth 1` clone of this
+          # repository: `19 passed, 8 skipped`, and the eight are the whole
+          # git-gated set.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
       - run: uv pip install -e ".[solvers]" pytest
@@ -179,6 +189,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, because the routing verification reads
+          # `CHANGELOG.md` AT THE COMMIT THE MANIFEST NAMES and a depth-1
+          # clone cannot reach it. With the default depth those checks SKIP,
+          # so the one guarantee batch B8c exists to provide -- that every
+          # routed block arrived, checked against the source it left -- was
+          # not exercised by any job. Measured on a `--depth 1` clone of this
+          # repository: `19 passed, 8 skipped`, and the eight are the whole
+          # git-gated set.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
       # `pytest-xdist` IN EXACTLY ONE LANE, and it is this one.
@@ -255,6 +275,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, because the routing verification reads
+          # `CHANGELOG.md` AT THE COMMIT THE MANIFEST NAMES and a depth-1
+          # clone cannot reach it. With the default depth those checks SKIP,
+          # so the one guarantee batch B8c exists to provide -- that every
+          # routed block arrived, checked against the source it left -- was
+          # not exercised by any job. Measured on a `--depth 1` clone of this
+          # repository: `19 passed, 8 skipped`, and the eight are the whole
+          # git-gated set.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
       - run: uv pip install -e ".[solvers]" "jax>=0.10,<0.11" pytest
@@ -344,6 +374,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, because the routing verification reads
+          # `CHANGELOG.md` AT THE COMMIT THE MANIFEST NAMES and a depth-1
+          # clone cannot reach it. With the default depth those checks SKIP,
+          # so the one guarantee batch B8c exists to provide -- that every
+          # routed block arrived, checked against the source it left -- was
+          # not exercised by any job. Measured on a `--depth 1` clone of this
+          # repository: `19 passed, 8 skipped`, and the eight are the whole
+          # git-gated set.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
       - run: uv pip install -e ".[jax]" pytest
@@ -481,6 +521,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, because the routing verification reads
+          # `CHANGELOG.md` AT THE COMMIT THE MANIFEST NAMES and a depth-1
+          # clone cannot reach it. With the default depth those checks SKIP,
+          # so the one guarantee batch B8c exists to provide -- that every
+          # routed block arrived, checked against the source it left -- was
+          # not exercised by any job. Measured on a `--depth 1` clone of this
+          # repository: `19 passed, 8 skipped`, and the eight are the whole
+          # git-gated set.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
       - run: uv pip install -e ".[solvers,jax]" pytest pytest-randomly
@@ -545,6 +595,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, because the routing verification reads
+          # `CHANGELOG.md` AT THE COMMIT THE MANIFEST NAMES and a depth-1
+          # clone cannot reach it. With the default depth those checks SKIP,
+          # so the one guarantee batch B8c exists to provide -- that every
+          # routed block arrived, checked against the source it left -- was
+          # not exercised by any job. Measured on a `--depth 1` clone of this
+          # repository: `19 passed, 8 skipped`, and the eight are the whole
+          # git-gated set.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
       # Two-stage install ON PURPOSE. Stage one resolves exactly what the
@@ -845,6 +905,16 @@ jobs:
       UV_CONSTRAINT: ${{ matrix.constraints }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, because the routing verification reads
+          # `CHANGELOG.md` AT THE COMMIT THE MANIFEST NAMES and a depth-1
+          # clone cannot reach it. With the default depth those checks SKIP,
+          # so the one guarantee batch B8c exists to provide -- that every
+          # routed block arrived, checked against the source it left -- was
+          # not exercised by any job. Measured on a `--depth 1` clone of this
+          # repository: `19 passed, 8 skipped`, and the eight are the whole
+          # git-gated set.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       # Python is PINNED here where every other lane takes the runner default,
       # because this lane cannot afford to inherit it: jaxfluids' setup.py
@@ -1229,6 +1299,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, because the routing verification reads
+          # `CHANGELOG.md` AT THE COMMIT THE MANIFEST NAMES and a depth-1
+          # clone cannot reach it. With the default depth those checks SKIP,
+          # so the one guarantee batch B8c exists to provide -- that every
+          # routed block arrived, checked against the source it left -- was
+          # not exercised by any job. Measured on a `--depth 1` clone of this
+          # repository: `19 passed, 8 skipped`, and the eight are the whole
+          # git-gated set.
+          fetch-depth: 0
       - uses: fsfe/reuse-action@v5
 
   # HAZARD: A SKIPPED JOB READS AS GREEN. This workflow runs on `push:
