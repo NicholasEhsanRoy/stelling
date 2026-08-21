@@ -27,11 +27,24 @@ Nothing downstream can tell that the `0` in the jaxpr was written as a `256`.
 is a **wrong VERIFIED**: a harness whose obligation is false at all eleven
 declared points, certified.
 
-`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` enumerated 32
-construction routes — 17 watched, 7 unwatched, 3 loud, 5 deferred. **Six of the
-seven unwatched routes narrow at that one line**, each reaching it with the
-written value intact, on both series. The seventh, `np.asarray(N).astype(dt)`,
-never reaches jax at all.
+`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` enumerates 35
+construction routes — 17 watched, 9 unwatched, 3 loud, 6 deferred. **Seven of
+the nine unwatched routes narrow at that one line**, each reaching it with the
+written value intact, on both series. The other two,
+`np.asarray(N).astype(dt)` and `jnp.asarray(np.array(N), dtype=dt)`, never
+reach jax at all.
+
+*This paragraph read "32 … 7 unwatched … The seventh" until 2026-08-20, and
+contradicted this file's own "Closed / Not closed" section below, which said
+six closed and **two** numpy routes remaining. It then read "33 … 8 unwatched
+… Six of the eight" until 2026-08-21, when `lax.select`-of-`full` and
+`jnp.take`'s `fill_value` — both driven, both disclosed below as closed, both
+rows of NEITHER inventory — were enrolled and measured. The first is
+`unwatched` and closed, which moved the fraction to seven of nine; the second
+is `deferred`, so it was never one of the gate's holes at all. Both numerals
+in the sentence above are now read out of this file, and out of the five
+others that state them, by
+`tests/test_tripwire_gate_coverage.py::test_the_documented_fraction_is_the_measured_one`.*
 
 ## Why a hook on a private function, and not something public
 
@@ -61,6 +74,16 @@ events. It raises at the construction site, in the frame that wrote the
 constant, while that frame is still on the stack. That is the whole argument
 for building the second one first: it is the one whose correctness does not
 depend on a heuristic.
+
+**It ships OFF, and this document did not say so anywhere** (added
+2026-08-20). Mode 2 is opt-in — `pytest --stelling-eager-truncation=error` —
+and `-p stelling.overflow` does **not** turn it on: they are two dials because
+they are two instruments, one a report over a session and one a rule. With the
+flag absent nothing about a program changes, no verdict moves, and this
+detector is not attached. Every "raises" and "every truncation" below is a
+statement about the armed state, including the heading *Once armed, error on
+every truncation*, which read *"Error by default on every truncation"* until it
+was noticed to read against the default it does not have.
 
 ## Why the exception inherits from `BaseException`
 
@@ -401,7 +424,7 @@ the alarm been an `Exception`, that helper would have gone on returning a
 confident answer about a door it never drove. The `BaseException` choice is
 what makes the missing declaration visible there.
 
-## Error by default on every truncation, and no value-based carve-out
+## Once armed, error on every truncation — and no value-based carve-out
 
 The obvious refinement is to guess intent from the numbers: let `0xFF` into
 `int8` through as a mask idiom and stop `300` into `int8` as an accident. It
@@ -578,11 +601,50 @@ being fixed.
 **Cost:** no measurable change across four full suite runs (8m52s baseline,
 8m47s instrumented).
 
-**Closed:** six of seven `unwatched` routes, plus `lax.select`-of-`full` and
-`jnp.take`'s `fill_value`, plus `report.UNCOVERED`'s scoped
+**Closed:** seven of the NINE `unwatched` routes — the six `full`-family ones
+and `lax.select`-of-`full`, which became a row of `GATE_COVERAGE` and
+`EAGER_COVERAGE` on 2026-08-21 and had until then been driven closed and
+disclosed as closed while being a row of neither, so nothing would have gone
+red if a jax release had moved it. Plus `report.UNCOVERED`'s scoped
 `with jax.disable_jit():` bullet — that one because the reason the const-fold
 rule is handed `-56` instead of `200` is that the constant was narrowed at this
 very site on the way in.
+
+**`jnp.take`'s `fill_value` was listed here as closed and the listing was
+misleading**, which the same day's measurement settled. The detector does raise
+on it. But it was never one of the gate's holes: driven through `check()` in
+three spellings — over the traced array, over a `jnp.zeros` of its shape, and
+over a constant `jnp.zeros` — the written constant reaches the jaxpr INTACT in
+all three, so the route is `deferred` and the gate never had anything to see.
+**What declines it is not the `convert_element_type` transfer that declines the
+other five `deferred` rows**, and the distinction is the whole reason this
+paragraph exists: the constant arrives as `gather`'s own `fill_value`
+parameter, so there is no `convert_element_type` equation in the jaxpr at all,
+and the note the verdict carries is the definite out-of-bounds index on that
+`gather` — the index that makes the fill reachable in the first place. Each
+`deferred` row declares its own catcher in
+`tests/test_tripwire_gate_coverage.py::DEFERRED_CATCHER` and the verdict's
+FIRST note is read against the declaration -- the root decline and not any
+note further down the run, which is the difference between a check and a
+formality -- because "the transfer declines them"
+had been written of the whole bucket in **six FILES** — measured at `68b219d`
+by the sweep
+`test_every_page_that_says_what_declines_the_deferred_bucket_names_them_all`
+runs, and every one of the six named `convert_element_type` and nothing else
+while it was true of five of the bucket's six rows. This is the one row that is
+`deferred` for the gate and `raises` for this detector, and reading it as a
+hole this instrument plugs credited the instrument with a hole that was not
+there.
+
+*The unit above is FILES and it is stated because the correction miscounted
+itself: this sentence read "in six places", meaning passages, until
+2026-08-21. Six was an earlier enumeration of six mixed items restated after
+a wider sweep had overtaken it, and the sweep that produced it stopped at the
+tree's prose: `898158c` corrected the four files outside `src/` and left
+`src/stelling/_tripwire/report.py` — whose fourth `EAGER_UNCOVERED` bullet
+prints on every armed run — and `src/stelling/_tripwire/_adapter_jax.py`.
+Both are corrected now, and `_DEFERRED_MECHANISM_SITES` is a partition over
+the whole tree so that the next such page is named rather than hunted.*
 
 **Not closed, and named:** two numpy routes. `np.asarray(N).astype(dt)` is
 PERMANENTLY unhookable — `np.ndarray.astype` is an immutable type attribute, so

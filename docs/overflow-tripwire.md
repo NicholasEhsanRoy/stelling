@@ -205,9 +205,14 @@ table at all and are worth knowing: **`loud`**, where jax itself raises rather
 than wrapping (`jnp.array(N, dtype=dt)`, `jnp.asarray(N, dtype=dt)`,
 `jnp.int16(N)` — note that `jnp.full(shape, N, dt)`, three rows up, silently
 wraps the same value), and **`deferred`**, where the written constant reaches
-the jaxpr intact and the narrowing is a run-time `convert_element_type` (`x //
-N`, `x % N`, `where`, `clip`, `pad`) — the trace gate has nothing to see there,
-and the propagation's convert transfer declines the form instead.
+the jaxpr intact, so the trace gate has nothing to see and something
+downstream is what refuses the route. Which something is declared per row and
+held against the verdict's FIRST note -- the root decline, not merely some
+note in the run -- because it is not the same one for all of
+them: for `x // N`, `x % N`, `where`, `clip` and `pad` the narrowing is a
+run-time `convert_element_type` and the propagation's convert transfer
+declines the form; for `jnp.take`'s `fill_value` it is the out-of-bounds index
+on that route's `gather`, and the section below says why.
 
 ## The eager door, and the second instrument that closes it
 
@@ -330,13 +335,43 @@ expression it is written in.
 
 ### What it closes, and what it does not
 
-Six of the seven `unwatched` routes in
+Seven of the **nine** `unwatched` routes in
 `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` move from "silently
 certifies a destroyed constant" to "cannot be traced at all": `jnp.full`,
-`jnp.full_like`, `lax.full`, `lax.full_like`, `lax.convert_element_type` and
-`jnp.stack`-of-`full`, plus `lax.select`-of-`full` and `jnp.take`'s
-`fill_value`. A scoped `with jax.disable_jit():` closes too, and for the same
-reason: the constant it wraps is narrowed at this very site on the way in.
+`jnp.full_like`, `lax.full`, `lax.full_like`, `lax.convert_element_type`,
+`jnp.stack`-of-`full` and `lax.select`-of-`full`.
+
+*This page said "six of the seven" until 2026-08-20, in a paragraph whose
+next line says two routes remain — 6 + 2 is 8, and the denominator was
+simply never re-read after `fc98241` made `jnp.stack`-of-`full` the eighth
+`unwatched` row. Both halves are read now, by
+`test_the_documented_fraction_is_the_measured_one`, in this page and in
+the five other files that state the same fraction — asserting the
+denominator in Python changed nothing, because nothing read the sentence.
+Measured: `GATE_COVERAGE` carries 35 routes, 17 `watched`, 9 `unwatched`,
+3 `loud`, 6 `deferred`.*
+
+*The denominator moved 8 → 9 on 2026-08-21 because `lax.select`-of-`full`
+became a row. It had been driven closed and disclosed as closed while
+being a row of NEITHER inventory, so a jax release that changed it would
+have reddened nothing.*
+
+**`jnp.take`'s `fill_value` was disclosed beside it and is a different
+case, measured.** Under a TRACE the written constant reaches the jaxpr
+intact — driven in three spellings, all `deferred` — so it was never one
+of the gate's holes and is not in the fraction above. **What declines it is
+not the transfer that declines the other five `deferred` rows**: the written
+constant arrives as `gather`'s own `fill_value` parameter, so there is no
+`convert_element_type` in the jaxpr for that transfer to see, and the note
+the verdict carries is the definite out-of-bounds index on the `gather`. The
+index is what makes the fill reachable at all — with an in-bounds one the
+fill is never selected and `check()` returns VERIFIED, correctly, because
+nothing wrapped. Run EAGERLY there is no trace to reach it in, the fill
+array is built at the construction site, and the detector raises. It is
+`deferred` in `GATE_COVERAGE` and `raises` in `EAGER_COVERAGE`, the only
+row that is both. A scoped
+`with jax.disable_jit():` closes too, and for the same reason as `full`:
+the constant it wraps is narrowed at this very site on the way in.
 
 Two named routes remain, and both are numpy finishing before jax is reached:
 
@@ -352,7 +387,7 @@ Both are declared `unwatched` in `GATE_COVERAGE`, declared `silent` in
 two — so a third cannot join them quietly.
 
 **And most of the table above is untouched by this**, which is worth saying
-plainly because "six of seven" invites the wrong reading. The rows this
+plainly because "six of eight" invites the wrong reading. The rows this
 detector does NOT close, each re-measured with it armed:
 
 * **eager execution of the inline door** — `a + 256` outside `jit` still

@@ -37,12 +37,16 @@ THE FOUR BUCKETS, which are four different facts and not four shades of one:
     silent happens, so there is nothing for a tripwire to catch.
 
 ``deferred``
-    the written constant reaches the jaxpr INTACT — the narrowing is a
-    ``convert_element_type`` the program performs at run time, not a
+    the written constant reaches the jaxpr INTACT — the narrowing is not a
     transcription loss — so the trace gate has nothing to see and correctly
-    sees nothing. These are not holes: the propagation's ``convert_element_
-    type`` transfer declines them, and the test below drives that too, since
-    "the gate ignores it" is only acceptable while something else does not.
+    sees nothing. These are not holes, and *"the gate ignores it"* is only
+    acceptable while something else does not, so every row DECLARES the
+    mechanism that declines it in :data:`DEFERRED_CATCHER` and the test
+    below requires that mechanism to be the verdict's FIRST note -- the ROOT
+    decline, not any note the run mentions later, which ``any(catcher in
+    note)`` was satisfied by and ``⊤`` alone would have passed.
+    TWO mechanisms, not one, and saying "the transfer declines them" of the
+    bucket was true of five of its six rows.
 
 WHY N=40000 AND int16. It is out of range for int16 and wraps to -25536, far
 enough from the declared envelope that a verdict on the wrapped program and a
@@ -56,6 +60,8 @@ import pytest
 jax = pytest.importorskip("jax")
 jnp = pytest.importorskip("jax.numpy")
 
+import re  # noqa: E402
+
 import numpy as np  # noqa: E402
 from jax import lax  # noqa: E402
 
@@ -63,6 +69,8 @@ from stelling import _tripwire  # noqa: E402
 from stelling._tripwire import eager as _eager, report  # noqa: E402
 from stelling.harness import any_array, assert_  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
+
+from _repo_files import read_text_files  # noqa: E402
 
 #: Out of int16 range; wraps to -25536.
 OVER = 40000
@@ -133,6 +141,18 @@ ROUTES = {
     "jnp.stack([x, jnp.full(N)])": lambda x: jnp.stack(
         [x, jnp.full(x.shape, OVER, DTYPE)]
     )[0],
+    # B8c fixup. MEASURED AND UNROSTERED until now: both were driven closed
+    # by the eager detector and named in `design/eager-truncation-detector.md`
+    # as closed, and neither was a row of GATE_COVERAGE or EAGER_COVERAGE — so
+    # nothing here would have reddened if a jax release moved either of them.
+    # A route that is measured, disclosed as closed, and enrolled in no
+    # inventory is a claim with no guard behind it.
+    "lax.select(c, jnp.full(N), x)": lambda x: lax.select(
+        x > 0, jnp.full(x.shape, OVER, DTYPE), x
+    ),
+    "jnp.take(x, i, fill_value=N)": lambda x: jnp.take(
+        x, jnp.array([9, 0]), mode="fill", fill_value=OVER
+    ),
     "jnp.array(N, dtype=dt)": lambda x: x + jnp.array(OVER, dtype=DTYPE),
     "jnp.asarray(N, dtype=dt)": lambda x: x + jnp.asarray(OVER, dtype=DTYPE),
     "jnp.int16(N)": lambda x: x + jnp.int16(OVER),
@@ -201,6 +221,13 @@ GATE_COVERAGE = {
     # detector armed: 0 fires, VERIFIED, and the value still wraps.
     "jnp.asarray(np.array(N), dt)": "unwatched",
     "jnp.stack([x, jnp.full(N)])": "unwatched",
+    # B8c fixup: `lax.select`-of-`full` narrows inside jax at the `full` line
+    # like the six above it, so the const-fold rule is handed an in-range
+    # value and the gate certifies a program the source does not describe.
+    # It was DRIVEN CLOSED by the eager detector and disclosed as closed in
+    # `design/eager-truncation-detector.md` while being a row of neither
+    # inventory -- a claim with no guard behind it, which is why it is here.
+    "lax.select(c, jnp.full(N), x)": "unwatched",
     # jnp.array and friends VALIDATE the Python int against the dtype and
     # raise. The contrast with jnp.full, three lines up, is jax's and not
     # stelling's, and it is the single most useful thing on this page for a
@@ -214,6 +241,70 @@ GATE_COVERAGE = {
     "jnp.where(c, N, x)": "deferred",
     "jnp.clip(x, 0, N)": "deferred",
     "jnp.pad(x, 1, constant_values=N)": "deferred",
+    # B8c fixup, and the bucket is NOT the one it was enrolled for.
+    # `jnp.take`'s `fill_value` was disclosed beside `lax.select`-of-`full` as
+    # a route the eager detector closes, which invited reading it as a hole
+    # the detector plugs. Driven here in three spellings -- over the traced
+    # `x`, over a `jnp.zeros` of `x`'s shape, and over a constant `jnp.zeros`
+    # -- all three put the written 40000 into the jaxpr INTACT, so the gate
+    # has nothing to see and correctly sees nothing. It is `deferred` and it
+    # was never one of the gate's holes. WHAT DECLINES IT IS NOT THE
+    # TRANSFER THAT DECLINES THE FIVE ABOVE: the constant arrives as
+    # `gather`'s own `fill_value` parameter, so there is no
+    # `convert_element_type` in this jaxpr to decline (measured), and the
+    # note the verdict carries is the definite out-of-bounds index on that
+    # `gather`. `DEFERRED_CATCHER` declares that per row and the test reads
+    # the notes against it. See EAGER_COVERAGE for the other half.
+    "jnp.take(x, i, fill_value=N)": "deferred",
+}
+
+#: WHAT DECLINES EACH `deferred` ROUTE, one row per row of the bucket, as a
+#: fragment of the note the verdict actually carries.
+#:
+#: THE BUCKET USED TO ASSERT ITS CATCHER IN PROSE, and the prose was already
+#: false. *"The propagation's `convert_element_type` transfer declines
+#: them"* stood in **SIX FILES** -- the unit is FILES, and the count is the
+#: one measured by
+#: `test_every_page_that_says_what_declines_the_deferred_bucket_names_them_all`
+#: below, re-run over `68b219d`: `SOUNDNESS.md`,
+#: `docs/overflow-tripwire.md`, `design/eager-truncation-detector.md`, this
+#: file, `src/stelling/_tripwire/report.py` and
+#: `src/stelling/_tripwire/_adapter_jax.py` -- while `jnp.take`'s row has
+#: no `convert_element_type` in its jaxpr at all. It survived because the
+#: assertion beside the docstring was `status != VERIFIED`, which is
+#: strictly weaker than the sentence: ANY refusal, for any reason, passes
+#: it. A bucket whose reason for not being a hole is written in a comment
+#: is a bucket with no reason at all, so the reason is declared here and
+#: read out of the verdict.
+#:
+#: THE UNIT IS STATED BECAUSE THIS SENTENCE MISCOUNTED ITSELF. It read *"in
+#: six places"* until 2026-08-21, meaning PASSAGES, and six was the earlier
+#: enumeration of six mixed items -- two code comments, two prose pages and
+#: two routed blocks -- restated unchanged after the sweep beside it had
+#: already found more. `898158c` corrected the four files outside `src/`
+#: and left the two inside it, one of them `report.EAGER_UNCOVERED`'s
+#: fourth bullet, which prints to the user on every armed run. Both are
+#: corrected now and the partition above is what will name the next one.
+#:
+#: TWO MECHANISMS, and the difference is not cosmetic. The five convert rows
+#: narrow at run time over a VARIABLE and the interval transfer refuses the
+#: lossy conversion. `jnp.take`'s `fill_value` reaches the jaxpr as
+#: `gather`'s own parameter -- measured, there is no `convert_element_type`
+#: equation in it -- so there is nothing for that transfer to decline, and
+#: what refuses the route is the definite out-of-bounds index the spelling
+#: asks for. That index is load-bearing rather than incidental: it is what
+#: makes the fill reachable. Driven with an in-bounds index the fill is
+#: never selected, the program executes `[100, 0]`, and `check()` returns
+#: VERIFIED -- correctly, because nothing wrapped.
+DEFERRED_CATCHER = {
+    "x // N": "'convert_element_type' declined this form",
+    "x % N": "'convert_element_type' declined this form",
+    "jnp.where(c, N, x)": "'convert_element_type' declined this form",
+    "jnp.clip(x, 0, N)": "'convert_element_type' declined this form",
+    "jnp.pad(x, 1, constant_values=N)": (
+        "'convert_element_type' declined this form"
+    ),
+    "jnp.take(x, i, fill_value=N)": "OUT-OF-BOUNDS INDEX (definite) in 'gather'",
 }
 
 
@@ -344,24 +435,88 @@ def test_every_unwatched_route_really_certifies_a_destroyed_constant():
         )
 
 
-def test_every_deferred_route_is_caught_by_the_transfer_instead():
-    """`deferred` says the gate ignores it. Something else must not.
+def test_every_deferred_route_is_declined_by_the_mechanism_it_declares():
+    """`deferred` says the gate ignores it. Something else must not — and
+    WHICH something is declared per route and read out of the verdict.
 
     The written constant reaches the jaxpr, so there is no transcription loss
     for the trace gate to report — but the program still wraps at run time,
     and a bucket that meant "the gate ignores it and so does everyone else"
-    would be a hole wearing a reassuring name. Measured: the propagation's
-    `convert_element_type` transfer declines the form, so the verdict is
-    UNKNOWN and never VERIFIED.
+    would be a hole wearing a reassuring name.
+
+    **THIS DOCSTRING USED TO BE THE ONLY PLACE THE CATCHER WAS NAMED, AND
+    THE NAME WENT STALE UNDER IT.** It read *"Measured: the propagation's
+    `convert_element_type` transfer declines the form"* while the assertion
+    was `status != VERIFIED` — strictly weaker, and passed by ANY refusal
+    for ANY reason. So when `jnp.take`'s `fill_value` joined the bucket with
+    no `convert_element_type` in its jaxpr at all, the sentence became false
+    of one of this test's own rows and the test stayed green. The name of
+    this function was the same claim and went stale with it; it was
+    `test_every_deferred_route_is_caught_by_the_transfer_instead`.
+
+    The mechanism is DECLARED now, in :data:`DEFERRED_CATCHER`, and this
+    holds the verdict's FIRST note to it. Driven: declaring
+    `'convert_element_type' declined this form` for `jnp.take`'s row turns
+    this red. `status != VERIFIED` stays as the weaker half, because "no
+    note says what was declared" and "nothing declined this at all" are
+    different failures and both should be legible.
+
+    **IT IS `notes[0].startswith(...)` AND NOT `any(catcher in note)`, AND
+    THAT WAS A REAL HOLE.** `in`-over-`any` is satisfied by any note in the
+    verdict, including notes DOWNSTREAM of the decline and the ⊤-summary
+    note that lists every primitive that fell. Driven, as shipped with
+    `any(...)`, one mutation at a time: declaring `'div' declined this
+    form` for `x // N`, `'add' declined this form` for `x % N`, `pad ×1`
+    for `jnp.pad` and `⊤` — ONE CHARACTER, present in every note of every
+    row — for all six were **`1 passed`** each. All four are `1 failed`
+    against `notes[0].startswith(...)`, which is what "this is the
+    mechanism that declines the route" actually says: the ROOT decline, not
+    something the run mentions later.
+
+    **A MEASURED LIMIT, because the note this reads is not always the one
+    that makes the verdict non-VERIFIED.** `jnp.clip(x, 0, N)` declines
+    TWICE — the conversion of the literal `0` at `lax_numpy.py:3408` and of
+    `N` at `:3410` — and `notes[0]` is the first. Driven on jax 0.11.0,
+    x64 on: `jnp.clip(x, 0, 100)`, where nothing wraps at all, produces the
+    same two notes and the same UNKNOWN; and `jnp.clip(x, jnp.int16(0), N)`,
+    which removes only the `0`-conversion, returns VERIFIED with the
+    `N`-conversion note still attached. So this row's evidence is a real
+    decline of a real conversion in the traced program, and it is not
+    evidence about the written constant. `jnp.take` has the same shape at
+    `fill_value=100`. Recorded rather than forced: what closes it is a
+    note that names the VALUE, which is a change to the propagation's
+    messages and not to this test.
     """
     deferred = [k for k, v in GATE_COVERAGE.items() if v == "deferred"]
     assert deferred, "no deferred routes, so this claim is vacuous"
+    assert set(DEFERRED_CATCHER) == set(deferred), (
+        "`DEFERRED_CATCHER` is a declaration per `deferred` row, not a list "
+        "of the rows someone remembered. Declares a catcher and is not in "
+        f"the bucket: {sorted(set(DEFERRED_CATCHER) - set(deferred))}; in "
+        f"the bucket and declares none: "
+        f"{sorted(set(deferred) - set(DEFERRED_CATCHER))}. A route admitted "
+        "to `deferred` without naming what declines it is the bucket back "
+        "to asserting a catcher it may not have."
+    )
     for name in deferred:
         bucket, verdict = _measure(name)
         assert bucket == "deferred", name
         assert verdict.status != "VERIFIED", (
-            f"{name} is declared covered by the convert transfer rather than "
-            f"by the gate, and NOTHING covered it: {verdict.status}"
+            f"{name} is declared covered by {DEFERRED_CATCHER[name]!r} "
+            f"rather than by the gate, and NOTHING covered it: "
+            f"{verdict.status}"
+        )
+        catcher = DEFERRED_CATCHER[name]
+        assert verdict.notes and verdict.notes[0].startswith(catcher), (
+            f"{name} declares that {catcher!r} is what declines it and the "
+            f"verdict's FIRST note does not say so. The verdict is "
+            f"{verdict.status}, so SOMETHING refused this route — but the "
+            f"root decline is not the mechanism this bucket's account of it "
+            f"names, which makes that account prose about a different "
+            f"program. It is the first note and not any note on purpose: "
+            f"`any(catcher in note …)` is passed by a downstream decline, "
+            f"and by `⊤`, which stands in every note of every row. Notes: "
+            f"{[note[:110] for note in verdict.notes]}"
         )
 
 
@@ -375,6 +530,7 @@ def test_every_deferred_route_is_caught_by_the_transfer_instead():
 UNCOVERED_SPELLING = {
     "jnp.stack([x, jnp.full(N)])": "jnp.stack([x, jnp.full(shape, N, dt)])",
     "jnp.asarray(np.array(N), dt)": "jnp.asarray(np.array(N), dtype=dt)",
+    "lax.select(c, jnp.full(N), x)": "lax.select(p, jnp.full(shape, N, dt), x)",
 }
 
 
@@ -554,6 +710,10 @@ EAGER_COVERAGE = {
     "lax.full_like(x, N)": "raises",
     "lax.convert_element_type(N, dt)": "raises",
     "jnp.stack([x, jnp.full(N)])": "raises",
+    # B8c fixup: driven FIRED, conv=1 trunc=1 with `jit` on and conv=2
+    # trunc=1 with `JAX_DISABLE_JIT=1`, warm, on jax 0.11.0. A row now,
+    # not prose.
+    "lax.select(c, jnp.full(N), x)": "raises",
     # jax refuses these three itself, with or without the detector
     "jnp.array(N, dtype=dt)": "loud",
     "jnp.asarray(N, dtype=dt)": "loud",
@@ -584,6 +744,14 @@ EAGER_COVERAGE = {
     "jnp.where(c, N, x)": "silent",
     "jnp.clip(x, 0, N)": "silent",
     "jnp.pad(x, 1, constant_values=N)": "silent",
+    # B8c fixup, and it is the ONE row that is `deferred` for the gate and
+    # `raises` for the detector at the same time. Nothing is inconsistent
+    # about that: under a TRACE the written 40000 reaches the jaxpr and the
+    # narrowing is a run-time convert, so the gate has nothing to see; run
+    # EAGERLY there is no trace to reach and the fill array is built at the
+    # construction site, which is this instrument's. Measured `raises` here
+    # and `deferred` in GATE_COVERAGE, and neither reading is the other's.
+    "jnp.take(x, i, fill_value=N)": "raises",
     # THE RESIDUE. numpy finished before jax was reached.
     "np.asarray(N).astype(dt)": "silent",
     "jnp.asarray(np.array(N), dt)": "silent",
@@ -662,16 +830,472 @@ def test_the_declared_eager_coverage_is_the_measured_eager_coverage(eager_armed)
     )
 
 
+#: The eager detector's coverage of the `unwatched` bucket, as ONE pair of
+#: numerals. `test_the_unwatched_routes_…` holds the measured buckets to
+#: them and `test_the_documented_fraction_is_the_measured_one` holds every
+#: file that states the fraction to them, so the sentence in the documents
+#: and the dict in this file cannot drift apart in either direction.
+_CLOSED = 7
+_UNWATCHED = 9
+
+#: The fraction as a document writes it: a numeral, `of the`, a numeral,
+#: `unwatched`. Tolerant of markdown emphasis, of wrapping and of case,
+#: because the six files that state it spell it six different ways.
+#:
+#: A QUOTED occurrence is skipped by `_live_fractions`, because a project
+#: that records what it got wrong has to be able to write the wrong
+#: sentence down. Quoting is the shape the retraction takes everywhere it
+#: appears here, and it is checked as a shape rather than trusted: an
+#: unquoted stale fraction fails wherever it stands.
+_FRACTION_RE = re.compile(
+    r"(?P<num>[A-Za-z]+|\d+)\s*\**\s*of\s+the\s*\**\s*"
+    r"(?P<den>[A-Za-z]+|\d+)\**\s+`*unwatched`*",
+    re.S,
+)
+
+#: THE CENSUS, the other shape the same numbers are written in:
+#: `N routes -- 17 `watched`, 9 `unwatched`, 3 `loud`, 6 `deferred``. It is
+#: a different sentence from the fraction and a check on one is not a check
+#: on the other -- driven in the B8c fixup, enrolling `lax.select`-of-`full`
+#: moved the fraction in every file that stated it AND left the census
+#: stale in `SOUNDNESS.md`'s `SF-0.2.0-07` block, which the fraction
+#: pattern does not match. Both shapes are read now.
+_CENSUS_RE = re.compile(
+    r"(?P<total>\d+)\s*\**\s*(?:constant-)?construction\s+routes|"
+    r"(?P<total2>\d+)\s+routes\s*[,—-]",
+    re.S,
+)
+_BUCKET_RE = re.compile(
+    r"(?P<n>\d+)\s*\**\s*`*(?P<bucket>watched|unwatched|loud|deferred)`*",
+    re.S,
+)
+
+_NUMERALS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12,
+}
+
+#: Every file that states the CENSUS. A partition, like the fraction's.
+_CENSUS_SITES = (
+    "SOUNDNESS.md",
+    "docs/overflow-tripwire.md",
+    "design/eager-truncation-detector.md",
+)
+
+#: Every file that states the fraction. This is a partition and not a
+#: reminder list: `test_the_documented_fraction_is_the_measured_one`
+#: requires each of these to state it AND requires no other file in the
+#: tree to state it, so adding the sentence somewhere new fails until it
+#: is listed here, and deleting it from a listed file fails too.
+#:
+#: THIS FILE IS ON THE LIST. The message that used to name the sites named
+#: six documents, included `SOUNDNESS.md` (which carried no such sentence
+#: before the 0.2.0 routing put one there) and omitted this file, which
+#: states the fraction in `test_the_unwatched_routes_…`'s own docstring —
+#: so *"move all six"* would have left the instruction's own file stale.
+#: `CHANGELOG.md` LEFT THIS LIST in the same commit that widened it, and
+#: that is the routing working rather than a site going quiet: the Mode 2
+#: detail moved into `SOUNDNESS.md` under §8.3, so the ledger states the
+#: fraction and the changelog links to it. The partition below is what
+#: made the move announce itself.
+_FRACTION_SITES = (
+    "SOUNDNESS.md",
+    "docs/overflow-tripwire.md",
+    "docs/quickstart.md",
+    "design/eager-truncation-detector.md",
+    "src/stelling/_tripwire/eager.py",
+    "tests/test_tripwire_gate_coverage.py",
+)
+
+#: THE MECHANISM TOKENS, DERIVED FROM `DEFERRED_CATCHER` and not typed
+#: beside it: the jax primitive named inside each declared catcher
+#: (`'convert_element_type' declined this form` -> `convert_element_type`;
+#: `OUT-OF-BOUNDS INDEX (definite) in 'gather'` -> `gather`). A third
+#: mechanism joining the bucket adds its own token here on the day the row
+#: is declared, and every page below has to name it in the same commit.
+_MECHANISM_TOKENS = tuple(sorted({
+    tok
+    for catcher in DEFERRED_CATCHER.values()
+    for tok in re.findall(r"'([a-z_]+)'", catcher)
+}))
+
+#: How far from the word `deferred` a mechanism may stand and still be part
+#: of the same passage. A paragraph in this repository is 300-500
+#: characters, and the whole ANSWER — the file set and each file's token set
+#: — is identical at 320, 400, 500, 600, 800, 1200 and 2000 measured over
+#: the whole tree, so the number is a paragraph rather than a threshold
+#: tuned until the answer came out right. Bisected one character at a time,
+#: the answer is CONSTANT from 301 to 2000, and below 301 it only shrinks,
+#: monotonically and without jumping: the file set completes at 249, where
+#: `_adapter_jax.py` joins, and the last token to arrive is `report.py`'s
+#: `gather` at 301. So the
+#: tightest real margin in the tree is 301 against a window of 400, and
+#: the widest is 2000 — the whole answer sits in the middle of that range
+#: rather than at either edge.
+#:
+#: IT IS A HEURISTIC AND HERE IS THE CONSEQUENCE, since a number chosen for
+#: being a paragraph is not a proof about paragraphs. Proximity is not
+#: aboutness, in either direction: a page that describes the bucket while
+#: naming the mechanism FURTHER than this from any `deferred` is invisible
+#: to the partition and may go on crediting one mechanism with the whole
+#: thing, and a mechanism standing beside the word for an unrelated reason
+#: counts as a description that is not one. The first is the one that costs
+#: something, and it is driven rather than reasoned about: a page naming
+#: `convert_element_type` 623 characters from its `deferred` is **`1
+#: passed`** here, and the same page with the gap closed to 123 is
+#: **`1 failed`**, named as an unlisted site.
+#:
+#: NOTHING IN THE TREE STRADDLES THAT LINE TODAY — that is what the 301-2000
+#: constancy above measures, and it is the reason this stays a documented
+#: limit and not a fix. If a page ever does straddle it, the answer is a
+#: per-page marker, not a wider window: widening trades the first failure
+#: for the second and moves the arbitrary number rather than removing it.
+_MECHANISM_WINDOW = 400
+
+#: A token counts as NAMED only where it is written AS CODE — in backticks,
+#: double backticks, or quotes. `gather` is an ordinary English word, and a
+#: bare `tok in window` substring test made this partition's second leg
+#: satisfiable by prose that says nothing about the bucket at all. Driven at
+#: `8e8a385`: revert `report.EAGER_UNCOVERED`'s fourth bullet to the
+#: sentence crediting `convert_element_type` with the whole bucket and this
+#: check goes red as it should, `1 failed`; do the same and write
+#: "(evidence gathered on 0.11.0)" anywhere in that bullet and it is
+#: `1 passed` — the exact sentence this check exists to refuse, restored to
+#: the text printed on every armed run, with the check green. With this
+#: rule both drives are `1 failed`, and the clean tree is `1 passed`.
+#:
+#: It costs no measurement. Every page already writes the tokens as code,
+#: so this rule and the bare one select the SAME seven files at `8e8a385`
+#: and the SAME six at `68b219d`; no numeral stated anywhere moves.
+#:
+#: IT IS LITERAL, AND THE SECOND HALF OF `_MECHANISM_WINDOW`'S LIMIT
+#: APPLIES TO IT UNCHANGED. A quote has to sit immediately either side, so
+#: `` `gather` ``, ``` ``gather`` ```, `'gather'` and `` `gather`'s ``
+#: count and `` `lax.convert_element_type` `` and
+#: `` `convert_element_type()` `` do not. Measured, and not by eye: swept
+#: tree-wide against a variant that also accepts a dotted prefix and a
+#: call, the answer — file set AND per-file token set — is IDENTICAL, so
+#: no page in the tree names a mechanism only in a form this misses. For
+#: a LISTED page
+#: that direction is loud: a page that stops matching leaves `found` and
+#: fails the first leg, named. For an UNLISTED one it is the window's
+#: quiet case again — a page describing the bucket in a spelling this
+#: does not recognise is invisible to the partition. Left literal rather
+#: than widened for the same reason the window is: a looser pattern trades
+#: that miss for matching the token in prose that is not about the bucket,
+#: which is the hole this rule was written to close. The answer if a page
+#: ever needs the dotted spelling is to write the bare one beside it.
+_MECHANISM_NAMED = {
+    tok: re.compile(rf"[`'\"]{{1,2}}{re.escape(tok)}[`'\"]{{1,2}}")
+    for tok in _MECHANISM_TOKENS
+}
+
+#: Every file that tells a reader WHAT DECLINES a `deferred` route. A
+#: partition, read exactly the way `_FRACTION_SITES` and `_CENSUS_SITES`
+#: are — and it is here because the sweep-and-correct that should have been
+#: this check MISSED TWO SITES, both of them in `src/` and one of them
+#: `report.EAGER_UNCOVERED`'s fourth bullet, printed to the user on every
+#: armed run. A correction applied by grepping is only as wide as the grep.
+#:
+#: WHAT THE PARTITION ENFORCES is that the bucket has MORE THAN ONE catcher
+#: and a page that names one of them names all of them. Every page that
+#: went false on 2026-08-21 went false the same way: it named
+#: `convert_element_type` and nothing else, and then `jnp.take`'s
+#: `fill_value` joined the bucket with no conversion in its jaxpr.
+_DEFERRED_MECHANISM_SITES = (
+    "SOUNDNESS.md",
+    "design/eager-truncation-detector.md",
+    "docs/overflow-tripwire.md",
+    "src/stelling/_tripwire/_adapter_jax.py",
+    "src/stelling/_tripwire/report.py",
+    "tests/_soundness_routing_manifest.py",
+    "tests/test_tripwire_gate_coverage.py",
+)
+
+#: A quoted run, which is how this repository writes a sentence it has
+#: retracted -- in prose with `"..."`, and in
+#: `tests/_soundness_routing_manifest.py` as a Python literal quoting a
+#: source line the destination does NOT carry. Bounded so that two unrelated
+#: quotes cannot swallow the text between them, and the single-quote form is
+#: guarded by letter lookarounds so an apostrophe in `jax's` cannot open one.
+_QUOTED = re.compile(
+    r"\"[^\"\n]{0,400}\"|(?<![A-Za-z])'[^'\n]{0,400}'(?![A-Za-z])", re.S
+)
+
+
+def _live_fractions(text: str) -> list[tuple[str, str]]:
+    """The fraction as this file ASSERTS it — quotations excluded.
+
+    A retraction has to be able to quote the sentence it retracts:
+    *"six of the SEVEN unwatched routes"* is written down in several
+    places on purpose, and a check that could not tell it from a live
+    claim would force the project to stop recording its own errors.
+    """
+    quoted = [m.span() for m in _QUOTED.finditer(text)]
+    out = []
+    for m in _FRACTION_RE.finditer(text):
+        s, e = m.span()
+        if any(qs <= s and e <= qe for qs, qe in quoted):
+            continue
+        out.append((m.group("num"), m.group("den")))
+    return out
+
+
+def found_censuses() -> dict[str, list[tuple[int, dict[str, int]]]]:
+    """`{file: [(total, {bucket: n}), …]}` for every live census in the tree.
+
+    A census is a sentence of the form `N construction routes — 17
+    `watched`, 9 `unwatched`, 3 `loud`, 6 `deferred``, and it is a
+    DIFFERENT sentence from the fraction: the fraction names two of the
+    buckets and the census names the size of the dict and all four. A
+    check on one is not a check on the other, which is exactly how
+    `SOUNDNESS.md`'s `SF-0.2.0-07` block kept `33 … 8 unwatched` while
+    every stated fraction moved to seven of nine.
+    """
+    out: dict[str, list[tuple[int, dict[str, int]]]] = {}
+    for rel, text in read_text_files():
+        quoted = [q.span() for q in _QUOTED.finditer(text)]
+        for m in _CENSUS_RE.finditer(text):
+            if any(qs <= m.start() and m.end() <= qe for qs, qe in quoted):
+                continue
+            total = int(m.group("total") or m.group("total2"))
+            tail = text[m.end():m.end() + 260]
+            buckets = {
+                b.group("bucket"): int(b.group("n"))
+                for b in _BUCKET_RE.finditer(tail)
+            }
+            if len(buckets) == 4:
+                out.setdefault(rel, []).append((total, buckets))
+    return out
+
+
+def _check_the_census(found):
+    measured = {"total": len(GATE_COVERAGE)}
+    for bucket in ("watched", "unwatched", "loud", "deferred"):
+        measured[bucket] = sum(1 for v in GATE_COVERAGE.values() if v == bucket)
+    assert set(found) == set(_CENSUS_SITES), (
+        f"the `GATE_COVERAGE` census is stated in {sorted(found)} and "
+        f"`_CENSUS_SITES` lists {sorted(_CENSUS_SITES)}. States it and is "
+        f"not listed: {sorted(set(found) - set(_CENSUS_SITES))}; listed and "
+        f"no longer states it: {sorted(set(_CENSUS_SITES) - set(found))}."
+    )
+    wrong = [
+        (rel, total, buckets)
+        for rel, hits in sorted(found.items())
+        for total, buckets in hits
+        if total != measured["total"]
+        or any(buckets[b] != measured[b] for b in buckets)
+    ]
+    assert not wrong, (
+        f"`GATE_COVERAGE` holds {measured} and these censuses say "
+        f"otherwise: {wrong}. The census and the fraction are two "
+        f"sentences over one dict, and moving one without the other is how "
+        f"`SF-0.2.0-07` kept a stale 33/8 through a commit that corrected "
+        f"the fraction in six files."
+    )
+
+
+def test_the_documented_fraction_is_the_measured_one():
+    """THE PROSE IS READ. That is the whole of this check, and it is new.
+
+    *"Six of the SEVEN unwatched routes"* stood in six shipped files from
+    ``fc98241`` until 2026-08-20 while ``GATE_COVERAGE`` held eight, and
+    the reason it survived is not that a Python assertion was one-sided —
+    ``len(closed) == 6`` and ``residue == {two}`` already entailed
+    ``len(unwatched) == 8`` between them. It survived because **no test
+    read the sentence.** Driven at ``de80ad8``: revert the fraction to
+    *"seven"* in all six prose sites and 419 tests over every suite that
+    opens any of those files still pass.
+
+    So this reads them. Both halves of the fraction, in every file that
+    states it, against the two numerals the buckets are held to — and in
+    BOTH directions, because a list of sites is only as wide as its list:
+    a file that states the fraction and is not listed fails here as loudly
+    as a listed file that has stopped stating it.
+    """
+    unwatched = {k for k, v in GATE_COVERAGE.items() if v == "unwatched"}
+    residue = {k for k in unwatched if EAGER_COVERAGE[k] == "silent"}
+    closed = unwatched - residue
+    assert (len(closed), len(unwatched)) == (_CLOSED, _UNWATCHED), (
+        "the declared numerals do not match the buckets; "
+        "test_the_unwatched_routes_… says the same thing with the detail"
+    )
+
+    found: dict[str, list[tuple[str, str]]] = {}
+    for rel, text in read_text_files():
+        hits = _live_fractions(text)
+        if hits:
+            found[rel] = hits
+
+    assert set(found) == set(_FRACTION_SITES), (
+        f"the eager detector's `unwatched` fraction is stated in "
+        f"{sorted(found)} and `_FRACTION_SITES` lists "
+        f"{sorted(_FRACTION_SITES)}. States it and is not listed: "
+        f"{sorted(set(found) - set(_FRACTION_SITES))}; listed and no longer "
+        f"states it: {sorted(set(_FRACTION_SITES) - set(found))}. A page "
+        f"list is only as wide as its list, so this is a partition: a new "
+        f"site has to be added here in the same commit, and a site that "
+        f"drops the sentence fails rather than passing as compliance."
+    )
+
+    _check_the_census(found_censuses())
+
+    wrong = []
+    for rel, hits in sorted(found.items()):
+        for num, den in hits:
+            n = int(num) if num.isdigit() else _NUMERALS.get(num.lower())
+            d = int(den) if den.isdigit() else _NUMERALS.get(den.lower())
+            if (n, d) != (_CLOSED, _UNWATCHED):
+                wrong.append((rel, num, den))
+    assert not wrong, (
+        f"the eager detector closes {_CLOSED} of the {_UNWATCHED} "
+        f"`unwatched` routes and these sites say otherwise: {wrong}. This "
+        f"is the sentence that read *\"six of the SEVEN\"* against a dict "
+        f"holding eight, in six files at once, for as long as it took "
+        f"someone to do the arithmetic in it."
+    )
+
+
+def found_deferred_mechanism_sites() -> dict[str, set[str]]:
+    """`{file: {mechanism tokens named beside a `deferred`}}`, tree-wide.
+
+    A file counts as describing the bucket's mechanism when one of
+    `_MECHANISM_TOKENS` stands within `_MECHANISM_WINDOW` characters of the
+    word `deferred` **and is written there AS CODE**, per
+    `_MECHANISM_NAMED`; the value is the union of the tokens its passages
+    name that way. The code-quoting is load-bearing and not decoration —
+    `gather` is an ordinary English word, and a bare substring test let
+    "(evidence gathered on 0.11.0)" stand in for naming the mechanism.
+
+    RETRACTIONS ARE NOT EXCLUDED HERE, unlike `_live_fractions`: a file
+    that writes a mechanism inside a quoted retraction at all is a file a
+    reader can take a mechanism from, and this one does, in the sentence
+    it records having gone false. **IT NAMED A SECOND SITE UNTIL
+    2026-08-21 AND MEASUREMENT REFUTES THAT ONE**: it said
+    `tests/_soundness_routing_manifest.py` writes a mechanism in the
+    source line `SF-0.2.0-07` did not carry, and that block's three
+    `not_carried` lines hold no mechanism in any spelling. That file
+    reaches the list live, not by retraction — its four in-window matches
+    are all `edit_note` prose (`:239-240` and `:956-957`) — and the one
+    mechanism a `not_carried` line in it does hold, `M2-0.2.0-01`'s
+    `` `lax.convert_element_type` ``, is the dotted spelling
+    `_MECHANISM_NAMED` deliberately does not match. Both files name both
+    mechanisms either way, which is the whole requirement.
+    """
+    out: dict[str, set[str]] = {}
+    for rel, text in read_text_files():
+        named: set[str] = set()
+        for m in re.finditer(r"deferred", text):
+            window = text[
+                max(0, m.start() - _MECHANISM_WINDOW):
+                m.end() + _MECHANISM_WINDOW
+            ]
+            named |= {
+                tok for tok in _MECHANISM_TOKENS
+                if _MECHANISM_NAMED[tok].search(window)
+            }
+        if named:
+            out[rel] = named
+    return out
+
+
+def test_every_page_that_says_what_declines_the_deferred_bucket_names_them_all():
+    """The bucket has TWO catchers, and a page may not name one of them.
+
+    This is `_FRACTION_SITES`' idiom pointed at the sentence that went
+    false on 2026-08-21: *"the propagation's `convert_element_type`
+    transfer declines them"*, written of a bucket one of whose rows has no
+    `convert_element_type` in its jaxpr at all.
+
+    **IT IS HERE BECAUSE THE CORRECTION WAS A SWEEP AND THE SWEEP MISSED
+    TWO SITES.** Measured over the whole tree at `68b219d` — every file
+    putting a mechanism token within `_MECHANISM_WINDOW` of the word
+    `deferred` — SIX FILES described the bucket's mechanism and all six
+    named `convert_element_type` alone: `SOUNDNESS.md`,
+    `docs/overflow-tripwire.md`, `design/eager-truncation-detector.md`,
+    `tests/test_tripwire_gate_coverage.py`,
+    `src/stelling/_tripwire/report.py` and
+    `src/stelling/_tripwire/_adapter_jax.py`. `898158c` corrected the four
+    outside `src/`. The two inside it survived — one of them
+    `report.EAGER_UNCOVERED`'s fourth bullet, which prints to the user on
+    every armed run — and are corrected in the commit that adds this test.
+
+    Both directions, because a list is only as wide as its list: a file
+    that starts describing the bucket's mechanism and is not listed fails
+    here, and a listed file that stops describing it fails too. The
+    strength of the second assertion is the DECLARATION's: while
+    `DEFERRED_CATCHER` names one distinct mechanism there is nothing for a
+    page to leave out, and it says two today.
+    """
+    assert all(
+        re.findall(r"'([a-z_]+)'", catcher)
+        for catcher in DEFERRED_CATCHER.values()
+    ), (
+        f"a declared catcher names no jax primitive in quotes, so "
+        f"`_MECHANISM_TOKENS` cannot be derived from it and this check "
+        f"would silently narrow: {sorted(DEFERRED_CATCHER.values())}"
+    )
+    found = found_deferred_mechanism_sites()
+    assert set(found) == set(_DEFERRED_MECHANISM_SITES), (
+        f"the `deferred` bucket's mechanism is described in "
+        f"{sorted(found)} and `_DEFERRED_MECHANISM_SITES` lists "
+        f"{sorted(_DEFERRED_MECHANISM_SITES)}. Describes it and is not "
+        f"listed: {sorted(set(found) - set(_DEFERRED_MECHANISM_SITES))}; "
+        f"listed and no longer describes it: "
+        f"{sorted(set(_DEFERRED_MECHANISM_SITES) - set(found))}."
+    )
+    partial = {
+        rel: sorted(set(_MECHANISM_TOKENS) - named)
+        for rel, named in sorted(found.items())
+        if set(named) != set(_MECHANISM_TOKENS)
+    }
+    assert not partial, (
+        f"`DEFERRED_CATCHER` declares {len(set(DEFERRED_CATCHER.values()))} "
+        f"distinct mechanisms, named by {list(_MECHANISM_TOKENS)}, and "
+        f"these files describe the bucket while naming only some of them: "
+        f"{partial}. A page that credits one mechanism with the whole "
+        f"bucket is the sentence this check exists to refuse — it was true "
+        f"of five of the six rows and printed as though it were true of "
+        f"all of them."
+    )
+
+
 def test_the_unwatched_routes_the_eager_detector_cannot_close_are_the_two_named_numpy_ones():
     """The residue is EXACTLY two routes, and both are disclosed.
 
     This is the assertion that keeps the ``unwatched`` bucket from quietly
-    growing a third member. Before the eager detector there were seven
-    unwatched routes and one disclosure covering all of them; six are now
-    closed by an opt-in flag and two remain, and the two that remain are the
-    ones numpy destroys before jax is reached. A route added to ``unwatched``
+    growing a third member. Seven of the nine ``unwatched`` routes are closed
+    by an opt-in flag and two remain, and the two that remain are the ones
+    numpy destroys before jax is reached. A route added to ``unwatched``
     that the detector does not close has to be argued into
     ``report.EAGER_UNCOVERED`` here, in the same commit.
+
+    THE FRACTION IN THE SENTENCE ABOVE IS READ, by
+    ``test_the_documented_fraction_is_the_measured_one``, in this file and
+    in the six shipped documents that state it. It is written in the same
+    form as theirs on purpose: the instruction *"move the bucket and move
+    all six"* used to stand in a message whose own file was the seventh
+    site and was not on its list.
+
+    **WHY THE FRACTION DRIFTED, STATED CORRECTLY THIS TIME.** The first
+    account of this said the sentence survived because the test *"asserted
+    the NUMERATOR alone"* and that *"the denominator is asserted now"*.
+    That is wrong about the mechanism, and the correction matters because
+    it points at the guard that was actually missing. ``residue`` is a
+    SUBSET of ``unwatched`` by construction, and the pre-existing
+    ``residue == {two named routes}`` already pinned ``|residue| = 2``; so
+    ``len(closed) == 6`` already entailed ``len(unwatched) == 8``, and
+    there is no state of ``GATE_COVERAGE`` in which the old assertions are
+    green and ``len(unwatched) == 8`` is red. Adding it detected nothing.
+
+    What was missing is a check that reads the PROSE. Driven at
+    ``de80ad8``: reverting the fraction to *"six of the seven"* in all six
+    prose sites gave **419 passed** over every suite that reads any of
+    those files. Nothing had ever read the sentence, and asserting the
+    denominator in Python did not change that.
+    ``test_the_documented_fraction_is_the_measured_one`` is the check that
+    reads it, and the numerals below are what it compares against.
 
     Reads the DECLARATIONS rather than re-measuring, on purpose: the
     measurement is the test above, and a second copy of it here would be a
@@ -690,9 +1314,15 @@ def test_the_unwatched_routes_the_eager_detector_cannot_close_are_the_two_named_
         "hole the reader is not told about."
     )
     closed = unwatched - residue
-    assert len(closed) == 6, (
-        f"six of the seven unwatched routes were closed by the eager "
-        f"detector and now {len(closed)} are: {sorted(closed)}"
+    assert (len(closed), len(unwatched)) == (_CLOSED, _UNWATCHED), (
+        f"the eager detector closes {len(closed)} of {len(unwatched)} "
+        f"`unwatched` route(s) and this file declares {_CLOSED} of "
+        f"{_UNWATCHED}: closed={sorted(closed)}, "
+        f"unwatched={sorted(unwatched)}. Those two numerals are the "
+        f"fraction stated in every file of `_FRACTION_SITES`, and "
+        f"`test_the_documented_fraction_is_the_measured_one` holds each of "
+        f"them to these. Move the bucket and move the prose in the same "
+        f"commit — the list is in this file and it includes this file."
     )
     text = " ".join(report.EAGER_UNCOVERED)
     for phrase in (

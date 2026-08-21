@@ -1244,11 +1244,25 @@ def test_the_record_does_not_pin_a_hash_LITERAL_in_prose():
     root = pathlib.Path(__file__).resolve().parent.parent
     tok = re.compile(r"`([0-9a-f]{16}|[0-9a-f]{64})[.…]*`")
     found = []
-    for name in ("CHANGELOG.md", "SOUNDNESS.md", "README.md",
-                 "ARCHITECTURE.md", "DOCUMENTATION_ARCHITECTURE.md"):
+    records = ("CHANGELOG.md", "SOUNDNESS.md", "README.md",
+               "ARCHITECTURE.md", "DOCUMENTATION_ARCHITECTURE.md")
+    # ABSENCE IS NOT COMPLIANCE, and this guard used to `continue` past a
+    # missing file. Driven: move `CHANGELOG.md`, `SOUNDNESS.md` and
+    # `README.md` out of the tree and it reported `1 passed` — a scan over
+    # nothing, reading as a clean record. It polices the very edit batch
+    # B8c declared (`SF-0.2.0-59`: an unreproducible hash literal removed
+    # from the record), so "the files are not here" has to be the loudest
+    # thing it can say and not the quietest.
+    missing = [name for name in records if not (root / name).is_file()]
+    assert not missing, (
+        f"the record files {missing} are not in this tree, so this scan "
+        f"read no prose at all. A hash-literal check that passes because "
+        f"there is nothing to check is the shape this campaign keeps "
+        f"closing: it would go green on a tree that had deleted the record "
+        f"the literal was removed from."
+    )
+    for name in records:
         path = root / name
-        if not path.exists():
-            continue
         for i, line in enumerate(path.read_text().splitlines(), 1):
             for m in tok.finditer(line):
                 if any(c in "abcdef" for c in m.group(1)):

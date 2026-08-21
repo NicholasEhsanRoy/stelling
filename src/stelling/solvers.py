@@ -961,12 +961,47 @@ def _run_z3(script_text: str, wall_s: float) -> _RawResult:
         return _RawResult(answer="not-run", detail=str(e))
     version = z3.get_version_string()
     ctx = z3.Context()  # fresh context: no symbol/option leakage across runs
-    # TACTIC WORKAROUND for degree-80 factoring pathology. When the script
-    # contains a rational-pow auxiliary variable (the `y^q = x^p` encoding),
-    # the default z3 Solver() times out on the high-degree polynomial that
-    # results (measured: d=80 from `x**(1/80)` on perfect-square bounds
-    # timed out every run at 10s). The tactic chain below restores the z3
-    # cross-check for these scripts (measured: 0.35-0.6s on d=80).
+    # TACTIC WORKAROUND for the high-numerator `q=128` rational-`pow`
+    # family. When the script contains a rational-pow auxiliary variable
+    # (the `y^q = x^p` encoding), the default z3 `Solver()` is run through
+    # the tactic chain below instead.
+    #
+    # THE REASON THIS COMMENT GAVE UNTIL 2026-08-20 NAMED A CASE THE
+    # EMISSION CANNOT PRODUCE. It read: *"for degree-80 factoring
+    # pathology … measured: d=80 from `x**(1/80)` on perfect-square bounds
+    # timed out every run at 10s … 0.35-0.6s on d=80"*. Degree 80 is
+    # UNREACHABLE. A binary64 exponent's exact value is dyadic, so
+    # `obligation.pow_exponent_rational` returns `p/q` in lowest terms with
+    # `q` a power of two and `p` odd; under
+    # `obligation.RATIONAL_POW_DEGREE_CAP = 128` the admitted degrees are
+    # the odd values below 128 together with 2, 4, 8, 16, 32, 64 and 128 —
+    # 448 positive-exponent pairs, and 80 is in none of them. The comment's
+    # own worked case, `x**(1/80)`, has exact denominator `2**58` and
+    # declines at the cap. The integer branch cannot reach it either: it
+    # expands inline, declares no `aux_`, so this branch never fires on it,
+    # and 80 is over `INTEGER_POW_EXPANSION_CAP = 64` regardless.
+    #
+    # WHAT IT ACTUALLY BUYS, and what it costs. Re-measured 2026-08-20 on
+    # z3 5.0.0 over this module's own emitted scripts for the five pairs
+    # `obligation.py`'s cost table names, all five `unsat` in both modes at
+    # a 120 s script timeout: `1/128` 0.31 -> 0.38 s, `127/2` 0.04 ->
+    # 0.04 s, `127/128` 50.03 -> 21.39 s, `113/128` 50.01 -> 18.23 s,
+    # `105/128` (the worst of the 448) 50.01 -> 69.80 s; total 150.39 ->
+    # 109.84 s. So it is kept for the NET, not for `d=80`: it roughly
+    # halves the two expensive `q=128` rows and LOSES about 20 s on
+    # `105/128`, and a string sniff on `aux_` cannot tell those rows apart.
+    # Racing the two strategies beats either fixed choice and is not a
+    # one-liner; it is not in this release. Seconds are machine-specific
+    # and were taken on a loaded box, so the ORDERING is the content.
+    #
+    # NOT GATED ON THE z3 VERSION, deliberately. z3 5.1 fixes the degree-80
+    # factoring pathology upstream — the case that cannot be reached — and
+    # does not touch the `q=128` family, so switching this off on 5.1 would
+    # be a regression (150.65 s default vs 133.70 s tactic on those same
+    # five, campaign measurement 2026-08-18 on isolated venvs; z3 5.1 is
+    # not installed here and that column is cited, not re-measured).
+    # Neither the version nor the mode has moved an ANSWER on this family
+    # in any measured cell — only a time.
     if "(declare-const aux_" in script_text:
         tactic = z3.Then(
             z3.Tactic("simplify", ctx=ctx),

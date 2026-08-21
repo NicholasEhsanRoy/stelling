@@ -105,9 +105,22 @@ certified `assume(x >= 0.9)`:
 
 Eight cells, all sound. The VERIFIED is the conditional claim and stamps
 itself as one (`constrained assume at ...: the verdict holds where the
-precondition holds — narrowed var 2 to [0.9, 1.0]`), so nothing here is
+precondition holds — narrowed x0 (IR var 0) to [0.9, 1.0]`), so nothing
+here is
 a wrong VERIFIED; what the position moves is only how much the checker
 could decide, and it moves it in both directions.
+
+That quotation read `narrowed var 2` until 2026-08-20 and `narrowed x0
+(IR var 1)` until 2026-08-21, and the harness above printed neither. The
+message names a declared input the way the witness does, so the SHAPE has
+been right since B8a; the INDEX was not. Driven on jax 0.11.0 with
+`JAX_ENABLE_X64=1` over exactly the one declaration above, `check()`
+prints `narrowed x0 (IR var 0)`; driven at `aabb58d`, the commit before
+that change, the same harness printed `narrowed var 0`. `IR var 1` and
+`var 1` are what a harness with a SECOND declaration prints when the
+assume is written on that second one — driven too. The digit was wrong
+when it was written and wrong again when it was corrected; see the
+2026-08-08 SOUNDNESS entry, corrected with it.
 
 ## The empty region — the empty-set bug, one level up
 

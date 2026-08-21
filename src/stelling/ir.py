@@ -3378,12 +3378,28 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
         # to ``"dtype" in params`` is therefore a BRANCH-SELECTION change
         # and not only a type check, and the enumeration in the paragraph
         # above — ``b'float64'``, ``0``, ``('float64',)`` — does not
-        # contain the document it moved. Measured, on a hand-built document whose
+        # contain the document it moved. Measured, on a document whose
         # declaration carries ``["dtype", null]`` under a ``float64``
-        # outvar aval:
+        # outvar aval — a traced ``any_array((2,), float64, (0.0, 1.0))``
+        # with ``assert_(x >= 0.0)``, round-tripped through ``to_dict()``
+        # with that one param set to ``null``:
         #
-        #     dff95fc, main (198a2b5)   ACCEPTED; content_hash 64a0ce8d…
+        #     dff95fc, main (198a2b5)   ACCEPTED, both to the SAME hash
         #     this commit               TranscriptionError
+        #
+        # THE PROPERTY IS THE MEASUREMENT AND THE LITERAL WAS NOT. This
+        # comment read ``content_hash 64a0ce8d…`` until 2026-08-21, and
+        # ``SOUNDNESS.md`` had already dropped that literal from its own
+        # copy of this entry on the ground that nobody can reproduce it —
+        # so the record and the code disagreed about a figure, in the
+        # direction where the code was the one still asserting it. Driven
+        # here at both commits, in this worktree, on the document
+        # described above: ``dff95fc`` and ``198a2b5`` accept it and
+        # return the identical hash, and it is not ``64a0ce8d…``. What a
+        # reader can re-derive is the PROPERTY — accepted on both, to one
+        # hash, refused here — and that is what this says now. A hash
+        # literal without the document that produced it is not a
+        # measurement; the document is above, so the hash is not needed.
         #
         # THE REFUSAL IS RIGHT: an absent `dtype` param is a declaration
         # that does not describe its dtype twice, which hand-built IR is

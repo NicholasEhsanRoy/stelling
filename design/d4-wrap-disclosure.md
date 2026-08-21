@@ -104,9 +104,16 @@ side:
 
 The rejection of PR #34797 is the key insight: a naive warning at
 `convert_element_type` is "fundamentally incorrect" because the operand may be a
-traced value. The detection has to happen at the **constant-folding rule**, which
-is the one site where the value is known to be concrete and is about to be
-narrowed. That is where the tripwire sits.
+traced value. For a constant that reaches the trace, the detection has to happen
+at the **constant-folding rule**, which is the one site where the value is known
+to be concrete and is about to be narrowed. That is where the tripwire sits.
+
+*"The detection has to happen at the constant-folding rule" stood unqualified
+until 2026-08-20 and was too wide by one door.* A constant that never reaches
+the trace has already died at ARRAY CONSTRUCTION, and there is a second
+concrete-by-construction site there —
+`design/eager-truncation-detector.md`'s, opt-in and off by default. The
+argument above is the argument for the INLINE door, and it is sound for it.
 
 ## What stelling ships (0.1.0)
 
@@ -150,10 +157,22 @@ route the tripwire watches. The two checks compose: detection gates proof.
 claim.** A whole bucket of construction routes is `unwatched` —
 `jnp.full(shape, N, dt)`, `jnp.full_like`, `lax.full`, `lax.full_like`,
 `lax.convert_element_type(N, dt)`, `np.asarray(N).astype(dt)`, and anything
-built on `full` such as `jnp.stack` or `lax.select` — because numpy narrows
-the value before any jax primitive runs, so the rule is handed something
-already in range. Those programs get a VERIFIED about a constant that no
-longer exists. The full inventory, one bucket per route and measured rather
+built on `full` such as `jnp.stack` or `lax.select` — because the value is
+narrowed at array CONSTRUCTION and the fold rule is handed something already
+in range. Those programs get a VERIFIED about a constant that no longer
+exists.
+
+*The mechanism in that sentence read "because numpy narrows the value before
+any jax primitive runs" until 2026-08-20, and it is measured wrong for all but
+two of the routes it names.* Six of them narrow INSIDE jax, at one line of
+`jax._src.lax.lax._convert_element_type` — numpy does the arithmetic, but
+inside a jax function, which is why a hook can sit there at all. Only
+`np.asarray(N).astype(dt)` and `jnp.asarray(np.array(N), dtype=dt)` finish
+before jax is reached, and those two are the permanent residue. The
+correction matters because the false mechanism was the reason this page gave
+for the door being unhookable: `design/eager-truncation-detector.md` hooks
+it, opt-in and off by default, and this paragraph's claim about the DEFAULT
+configuration is unchanged. The full inventory, one bucket per route and measured rather
 than typed, is `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE`; the
 user-facing version is `docs/overflow-tripwire.md`.
 
@@ -246,15 +265,42 @@ Printed on every run, findings or not. This is a floor, not a census.
 | `x + N`, `x * N`, `x >= N`, `x.at[i].set(N)`, `jnp.maximum`, `jnp.minimum` under a trace | **covered** | the fold rule is reached |
 | `jnp.where(pred, N, x)` | **UNCOVERED** | the literal sits at the enclosing call site; the fold operates on a variable inside the sub-jaxpr |
 | `jnp.clip(x, lo, N)` | **UNCOVERED** | same — nested sub-jaxpr |
-| `jnp.full(shape, N, dt)` / `jnp.full_like` | **UNCOVERED** | NumPy truncates before the fold site is reached |
-| eager execution (outside `jit`) | **UNCOVERED** | warm dispatch is 11 frames of C++ fast path; the fold is reached 0 times |
-| anything traced before the plugin armed | **UNCOVERED** | jit caches; it is never re-traced |
+| `jnp.full(shape, N, dt)` / `jnp.full_like` | **UNCOVERED by this hook** | the value is narrowed at array construction, inside jax, before the fold site is reached. Closed by the opt-in eager detector, which is off by default |
+| eager execution (outside `jit`) | **UNCOVERED with `jit` ON** | warm dispatch is 11 frames of C++ fast path; the fold is reached 0 times, and with `jit` on the eager detector sees 0 conversions *of the written constant* here too. **That is a `jit`-ON measurement and the qualifier is load-bearing** — with `jit` off the detector fires on every spelling tried. See the note below the table |
+| anything traced before the plugin armed | **UNCOVERED here, COVERED inside `check()`** | jit caches, so the body is never re-traced. `preconditions.check()` and `contracts.check_contract()` empty jax's trace caches before the trace they gate, so a *verdict*'s observation is complete with respect to jax's caches on one thread; this *session report* has no such moment. `docs/overflow-tripwire.md` carries the two rows past that qualifier |
+
+*The last two rows' "why" columns are dated 2026-08-20. The third row read a
+flat **UNCOVERED** — "jit caches; it is never re-traced" — after the cache
+eviction had already closed it for a verdict, so this page and
+`docs/overflow-tripwire.md` gave different answers to the same question.*
+
+**AND THE EAGER ROW WAS THE SAME DEFECT ONE ROW UP, corrected 2026-08-21.**
+It said the eager detector sees 0 conversions here, flat, and that is true of
+one configuration and false of the other. Measured on jax 0.11.0, warm
+dispatch, counters from `eager.snapshot()`, on an `int16` array: with `jit`
+**ON** — the default — `x + 40000` is conv=0, trunc=0 and returns `-25535` in
+silence, and `x * 40000`, `x >= 40000`, `jnp.maximum(x, 40000)`,
+`jnp.minimum(x, 40000)` and `jnp.clip(x, 0, 40000)` are conv=0 too. With
+`JAX_DISABLE_JIT=1` **every one of them RAISES** — conv=1 trunc=1 apiece,
+conv=2 for `clip`. `jnp.full((2,), 40000, int16)` fires in both.
+`src/stelling/_tripwire/eager.py` has said this in capitals since B16 —
+**"THAT FIGURE IS FOR `jit` ON AND THAT QUALIFIER IS LOAD-BEARING"** — and
+this page did not, which is the same "two pages, two answers" defect the
+paragraph above says it just fixed for the row before.
+
+**And "0 conversions" was off by one even with `jit` on**, for
+`x.at[i].set(N)` and `x.at[i].add(N)`: conv=**1**, trunc=0, identically with
+`jit` on and off. The one conversion is the INDEX — `0`, converted to
+`int32` — and not the written constant, which is why the row now says "0
+conversions of the written constant".
 
 The two causes are distinct:
 1. **The site is never reached** (`where`, `clip`, `pad`): the literal survives
    in the enclosing trace, so standard static analysis is NOT blind to these.
-2. **The value is already narrowed** (`full`, `full_like`, eager): NumPy
-   truncates first, so the rule sees an in-range value.
+2. **The value is already narrowed** (`full`, `full_like`, eager): the
+   narrowing happens at construction — inside jax for the `full` family, in
+   numpy before jax for the two `np.asarray` spellings — so the fold rule sees
+   an in-range value.
 
 ## The prior-art claim (what we are NOT saying)
 

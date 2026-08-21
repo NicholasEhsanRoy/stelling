@@ -117,7 +117,7 @@ its relatives **raise** at the line that wrote the constant instead of
 narrowing it silently, so a session either contains no undeclared truncation
 or does not finish. It is off by default, `-p stelling.overflow` does not turn
 it on, and `stelling.intentional_wrap(value, dtype)` is how you say a wrap is
-deliberate. It closes six of the seven unwatched routes; the two it cannot
+deliberate. It closes seven of the nine unwatched routes; the two it cannot
 close are numpy's and are named on that page.
 
 ## 2. The three judgments

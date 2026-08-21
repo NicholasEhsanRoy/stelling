@@ -37,6 +37,8 @@ import asyncio
 import contextlib
 import dataclasses
 import functools
+import pathlib
+import re
 import subprocess
 import sys
 import textwrap
@@ -55,6 +57,10 @@ from stelling import _tripwire  # noqa: E402
 from stelling._tripwire import _adapter_jax as adapter  # noqa: E402
 from stelling._tripwire import eager, record, report  # noqa: E402
 from stelling._tripwire.eager import expected_truncation  # noqa: E402
+
+from _repo_files import read_text_files  # noqa: E402
+
+_REPO = pathlib.Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
@@ -1717,6 +1723,144 @@ def test_the_user_s_own_constants_still_fire_with_jit_OFF(armed):
             fired["a + 200"] = (exc.written, exc.became)
     assert fired["a + 200"] == (200, -56)
     assert all(value != "SILENT" for value in fired.values()), fired
+
+
+#: The files that state what this detector does NOT reach. Each says it
+#: about ONE configuration and the two configurations disagree completely,
+#: so each has to say WHICH — and that is a thing a test can hold.
+#: `SOUNDNESS.md` carried both halves at once until 2026-08-21: a list
+#: naming the scoped `with jax.disable_jit():` door as CLOSED, and eleven
+#: lines below it, *"it does not reach eager execution"*.
+#:
+#: A PARTITION AND NOT A REMINDER LIST. The check below scans every text
+#: file in the checkout, so a claim written into a page nobody listed
+#: fails as loudly as a listed page that has stopped making the claim.
+#: Listing pages that carry no claim would be worse than useless: it would
+#: be two parametrised cases that pass over nothing.
+_JIT_QUALIFIED_PAGES = (
+    "SOUNDNESS.md",
+    "design/d4-wrap-disclosure.md",
+)
+
+#: The claims that are true of `jit` ON and false of `jit` off. Written as
+#: fragments because every page wraps them differently.
+_JIT_DEPENDENT_CLAIM = (
+    "does not reach eager execution",
+    "not touch the INLINE door",
+    "not reach the inline door",
+    "sees 0 conversions",
+)
+
+
+#: The qualifier, as a shape. Naming ``jit`` is not enough: the row that
+#: needed this most already read *"eager execution (outside `jit`)"*, which
+#: names it and still says nothing about which configuration the figure
+#: beside it was taken in.
+_JIT_CONFIG = re.compile(
+    r"`?jit`?\s+(?:is\s+)?(?:ON|OFF|on|off)\b|JAX_DISABLE_JIT|disable_jit",
+)
+
+
+def _claim_scope(text, index):
+    """The text a qualifier has to be in: the ROW for a table row, the
+    paragraph otherwise.
+
+    A markdown table is one paragraph, so a paragraph-scoped check lets any
+    other row's qualifier stand in for a missing one — driven: restoring the
+    flat eager row passed, because the row above it says ``jit``.
+    """
+    line_start = text.rfind("\n", 0, index) + 1
+    line_end = text.find("\n", index)
+    line = text[line_start:len(text) if line_end < 0 else line_end]
+    if line.lstrip().startswith("|"):
+        return line
+    start = text.rfind("\n\n", 0, index)
+    start = 0 if start < 0 else start + 2
+    end = text.find("\n\n", index)
+    return text[start:len(text) if end < 0 else end]
+
+
+def test_the_inline_door_is_open_with_jit_ON_and_closed_with_jit_OFF(armed):
+    """THE MEASUREMENT THE PROSE HAS TO CARRY A QUALIFIER FOR.
+
+    The same expression, the same process, the same armed detector: with
+    ``jit`` on it is silent and the value is destroyed; with ``jit`` off it
+    raises at the line that wrote it. Both directions are driven here so
+    that neither half of the sentence in the four pages below can be
+    written without the other having been measured.
+
+    ``x + 40000`` on ``int16`` is the INLINE door — the one the const-fold
+    rule is supposed to own and this detector is documented as not
+    touching. It does touch it, whenever jax is not tracing.
+    """
+    x = jnp.arange(2, dtype=jnp.int16)
+    with expected_truncation("driving the jit-ON silence this test is about"):
+        x + 1                      # warm the dispatch
+        warm = np.asarray(x + 40000).tolist()
+    assert warm == [-25536, -25535], (
+        f"with `jit` on, `x + 40000` on int16 gave {warm}; the row in "
+        f"`design/d4-wrap-disclosure.md` is about this silence"
+    )
+    eager.reset_counters()
+    with jax.disable_jit():
+        with pytest.raises(stelling.EagerTruncationError) as caught:
+            x + 40000
+    assert (caught.value.written, caught.value.became) == (40000, -25536)
+
+
+def test_every_claim_about_what_this_does_not_reach_names_its_jit_mode():
+    """The prose half, and it is a SHAPE check rather than a word ban.
+
+    A page is free to say this detector does not reach the inline door or
+    eager execution — it does not, with ``jit`` on, which is the default
+    and is what those sentences were measured in. What it may not do is say
+    it FLAT, because the sentence is false in the other configuration and
+    the scoped ``disable_jit`` door is on the same pages' CLOSED lists. So
+    the requirement is that the configuration is named in the same scope,
+    not that the claim is absent: absence would forbid saying a true thing.
+
+    BOTH DIRECTIONS, over the whole checkout. A file that makes the claim
+    and is not in :data:`_JIT_QUALIFIED_PAGES` fails, because a page list
+    is only as wide as its list; a listed file that has stopped making the
+    claim fails too, because that is how a disclosure goes quiet.
+    """
+    here = pathlib.Path(__file__).resolve().relative_to(_REPO).as_posix()
+    found: dict[str, list] = {}
+    for rel, text in read_text_files():
+        # This file DEFINES the claim fragments, so it matches by
+        # construction and says nothing about the project's prose.
+        if rel == here:
+            continue
+        for claim in _JIT_DEPENDENT_CLAIM:
+            start = 0
+            while (i := text.find(claim, start)) >= 0:
+                start = i + 1
+                scope = _claim_scope(text, i)
+                found.setdefault(rel, []).append(
+                    (claim, bool(_JIT_CONFIG.search(scope)), scope[:200])
+                )
+    assert set(found) == set(_JIT_QUALIFIED_PAGES), (
+        f"the claim that the eager detector does not reach the inline door "
+        f"or eager execution is made in {sorted(found)} and "
+        f"`_JIT_QUALIFIED_PAGES` lists {sorted(_JIT_QUALIFIED_PAGES)}. "
+        f"Makes it and is not listed: "
+        f"{sorted(set(found) - set(_JIT_QUALIFIED_PAGES))}; listed and no "
+        f"longer makes it: {sorted(set(_JIT_QUALIFIED_PAGES) - set(found))}."
+    )
+    unqualified = [
+        (rel, claim, scope)
+        for rel, hits in sorted(found.items())
+        for claim, ok, scope in hits
+        if not ok
+    ]
+    assert not unqualified, (
+        f"a claim about what the eager detector does not reach, without the "
+        f"`jit` configuration it holds in named in the same scope. Measured "
+        f"on jax 0.11.0: with `jit` ON, `x + 40000` on int16 is conv=0, "
+        f"trunc=0 and returns -25535; with `JAX_DISABLE_JIT=1` it RAISES, "
+        f"and so do `x * 40000`, `x >= 40000`, `jnp.maximum`, `jnp.minimum` "
+        f"and `jnp.clip`. Unqualified: {unqualified[:3]}"
+    )
 
 
 #: Four narrowings a user really can write, spelled the way they write them,

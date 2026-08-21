@@ -576,15 +576,75 @@ def test_the_one_forgery_CPython_permits_is_stored_as_the_int_it_carries():
 
 # the sentence audit 8 falsified. It must not come back in any shipped
 # page, in either of the two files that carried it.
+#: WHITESPACE-TOLERANT AT EVERY JOINT, because the pages wrap it and a
+#: pattern with literal spaces only ever saw the copies that happened to fit
+#: on one line. Driven at `de80ad8`: of the three occurrences in the three
+#: pages below, this found ONE. The other two -- `SOUNDNESS.md`'s B6-audit-8
+#: paragraph and `tests/test_aval_lie_both_faces.py`'s -- wrap between "the"
+#: and "frozen" and were never examined at all, so the shape check below was
+#: policing a third of what it named.
 _FALSE_SENTENCE = re.compile(
-    r"only an\s+`?object\.__setattr__`?\s+past the frozen dataclass\s+reaches it",
+    r"only\s+an\s+`?object\.__setattr__`?\s+past\s+the\s+frozen\s+"
+    r"dataclass\s+reaches\s+it",
     re.S,
 )
 
 _DISCLOSURE_PAGES = (
     "SOUNDNESS.md",
+    "CHANGELOG.md",
     "tests/test_aval_lie_both_faces.py",
 )
+
+# The sentence is allowed in ONE shape: quoted, inside `*"..."*`, in a
+# paragraph that also says how many routes there really are. That is how
+# this project records a claim it has retracted, and a check that forbade
+# the words outright would forbid saying that they were wrong.
+#
+# `CHANGELOG.md` JOINED THE LIST ABOVE FOR A REASON — batch B8c. The
+# falsified sentence was quoted in `CHANGELOG.md`, which this check did
+# not read, and the 0.2.0 documentation routing moved that quotation into
+# `SOUNDNESS.md`, which it did. The check went red at a sentence that had
+# been sitting unexamined in a shipped page all along: a page-list guard
+# is only as wide as its list. Both pages are read now, and the shape is
+# checked rather than the words banned.
+#: TWO CONDITIONS, CHECKED INDEPENDENTLY, because an alternation is not a
+#: shape. The old pattern offered two branches, and the second -- the bare
+#: phrase `named one route where there are three` -- required no quoting at
+#: all, so the message's promise that the sentence is permitted *"ONLY as a
+#: QUOTED RETRACTION -- inside `*"..."*`"* was not what was enforced. Driven
+#: at `de80ad8`: removing the retraction reddened this correctly; UN-QUOTING
+#: the sentence and leaving the rest of the paragraph intact ran `14 passed`.
+#: Branch 1 was dead on top of that: it wanted the literal `three routes`,
+#: and the one paragraph the pattern above could reach says `there are three
+#: --`, so nothing ever matched it.
+#:
+#: 1. the occurrence is inside `*"..."*`, and
+#: 2. the paragraph states how many routes there really are.
+_QUOTED_FALSE = re.compile(
+    r"\*\"[^\"]*only\s+an\s+`?object\.__setattr__`?[^\"]*\"\*", re.S
+)
+#: The count, DERIVED: `len(ROUTES)` as a word or a digit, with markdown
+#: emphasis allowed between it and the noun. A literal `three` here would be
+#: one more hand-maintained number beside the data it counts.
+_COUNT_WORD = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
+               6: "six", 7: "seven", 8: "eight", 9: "nine"}
+
+
+def _states_the_count(block: str) -> bool:
+    n = len(ROUTES)
+    word = _COUNT_WORD.get(n, str(n))
+    return bool(
+        re.search(rf"\b(?:{word}|{n})\b\s*\**\s*routes?", block, re.I)
+        or re.search(rf"there\s+are\s+\**\s*(?:{word}|{n})\b", block, re.I)
+    )
+
+
+def _enclosing_block(text: str, index: int) -> str:
+    """The blank-line-delimited paragraph containing `index`."""
+    start = text.rfind("\n\n", 0, index)
+    start = 0 if start < 0 else start + 2
+    end = text.find("\n\n", index)
+    return text[start:len(text) if end < 0 else end]
 
 
 def test_the_DISCLOSURES_name_exactly_these_routes():
@@ -604,11 +664,25 @@ def test_the_DISCLOSURES_name_exactly_these_routes():
         path = _REPO / rel
         assert path.is_file(), rel
         text = path.read_text(encoding="utf-8")
-        assert not _FALSE_SENTENCE.search(text), (
-            f"{rel} still claims that only an `object.__setattr__` reaches "
-            f"the residue; this file drives {len(ROUTES)} routes that do "
-            f"not"
-        )
+        for match in _FALSE_SENTENCE.finditer(text):
+            block = _enclosing_block(text, match.start())
+            quoted = any(
+                q.start() <= match.start() and match.end() <= q.end()
+                for q in _QUOTED_FALSE.finditer(text)
+            )
+            assert quoted, (
+                f"{rel} states that only an `object.__setattr__` reaches "
+                f"the residue, and this file drives {len(ROUTES)} routes "
+                f"that do not. The sentence is permitted ONLY as a QUOTED "
+                f"RETRACTION — inside `*\"...\"*` — and this occurrence is "
+                f"not inside one:\n{block[:400]}"
+            )
+            assert _states_the_count(block), (
+                f"{rel} quotes the retracted sentence and its paragraph does "
+                f"not say how many routes there really are ({len(ROUTES)}). "
+                f"A quotation without the correction is the claim with "
+                f"typography around it:\n{block[:400]}"
+            )
 
     soundness = (_REPO / "SOUNDNESS.md").read_text(encoding="utf-8")
     missing = [phrase for _key, phrase in ROUTES if phrase not in soundness]

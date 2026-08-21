@@ -678,10 +678,19 @@ EAGER_UNCOVERED = (
     "`.astype` is not reported here and is not claimed to be.",
     "VALUES THE PROGRAM COMPUTES. A `convert_element_type` over a jax "
     "`Array` or a tracer is a narrowing the program performs at RUN time on a "
-    "value that depends on its inputs -- the `deferred` bucket in "
-    "`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE`. It is not a "
-    "transcription loss and this instrument says nothing about it; "
-    "`stelling.preconditions.check` does, by declining the form.",
+    "value that depends on its inputs. It is not a transcription loss and "
+    "this instrument says nothing about it; `stelling.preconditions.check` "
+    "does, where the narrowing really is a conversion -- the propagation's "
+    "`convert_element_type` transfer declines the form. THE `deferred` "
+    "BUCKET IN `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` IS NOT "
+    "THAT ONE MECHANISM, and this bullet said it was until 2026-08-21: "
+    "`jnp.take(x, i, fill_value=N)` is a row of it whose jaxpr holds no "
+    "conversion at all, because the written constant arrives as `gather`'s "
+    "own `fill_value` parameter (measured), and what refuses that route is "
+    "the definite out-of-bounds index on the `gather`. Every row of the "
+    "bucket declares the mechanism that declines it in `DEFERRED_CATCHER` "
+    "beside the bucket, and the verdict's FIRST note is read against the "
+    "declaration.",
     "THE INLINE DOOR, `x + 256` on an `int8` array, which is the OTHER "
     "instrument's: the constant survives into the trace and dies in jax's "
     "const-fold rule for `convert_element_type`, which is where "

@@ -5133,10 +5133,8 @@ _BAR_DEPENDENT_TESTS = frozenset({
 _BAR_SAFE_STATUS_READERS = frozenset({"gate_non_dyadic_exponent_declines"})
 
 
-_CHANGELOG = pathlib.Path(__file__).resolve().parent.parent / "CHANGELOG.md"
-
 # "N mutations, 0 survivors either way" — the bar-independence sentence, in
-# this module's docstring and in the CHANGELOG's copy of it. Whitespace-
+# this module's docstring and in the release record's copy of it. Whitespace-
 # tolerant because both get re-wrapped, and both are matched by ONE pattern so
 # the two cannot drift apart from each other either.
 _BAR_BATTERY_SIZE_RE = re.compile(
@@ -5169,16 +5167,39 @@ def test_the_DOCSTRING_and_CHANGELOG_battery_SIZE_is_the_one_that_RAN():
     noticing; the sentence around it is what a later round has to re-measure
     deliberately, and the two need different mechanisms."""
     size = len(_mutations())
-    for where, text in (
-        ("this module's docstring", __doc__),
-        (f"{_CHANGELOG.name}", _CHANGELOG.read_text(encoding="utf-8")),
-    ):
-        match = _BAR_BATTERY_SIZE_RE.search(text)
-        assert match is not None, (
-            f"{where} no longer carries the bar-independence sentence in the "
-            f"form 'N mutations, 0 survivors either way' — the digit went back "
-            f"to being prose nothing recomputes"
-        )
+    from _release_record import release_records
+
+    # THE RELEASE RECORD, FILE BY FILE — batch B8c and its fixup. This
+    # sentence lived in `CHANGELOG.md` until the 0.2.0 routing moved the
+    # soundness detail into `SOUNDNESS.md`; the digit is still published
+    # and still has to match, and reading only the changelog would have
+    # made this a check on which file the paragraph is filed in.
+    #
+    # PER FILE AND NOT OVER THE CONCATENATION, because `re.search` returns
+    # the FIRST match and a concatenation therefore HIDES a stale copy
+    # behind a correct one. Driven: the sentence written correctly into
+    # `CHANGELOG.md` and as `999` into `SOUNDNESS.md` passed the
+    # concatenated form, with the wrong digit shipped in the ledger. The
+    # rule is that the figure has to be somewhere in the record and right
+    # everywhere in it, and both halves are checked below.
+    texts = [("this module's docstring", __doc__), *release_records()]
+    carriers = [
+        (where, m)
+        for where, text in texts
+        if (m := _BAR_BATTERY_SIZE_RE.search(text)) is not None
+    ]
+    assert {w for w, _ in carriers} >= {"this module's docstring"}, (
+        "this module's docstring no longer carries the bar-independence "
+        "sentence in the form 'N mutations, 0 survivors either way' — the "
+        "digit went back to being prose nothing recomputes"
+    )
+    assert len(carriers) > 1, (
+        "no file of the release record carries the bar-independence "
+        "sentence in the form 'N mutations, 0 survivors either way'; it is "
+        "published in this docstring alone, where no reader of the release "
+        "will meet it"
+    )
+    for where, match in carriers:
         assert int(match.group("muts")) == size, (
             f"{where} says the battery holds {match.group('muts')} mutations; "
             f"`_mutations()` holds {size}. Re-run the bar measurement and "

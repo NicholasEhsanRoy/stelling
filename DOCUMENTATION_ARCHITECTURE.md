@@ -840,10 +840,19 @@ better in retrospect** — §7.1.
 
 ### 3.2 The tree
 
+**THE ANNOTATIONS BELOW ARE `EXISTS`/`NEW` AGAINST THE DAY THIS SECTION
+WAS WRITTEN, AND TWO OF THEM DESCRIBE A MECHANISM THAT WAS NEVER BUILT.**
+`evidence/` does not exist in the repository and never has; the
+`SOUNDNESS.md` Log is written by hand. The `SOUNDNESS.md` line said *"Log
+rendered from evidence/soundness.yaml"* in the present tense, 570 lines
+above the §7 STATUS block that retracts it and 830 above §8.3's, until
+2026-08-21. Read §7 and §8.3 for what is in force; read this tree as the
+shape, not as an inventory of what shipped.
+
 ```
 stelling/
 ├── README.md                      # positioning + the §1.3 rule + one green proof, one red
-├── SOUNDNESS.md                   # EXISTS — verdict trust policy (normative); Log rendered from evidence/soundness.yaml
+├── SOUNDNESS.md                   # EXISTS — verdict trust policy (normative); the LEDGER (§8.3); Log HAND-AUTHORED (§7 STATUS)
 ├── SECURITY.md                    # EXISTS — supply chain, private reporting
 ├── CONTRIBUTING.md                # EXISTS — extend with §9 checklists
 ├── CHANGELOG.md                   # NEW — with Soundness / Verdicts / Coverage sections (§8.3)
@@ -1415,6 +1424,19 @@ What it does not provide, and cannot:
 
 ## 7. The soundness ledger
 
+**STATUS, because this section is written in the present tense and one of
+its clauses is not true yet.** `evidence/soundness.yaml`, its generated
+JSON face, and the CI job that renders the `SOUNDNESS.md` Log from them
+**do not exist** — there is no `evidence/` directory in the repository,
+and the Log is hand-authored. Everything below is the design for a
+machine-queryable face, kept because the argument for it is the reason
+`SOUNDNESS.md` is written the way it is; nothing below describes a
+shipped mechanism. **The ledger in force is `SOUNDNESS.md` itself**, and
+§8.3 is the clause that says so. The one sentence to read as a promise
+rather than a report is *"`SOUNDNESS.md`'s Log section is rendered from
+the ledger by CI"*: today it is written by hand, and the drift that
+guards against is guarded by review.
+
 ### 7.1 The ledger is the architecture, not a document
 
 `SOUNDNESS.md` is the strongest artifact in the repository, and the reason is one
@@ -1670,8 +1692,8 @@ Keep a Changelog, plus three sections that exist because this is a verifier:
 ### Security
 
 ### Soundness
-- [Every entry added to evidence/soundness.yaml this release, with its ID.
-  Links to the ledger; never restates the predicate — one source of truth.]
+- [Every entry added to SOUNDNESS.md this release, with its ID. Links to
+  the ledger; never restates the predicate — one source of truth.]
 
 ### Verdicts
 - [Every known verdict flip not already covered above: new transfers, tier
@@ -1683,6 +1705,47 @@ Keep a Changelog, plus three sections that exist because this is a verifier:
   This is the section users will actually read, because it answers "can I
   prove more than last month?"]
 ```
+
+**`SOUNDNESS.md` IS THE LEDGER, and the Soundness section links to it.**
+This clause named `evidence/soundness.yaml` until 0.2.0, and the rule
+above drifted for one reason: **that file was never built.** There is no
+`evidence/` directory in the repository, so §8.3 routed the detail to a
+file that does not exist and the detail landed in the two files that do —
+by 0.2.0 the changelog's Soundness section was **2990 of `CHANGELOG.md`'s
+3778 lines, 79.1% of it**, against a released 0.1.0 section of 60. The
+YAML ledger was a Day 1 artifact the project outgrew, and §7 is retained
+as the design it was rather than rewritten into a description of
+something shipped: read §7 as the plan for a machine-queryable face, and
+this clause as the rule in force.
+
+So, in force: `SOUNDNESS.md` is the official soundness ledger and the
+single source of truth for a soundness entry's predicate, measurement,
+scope and derivation. `CHANGELOG.md`'s Soundness section carries **strict
+one-liners** — ID, one-sentence statement, affected versions, and a link
+to that entry's section in `SOUNDNESS.md`. It never restates a predicate.
+
+The 0.2.0 detail was ROUTED there rather than summarised away, and the
+move is checked rather than asserted: `tests/test_soundness_routing.py`
+pins every block by hash and requires the two files to partition the same
+ID set in both directions, so an entry cannot be brought into compliance
+by deleting it. A future release adds entries to `SOUNDNESS.md` and a
+one-liner apiece to `CHANGELOG.md`; it does not need that manifest, which
+records the moves that were made.
+
+**THIS CLAUSE'S LETTER GOVERNS THE SOUNDNESS SECTION AND ITS RATIONALE IS
+WIDER, so a second section was routed under the same machinery.**
+`### The eager construction-site detector (Mode 2), DEFAULT-OFF` was 242 of
+`CHANGELOG.md`'s 1158 lines — 20.9%, the third-largest section — and it
+carried predicate, measurement and derivation exactly as the Soundness
+section had. It is routed into `SOUNDNESS.md` under
+**0.2.0 Mode 2 detail**, with its own manifest section, its own
+`source_commit`, a derived span and per-block hashes, and the SAME
+partition proof in both directions. The rule for a future section is the
+rule this one followed: route it if the changelog is carrying the
+predicate, and check the move rather than assert it. The rule is NOT that
+every section becomes one-liners — `### Known limitations (0.2.0)` and the
+release's `### Coverage` are what a reader opens the changelog for, and
+they state no predicate the ledger owns.
 
 ### 8.4 The pin is not the environment
 
