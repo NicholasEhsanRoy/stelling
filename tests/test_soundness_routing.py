@@ -140,23 +140,23 @@ quiet.
     checkout of this repository whose manifest simply names a commit that
     is not there — sending a maintainer to the CI job's fetch depth when
     the file to open is the manifest. `_why_the_history_is_out_of_reach`
-    names the environments that legitimately cannot answer — no git
-    here, someone else's git here, someone else's REPOSITORY ROOTED
-    here, a shallow history here — and `_source_changelog` FAILS rather
-    than skips when none of them holds. Driven all six ways: full
+    names the environments that legitimately cannot answer — no work
+    tree named here, someone else's git here, someone else's REPOSITORY
+    ROOTED here, a shallow history here — and `_source_changelog` FAILS
+    rather than skips when none of them holds. Driven all six ways: full
     checkout with a bad commit, `4 failed, 23 passed`; `--depth 1` clone
     that does not reach the commit, `19 passed, 8 skipped` reading *"a
     shallow clone, whose history does not reach that commit"*; `.git`
-    removed, `19 passed, 8 skipped` reading *"not a git checkout at
-    all"*; the tree unpacked inside an unrelated repository, which
-    `--git-dir` alone would have failed, `19 passed, 8 skipped` naming
-    the outer repository it merely sits inside; and the two the ROOT
-    COMMIT probe was added for, where two probes had been read as a
-    third proposition neither establishes — an sdist unpacked and
-    `git init`-ed, and `GIT_DIR` pointed at an unrelated repository from
-    inside a real checkout, where `--show-toplevel` answers with the cwd
-    so the identity test passed VACUOUSLY. Both are `8 failed,
-    19 passed` at `a7fe65f` and `19 passed, 8 skipped` here.
+    removed, `19 passed, 8 skipped` reading *"git refused to name a work
+    tree for this directory"*; the tree unpacked inside an unrelated
+    repository, which `--git-dir` alone would have failed, `19 passed,
+    8 skipped` naming the outer repository it merely sits inside; and
+    the two the ROOT COMMIT probe was added for, where two probes had
+    been read as a third proposition neither establishes — an sdist
+    unpacked and `git init`-ed, and `GIT_DIR` pointed at an unrelated
+    repository from inside a real checkout, where `--show-toplevel`
+    answers with the cwd so the identity test passed VACUOUSLY. Both are
+    `8 failed, 19 passed` at `a7fe65f` and `19 passed, 8 skipped` here.
 
   **So the earlier form of this bullet was wrong twice.** It said the
   destination checks *"catch any mutation that touches only one of the
@@ -560,17 +560,29 @@ def _why_the_history_is_out_of_reach() -> str | None:
     probes are what this runs — nothing else, so the message asserts only
     what was measured:
 
-        git rev-parse --show-toplevel          rc=128 where NO WORK TREE
-                                               governs this directory --
-                                               outside any repository and
-                                               inside a bare one alike,
-                                               measured both ways. Only
-                                               git's own stderr separates
-                                               those two, which is why
-                                               the message names both and
-                                               carries it. Otherwise, the
-                                               tree the git directory
-                                               actually governs
+        git rev-parse --show-toplevel          rc=128 where git will NOT
+                                               NAME a work tree for this
+                                               directory. Five driven
+                                               causes, as EXAMPLES and
+                                               not a list: outside any
+                                               repository; a bare one; an
+                                               unknown repository
+                                               extension; a refused
+                                               ownership check; and a
+                                               stale `gitdir:` pointer --
+                                               a linked worktree, THIS
+                                               PROJECT'S OWN IDIOM, whose
+                                               parent repository has
+                                               moved, where a work tree
+                                               DOES govern this directory
+                                               and none of the other four
+                                               holds. The return code
+                                               does not separate them, so
+                                               the message carries git's
+                                               stderr and lets it decide.
+                                               Otherwise, the tree the
+                                               git directory actually
+                                               governs
         git rev-parse --is-shallow-repository  `true` only in a shallow
                                                clone
         git cat-file -e _ANCHOR^{commit}       the repository rooted here
@@ -612,10 +624,15 @@ def _why_the_history_is_out_of_reach() -> str | None:
         return "git stopped answering between two calls"
     if r.returncode != 0:
         return (
-            f"this tree is not a git checkout at all -- an sdist, or an "
-            f"export -- or the git answering here is bare and has no work "
-            f"tree; rc=128 is both, and only git's own words separate "
-            f"them: {r.stderr.strip()[:120]}"
+            f"git refused to name a work tree for this directory. An "
+            f"sdist or an export, a bare repository, an unknown "
+            f"repository extension, a refused-ownership check, and a "
+            f"stale `gitdir:` pointer -- a linked worktree, this "
+            f"project's own idiom, whose parent repository has moved -- "
+            f"are five driven causes that all give rc=128: examples, "
+            f"not the whole list. The return code does not separate "
+            f"them; git's own words, carried here, do: "
+            f"{r.stderr.strip()[:120]}"
         )
     top = pathlib.Path(r.stdout.strip())
     if not top.is_dir() or top.resolve() != REPO:
