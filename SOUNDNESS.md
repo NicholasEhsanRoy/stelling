@@ -11576,13 +11576,27 @@ it** (`fix/B15-trace-gate-observation`). Branched from `a759809`.
   **Each `deferred` row names the mechanism that declines it**, in
   `DEFERRED_CATCHER` beside the bucket, and
   `test_every_deferred_route_is_declined_by_the_mechanism_it_declares`
-  requires that mechanism to appear in the verdict's own notes: five rows
-  are declined by the `convert_element_type` transfer, and `jnp.take`'s
+  requires that mechanism to be the verdict's FIRST note: five rows are
+  declined by the `convert_element_type` transfer, and `jnp.take`'s
   `fill_value` by the definite out-of-bounds index on its `gather`, whose
   jaxpr holds no `convert_element_type` for that transfer to decline. The
-  bucket asserted ONE catcher for all of it, in prose, in six places at
-  once — beside an assertion that required only SOME refusal — so the
+  bucket asserted ONE catcher for all of it, in prose, in **six FILES** —
+  the unit is FILES, measured at `68b219d` by the tree-wide sweep
+  `test_every_page_that_says_what_declines_the_deferred_bucket_names_them_all`
+  runs — beside an assertion that required only SOME refusal, so the
   sentence went false of a row of the bucket's own and nothing went red.
+
+  *This paragraph said "in six places" until 2026-08-21, meaning passages,
+  and six was an earlier enumeration of six mixed items restated after a
+  wider sweep had already overtaken it. The correction was a sweep and the
+  sweep stopped at the tree's prose: four of the six files were corrected
+  and the two in `src/` were not, one of them `report.EAGER_UNCOVERED`'s
+  fourth bullet, which prints to the user on every armed run. Both are
+  corrected now, and `_DEFERRED_MECHANISM_SITES` is a partition over the
+  whole tree — every file that says what declines a `deferred` route must
+  be listed, and every listed file must name every mechanism
+  `DEFERRED_CATCHER` declares — so the next such page is named rather than
+  hunted for.*
 
   The second call is a **regression detector for the eviction, not an
   independent control**: with the eviction in place both calls trace cold
@@ -14714,14 +14728,35 @@ rather than declared.
   that jaxpr holds no `convert_element_type` at all, and the note the verdict
   carries is the definite out-of-bounds index on the `gather` — the index
   that makes the fill reachable in the first place. Each `deferred` row
-  declares its catcher in `DEFERRED_CATCHER` and the verdict's notes are read
-  against the declaration; the prose that said "the transfer declines them"
-  of the whole bucket stood in six places, one of them the docstring of the
-  test policing the bucket, and was true of five of its rows. Run EAGERLY
-  there is no trace for the constant to reach, the fill array is built at
-  the construction site, and this detector does raise — so it is `deferred`
+  declares its catcher in `DEFERRED_CATCHER` and the verdict's FIRST note is
+  read against the declaration; the prose that said "the transfer declines
+  them" of the whole bucket stood in **six FILES** — one of them the docstring
+  of the test policing the bucket — and was true of five of its rows. Run
+  EAGERLY there is no trace for the constant to reach, the fill array is built
+  at the construction site, and this detector does raise — so it is `deferred`
   in `GATE_COVERAGE` and `raises` in `EAGER_COVERAGE`, the only row that is
   both.
+
+  *The unit above is FILES, measured at `68b219d` by the tree-wide sweep
+  `test_every_page_that_says_what_declines_the_deferred_bucket_names_them_all`
+  runs, and it is stated because this sentence read "in six places" —
+  passages — until 2026-08-21, restating an earlier enumeration of six mixed
+  items after a wider sweep had overtaken it. The sweep that produced the
+  correction stopped at the tree's prose: four of the six files were
+  corrected and the two in `src/` were not, one of them
+  `report.EAGER_UNCOVERED`'s fourth bullet, which prints to the user on every
+  armed run. Both are corrected now, and `_DEFERRED_MECHANISM_SITES` holds
+  every file in the tree that says what declines a `deferred` route to naming
+  every mechanism `DEFERRED_CATCHER` declares.*
+
+  *And the notes check was `any(catcher in note …)` until the same day,
+  which a note DOWNSTREAM of the decline satisfies. Driven as shipped, one
+  mutation at a time: `'div' declined this form` declared for `x // N`,
+  `'add' declined this form` for `x % N`, `pad ×1` — a fragment of the
+  SUMMARY note — for `jnp.pad`, and `⊤`, one character present in every
+  note of every row, for all six rows at once. Each of the four ran
+  `1 passed`. It is `notes[0].startswith(…)` now and each of the four is
+  `1 failed`.*
 
   *This entry said "six of the SEVEN" until 2026-08-20, as did five other
   places, while `GATE_COVERAGE` held eight `unwatched` rows — and had held

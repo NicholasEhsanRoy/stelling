@@ -1453,10 +1453,20 @@ def _eager_scalar_int(operand):
     ``.astype`` is a user converting DATA, not writing a constant, and firing
     on it would make the detector unusable on any real program. A jax
     ``Array`` or ``Tracer`` is a value the program computes; its conversion is
-    a ``convert_element_type`` the program performs at RUN time, which is the
-    ``deferred`` bucket in ``GATE_COVERAGE`` and is not a transcription loss at
-    all. The module test rather than an ``isinstance`` keeps this module free
-    of numpy and free of jax alike.
+    a ``convert_element_type`` the program performs at RUN time and is not a
+    transcription loss at all. The module test rather than an ``isinstance``
+    keeps this module free of numpy and free of jax alike.
+
+    THAT IS MOST OF ``GATE_COVERAGE``'S ``deferred`` BUCKET AND IT IS NOT THE
+    BUCKET, which is what this docstring said until 2026-08-21. The bucket's
+    rows are the ones whose written constant reaches the jaxpr intact, and
+    they do not all get there by a conversion: ``jnp.take(x, i,
+    fill_value=N)`` puts it there as ``gather``'s own ``fill_value``
+    parameter, so that jaxpr holds no ``convert_element_type`` for the
+    propagation's transfer to decline (measured), and what refuses that route
+    is the definite out-of-bounds index on the ``gather``.
+    ``DEFERRED_CATCHER``, beside the bucket, declares the mechanism per row
+    and the verdict's notes are read against the declaration.
     """
     if type(operand) is int:
         return operand, PYTHON_INT

@@ -625,10 +625,24 @@ and the note the verdict carries is the definite out-of-bounds index on that
 `deferred` row declares its own catcher in
 `tests/test_tripwire_gate_coverage.py::DEFERRED_CATCHER` and the verdict's
 notes are read against the declaration, because "the transfer declines them"
-had been written of the whole bucket in six places while being true of five of
-its rows. This is the one row that is `deferred` for the gate and `raises` for
-this detector, and reading it as a hole this instrument plugs credited the
-instrument with a hole that was not there.
+had been written of the whole bucket in **six FILES** — measured at `68b219d`
+by the sweep
+`test_every_page_that_says_what_declines_the_deferred_bucket_names_them_all`
+runs, and every one of the six named `convert_element_type` and nothing else
+while it was true of five of the bucket's six rows. This is the one row that is
+`deferred` for the gate and `raises` for this detector, and reading it as a
+hole this instrument plugs credited the instrument with a hole that was not
+there.
+
+*The unit above is FILES and it is stated because the correction miscounted
+itself: this sentence read "in six places", meaning passages, until
+2026-08-21. Six was an earlier enumeration of six mixed items restated after
+a wider sweep had overtaken it, and the sweep that produced it stopped at the
+tree's prose: `898158c` corrected the four files outside `src/` and left
+`src/stelling/_tripwire/report.py` — whose fourth `EAGER_UNCOVERED` bullet
+prints on every armed run — and `src/stelling/_tripwire/_adapter_jax.py`.
+Both are corrected now, and `_DEFERRED_MECHANISM_SITES` is a partition over
+the whole tree so that the next such page is named rather than hunted.*
 
 **Not closed, and named:** two numpy routes. `np.asarray(N).astype(dt)` is
 PERMANENTLY unhookable — `np.ndarray.astype` is an immutable type attribute, so

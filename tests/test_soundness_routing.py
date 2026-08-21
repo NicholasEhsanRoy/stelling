@@ -53,35 +53,78 @@ quiet.
   source; `test_the_splitter_partitions_the_source` shows every non-blank
   source line was in some block. Those three SKIP in an sdist.
 * **NOT checked outside git, and this is the sharpest limit here.** The
-  destination checks are a partition of the manifest against the two
-  shipped files, so they catch any mutation that touches only one of the
-  three. TWO classes survive them, and the git leg is the SOLE guard
-  against both — an sdist keeps every other check here and loses this one
-  entirely.
+  general statement, which is what a reader needs, is about COLUMNS and
+  not about a list of scenarios: **every SOURCE-SIDE column of the
+  manifest is unverified outside git** — `src_span`, `src_lines`,
+  `src_sha256`, `src_lines_not_carried`, `not_carried`, and each section's
+  `source_commit` and `source_span`. A mutation confined to those columns
+  survives an sdist **whether or not it also touches a shipped file**,
+  because nothing in the destination reads them. The git leg is the SOLE
+  guard over all of it.
 
-  The first is the COORDINATED DELETION: drop a block's row from this
-  manifest, its one-liner from `CHANGELOG.md` and its detail section from
-  `SOUNDNESS.md`, and every destination check still agrees, because the
-  three now describe the same smaller world. What refuses it is the
-  source: the section still splits into the old number of blocks at the
-  old spans.
+  **The one coupling, and it is why the sentence is about columns rather
+  than files.** `src_sha256 != dest_sha256` is the definition of "edited
+  in transit", and that partition IS read without git: an edited block
+  must carry an `edit_note` and a `not_carried` whose length equals
+  `src_lines_not_carried`, and the changelog section must state
+  `len(edited)` and name every one. So a mutation that changes WHICH
+  blocks are edited is caught git-less — driven, corrupting an *unedited*
+  block's `src_sha256`: **`2 failed, 15 passed, 8 skipped`**, in
+  `test_nothing_was_dropped_and_every_edit_is_declared` and
+  `test_the_record_says_how_many_blocks_were_edited_in_transit`. A
+  mutation that leaves that partition alone is not — the same corruption
+  applied to an *edited* block's `src_sha256` is `17 passed, 8 skipped`.
 
-  The second is the SUMMARISATION, and it is the class this whole file
-  exists to refuse: replace a routed block's detail section in
-  `SOUNDNESS.md` with a three-line summary of it, update the manifest's
-  `dest_sha256` to the summary and rewrite `not_carried` and
-  `src_lines_not_carried` to quote three fabricated lines. It needs only
-  TWO files, `CHANGELOG.md` is untouched, and the destination checks
-  agree because the hash is a hash of whatever is there. What refuses it
-  is `test_the_source_hashes_reproduce_from_git`, which counts the
-  dropped lines against the source and compares the quoted ones — and
-  that test is git-gated. Driven in a copy of this tree with `.git`
-  removed, `SF-0.2.0-59`'s 367-line body replaced by three lines and its
-  row rewritten to match: **`17 passed, 8 skipped`**. The same mutation
-  where git is present is red.
+  Four mutations of ONE file, `tests/_soundness_routing_manifest.py`, all
+  **`17 passed, 8 skipped`** git-less and driven:
 
-  The skip messages name both classes, so a reader who meets one there
-  learns what is gone and not merely that something is.
+  * `SF-0.2.0-51`'s three quoted `not_carried` lines replaced by three
+    inventions with the count preserved — **`1 failed, 24 passed`** with
+    git, in `test_the_source_hashes_reproduce_from_git[soundness]`. This
+    one matters most, because `not_carried` is the evidence the manifest
+    sells: *"Quoting the lines is what makes an edit reviewable … where a
+    reader will meet them."* In an sdist the reader meets three lines that
+    never stood in `CHANGELOG.md`, no material is missing from either
+    shipped file, and `CHANGELOG.md` is untouched.
+  * `src_span` shrunk by a line — **`1 failed, 24 passed`** with git.
+  * a section's `source_commit` zeroed — with git present this does not
+    even fail: it SKIPS the three git-gated tests, **`21 passed, 4
+    skipped`**, so the sole guard is switched off from inside the file it
+    guards.
+  * an *edited* block's `src_sha256` corrupted — `1 failed, 24 passed`
+    with git.
+
+  **So the earlier form of this bullet was wrong twice.** It said the
+  destination checks *"catch any mutation that touches only one of the
+  three"*, which the `not_carried` fabrication above falsifies: one file,
+  and it survives. And it named two SCENARIOS — a three-file coordinated
+  deletion and a two-file summarisation — where the class is every
+  source-side column. Both scenarios are still true and are still worth
+  naming as the sharpest shapes the class takes: the COORDINATED DELETION
+  (drop a block's row here, its one-liner from `CHANGELOG.md` and its
+  detail section from `SOUNDNESS.md`; the three then describe the same
+  smaller world and the source still splits into the old number of blocks
+  at the old spans), and the SUMMARISATION, the class this whole file
+  exists to refuse (replace a routed block's detail section with a
+  three-line summary, update `dest_sha256`, rewrite `not_carried` and
+  `src_lines_not_carried` to quote three fabricated lines; driven with
+  `.git` removed on `SF-0.2.0-59`'s 367-line body, **`17 passed, 8
+  skipped`**, and red where git is present).
+
+  `src_lines` is in that list and is a WORSE case than any of these, which
+  is why it is named rather than dropped from a list that claims to be the
+  general statement: it is declared 72 times and READ NOWHERE. Measured,
+  `grep -rEn 'src_lines([^_]|$)'` over the whole checkout, `*.py` and
+  `*.md`: 73 hits in `_soundness_routing_manifest.py` — the 72 values and
+  the field's own declaration on `Block` — 3 in this docstring, and no
+  reader anywhere. So it is unverified with git present as well as
+  without, and it is the one source-side column that COULD be checked
+  without git, against `src_span`. Recorded for the campaign's final sweep
+  and deliberately not fixed here.
+
+  The skip messages carry the general statement too, so a reader who
+  meets one there learns which columns are unverified and not merely that
+  something is.
 * NOT checked: whether a one-liner's sentence is a *good* summary of its
   detail. It is not a summary — it is the block's own headline, moved,
   or a sentence written to stand alone in its place — but nothing here
@@ -351,16 +394,35 @@ def files() -> tuple[str, str]:
 def _source_changelog(section: Section) -> str:
     """`section.source_commit:CHANGELOG.md`, or a skip that says what is lost.
 
-    The skip is not "this check is unavailable"; it is "the two mutation
-    classes described in this module's docstring have no guard left in this
-    tree", and the message says so where a reader will meet it. BOTH are
-    named: the coordinated deletion across three files, and the
-    SUMMARISATION of a routed block into a summary with `dest_sha256` and
-    `not_carried` rewritten to match — two files, and the one this manifest
-    exists to refuse. Naming only the first was measured to be a
-    disclosure of the narrower half: the summarisation runs `17 passed, 8
-    skipped` in a tree with no git.
+    The skip is not "this check is unavailable"; it is "every source-side
+    column of the manifest is unverified in this tree", and the message
+    says so where a reader will meet it — by COLUMN, because that is the
+    general statement and an enumeration of scenarios is not.
+
+    BOTH SKIP MESSAGES USED TO NAME TWO SCENARIOS, a three-file
+    coordinated deletion and a two-file summarisation, under a bullet
+    claiming the destination checks *"catch any mutation that touches only
+    one of the three"*. Driven, that claim is false and the scenario list
+    was not the class: `SF-0.2.0-51`'s three quoted `not_carried` lines
+    replaced by three inventions with the count preserved is ONE file, is
+    described by neither scenario, and runs `17 passed, 8 skipped` with
+    `.git` removed against `1 failed, 24 passed` with git.
     """
+    _LOST = (
+        "src_span, src_sha256, src_lines_not_carried, not_carried and the "
+        "section's source_commit/source_span are ALL unverified here, so "
+        "any mutation confined to those columns survives -- one file or "
+        "three, and whether or not a shipped file is touched. Measured, "
+        "one file and 17 passed, 8 skipped: fabricated `not_carried` "
+        "quotes with the count preserved; a shrunk `src_span`; a "
+        "corrupted `src_sha256` on a block already declared edited. The "
+        "sharpest shapes it takes are a COORDINATED deletion across the "
+        "manifest and both shipped files and a SUMMARISATION of a routed "
+        "block in SOUNDNESS.md with dest_sha256 and not_carried rewritten "
+        "to match. What is still checked without git: a mutation that "
+        "changes WHICH blocks count as edited, since src_sha256 != "
+        "dest_sha256 is that partition and the destination reads it"
+    )
     ref = f"{section.source_commit}:CHANGELOG.md"
     try:
         r = subprocess.run(
@@ -369,22 +431,13 @@ def _source_changelog(section: Section) -> str:
         )
     except (OSError, subprocess.SubprocessError) as e:  # pragma: no cover
         pytest.skip(
-            f"git unavailable, so `{section.key}`'s source is unverified "
-            f"here and TWO mutation classes have no remaining guard: a "
-            f"COORDINATED deletion across the manifest and both shipped "
-            f"files, and a SUMMARISATION of a routed block in "
-            f"SOUNDNESS.md with dest_sha256 and not_carried rewritten to "
-            f"match it: {e}"
+            f"git unavailable, so `{section.key}`'s source cannot be read: "
+            f"{_LOST}: {e}"
         )
     if r.returncode != 0:
         pytest.skip(
-            f"cannot read {ref} (shallow clone or sdist), so `{section.key}`'s "
-            f"source span, src_sha256, src_lines_not_carried and not_carried "
-            f"are unverified here and TWO mutation classes have no remaining "
-            f"guard: a COORDINATED deletion across the manifest and both "
-            f"shipped files, and a SUMMARISATION of a routed block in "
-            f"SOUNDNESS.md with dest_sha256 and not_carried rewritten to "
-            f"match it: {r.stderr[:200]}"
+            f"cannot read {ref} (shallow clone or sdist), so "
+            f"`{section.key}`'s {_LOST}: {r.stderr[:200]}"
         )
     return r.stdout
 

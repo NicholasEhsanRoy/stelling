@@ -210,7 +210,7 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(671, 691),
         src_lines=21,
         src_sha256="319d09cf527d0ae754196875b8d8dfca3923025a8608c1cafe026bde9242a455",
-        dest_sha256="3d81c7c7c2ce0736e47497fc5037e16591633849a60401a472d5500a7adac00b",
+        dest_sha256="99676e4f315d37d8619140db8c23b6adfc5a6a2c948353a7d05ca8893d8fb1a4",
         src_lines_not_carried=3,
         not_carried=(
             '  for each of 32 constant-construction routes — 17 `watched`, 7',
@@ -230,7 +230,14 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
             "the gloss now claims only that something downstream declines "
             "the row, and the block names the two mechanisms and the "
             "per-row declaration that holds them. All three corrections "
-            "stated in the block. No behaviour change."
+            "stated in the block. AND A FOURTH, one commit later: the "
+            "block's own account of how many places carried that gloss "
+            "read `in six places`, meaning passages, restating an earlier "
+            "enumeration of six mixed items -- the numeral is a FILE "
+            "count now, measured tree-wide at 68b219d by the sweep in "
+            "tests/test_tripwire_gate_coverage.py that "
+            "_DEFERRED_MECHANISM_SITES partitions, and the sentence says "
+            "which unit it counts. No behaviour change."
         ),
     ),
     Block(
@@ -901,7 +908,7 @@ _MODE_2: tuple[Block, ...] = (
         src_span=(134, 276),
         src_lines=143,
         src_sha256="b5f2a21a36aba075d22a2a8ee56fe2383d86fcf31bbc0ef9b8830025b4605287",
-        dest_sha256="10251ade6a40f0f5c52fe5d22058c2d2c007e8071d67a054d251ef1173a6aac5",
+        dest_sha256="c0aabd885723dbfbf6fcd73491987283486b0fcfbbd2eaf227ececc25c6f1ce5",
         src_lines_not_carried=11,
         not_carried=(
             '  Six of the **eight** `unwatched` routes in',
@@ -928,8 +935,14 @@ _MODE_2: tuple[Block, ...] = (
             'turn, one commit later: it named the transfer that declines '
             'the other five `deferred` rows, of a route whose jaxpr holds '
             'no `convert_element_type` at all, and the mechanism is the '
-            'definite out-of-bounds index on its `gather`. No behaviour '
-            'change.'
+            'definite out-of-bounds index on its `gather`. And the count '
+            'of places that carried the corrected sentence was itself '
+            'restated wrong one commit further on -- `in six places` '
+            'meaning passages, where six is the FILE count and the sweep '
+            'behind it had already overtaken the enumeration it came '
+            'from; the numeral names its unit now, and the two files the '
+            'correction never reached, both in `src/`, are corrected in '
+            'the same commit. No behaviour change.'
         ),
     ),
     Block(
