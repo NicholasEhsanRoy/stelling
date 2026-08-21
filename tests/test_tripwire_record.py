@@ -1035,17 +1035,37 @@ def _stub_jax(monkeypatch, probe):
     fake = types.ModuleType("stelling._jax_compat")
     fake.jax = types.SimpleNamespace(make_jaxpr=lambda fn: lambda *a, **k: fn(*a, **k))
     fake.jnp = types.SimpleNamespace(
-        zeros=lambda shape, dtype: _Array(), int8="int8", float32="float32",
-        full=lambda shape, value, dtype: _Array(),
+        zeros=lambda shape, dtype: _Array(), int8="int8", int16="int16",
+        float32="float32", full=lambda shape, value, dtype: _Array(),
     )
     monkeypatch.setitem(sys.modules, "stelling._jax_compat", fake)
     monkeypatch.setattr(stelling, "_jax_compat", fake, raising=False)
 
+    # AND THE PREDICATE'S OWN MEMOS, PUT BACK ON THE WAY OUT. `prop_guard`
+    # caches the modules it lazily imports and memoises promotion targets, and
+    # a lookup that happens inside this window caches THE FAKE -- permanently,
+    # because those are module globals and `monkeypatch` knows nothing about
+    # them. Measured: one `classify()` reaching `_x64()` here left
+    # `prop_guard._JAX` bound to a `SimpleNamespace` with no `.config`, so
+    # every later call in the process declined with an internal AttributeError
+    # and the perimeter was silently dead for the rest of the session. It did
+    # not show up in file order -- `test_narrowing_perimeter.py` sorts before
+    # this file -- which is exactly the shape a shuffled lane exists to catch.
+    # Re-setting each to its current value records it, and teardown restores
+    # it whatever this window did.
     if probe == "raises":
         def _boom(a):
             raise RuntimeError("FORCED: the probe could not execute")
 
         monkeypatch.setattr(_probe, "over", _boom)
+
+    try:
+        from stelling._tripwire import prop_guard
+    except Exception:  # noqa: BLE001 - the zero-dep lane has no numpy
+        return
+    for name in ("_JNP", "_ML", "_JAX"):
+        monkeypatch.setattr(prop_guard, name, getattr(prop_guard, name))
+    monkeypatch.setattr(prop_guard, "_TARGET_CACHE", dict(prop_guard._TARGET_CACHE))
 
 
 #: The eager detector's states this battery can put the canary in, and what
@@ -1171,9 +1191,14 @@ def _stub_perimeter(monkeypatch, canary, choice):
     monkeypatch.setattr(_tripwire, "disarm_perimeter", lambda owner=None: "restored")
     monkeypatch.setattr(_probe, "compare_over", _behave(over))
     monkeypatch.setattr(_probe, "compare_under", _behave(under))
+    # BOTH FACES' PROBES, because the canary drives both and a stub that
+    # patched only the traced pair would leave the eager one running against
+    # the stand-in tracer -- which is not a jax array and does not add.
+    monkeypatch.setattr(_probe, "arith_over", _behave(over))
+    monkeypatch.setattr(_probe, "arith_under", _behave(under))
     monkeypatch.setattr(
         canary, "_perimeter_facts",
-        lambda located: ([("perimeter type", "PASS stub")], list(moved)),
+        lambda face, located: ([(f"{face}: type", "PASS stub")], list(moved)),
     )
     monkeypatch.setattr(
         canary, "_perimeter_promotion",

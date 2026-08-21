@@ -888,6 +888,10 @@ PERIMETER_UNCOVERED = (
     "an operand that is neither an array nor a tracer -- a numpy array or a "
     "numpy scalar meets numpy's own rules, and numpy raises its own "
     "OverflowError for an out-of-range int rather than narrowing silently.",
+    "`x ** k`: jax lowers it to `integer_pow[y=k]` and keeps the exponent a "
+    "Python int in the program's own structure -- it is never converted and "
+    "never reaches StableHLO as a constant -- so the slot is deliberately not "
+    "installed. `k ** x` IS covered: that one does convert, and does narrow.",
     "a size-0 operand, which is exempt by measurement: 2,988 (literal, "
     "narrowed-image) outcome comparisons on empty arrays across all 34 slots, "
     "zero differences. An empty array narrows nothing observably.",

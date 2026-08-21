@@ -580,20 +580,61 @@ def h():
 
 The perimeter attaches to the Python operator slot the literal passes through
 on its way into jax and refuses it there, at the line that wrote it. It is
-**off by default** and neither of the other two dials switches it on.
+**off by default** and neither of the other two dials switches it on. Turning
+it on arms both faces below; nothing arms half a perimeter and reports
+`armed`.
 
 ### What it covers
 
-The **six comparison slots** on jax's tracer type — `<`, `<=`, `==`, `!=`,
-`>`, `>=` — which is the face verification runs through: inside a harness the
-operand is a tracer, not a concrete array. The armed slot list is printed in
-the report on every run, and it is the whole perimeter rather than a summary
-of one: an operator missing from it is unwatched.
+**Two faces, and they close different doors.**
+
+The **tracer face** is the six comparison slots on jax's tracer type — `<`,
+`<=`, `==`, `!=`, `>`, `>=`. That is the face verification runs through:
+inside a harness the operand is a tracer, not a concrete array, so an
+array-only perimeter never fires during `check()` at all.
 
 Six and not two, because a spelling and its reflection **share** a slot while
 a spelling and its opposite do not. Python maps `N >= x` onto `x.__le__(N)`
 and `N > x` onto `x.__lt__(N)`, so `x <= N` and `N >= x` land in the same
 place — and `x <= N` and `x >= N` do not. A user writes both.
+
+The **array face** is the arithmetic and comparison slots on the concrete
+array type: the EAGER spelling, typed at a REPL or in a test body before any
+trace exists. Measured on this repository's own tree with **everything it
+ships armed** and `jit` warm:
+
+| written | what runs | the tripwire | the eager detector | the perimeter |
+|---|---|---|---|---|
+| `jnp.full((3,), 40000, int16)` | `0`-filled | — | **refuses** | — |
+| `x_int16 + 40000` | `-25536` | no fire | no fire | **refuses** |
+| `40000 + x_int16` | `-25536` | no fire | no fire | **refuses** |
+| `x_f32 <= 2**31 - 1` | `<= 2147483648.0` | no fire | no fire | **refuses** |
+| `x_int16 + 3` | `3` | — | — | passes |
+
+The eager detector watches **construction**, and `x + 40000` constructs
+nothing — which is why the two instruments are not substitutes.
+
+**The array face's slot list is deliberately not uniform, and the hole in it
+is measured.** `__pow__` is **not** installed: jax lowers `x ** k` to
+`integer_pow[y=k]` and keeps `k` a Python `int` in the program's own
+structure, so it is never converted, never reaches StableHLO as a constant,
+and the written integer survives exactly. A guard there would be a pure
+false-positive generator — the corpus carried 4,647 `__pow__` checks and zero
+fires under two independently written guards. `__rpow__` **is** installed,
+because `k ** x` does convert `k` into the array's dtype and does narrow it:
+`40000 ** x_int16` runs as `(-25536) ** x`.
+
+`__matmul__` and `__rmatmul__` are installed although jax refuses a scalar
+matmul outright. Leaving a slot out because today's jax happens to reject it
+is how a perimeter grows a hole when tomorrow's does not.
+
+Neither face defines any of the 13 in-place slots, so `y += 40000` falls back
+to `__add__` and is covered by the forward wrapper. That is a fact about jax
+rather than about this tool, so the nightly canary holds it as a row.
+
+The armed slot list is printed in the report on every run, and it is the whole
+perimeter rather than a summary of one: an operator missing from it is
+unwatched.
 
 ### If the narrowing is what you meant
 

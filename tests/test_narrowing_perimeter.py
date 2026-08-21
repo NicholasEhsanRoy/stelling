@@ -925,7 +925,7 @@ def test_all_three_instruments_arm_together_in_either_order():
         try:
             for which in order:
                 if which == "perimeter":
-                    statuses["perimeter"] = perimeter.arm(("tracer",), owner="A")
+                    statuses["perimeter"] = perimeter.arm(perimeter.FACES, owner="A")
                 else:
                     status, _rec = _tripwire.arm()
                     statuses["tripwire"] = status
@@ -1092,31 +1092,35 @@ def test_the_canarys_fact_rows_are_all_green_on_this_jax():
     before tomorrow's users do.
     """
     canary = _canary()
-    rows, moved = canary._perimeter_facts(_tracer_type())
-    assert not moved, dict(rows)
-    names = {name for name, _value in rows}
-    assert names == {
-        "perimeter type",
-        "Py_TPFLAGS_HEAPTYPE",
-        "slots are own attributes",
-        "setattr rebinds and restores identity",
-        "a WARM traced op still enters Python",
-        "no in-place slots to bypass the forward ones",
-    }, names
-    assert all(value.startswith("PASS") for _name, value in rows), dict(rows)
+    for face in perimeter.FACES:
+        located = adapter.perimeter_locate(face)
+        assert not isinstance(located, str), (face, located)
+        rows, moved = canary._perimeter_facts(face, located)
+        assert not moved, (face, dict(rows))
+        names = {name for name, _value in rows}
+        probe_slot = "__le__" if face == "tracer" else "__add__"
+        assert names == {
+            f"{face}: type",
+            f"{face}: Py_TPFLAGS_HEAPTYPE",
+            f"{face}: slots are own attributes",
+            f"{face}: setattr rebinds and restores identity",
+            f"{face}: a WARM {probe_slot} still enters Python",
+            f"{face}: no in-place slots to bypass the forward ones",
+        }, names
+        assert all(value.startswith("PASS") for _name, value in rows), dict(rows)
 
 
 @pytest.mark.parametrize(
     ("fault", "reddens"),
     [
         # jax renames or restructures the type the perimeter attaches to
-        ("no-type", {"perimeter type"}),
+        ("no-type", {"tracer: type"}),
         # jax moves the slots off the type it used to own them on
-        ("no-slots", {"slots are own attributes",
-                      "setattr rebinds and restores identity",
-                      "a WARM traced op still enters Python"}),
+        ("no-slots", {"tracer: slots are own attributes",
+                      "tracer: setattr rebinds and restores identity",
+                      "tracer: a WARM __le__ still enters Python"}),
         # jax grows an in-place slot, so `x += N` stops falling back
-        ("inplace", {"no in-place slots to bypass the forward ones"}),
+        ("inplace", {"tracer: no in-place slots to bypass the forward ones"}),
     ],
 )
 def test_the_canarys_fact_rows_fail_CLOSED_under_injected_drift(
@@ -1134,20 +1138,20 @@ def test_the_canarys_fact_rows_fail_CLOSED_under_injected_drift(
     tracer = _tracer_type()
 
     if fault == "no-type":
-        rows, moved = canary._perimeter_facts("no-type")
+        rows, moved = canary._perimeter_facts("tracer", "no-type")
     elif fault == "no-slots":
         class _Stripped:
             """A type that answers to the name and owns none of the slots."""
 
             __mro__ = ()
 
-        rows, moved = canary._perimeter_facts(_Stripped)
+        rows, moved = canary._perimeter_facts("tracer", _Stripped)
     else:
         class _WithInplace(tracer):
             def __iadd__(self, other):  # pragma: no cover - never called
                 return self
 
-        rows, moved = canary._perimeter_facts(_WithInplace)
+        rows, moved = canary._perimeter_facts("tracer", _WithInplace)
 
     assert reddens <= set(moved), (rows, moved)
     reasons = dict(
@@ -1182,3 +1186,216 @@ def test_the_promotion_identity_holds_and_its_drift_check_can_fail(monkeypatch):
     note, drift = canary._perimeter_promotion(sample=("float32",))
     assert drift, note
     assert "says int8" in note
+
+
+# ---------------------------------------------------------------------------
+# The ARRAY face: the eager door, which the other two instruments miss
+# ---------------------------------------------------------------------------
+
+
+def _array_type():
+    located = adapter.perimeter_locate("array")
+    assert not isinstance(located, str), located
+    return located
+
+
+def test_the_eager_door_is_open_with_everything_else_armed_and_this_closes_it():
+    """The acceptance criterion for the array face, driven BOTH ways.
+
+    The disarmed half is measured with **everything this repository ships**
+    armed — the const-fold tripwire and the eager construction-site detector,
+    both reporting ``armed`` — so the zero it produces is not "nothing was
+    watching", it is "everything that watches was watching and saw nothing".
+    ``jnp.full((3,), 40000, int16)`` IS refused by the eager detector in the
+    same window, which is what makes the contrast a measurement rather than a
+    claim: that instrument watches CONSTRUCTION, and no array is being
+    constructed by ``x + 40000``.
+
+    Cold AND warm, because warm is the harder half: a jax that answered a warm
+    operation from C++ without entering Python would leave this face blind
+    while every arm-time check still passed.
+    """
+    tripwire_status, _rec = _tripwire.arm()
+    eager_status = _tripwire.arm_eager()
+    try:
+        assert tripwire_status.armed, tripwire_status.explanation
+        assert eager_status.armed, eager_status.explanation
+
+        x16 = jnp.zeros((3,), jnp.int16)
+        x32 = jnp.zeros((3,), jnp.float32)
+
+        def outcome(fn):
+            try:
+                return ("value", int(fn()))
+            except perimeter.NarrowingError as exc:
+                return ("refused", exc.finding.reason)
+
+        # the positive control for the OTHER instrument, in the same window
+        with pytest.raises(stelling.EagerTruncationError):
+            jnp.full((3,), 40000, jnp.int16)
+
+        # --- with only the tracer face armed: the door is OPEN
+        with perimeter.armed(("tracer",)) as status:
+            assert status.armed, status.explanation
+            for _run in ("cold", "warm"):
+                assert outcome(lambda: (x16 + 40000)[0]) == ("value", -25536)
+                assert outcome(lambda: (40000 + x16)[0]) == ("value", -25536)
+                assert outcome(lambda: int((x32 <= 2**31 - 1)[0])) == ("value", 1)
+
+        # --- with the array face armed: it is CLOSED, cold and warm
+        with perimeter.armed(perimeter.FACES) as status:
+            assert status.armed, status.explanation
+            for _run in ("cold", "warm"):
+                assert outcome(lambda: (x16 + 40000)[0]) == ("refused", "out-of-range")
+                assert outcome(lambda: (40000 + x16)[0]) == ("refused", "out-of-range")
+                assert outcome(lambda: int((x32 <= 2**31 - 1)[0])) == (
+                    "refused", "inexact",
+                )
+                # ...and a literal that survives is still not refused
+                assert outcome(lambda: (x16 + 3)[0]) == ("value", 3)
+    finally:
+        _tripwire.disarm_eager()
+        _tripwire.disarm()
+
+
+def test_pow_is_excluded_and_rpow_is_kept_through_the_REAL_slots():
+    """The measured asymmetry, driven end to end rather than at the predicate.
+
+    ``x ** k`` is lowered to ``integer_pow[y=k]`` and keeps ``k`` a Python int
+    in the program's own structure: the written integer survives exactly, so a
+    guard there is a pure false-positive generator and the slot is not
+    installed at all. ``k ** x`` converts and narrows, so it is.
+
+    Driven through the installed slots and not only through ``classify``,
+    because the exclusion is enforced in two independent places — the slot is
+    absent from the face's list, and the predicate declines the name — and a
+    test at the predicate alone would pass on a perimeter that installed the
+    slot anyway.
+    """
+    assert "__pow__" not in perimeter.FACE_SLOTS["array"]
+    assert "__rpow__" in perimeter.FACE_SLOTS["array"]
+    x16 = jnp.zeros((3,), jnp.int16)
+    with perimeter.armed(perimeter.FACES):
+        # the exponent is not converted, so nothing is refused...
+        assert int((x16 ** 40000)[0]) == 0
+        assert perimeter.FINDINGS == 0
+        # ...and the base is, so it is
+        with pytest.raises(perimeter.NarrowingError) as caught:
+            40000 ** x16
+    assert caught.value.finding.slot == "rpow"
+    assert caught.value.finding.narrowed_to == -25536
+
+
+def test_true_division_promotes_the_literal_into_a_float_so_it_survives():
+    """F6's redirect, driven through the real slot.
+
+    ``int16 / 40000`` converts the literal into ``float32`` — jax's own
+    promotion, asked of jax through the public ``(zeros((0,), dt) / 1).dtype``
+    rather than ``result_type(dt, 1.0)``, which is measurably wrong at x64 and
+    raises on the sub-byte dtypes. 40000 is exactly representable there, so
+    nothing is refused; the same literal in ``+`` is.
+    """
+    x16 = jnp.zeros((3,), jnp.int16)
+    with perimeter.armed(perimeter.FACES):
+        x16 / 40000
+        40000 / (x16 + 1)
+        assert perimeter.FINDINGS == 0
+        with pytest.raises(perimeter.NarrowingError):
+            x16 + 40000
+
+
+def test_an_in_place_spelling_falls_back_to_the_forward_slot():
+    """``y += 40000`` and ``y = y + 40000`` are the same program here.
+
+    Neither face defines any of the 13 ``__i*__`` slots, so the in-place
+    spelling falls back to the forward one and is covered by the same wrapper.
+    That is a fact about jax rather than about this module, which is why the
+    canary holds it as a row.
+    """
+    array_type = _array_type()
+    assert not [s for s in perimeter.INPLACE_SLOTS if s in array_type.__dict__]
+    y = jnp.zeros((3,), jnp.int16)
+    with perimeter.armed(perimeter.FACES):
+        with pytest.raises(perimeter.NarrowingError) as caught:
+            y += 40000
+    assert caught.value.finding.slot == "add"
+
+
+def test_a_size_zero_array_is_exempt_on_the_arithmetic_face_too():
+    """F11 reads ``.size``, so it applies wherever the array does."""
+    empty = jnp.zeros((0,), jnp.int16)
+    with perimeter.armed(perimeter.FACES):
+        empty + 40000
+        assert perimeter.FINDINGS == 0
+
+
+def test_a_numpy_operand_is_not_ours_and_numpy_says_so_itself():
+    """One of the report's ``does NOT see`` items, driven.
+
+    A numpy array is not a jax array and never enters these slots. It is not a
+    hole in the perimeter: numpy raises its own ``OverflowError`` rather than
+    narrowing in silence, which is the behaviour the perimeter is trying to
+    give jax.
+    """
+    with perimeter.armed(perimeter.FACES):
+        with pytest.raises(OverflowError):
+            np.zeros((3,), np.int16) + 40000
+        assert perimeter.FINDINGS == 0
+
+
+def test_the_array_face_arms_and_disarms_by_identity_too():
+    """The lifecycle claim is about the perimeter, not about one face of it."""
+    array_type = _array_type()
+    originals = {
+        slot: array_type.__dict__[slot] for slot in perimeter.FACE_SLOTS["array"]
+    }
+    assert perimeter.arm(("array",), owner="A").armed
+    assert all(
+        array_type.__dict__[slot] is not original
+        for slot, original in originals.items()
+    )
+    assert perimeter.disarm("A") == "restored"
+    assert all(
+        array_type.__dict__[slot] is original
+        for slot, original in originals.items()
+    ), "the array face did not come back to jax's own functions"
+
+
+def test_the_two_faces_are_independent_holds():
+    """Arming one face does not arm or disarm the other.
+
+    They close different doors and a user may want either without the other,
+    which is the same independence the three instruments have from each other.
+    """
+    array_type, tracer = _array_type(), _tracer_type()
+    array_original = array_type.__dict__["__add__"]
+    tracer_original = tracer.__dict__["__le__"]
+    assert perimeter.arm(("tracer",), owner="A").armed
+    assert array_type.__dict__["__add__"] is array_original
+    assert perimeter.arm(("array",), owner="B").armed
+    assert tracer.__dict__["__le__"] is not tracer_original
+    assert perimeter.disarm("A") == "still-armed"
+    assert perimeter.disarm("B") == "restored"
+    assert array_type.__dict__["__add__"] is array_original
+    assert tracer.__dict__["__le__"] is tracer_original
+
+
+def test_the_whole_perimeter_is_the_default_when_a_caller_asks_for_it():
+    """``arm_perimeter()`` with no faces means every face.
+
+    A default of one face would mean the pytest dial armed half the perimeter
+    and reported ``armed``, which is the shape of green this project keeps
+    having to withdraw.
+    """
+    status = _tripwire.arm_perimeter(owner="A")
+    try:
+        assert status.armed, status.explanation
+        assert set(perimeter.armed_faces()) == set(perimeter.FACES)
+        snapshot = perimeter.snapshot()
+        assert set(snapshot["faces"]) == set(perimeter.FACES)
+        assert len(snapshot["faces"]["array"]) == len(perimeter.FACE_SLOTS["array"])
+        lines = "\n".join(report.render_perimeter(status, snapshot))
+        assert "armed on the array face" in lines
+        assert "armed on the tracer face" in lines
+    finally:
+        assert _tripwire.disarm_perimeter("A") == "restored"

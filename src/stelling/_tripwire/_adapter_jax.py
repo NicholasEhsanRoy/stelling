@@ -2288,4 +2288,23 @@ def perimeter_probes(face: str) -> dict:
                 )
             ],
         }
+    if face == "array":
+        # EAGER, and warm: the probe runs the operation twice, because the
+        # door this face closes is specifically the WARM one. A cold-only
+        # control would pass on a jax that had started answering warm
+        # operations from C++ without entering Python at all.
+        def _bad():
+            arr = _jnp.zeros((3,), _jnp.int16)
+            _probe.arith_over(arr)
+            return _probe.arith_over(arr)
+
+        def _good():
+            arr = _jnp.zeros((3,), _jnp.int16)
+            _probe.arith_under(arr)
+            return _probe.arith_under(arr)
+
+        return {
+            "bad": [("eager int16 + 40000 (warm)", _bad, _probe.ARITH_OVER_LINE)],
+            "good": [("eager int16 + 3 (warm)", _good, _probe.ARITH_UNDER_LINE)],
+        }
     raise ValueError(f"no perimeter probes for face {face!r}")

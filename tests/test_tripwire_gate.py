@@ -767,7 +767,17 @@ def test_the_displacement_check_reports_only_the_hooks_this_process_armed():
         _tripwire.disarm_eager()
     try:
         assert _tripwire.displaced() == ()
-        assert dict(adapter.displacement_check()) == {"const-fold": "armed"}
+        # THE CLAIM IS ABOUT AN ENTRY'S PRESENCE, so it is read as one rather
+        # than as an exact dict. A session run with a THIRD instrument on --
+        # `--stelling-narrowing-perimeter=error` -- arms hooks this file
+        # neither armed nor disarmed, and they legitimately have entries; an
+        # equality here would have made this test a statement about which
+        # flags the session was run with. Both halves of the claim survive
+        # intact: the hook this file armed is live, and the hook it never
+        # armed has no entry.
+        states = dict(adapter.displacement_check())
+        assert states["const-fold"] == "armed"
+        assert "eager" not in states
     finally:
         if eager_was_armed:
             _tripwire.arm_eager()

@@ -561,8 +561,10 @@ def displaced() -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 
 
-def arm_perimeter(faces=("tracer",), owner=None):
-    """Arm the dunder perimeter. Returns a :class:`Status`; never raises.
+def arm_perimeter(faces=None, owner=None):
+    """Arm the dunder perimeter on every face. Returns a :class:`Status`.
+
+    Never raises.
 
     ``owner`` is the SESSION SCOPE: pass the object whose lifetime the arming
     belongs to (the pytest plugin passes the session's ``Config``), and pass
@@ -572,7 +574,11 @@ def arm_perimeter(faces=("tracer",), owner=None):
     """
     from stelling._tripwire import perimeter
 
-    return perimeter.arm(faces, owner=owner)
+    # BOTH FACES BY DEFAULT, and `None` rather than a literal tuple so that
+    # the default cannot drift out of step with `perimeter.FACES`: the two
+    # faces close different doors and a caller who asked for "the perimeter"
+    # asked for the perimeter.
+    return perimeter.arm(perimeter.FACES if faces is None else faces, owner=owner)
 
 
 def disarm_perimeter(owner=None) -> str:

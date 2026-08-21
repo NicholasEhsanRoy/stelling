@@ -202,6 +202,29 @@ is 0.2.0 development work throughout.
   the same process, for `2**31 - 1` and for `16777219`, with `1000`
   unaffected in both directions.
 
+- **The second face, and the door it closes.** The arithmetic and comparison
+  slots on the concrete array type — the EAGER spelling, before any trace
+  exists. Measured on this tree with **everything stelling ships armed** and
+  `jit` warm: `jnp.full((3,), 40000, int16)` is refused by the eager detector
+  in the same window, and `x_int16 + 40000` is `-25536` with no fire from any
+  instrument, cold or warm, as is `40000 + x_int16` and
+  `x_float32 <= 2**31 - 1`. The eager detector watches CONSTRUCTION and
+  nothing is being constructed here, so the two are not substitutes. Driven
+  both ways with all three instruments armed.
+
+- **The array face's slot list is NOT uniform, and the hole is measured.**
+  `__pow__` is not installed: jax lowers `x ** k` to `integer_pow[y=k]` and
+  keeps `k` a Python int in the program's own structure, so the written
+  integer survives exactly and a guard there is a pure false-positive
+  generator (4,647 corpus checks, zero fires under two independent guards).
+  `__rpow__` IS installed — `40000 ** x_int16` runs as `(-25536) ** x`. Both
+  halves are driven through the installed slots and not only at the
+  predicate, because the exclusion is enforced in two independent places.
+  `__matmul__`/`__rmatmul__` are installed although jax refuses a scalar
+  matmul today; "jax still refuses" is a canary row, not an assumption. No
+  in-place slot exists on either face, so `y += 40000` falls back to
+  `__add__` and is covered — also a canary row.
+
 - **What it attaches to.** The six comparison slots on jax's tracer type,
   which is the face verification runs through: inside a harness the operand
   is a `DynamicJaxprTracer` and **not** a concrete array, so an array-only

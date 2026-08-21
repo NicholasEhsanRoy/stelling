@@ -2449,9 +2449,14 @@ def test_the_displacement_check_covers_BOTH_hooks_in_one_instrument(unarmed):
         if not eager_status.armed:  # pragma: no cover - environment
             pytest.skip(eager_status.code)
         assert _tripwire.displaced() == ()
-        assert dict(adapter.displacement_check()) == {
-            "const-fold": "armed", "eager": "armed"
-        }
+        # READ AS ENTRIES, NOT AS AN EXACT DICT: a session run with the
+        # narrowing perimeter on arms a hook this test neither armed nor
+        # disarmed, and it legitimately has an entry of its own. The claim
+        # here is that ONE instrument answers for BOTH of these hooks, which
+        # is what these two assertions say.
+        states = dict(adapter.displacement_check())
+        assert states["const-fold"] == "armed"
+        assert states["eager"] == "armed"
         adapter.detach("bypass")
         try:
             assert _tripwire.displaced() == ("const-fold",)

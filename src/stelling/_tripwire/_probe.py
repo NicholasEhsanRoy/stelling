@@ -138,3 +138,31 @@ def _literal_line(fn) -> int:
 #: editing this file cannot silently make the attribution check vacuous.
 COMPARE_OVER_LINE = _literal_line(compare_over)
 COMPARE_UNDER_LINE = _literal_line(compare_under)
+
+
+#: The ARRAY face's control programs. ``40000`` into ``int16`` and not a float
+#: comparison, because the eager door's headline is the integer one: with jit
+#: warm and everything this repository ships armed, ``x_int16 + 40000`` is
+#: ``-25536`` and nothing fires. These take the array as an argument, like
+#: every probe above them, so this module still names no jax.
+ARITH_OVER = 40000
+ARITH_UNDER = 3
+ARITH_DTYPE = "int16"
+
+
+def arith_over(x):
+    """Out of range for int16: the perimeter MUST refuse this."""
+    return x + 40000
+
+
+def arith_under(x):
+    """In range for int16: it must NOT be refused.
+
+    The negative direction. A perimeter replaced by "refuse every int" passes
+    the positive control and fails this one.
+    """
+    return x + 3
+
+
+ARITH_OVER_LINE = _literal_line(arith_over)
+ARITH_UNDER_LINE = _literal_line(arith_under)

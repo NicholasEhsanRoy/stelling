@@ -26,13 +26,24 @@ THE THIRD INSTRUMENT, AND THE THREE DO NOT SUBSUME ONE ANOTHER:
   *representability*, and the value that reaches the jaxpr is a perfectly
   ordinary ``float32``.
 
-ONE FACE TODAY, AND IT IS THE ONE VERIFICATION RUNS THROUGH. ``"tracer"`` is
-the six comparison slots on jax's ``Tracer``. Inside a harness the operand is
-a ``DynamicJaxprTracer``, **not** an ``ArrayImpl`` — measured, and it is the
-correction that reshaped this rollout: an array-only perimeter never fires
-during ``check()`` at all, so it could not have closed the defect above. The
-eager array face is a second door, over the spelling a user types at a REPL,
-and it arms separately.
+TWO FACES, ARMED SEPARATELY, BECAUSE THEY CLOSE DIFFERENT DOORS.
+
+``"tracer"``
+    the six comparison slots on jax's ``Tracer``. This is the face
+    verification runs through: inside a harness the operand is a
+    ``DynamicJaxprTracer``, **not** a concrete array — measured, and it is the
+    correction that reshaped this rollout, because an array-only perimeter
+    never fires during ``check()`` at all.
+
+``"array"``
+    the arithmetic and comparison slots on the concrete array type. This is
+    the EAGER spelling — a threshold typed at a REPL or in a test body, before
+    any trace exists — and it is a door the other two instruments demonstrably
+    miss. Measured at this repository's own commit with everything it ships
+    armed, cold and warm, ``jit`` on: ``jnp.full((3,), 40000, int16)`` is
+    refused by the eager detector, and ``x_int16 + 40000`` is ``-25536`` with
+    no fire from any instrument, as is ``x_float32 <= 2**31 - 1``. The eager
+    detector watches CONSTRUCTION; nothing is being constructed here.
 
 THE PREDICATE IS NOT WRITTEN HERE. ``prop_guard.classify(a, b, slot)`` answers
 the one question — *does the integer the author wrote exist, exactly, in the
@@ -112,13 +123,57 @@ _GUARD = None
 #: the answer does not depend on which direction the resulting wrongness runs.
 _COMPARISONS = ("__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__")
 
+#: The array face's arithmetic slots, forward and reflected.
+#:
+#: **THIS LIST IS NOT UNIFORM, AND THE HOLE IN IT IS MEASURED RATHER THAN
+#: STYLISTIC.** ``__pow__`` is absent and ``__rpow__`` is present:
+#:
+#: * ``x ** k`` is lowered by jax to ``integer_pow[y=k]``, which keeps ``k`` a
+#:   Python ``int`` in the program's own structure. It is never converted into
+#:   the array's dtype and it never reaches StableHLO as a constant, so the
+#:   written integer survives exactly and a guard on that slot is a pure
+#:   false-positive generator. The corpus carried 4,647 ``__pow__`` checks and
+#:   zero fires under either of two independently written guards.
+#: * ``k ** x`` DOES convert ``k`` into the array's dtype and does narrow it:
+#:   ``40000 ** int16`` runs as ``(-25536) ** x``.
+#:
+#: ``prop_guard`` encodes the same asymmetry in its ``_NO_CONVERSION`` set
+#: (its finding F5), keyed on the slot name this module passes it. The two are
+#: belt and braces, and the slot is left UNINSTALLED here as well so that
+#: ``x ** 40000`` does not pay for a wrapper that can only ever answer "no".
+#:
+#: ``__matmul__`` / ``__rmatmul__`` ARE installed although jax refuses a scalar
+#: matmul outright with ``ValueError``. Installing them costs one type test on
+#: a program that already raises, and leaving a slot out because today's jax
+#: happens to reject it is how a perimeter grows a hole when tomorrow's does
+#: not. "jax still refuses" is a canary row rather than an assumption here.
+_ARRAY_ARITHMETIC = (
+    "__add__", "__sub__", "__mul__", "__truediv__", "__floordiv__",
+    "__mod__", "__divmod__", "__lshift__", "__rshift__", "__and__",
+    "__xor__", "__or__", "__matmul__",
+    "__radd__", "__rsub__", "__rmul__", "__rtruediv__", "__rfloordiv__",
+    "__rmod__", "__rdivmod__", "__rpow__", "__rlshift__", "__rrshift__",
+    "__rand__", "__rxor__", "__ror__", "__rmatmul__",
+)
+
+#: The 13 in-place slots, which neither face defines: ``y += 40000`` falls
+#: back to ``__add__`` and is covered by the forward wrapper. Enumerated here
+#: so the canary can hold "still none of these" as a row — a jax that grew
+#: ``__iadd__`` would put a hole in a spelling people write constantly.
+INPLACE_SLOTS = (
+    "__iadd__", "__isub__", "__imul__", "__itruediv__", "__ifloordiv__",
+    "__imod__", "__ipow__", "__ilshift__", "__irshift__", "__iand__",
+    "__ixor__", "__ior__", "__imatmul__",
+)
+
 #: face -> the slots armed on it. Ordered so a report reads the same twice.
 FACE_SLOTS: dict[str, tuple[str, ...]] = {
     "tracer": _COMPARISONS,
+    "array": _ARRAY_ARITHMETIC + _COMPARISONS,
 }
 
 #: Every face this module knows how to arm, in arming order.
-FACES = ("tracer",)
+FACES = ("tracer", "array")
 
 
 class NarrowingError(BaseException):
@@ -415,7 +470,7 @@ def _safe_version():
         return None
 
 
-def arm(faces=("tracer",), owner=None):
+def arm(faces=FACES, owner=None):
     """Install the perimeter on ``faces``. Returns a ``Status``; never raises.
 
     ``owner`` IS THE SESSION SCOPE AND IT IS NOT OPTIONAL IN PRACTICE. Every
@@ -693,7 +748,7 @@ def selfcheck(faces=()) -> str:
 
 
 @contextlib.contextmanager
-def armed(faces=("tracer",), owner=None):
+def armed(faces=FACES, owner=None):
     """Arm for the duration of a block, and restore on **every** way out.
 
     ::
