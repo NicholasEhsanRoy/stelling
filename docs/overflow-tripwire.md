@@ -207,7 +207,8 @@ than wrapping (`jnp.array(N, dtype=dt)`, `jnp.asarray(N, dtype=dt)`,
 wraps the same value), and **`deferred`**, where the written constant reaches
 the jaxpr intact, so the trace gate has nothing to see and something
 downstream is what refuses the route. Which something is declared per row and
-read out of the verdict's notes, because it is not the same one for all of
+held against the verdict's FIRST note -- the root decline, not merely some
+note in the run -- because it is not the same one for all of
 them: for `x // N`, `x % N`, `where`, `clip` and `pad` the narrowing is a
 run-time `convert_element_type` and the propagation's convert transfer
 declines the form; for `jnp.take`'s `fill_value` it is the out-of-bounds index

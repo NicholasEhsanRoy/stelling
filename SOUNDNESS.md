@@ -11586,6 +11586,25 @@ it** (`fix/B15-trace-gate-observation`). Branched from `a759809`.
   runs — beside an assertion that required only SOME refusal, so the
   sentence went false of a row of the bucket's own and nothing went red.
 
+  **And here is what the FIRST note does not prove, measured rather than
+  reasoned about, because the limit had been stated only in the test's own
+  docstring.** The first note is not always the note that makes the verdict
+  non-VERIFIED. `jnp.clip(x, 0, N)` declines TWICE — the conversion of the
+  literal `0` at `lax_numpy.py:3408` and of `N` at `:3410` — and `notes[0]`
+  is the first of the two. Driven on jax 0.11.0 with `JAX_ENABLE_X64=1`:
+  `jnp.clip(x, 0, 100)`, where nothing wraps at all, gives the same two
+  notes in the same order and the same UNKNOWN; and
+  `jnp.clip(x, jnp.int16(0), N)`, which removes only the `0`-conversion,
+  returns VERIFIED with the `N`-conversion note still attached.
+  `jnp.take(x, i, fill_value=100)` has the same shape: the same
+  out-of-bounds-`gather` `notes[0]` as `fill_value=N` and the same UNKNOWN.
+  So for those rows the declared catcher is evidence of a real decline of a
+  real conversion in the traced program, and it is NOT evidence about the
+  written constant — the bucket is decided by `GATE_COVERAGE`'s own jaxpr
+  measurement, not by this note. What would close it is a note naming the
+  VALUE, which is a change to the propagation's messages rather than to the
+  check, so it is recorded here and not forced.
+
   *This paragraph said "in six places" until 2026-08-21, meaning passages,
   and six was an earlier enumeration of six mixed items restated after a
   wider sweep had already overtaken it. The correction was a sweep and the
@@ -14730,8 +14749,9 @@ rather than declared.
   that makes the fill reachable in the first place. Each `deferred` row
   declares its catcher in `DEFERRED_CATCHER` and the verdict's FIRST note is
   read against the declaration; the prose that said "the transfer declines
-  them" of the whole bucket stood in **six FILES** — one of them the docstring
-  of the test policing the bucket — and was true of five of its rows. Run
+  them" of the whole bucket stood in **six FILES** — one of them
+  `tests/test_tripwire_gate_coverage.py`, the file holding the bucket, where
+  the sentence stood in a docstring — and was true of five of its rows. Run
   EAGERLY there is no trace for the constant to reach, the fill array is built
   at the construction site, and this detector does raise — so it is `deferred`
   in `GATE_COVERAGE` and `raises` in `EAGER_COVERAGE`, the only row that is

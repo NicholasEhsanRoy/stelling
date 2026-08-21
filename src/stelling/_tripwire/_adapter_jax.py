@@ -1466,7 +1466,7 @@ def _eager_scalar_int(operand):
     propagation's transfer to decline (measured), and what refuses that route
     is the definite out-of-bounds index on the ``gather``.
     ``DEFERRED_CATCHER``, beside the bucket, declares the mechanism per row
-    and the verdict's notes are read against the declaration.
+    and the verdict's FIRST note is read against the declaration.
     """
     if type(operand) is int:
         return operand, PYTHON_INT

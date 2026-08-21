@@ -689,7 +689,7 @@ EAGER_UNCOVERED = (
     "own `fill_value` parameter (measured), and what refuses that route is "
     "the definite out-of-bounds index on the `gather`. Every row of the "
     "bucket declares the mechanism that declines it in `DEFERRED_CATCHER` "
-    "beside the bucket, and the verdict's own notes are read against the "
+    "beside the bucket, and the verdict's FIRST note is read against the "
     "declaration.",
     "THE INLINE DOOR, `x + 256` on an `int8` array, which is the OTHER "
     "instrument's: the constant survives into the trace and dies in jax's "

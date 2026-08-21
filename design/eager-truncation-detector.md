@@ -624,7 +624,9 @@ and the note the verdict carries is the definite out-of-bounds index on that
 `gather` — the index that makes the fill reachable in the first place. Each
 `deferred` row declares its own catcher in
 `tests/test_tripwire_gate_coverage.py::DEFERRED_CATCHER` and the verdict's
-notes are read against the declaration, because "the transfer declines them"
+FIRST note is read against the declaration -- the root decline and not any
+note further down the run, which is the difference between a check and a
+formality -- because "the transfer declines them"
 had been written of the whole bucket in **six FILES** — measured at `68b219d`
 by the sweep
 `test_every_page_that_says_what_declines_the_deferred_bucket_names_them_all`

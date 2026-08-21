@@ -59,16 +59,27 @@ section's blocks to partition its span exactly, so a block that went
 missing could not be silently absent from this file either — it would have
 to be listed with a reason, and there is nothing to list.
 
-**The limit, stated because it is real.** `src_sha256`, `src_span` and
-`src_lines_not_carried` are all claims about a file this tree no longer
-contains. They are verifiable — each section is re-derivable from
+**The limit, stated because it is real.** `src_sha256`, `src_span`,
+`src_lines`, `src_lines_not_carried` and `not_carried` are all claims about
+a file this tree no longer contains, and so are each section's
+`source_commit` and `source_span` — SEVEN columns, which is the unit the
+statement has to be in, because a list of scenarios is not the class.
+They are verifiable — each section is re-derivable from
 `git show <source_commit>:CHANGELOG.md` with the same splitter the routing
 used — but only where git and that commit are present. In an sdist the
-three git-gated tests skip, and what remains checkable there is the
-destination: every hash, every anchor, and the two-way partition against
-`CHANGELOG.md`. `tests/test_soundness_routing.py`'s module docstring says
-which mutation class that leaves with NO guard at all, because it is not
-the empty set.
+FOUR git-gated tests skip, `8 skipped` over two sections, and what remains
+checkable there is the destination: every hash, every anchor, and the
+two-way partition against `CHANGELOG.md`.
+`tests/test_soundness_routing.py`'s module docstring says which mutation
+class that leaves with NO guard at all, because it is not the empty set.
+
+*This said "the three git-gated tests" and named three columns until
+2026-08-21, in a paragraph headed "stated because it is real". The fourth
+test is `test_the_declared_loss_check_bites`, split out of
+`test_these_checks_bite` in the same commit that corrected this — it had
+been the eighth leg of that test, taking seven git-less mutation controls
+into the skip with it. Driven git-less, the eight skips are those four
+tests over these two sections and nothing else.*
 
 The IDs are positional. They were minted once, at 0.2.0, in the order the
 blocks stood in `CHANGELOG.md` at their section's `source_commit`, and
@@ -210,7 +221,7 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(671, 691),
         src_lines=21,
         src_sha256="319d09cf527d0ae754196875b8d8dfca3923025a8608c1cafe026bde9242a455",
-        dest_sha256="99676e4f315d37d8619140db8c23b6adfc5a6a2c948353a7d05ca8893d8fb1a4",
+        dest_sha256="8d40a70f867f173922f917644a4e161416c1776f063f0881c1101347d9845399",
         src_lines_not_carried=3,
         not_carried=(
             '  for each of 32 constant-construction routes — 17 `watched`, 7',
@@ -237,7 +248,15 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
             "count now, measured tree-wide at 68b219d by the sweep in "
             "tests/test_tripwire_gate_coverage.py that "
             "_DEFERRED_MECHANISM_SITES partitions, and the sentence says "
-            "which unit it counts. No behaviour change."
+            "which unit it counts. AND A FIFTH, one commit later again: "
+            "the block said the declared catcher is held to the verdict's "
+            "FIRST note and did not say what that note does not prove. "
+            "The limit was measured and stood only in the test's own "
+            "docstring -- `jnp.clip` declines twice and `notes[0]` is the "
+            "first of the two, so for that row and for `jnp.take` the "
+            "note is evidence of a real decline in the traced program and "
+            "not evidence about the written constant. It is in the block "
+            "now, with the drive. No behaviour change."
         ),
     ),
     Block(
@@ -908,7 +927,7 @@ _MODE_2: tuple[Block, ...] = (
         src_span=(134, 276),
         src_lines=143,
         src_sha256="b5f2a21a36aba075d22a2a8ee56fe2383d86fcf31bbc0ef9b8830025b4605287",
-        dest_sha256="c0aabd885723dbfbf6fcd73491987283486b0fcfbbd2eaf227ececc25c6f1ce5",
+        dest_sha256="d592e51454c2c4a5c27ed2542cb8a9eed1f8560a21977518deefe897cf4c6486",
         src_lines_not_carried=11,
         not_carried=(
             '  Six of the **eight** `unwatched` routes in',
@@ -942,7 +961,12 @@ _MODE_2: tuple[Block, ...] = (
             'behind it had already overtaken the enumeration it came '
             'from; the numeral names its unit now, and the two files the '
             'correction never reached, both in `src/`, are corrected in '
-            'the same commit. No behaviour change.'
+            'the same commit. And the unit slipped once more inside the '
+            'sentence that declares the unit: the block glossed one of '
+            'the six FILES as `the docstring of the test policing the '
+            'bucket`, and a docstring is not a file -- it names the file '
+            'now, and says the sentence stood in a docstring within it. '
+            'No behaviour change.'
         ),
     ),
     Block(

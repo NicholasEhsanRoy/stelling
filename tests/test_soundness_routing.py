@@ -44,23 +44,51 @@ quiet.
   one-liner is a one-liner — short, and carrying a version field drawn
   from a closed set of phrases.
 * Checked only where git and the section's `source_commit` are present,
-  by the three git-gated tests:
+  by the FOUR git-gated tests:
   `test_the_source_span_is_derived_and_not_trusted` recomputes
   `Section.source_span` from the source file;
   `test_the_source_hashes_reproduce_from_git` re-splits the pre-routing
   `CHANGELOG.md` with the same splitter, compares every `src_sha256`,
   and MEASURES each edited block's `src_lines_not_carried` against the
   source; `test_the_splitter_partitions_the_source` shows every non-blank
-  source line was in some block. Those three SKIP in an sdist.
+  source line was in some block; and `test_the_declared_loss_check_bites`
+  drives the second of those against an edited block whose declaration of
+  what it dropped has been zeroed. Those four SKIP in an sdist —
+  `8 skipped`, four tests × two sections, and the ids are those four and
+  nothing else, driven with `.git` removed.
+
+  **THIS SAID THREE UNTIL 2026-08-21 AND THE FOURTH WAS COSTING SEVEN
+  OTHER CHECKS.** `test_the_declared_loss_check_bites` was the eighth leg
+  of `test_these_checks_bite`, and a `pytest.skip` raised inside one leg
+  skips the WHOLE test — so the seven mutation controls beside it (entry
+  deleted, section gutted, detail deleted, detail truncated, one-liner
+  re-grown indented, re-grown unindented, prose beside), none of which
+  touches git, skipped in an sdist as well, disclosed nowhere, while this
+  list — the general statement a reader is meant to be able to trust —
+  said three. Splitting the leg into its own test buys those seven back
+  and moves no skip: driven git-less, `test_these_checks_bite` is
+  `2 passed` where as shipped it was `2 skipped`, and the file reads
+  `19 passed, 8 skipped` against `17 passed, 8 skipped` before.
 * **NOT checked outside git, and this is the sharpest limit here.** The
   general statement, which is what a reader needs, is about COLUMNS and
   not about a list of scenarios: **every SOURCE-SIDE column of the
   manifest is unverified outside git** — `src_span`, `src_lines`,
   `src_sha256`, `src_lines_not_carried`, `not_carried`, and each section's
   `source_commit` and `source_span`. A mutation confined to those columns
-  survives an sdist **whether or not it also touches a shipped file**,
-  because nothing in the destination reads them. The git leg is the SOLE
-  guard over all of it.
+  survives an sdist **whether or not it also touches a shipped file**. The
+  git leg is the SOLE guard over all of it.
+
+  **NOT, HOWEVER, "BECAUSE NOTHING IN THE DESTINATION READS THEM", WHICH
+  IS WHAT THIS SAID AND IS REFUTED BY ITS OWN NEXT PARAGRAPH.** The
+  destination reads `src_sha256`: `src_sha256 != dest_sha256` is the
+  edited/unedited partition, and that partition is checked without git,
+  as the next paragraph drives. The true reason is narrower and is what
+  the drive below shows. What the destination reads is a PREDICATE over
+  two of the columns, not their values, so every assignment satisfying
+  that predicate the same way is interchangeable to it — which is exactly
+  why corrupting an UNEDITED block's `src_sha256` is caught git-less (it
+  flips the predicate) and corrupting an EDITED one's is not (it does
+  not). A column being read is not a column being verified.
 
   **The one coupling, and it is why the sentence is about columns rather
   than files.** `src_sha256 != dest_sha256` is the definition of "edited
@@ -69,30 +97,60 @@ quiet.
   `src_lines_not_carried`, and the changelog section must state
   `len(edited)` and name every one. So a mutation that changes WHICH
   blocks are edited is caught git-less — driven, corrupting an *unedited*
-  block's `src_sha256`: **`2 failed, 15 passed, 8 skipped`**, in
+  block's `src_sha256`: **`2 failed, 17 passed, 8 skipped`**, in
   `test_nothing_was_dropped_and_every_edit_is_declared` and
   `test_the_record_says_how_many_blocks_were_edited_in_transit`. A
   mutation that leaves that partition alone is not — the same corruption
-  applied to an *edited* block's `src_sha256` is `17 passed, 8 skipped`.
+  applied to an *edited* block's `src_sha256` is `19 passed, 8 skipped`,
+  the whole git-less tally.
 
   Four mutations of ONE file, `tests/_soundness_routing_manifest.py`, all
-  **`17 passed, 8 skipped`** git-less and driven:
+  **`19 passed, 8 skipped`** git-less — this file's entire git-less tally,
+  so nothing at all goes red — and driven:
 
   * `SF-0.2.0-51`'s three quoted `not_carried` lines replaced by three
-    inventions with the count preserved — **`1 failed, 24 passed`** with
+    inventions with the count preserved — **`1 failed, 26 passed`** with
     git, in `test_the_source_hashes_reproduce_from_git[soundness]`. This
     one matters most, because `not_carried` is the evidence the manifest
     sells: *"Quoting the lines is what makes an edit reviewable … where a
     reader will meet them."* In an sdist the reader meets three lines that
     never stood in `CHANGELOG.md`, no material is missing from either
     shipped file, and `CHANGELOG.md` is untouched.
-  * `src_span` shrunk by a line — **`1 failed, 24 passed`** with git.
-  * a section's `source_commit` zeroed — with git present this does not
-    even fail: it SKIPS the three git-gated tests, **`21 passed, 4
-    skipped`**, so the sole guard is switched off from inside the file it
-    guards.
-  * an *edited* block's `src_sha256` corrupted — `1 failed, 24 passed`
+  * `src_span` shrunk by a line — **`1 failed, 26 passed`** with git.
+  * an *edited* block's `src_sha256` corrupted — `1 failed, 26 passed`
     with git.
+  * a section's `source_commit` zeroed — **`4 failed, 23 passed`** with
+    git, naming `soundness` and `0000000` in all four.
+
+    **THAT LAST ONE READ DIFFERENTLY HERE UNTIL 2026-08-21 AND THE
+    DIFFERENCE WAS A DEFECT IN THIS FILE, NOT IN THE GUARD.** It said the
+    zeroed commit *"does not even fail: it SKIPS the git-gated tests,
+    `21 passed, 4 skipped`, so the sole guard is switched off from inside
+    the file it guards."* The tally is right and the conclusion was
+    wrong, because a file's own tally is not the session's:
+    `tests/test_skip_inventory.py::test_no_session_skip_is_undisclosed`
+    reds on exactly those four new skips and names every one of them with
+    its reason. Driven at `8e8a385` with the commit zeroed, whole suite:
+    **`1 failed, 4286 passed, 13 skipped`, exit 1**. The guard was never
+    silently disarmable.
+
+    What WAS defective is smaller and is fixed here: the skip asserted a
+    cause it had not checked. Any failure of `git show` produced
+    *"(shallow clone or sdist)"*, including in a full non-shallow
+    checkout of this repository whose manifest simply names a commit that
+    is not there — sending a maintainer to the CI job's fetch depth when
+    the file to open is the manifest. `_why_the_history_is_out_of_reach`
+    names the environments that legitimately cannot answer — no git here,
+    someone else's git here, a shallow history here — and
+    `_source_changelog` FAILS rather than skips when none of them holds.
+    Driven all four ways: full
+    checkout with a bad commit, `4 failed, 23 passed`; `--depth 1` clone
+    that does not reach the commit, `19 passed, 8 skipped` reading *"a
+    shallow clone, whose history does not reach that commit"*; `.git`
+    removed, `19 passed, 8 skipped` reading *"not a git checkout at
+    all"*; and the tree unpacked inside an unrelated repository, which
+    `--git-dir` alone would have failed, `19 passed, 8 skipped` naming
+    the outer repository it merely sits inside.
 
   **So the earlier form of this bullet was wrong twice.** It said the
   destination checks *"catch any mutation that touches only one of the
@@ -108,16 +166,18 @@ quiet.
   exists to refuse (replace a routed block's detail section with a
   three-line summary, update `dest_sha256`, rewrite `not_carried` and
   `src_lines_not_carried` to quote three fabricated lines; driven with
-  `.git` removed on `SF-0.2.0-59`'s 367-line body, **`17 passed, 8
-  skipped`**, and red where git is present).
+  `.git` removed on `SF-0.2.0-59`'s 367-line body, **`19 passed, 8
+  skipped`**, and **`1 failed, 26 passed`** where git is present).
 
   `src_lines` is in that list and is a WORSE case than any of these, which
   is why it is named rather than dropped from a list that claims to be the
   general statement: it is declared 72 times and READ NOWHERE. Measured,
   `grep -rEn 'src_lines([^_]|$)'` over the whole checkout, `*.py` and
-  `*.md`: 73 hits in `_soundness_routing_manifest.py` — the 72 values and
-  the field's own declaration on `Block` — 3 in this docstring, and no
-  reader anywhere. So it is unverified with git present as well as
+  `*.md`: 74 hits in `_soundness_routing_manifest.py` — the 72 values, the
+  field's own declaration on `Block`, and one mention in that file's
+  docstring — and 6 in this file, of which 4 are in this docstring and 2
+  in the skip message below. No reader anywhere, in either file. So it is
+  unverified with git present as well as
   without, and it is the one source-side column that COULD be checked
   without git, against `src_span`. Recorded for the campaign's final sweep
   and deliberately not fixed here.
@@ -125,6 +185,16 @@ quiet.
   The skip messages carry the general statement too, so a reader who
   meets one there learns which columns are unverified and not merely that
   something is.
+
+  **AND UNTIL 2026-08-21 THEY CARRIED A DIFFERENT ONE.** This list names
+  SEVEN columns. `_LOST`, the string both skip messages are built from,
+  named SIX — and the one it left out was `src_lines`, the column this
+  list singles out as *"a WORSE case than any of these"*, in the same
+  paragraph as the claim that the skip messages carry the general
+  statement. Two statements of one general statement that differ by a
+  member are not one statement in two places, and the sdist reader, who
+  is the only reader either was written for, met the shorter one. Seven
+  and seven now.
 * NOT checked: whether a one-liner's sentence is a *good* summary of its
   detail. It is not a summary — it is the block's own headline, moved,
   or a sentence written to stand alone in its place — but nothing here
@@ -391,6 +461,67 @@ def files() -> tuple[str, str]:
     )
 
 
+def _why_the_history_is_out_of_reach() -> str | None:
+    """Why `git show <commit>` could not reach the source, or `None`.
+
+    `None` means THIS TREE IS THE REPOSITORY, in full, and the commit is
+    simply not in it -- which is a defect in the manifest and not a
+    property of the checkout, so the caller fails instead of skipping.
+
+    **THIS EXISTS BECAUSE THE SKIP MESSAGE ASSERTED A CAUSE IT NEVER
+    CHECKED.** It read *"cannot read <ref> (shallow clone or sdist)"* on
+    every failure of `git show`, including in a full non-shallow checkout
+    of this repository with a bad commit in the manifest -- sending the
+    maintainer to the CI job's fetch depth when the file to open was
+    `tests/_soundness_routing_manifest.py`. The cases are trivially
+    distinguishable, and these two probes are what this runs — nothing
+    else, so the message asserts only what was measured:
+
+        git rev-parse --show-toplevel          rc=128 outside any repo;
+                                               otherwise the tree the git
+                                               directory actually governs
+        git rev-parse --is-shallow-repository  `true` only in a shallow
+                                               clone
+
+    That the commit itself is absent needs no probe: the caller's
+    `git show` has already said so, and its `stderr` goes into the
+    message.
+
+    `--show-toplevel` rather than `--git-dir`, because an sdist unpacked
+    INSIDE some other checkout answers `--git-dir` from that OUTER
+    repository and would be failed as though it were this one. Comparing
+    the toplevel with `REPO` catches that, and what is reported then is
+    the truth: git is here, but it is not this tree's git.
+    """
+    def git(*args: str) -> subprocess.CompletedProcess[str] | None:
+        try:
+            return subprocess.run(
+                ["git", *args],
+                cwd=REPO, capture_output=True, text=True, timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError):  # pragma: no cover
+            return None
+
+    r = git("rev-parse", "--show-toplevel")
+    if r is None:  # pragma: no cover - git vanished between two calls
+        return "git stopped answering between two calls"
+    if r.returncode != 0:
+        return "this tree is not a git checkout at all -- an sdist, or an "\
+               "export"
+    top = pathlib.Path(r.stdout.strip())
+    if not top.is_dir() or top.resolve() != REPO:
+        return (
+            f"this tree is not itself a git checkout; the git repository "
+            f"answering here is {top}, which this tree merely sits inside"
+        )
+    r = git("rev-parse", "--is-shallow-repository")
+    if r is None or r.returncode != 0:  # pragma: no cover
+        return "git cannot say whether this checkout is shallow"
+    if r.stdout.strip() == "true":
+        return "a shallow clone, whose history does not reach that commit"
+    return None
+
+
 def _source_changelog(section: Section) -> str:
     """`section.source_commit:CHANGELOG.md`, or a skip that says what is lost.
 
@@ -405,17 +536,25 @@ def _source_changelog(section: Section) -> str:
     one of the three"*. Driven, that claim is false and the scenario list
     was not the class: `SF-0.2.0-51`'s three quoted `not_carried` lines
     replaced by three inventions with the count preserved is ONE file, is
-    described by neither scenario, and runs `17 passed, 8 skipped` with
-    `.git` removed against `1 failed, 24 passed` with git.
+    described by neither scenario, and runs `19 passed, 8 skipped` with
+    `.git` removed against `1 failed, 26 passed` with git.
     """
     _LOST = (
-        "src_span, src_sha256, src_lines_not_carried, not_carried and the "
-        "section's source_commit/source_span are ALL unverified here, so "
+        "src_span, src_lines, src_sha256, src_lines_not_carried, "
+        "not_carried and the section's source_commit/source_span -- SEVEN "
+        "columns, the same seven this file's docstring lists, and "
+        "src_lines is one of them because a list that claims to be the "
+        "general statement may not omit a member of itself -- are ALL "
+        "unverified here, so "
         "any mutation confined to those columns survives -- one file or "
         "three, and whether or not a shipped file is touched. Measured, "
-        "one file and 17 passed, 8 skipped: fabricated `not_carried` "
-        "quotes with the count preserved; a shrunk `src_span`; a "
-        "corrupted `src_sha256` on a block already declared edited. The "
+        "one file and 19 passed, 8 skipped -- the whole of this file's "
+        "git-less tally, so nothing at all went red: fabricated "
+        "`not_carried` quotes with the count preserved; a shrunk "
+        "`src_span`; a corrupted `src_sha256` on a block already declared "
+        "edited; and this section's own source_commit zeroed. Each of the "
+        "four is 1 failed, 26 passed with git present, except the zeroed "
+        "commit, which is 4 failed, 23 passed. The "
         "sharpest shapes it takes are a COORDINATED deletion across the "
         "manifest and both shipped files and a SUMMARISATION of a routed "
         "block in SOUNDNESS.md with dest_sha256 and not_carried rewritten "
@@ -435,9 +574,23 @@ def _source_changelog(section: Section) -> str:
             f"{_LOST}: {e}"
         )
     if r.returncode != 0:
+        why = _why_the_history_is_out_of_reach()
+        if why is None:
+            pytest.fail(
+                f"`{section.key}` names {section.source_commit} as the "
+                f"commit its source-side columns were measured from, and "
+                f"`git show {ref}` fails in a tree that IS this repository's "
+                f"own full, non-shallow checkout -- both conditions tested "
+                f"here, just now, rather than assumed. So this is neither "
+                f"the sdist nor the shallow clone this check skips for: the "
+                f"commit is unresolvable in a tree that can resolve "
+                f"commits, and what is wrong is the MANIFEST naming a "
+                f"commit that is not there, not the CI configuration's "
+                f"fetch depth. git said: {r.stderr[:200]}"
+            )
         pytest.skip(
-            f"cannot read {ref} (shallow clone or sdist), so "
-            f"`{section.key}`'s {_LOST}: {r.stderr[:200]}"
+            f"cannot read {ref} ({why}), so `{section.key}`'s {_LOST}: "
+            f"{r.stderr[:200]}"
         )
     return r.stdout
 
@@ -889,6 +1042,18 @@ def test_these_checks_bite(files, section):
     A partition check is only worth its docstring if the ways a routing
     can go wrong actually turn it red, and most of them are DELETIONS —
     the shape that a "must not contain claim X" check would wave through.
+
+    **NONE OF THESE SEVEN NEEDS GIT, AND FOR ONE COMMIT ALL SEVEN WERE
+    GATED ON IT ANYWAY.** An eighth control lived here — an edited block
+    declaring fewer lines not carried than it dropped — and it drives
+    `test_the_source_hashes_reproduce_from_git`, which skips without git.
+    A `pytest.skip` from inside a leg skips the WHOLE test, so in an sdist
+    these seven ran nowhere, disclosed nowhere, and the file reported
+    `8 skipped` while a reader counting the git-gated checks in the
+    docstring above would count three. The eighth is now
+    `test_the_declared_loss_check_bites`, gated where it belongs and named
+    in that list; these seven are not gated at all. Driven, git-less:
+    `2 passed` here where the file as shipped gave `2 skipped`.
     """
     changelog, soundness = files
     victim = next(b for b in section.blocks if b.kind == "entry")
@@ -961,14 +1126,46 @@ def test_these_checks_bite(files, section):
         test_the_section_holds_only_one_liners_and_context_blocks(
             (beside, soundness), section)
 
-    # 8. an edited block declares fewer lines not carried than it dropped
+
+@_SECTION
+def test_the_declared_loss_check_bites(files, section):
+    """An edited block declaring fewer lines not carried than it dropped.
+
+    THE EIGHTH CONTROL, IN ITS OWN TEST BECAUSE IT IS THE ONLY ONE THAT
+    NEEDS GIT. It drives `test_the_source_hashes_reproduce_from_git`,
+    which reads the pre-routing `CHANGELOG.md` and therefore skips in an
+    sdist; while it sat as the last leg of `test_these_checks_bite` its
+    skip took the seven git-less controls above down with it, since a
+    `pytest.skip` raised inside a leg skips the whole test. Splitting it
+    out costs nothing and buys those seven back outside git.
+
+    What it holds is the half of the git leg that is new in this batch:
+    `src_lines_not_carried` was declared per edited block and never
+    measured, so a 367-line block could be replaced by a three-line
+    summary with `3` declared and a reason written. Zeroing an edited
+    block's declaration must be caught, or the measurement is decorative.
+
+    The skip below is for a section with NOTHING edited in transit, where
+    there is no declaration to under-state and this control has no
+    subject. It cannot fire today — `soundness` edits 3 of its 66 blocks
+    and `mode2` 1 of its 6 — and it is a skip rather than the silent
+    `if … is not None` this leg used to carry, because a control that
+    quietly has no subject is the vacuity this whole file is written
+    against.
+    """
     victim_edit = next(
         (b for b in section.blocks if b.src_sha256 != b.dest_sha256), None)
-    if victim_edit is not None:
-        under = section._replace(blocks=tuple(
-            b._replace(src_lines_not_carried=0, not_carried=())
-            if b.id == victim_edit.id else b
-            for b in section.blocks
-        ))
-        with pytest.raises(AssertionError, match="not carried|does not carry"):
-            test_the_source_hashes_reproduce_from_git(files, under)
+    if victim_edit is None:
+        pytest.skip(
+            f"`{section.key}` has no block edited in transit, so there is "
+            f"no declaration of lost lines to under-state. This is a "
+            f"property of the section and not of the environment: it means "
+            f"every block of it arrived verbatim."
+        )
+    under = section._replace(blocks=tuple(
+        b._replace(src_lines_not_carried=0, not_carried=())
+        if b.id == victim_edit.id else b
+        for b in section.blocks
+    ))
+    with pytest.raises(AssertionError, match="not carried|does not carry"):
+        test_the_source_hashes_reproduce_from_git(files, under)

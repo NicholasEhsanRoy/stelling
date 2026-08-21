@@ -42,7 +42,9 @@ THE FOUR BUCKETS, which are four different facts and not four shades of one:
     sees nothing. These are not holes, and *"the gate ignores it"* is only
     acceptable while something else does not, so every row DECLARES the
     mechanism that declines it in :data:`DEFERRED_CATCHER` and the test
-    below requires that mechanism to appear in the verdict's own notes.
+    below requires that mechanism to be the verdict's FIRST note -- the ROOT
+    decline, not any note the run mentions later, which ``any(catcher in
+    note)`` was satisfied by and ``⊤`` alone would have passed.
     TWO mechanisms, not one, and saying "the transfer declines them" of the
     bucket was true of five of its six rows.
 
@@ -920,10 +922,74 @@ _MECHANISM_TOKENS = tuple(sorted({
 
 #: How far from the word `deferred` a mechanism may stand and still be part
 #: of the same passage. A paragraph in this repository is 300-500
-#: characters, and the FILE SET this window selects is identical at 320,
-#: 400, 500 and 600 measured over the whole tree — so the number is a
-#: paragraph rather than a threshold tuned until the answer came out right.
+#: characters, and the whole ANSWER — the file set and each file's token set
+#: — is identical at 320, 400, 500, 600, 800, 1200 and 2000 measured over
+#: the whole tree, so the number is a paragraph rather than a threshold
+#: tuned until the answer came out right. Bisected one character at a time,
+#: the answer is CONSTANT from 301 to 2000, and below 301 it only shrinks,
+#: monotonically and without jumping: the file set completes at 249, where
+#: `_adapter_jax.py` joins, and the last token to arrive is `report.py`'s
+#: `gather` at 301. So the
+#: tightest real margin in the tree is 301 against a window of 400, and
+#: the widest is 2000 — the whole answer sits in the middle of that range
+#: rather than at either edge.
+#:
+#: IT IS A HEURISTIC AND HERE IS THE CONSEQUENCE, since a number chosen for
+#: being a paragraph is not a proof about paragraphs. Proximity is not
+#: aboutness, in either direction: a page that describes the bucket while
+#: naming the mechanism FURTHER than this from any `deferred` is invisible
+#: to the partition and may go on crediting one mechanism with the whole
+#: thing, and a mechanism standing beside the word for an unrelated reason
+#: counts as a description that is not one. The first is the one that costs
+#: something, and it is driven rather than reasoned about: a page naming
+#: `convert_element_type` 623 characters from its `deferred` is **`1
+#: passed`** here, and the same page with the gap closed to 123 is
+#: **`1 failed`**, named as an unlisted site.
+#:
+#: NOTHING IN THE TREE STRADDLES THAT LINE TODAY — that is what the 301-2000
+#: constancy above measures, and it is the reason this stays a documented
+#: limit and not a fix. If a page ever does straddle it, the answer is a
+#: per-page marker, not a wider window: widening trades the first failure
+#: for the second and moves the arbitrary number rather than removing it.
 _MECHANISM_WINDOW = 400
+
+#: A token counts as NAMED only where it is written AS CODE — in backticks,
+#: double backticks, or quotes. `gather` is an ordinary English word, and a
+#: bare `tok in window` substring test made this partition's second leg
+#: satisfiable by prose that says nothing about the bucket at all. Driven at
+#: `8e8a385`: revert `report.EAGER_UNCOVERED`'s fourth bullet to the
+#: sentence crediting `convert_element_type` with the whole bucket and this
+#: check goes red as it should, `1 failed`; do the same and write
+#: "(evidence gathered on 0.11.0)" anywhere in that bullet and it is
+#: `1 passed` — the exact sentence this check exists to refuse, restored to
+#: the text printed on every armed run, with the check green. With this
+#: rule both drives are `1 failed`, and the clean tree is `1 passed`.
+#:
+#: It costs no measurement. Every page already writes the tokens as code,
+#: so this rule and the bare one select the SAME seven files at `8e8a385`
+#: and the SAME six at `68b219d`; no numeral stated anywhere moves.
+#:
+#: IT IS LITERAL, AND THE SECOND HALF OF `_MECHANISM_WINDOW`'S LIMIT
+#: APPLIES TO IT UNCHANGED. A quote has to sit immediately either side, so
+#: `` `gather` ``, ``` ``gather`` ```, `'gather'` and `` `gather`'s ``
+#: count and `` `lax.convert_element_type` `` and
+#: `` `convert_element_type()` `` do not. Measured, and not by eye: swept
+#: tree-wide against a variant that also accepts a dotted prefix and a
+#: call, the answer — file set AND per-file token set — is IDENTICAL, so
+#: no page in the tree names a mechanism only in a form this misses. For
+#: a LISTED page
+#: that direction is loud: a page that stops matching leaves `found` and
+#: fails the first leg, named. For an UNLISTED one it is the window's
+#: quiet case again — a page describing the bucket in a spelling this
+#: does not recognise is invisible to the partition. Left literal rather
+#: than widened for the same reason the window is: a looser pattern trades
+#: that miss for matching the token in prose that is not about the bucket,
+#: which is the hole this rule was written to close. The answer if a page
+#: ever needs the dotted spelling is to write the bare one beside it.
+_MECHANISM_NAMED = {
+    tok: re.compile(rf"[`'\"]{{1,2}}{re.escape(tok)}[`'\"]{{1,2}}")
+    for tok in _MECHANISM_TOKENS
+}
 
 #: Every file that tells a reader WHAT DECLINES a `deferred` route. A
 #: partition, read exactly the way `_FRACTION_SITES` and `_CENSUS_SITES`
@@ -1096,12 +1162,17 @@ def found_deferred_mechanism_sites() -> dict[str, set[str]]:
 
     A file counts as describing the bucket's mechanism when one of
     `_MECHANISM_TOKENS` stands within `_MECHANISM_WINDOW` characters of the
-    word `deferred`, and the value is the union of the tokens its passages
-    name. Quotations are NOT excluded here, unlike `_live_fractions`: a
-    file that quotes a mechanism at all is a file a reader can take a
-    mechanism from, and the two files that quote one — this one, in the
-    history it records, and `tests/_soundness_routing_manifest.py`, in the
-    source line `SF-0.2.0-07` did not carry — both name the other
+    word `deferred` **and is written there AS CODE**, per
+    `_MECHANISM_NAMED`; the value is the union of the tokens its passages
+    name that way. The code-quoting is load-bearing and not decoration —
+    `gather` is an ordinary English word, and a bare substring test let
+    "(evidence gathered on 0.11.0)" stand in for naming the mechanism.
+
+    RETRACTIONS ARE NOT EXCLUDED HERE, unlike `_live_fractions`: a file
+    that writes a mechanism inside a quoted retraction at all is a file a
+    reader can take a mechanism from, and the two that do — this one, in
+    the history it records, and `tests/_soundness_routing_manifest.py`, in
+    the source line `SF-0.2.0-07` did not carry — both name the other
     mechanism as well, which is the whole requirement.
     """
     out: dict[str, set[str]] = {}
@@ -1112,7 +1183,10 @@ def found_deferred_mechanism_sites() -> dict[str, set[str]]:
                 max(0, m.start() - _MECHANISM_WINDOW):
                 m.end() + _MECHANISM_WINDOW
             ]
-            named |= {tok for tok in _MECHANISM_TOKENS if tok in window}
+            named |= {
+                tok for tok in _MECHANISM_TOKENS
+                if _MECHANISM_NAMED[tok].search(window)
+            }
         if named:
             out[rel] = named
     return out
