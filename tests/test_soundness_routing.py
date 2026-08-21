@@ -55,15 +55,33 @@ quiet.
 * **NOT checked outside git, and this is the sharpest limit here.** The
   destination checks are a partition of the manifest against the two
   shipped files, so they catch any mutation that touches only one of the
-  three. They do NOT catch a COORDINATED one: drop a block's row from
-  this manifest, its one-liner from `CHANGELOG.md` and its detail section
-  from `SOUNDNESS.md`, and every destination check still agrees, because
-  the three now describe the same smaller world. What refuses that is the
+  three. TWO classes survive them, and the git leg is the SOLE guard
+  against both — an sdist keeps every other check here and loses this one
+  entirely.
+
+  The first is the COORDINATED DELETION: drop a block's row from this
+  manifest, its one-liner from `CHANGELOG.md` and its detail section from
+  `SOUNDNESS.md`, and every destination check still agrees, because the
+  three now describe the same smaller world. What refuses it is the
   source: the section still splits into the old number of blocks at the
-  old spans. So for the coordinated-deletion class the git leg is not
-  merely *a* guard, it is the SOLE guard — an sdist keeps the other
-  checks and loses this one entirely. The skip messages say the leg is
-  gone; this says what goes with it.
+  old spans.
+
+  The second is the SUMMARISATION, and it is the class this whole file
+  exists to refuse: replace a routed block's detail section in
+  `SOUNDNESS.md` with a three-line summary of it, update the manifest's
+  `dest_sha256` to the summary and rewrite `not_carried` and
+  `src_lines_not_carried` to quote three fabricated lines. It needs only
+  TWO files, `CHANGELOG.md` is untouched, and the destination checks
+  agree because the hash is a hash of whatever is there. What refuses it
+  is `test_the_source_hashes_reproduce_from_git`, which counts the
+  dropped lines against the source and compares the quoted ones — and
+  that test is git-gated. Driven in a copy of this tree with `.git`
+  removed, `SF-0.2.0-59`'s 367-line body replaced by three lines and its
+  row rewritten to match: **`17 passed, 8 skipped`**. The same mutation
+  where git is present is red.
+
+  The skip messages name both classes, so a reader who meets one there
+  learns what is gone and not merely that something is.
 * NOT checked: whether a one-liner's sentence is a *good* summary of its
   detail. It is not a summary — it is the block's own headline, moved,
   or a sentence written to stand alone in its place — but nothing here
@@ -333,9 +351,15 @@ def files() -> tuple[str, str]:
 def _source_changelog(section: Section) -> str:
     """`section.source_commit:CHANGELOG.md`, or a skip that says what is lost.
 
-    The skip is not "this check is unavailable"; it is "the coordinated
-    deletion described in this module's docstring has no guard left in
-    this tree", and the message says so where a reader will meet it.
+    The skip is not "this check is unavailable"; it is "the two mutation
+    classes described in this module's docstring have no guard left in this
+    tree", and the message says so where a reader will meet it. BOTH are
+    named: the coordinated deletion across three files, and the
+    SUMMARISATION of a routed block into a summary with `dest_sha256` and
+    `not_carried` rewritten to match — two files, and the one this manifest
+    exists to refuse. Naming only the first was measured to be a
+    disclosure of the narrower half: the summarisation runs `17 passed, 8
+    skipped` in a tree with no git.
     """
     ref = f"{section.source_commit}:CHANGELOG.md"
     try:
@@ -346,15 +370,21 @@ def _source_changelog(section: Section) -> str:
     except (OSError, subprocess.SubprocessError) as e:  # pragma: no cover
         pytest.skip(
             f"git unavailable, so `{section.key}`'s source is unverified "
-            f"here and a COORDINATED deletion across the manifest and both "
-            f"shipped files has no remaining guard: {e}"
+            f"here and TWO mutation classes have no remaining guard: a "
+            f"COORDINATED deletion across the manifest and both shipped "
+            f"files, and a SUMMARISATION of a routed block in "
+            f"SOUNDNESS.md with dest_sha256 and not_carried rewritten to "
+            f"match it: {e}"
         )
     if r.returncode != 0:
         pytest.skip(
             f"cannot read {ref} (shallow clone or sdist), so `{section.key}`'s "
-            f"source span, src_sha256 and src_lines_not_carried are "
-            f"unverified here and a COORDINATED deletion across the manifest "
-            f"and both shipped files has no remaining guard: {r.stderr[:200]}"
+            f"source span, src_sha256, src_lines_not_carried and not_carried "
+            f"are unverified here and TWO mutation classes have no remaining "
+            f"guard: a COORDINATED deletion across the manifest and both "
+            f"shipped files, and a SUMMARISATION of a routed block in "
+            f"SOUNDNESS.md with dest_sha256 and not_carried rewritten to "
+            f"match it: {r.stderr[:200]}"
         )
     return r.stdout
 

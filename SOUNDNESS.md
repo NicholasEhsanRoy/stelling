@@ -11563,7 +11563,7 @@ it** (`fix/B15-trace-gate-observation`). Branched from `a759809`.
   `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` declares a bucket
   for each of 35 constant-construction routes — 17 `watched`, 9
   `unwatched`, 3 `loud` (jax raises), 6 `deferred` (the constant reaches the
-  jaxpr and the convert transfer declines it) — and the suite MEASURES every
+  jaxpr and something downstream declines it) — and the suite MEASURES every
   route by driving it through `check()` twice, comparing, and failing on a
   route whose two calls disagree. Driving it once was the shape that made
   this defect invisible. `report.UNCOVERED` and `docs/overflow-tripwire.md`
@@ -11572,6 +11572,17 @@ it** (`fix/B15-trace-gate-observation`). Branched from `a759809`.
   before jax sees them), and the warm-trace-cache row now records that the
   door is closed for a *verdict* and still open for the *session report*,
   which has no single moment that owns the whole program.
+
+  **Each `deferred` row names the mechanism that declines it**, in
+  `DEFERRED_CATCHER` beside the bucket, and
+  `test_every_deferred_route_is_declined_by_the_mechanism_it_declares`
+  requires that mechanism to appear in the verdict's own notes: five rows
+  are declined by the `convert_element_type` transfer, and `jnp.take`'s
+  `fill_value` by the definite out-of-bounds index on its `gather`, whose
+  jaxpr holds no `convert_element_type` for that transfer to decline. The
+  bucket asserted ONE catcher for all of it, in prose, in six places at
+  once — beside an assertion that required only SOME refusal — so the
+  sentence went false of a row of the bucket's own and nothing went red.
 
   The second call is a **regression detector for the eviction, not an
   independent control**: with the eviction in place both calls trace cold
@@ -14696,12 +14707,21 @@ rather than declared.
   **`jnp.take`'s `fill_value` was disclosed beside `lax.select`-of-`full` as
   a route this closes, and it is not one of the gate's holes at all.** Driven
   through `check()` in three spellings on 2026-08-21, the written 40000
-  reaches the jaxpr INTACT in all three: the route is `deferred`, the
-  `convert_element_type` transfer is what declines it, and the gate never had
-  anything to see. Run EAGERLY there is no trace for the constant to reach,
-  the fill array is built at the construction site, and this detector does
-  raise — so it is `deferred` in `GATE_COVERAGE` and `raises` in
-  `EAGER_COVERAGE`, the only row that is both.
+  reaches the jaxpr INTACT in all three: the route is `deferred` and the gate
+  never had anything to see. **What declines it is not the
+  `convert_element_type` transfer that declines the other five `deferred`
+  rows**: the constant arrives as `gather`'s own `fill_value` parameter, so
+  that jaxpr holds no `convert_element_type` at all, and the note the verdict
+  carries is the definite out-of-bounds index on the `gather` — the index
+  that makes the fill reachable in the first place. Each `deferred` row
+  declares its catcher in `DEFERRED_CATCHER` and the verdict's notes are read
+  against the declaration; the prose that said "the transfer declines them"
+  of the whole bucket stood in six places, one of them the docstring of the
+  test policing the bucket, and was true of five of its rows. Run EAGERLY
+  there is no trace for the constant to reach, the fill array is built at
+  the construction site, and this detector does raise — so it is `deferred`
+  in `GATE_COVERAGE` and `raises` in `EAGER_COVERAGE`, the only row that is
+  both.
 
   *This entry said "six of the SEVEN" until 2026-08-20, as did five other
   places, while `GATE_COVERAGE` held eight `unwatched` rows — and had held

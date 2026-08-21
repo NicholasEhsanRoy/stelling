@@ -205,9 +205,13 @@ table at all and are worth knowing: **`loud`**, where jax itself raises rather
 than wrapping (`jnp.array(N, dtype=dt)`, `jnp.asarray(N, dtype=dt)`,
 `jnp.int16(N)` — note that `jnp.full(shape, N, dt)`, three rows up, silently
 wraps the same value), and **`deferred`**, where the written constant reaches
-the jaxpr intact and the narrowing is a run-time `convert_element_type` (`x //
-N`, `x % N`, `where`, `clip`, `pad`) — the trace gate has nothing to see there,
-and the propagation's convert transfer declines the form instead.
+the jaxpr intact, so the trace gate has nothing to see and something
+downstream is what refuses the route. Which something is declared per row and
+read out of the verdict's notes, because it is not the same one for all of
+them: for `x // N`, `x % N`, `where`, `clip` and `pad` the narrowing is a
+run-time `convert_element_type` and the propagation's convert transfer
+declines the form; for `jnp.take`'s `fill_value` it is the out-of-bounds index
+on that route's `gather`, and the section below says why.
 
 ## The eager door, and the second instrument that closes it
 
@@ -354,11 +358,17 @@ have reddened nothing.*
 **`jnp.take`'s `fill_value` was disclosed beside it and is a different
 case, measured.** Under a TRACE the written constant reaches the jaxpr
 intact — driven in three spellings, all `deferred` — so it was never one
-of the gate's holes and is not in the fraction above; the propagation's
-`convert_element_type` transfer is what declines it. Run EAGERLY there is
-no trace to reach it in, the fill array is built at the construction site,
-and the detector raises. It is `deferred` in `GATE_COVERAGE` and `raises`
-in `EAGER_COVERAGE`, the only row that is both. A scoped
+of the gate's holes and is not in the fraction above. **What declines it is
+not the transfer that declines the other five `deferred` rows**: the written
+constant arrives as `gather`'s own `fill_value` parameter, so there is no
+`convert_element_type` in the jaxpr for that transfer to see, and the note
+the verdict carries is the definite out-of-bounds index on the `gather`. The
+index is what makes the fill reachable at all — with an in-bounds one the
+fill is never selected and `check()` returns VERIFIED, correctly, because
+nothing wrapped. Run EAGERLY there is no trace to reach it in, the fill
+array is built at the construction site, and the detector raises. It is
+`deferred` in `GATE_COVERAGE` and `raises` in `EAGER_COVERAGE`, the only
+row that is both. A scoped
 `with jax.disable_jit():` closes too, and for the same reason as `full`:
 the constant it wraps is narrowed at this very site on the way in.
 

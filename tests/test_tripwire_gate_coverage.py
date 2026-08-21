@@ -37,12 +37,14 @@ THE FOUR BUCKETS, which are four different facts and not four shades of one:
     silent happens, so there is nothing for a tripwire to catch.
 
 ``deferred``
-    the written constant reaches the jaxpr INTACT — the narrowing is a
-    ``convert_element_type`` the program performs at run time, not a
+    the written constant reaches the jaxpr INTACT — the narrowing is not a
     transcription loss — so the trace gate has nothing to see and correctly
-    sees nothing. These are not holes: the propagation's ``convert_element_
-    type`` transfer declines them, and the test below drives that too, since
-    "the gate ignores it" is only acceptable while something else does not.
+    sees nothing. These are not holes, and *"the gate ignores it"* is only
+    acceptable while something else does not, so every row DECLARES the
+    mechanism that declines it in :data:`DEFERRED_CATCHER` and the test
+    below requires that mechanism to appear in the verdict's own notes.
+    TWO mechanisms, not one, and saying "the transfer declines them" of the
+    bucket was true of five of its six rows.
 
 WHY N=40000 AND int16. It is out of range for int16 and wraps to -25536, far
 enough from the declared envelope that a verdict on the wrapped program and a
@@ -243,10 +245,50 @@ GATE_COVERAGE = {
     # the detector plugs. Driven here in three spellings -- over the traced
     # `x`, over a `jnp.zeros` of `x`'s shape, and over a constant `jnp.zeros`
     # -- all three put the written 40000 into the jaxpr INTACT, so the gate
-    # has nothing to see and correctly sees nothing. It is `deferred`, the
-    # transfer declines it like the five above, and it was never one of the
-    # gate's holes. See EAGER_COVERAGE for the other half of the story.
+    # has nothing to see and correctly sees nothing. It is `deferred` and it
+    # was never one of the gate's holes. WHAT DECLINES IT IS NOT THE
+    # TRANSFER THAT DECLINES THE FIVE ABOVE: the constant arrives as
+    # `gather`'s own `fill_value` parameter, so there is no
+    # `convert_element_type` in this jaxpr to decline (measured), and the
+    # note the verdict carries is the definite out-of-bounds index on that
+    # `gather`. `DEFERRED_CATCHER` declares that per row and the test reads
+    # the notes against it. See EAGER_COVERAGE for the other half.
     "jnp.take(x, i, fill_value=N)": "deferred",
+}
+
+#: WHAT DECLINES EACH `deferred` ROUTE, one row per row of the bucket, as a
+#: fragment of the note the verdict actually carries.
+#:
+#: THE BUCKET USED TO ASSERT ITS CATCHER IN PROSE, and the prose was already
+#: false. *"The propagation's `convert_element_type` transfer declines
+#: them"* stood in six places -- including the docstring of the test that
+#: polices this bucket -- while `jnp.take`'s row has no
+#: `convert_element_type` in its jaxpr at all. It survived because the
+#: assertion beside the docstring was `status != VERIFIED`, which is
+#: strictly weaker than the sentence: ANY refusal, for any reason, passes
+#: it. A bucket whose reason for not being a hole is written in a comment
+#: is a bucket with no reason at all, so the reason is declared here and
+#: read out of the verdict.
+#:
+#: TWO MECHANISMS, and the difference is not cosmetic. The five convert rows
+#: narrow at run time over a VARIABLE and the interval transfer refuses the
+#: lossy conversion. `jnp.take`'s `fill_value` reaches the jaxpr as
+#: `gather`'s own parameter -- measured, there is no `convert_element_type`
+#: equation in it -- so there is nothing for that transfer to decline, and
+#: what refuses the route is the definite out-of-bounds index the spelling
+#: asks for. That index is load-bearing rather than incidental: it is what
+#: makes the fill reachable. Driven with an in-bounds index the fill is
+#: never selected, the program executes `[100, 0]`, and `check()` returns
+#: VERIFIED -- correctly, because nothing wrapped.
+DEFERRED_CATCHER = {
+    "x // N": "'convert_element_type' declined this form",
+    "x % N": "'convert_element_type' declined this form",
+    "jnp.where(c, N, x)": "'convert_element_type' declined this form",
+    "jnp.clip(x, 0, N)": "'convert_element_type' declined this form",
+    "jnp.pad(x, 1, constant_values=N)": (
+        "'convert_element_type' declined this form"
+    ),
+    "jnp.take(x, i, fill_value=N)": "OUT-OF-BOUNDS INDEX (definite) in 'gather'",
 }
 
 
@@ -377,24 +419,59 @@ def test_every_unwatched_route_really_certifies_a_destroyed_constant():
         )
 
 
-def test_every_deferred_route_is_caught_by_the_transfer_instead():
-    """`deferred` says the gate ignores it. Something else must not.
+def test_every_deferred_route_is_declined_by_the_mechanism_it_declares():
+    """`deferred` says the gate ignores it. Something else must not — and
+    WHICH something is declared per route and read out of the verdict.
 
     The written constant reaches the jaxpr, so there is no transcription loss
     for the trace gate to report — but the program still wraps at run time,
     and a bucket that meant "the gate ignores it and so does everyone else"
-    would be a hole wearing a reassuring name. Measured: the propagation's
-    `convert_element_type` transfer declines the form, so the verdict is
-    UNKNOWN and never VERIFIED.
+    would be a hole wearing a reassuring name.
+
+    **THIS DOCSTRING USED TO BE THE ONLY PLACE THE CATCHER WAS NAMED, AND
+    THE NAME WENT STALE UNDER IT.** It read *"Measured: the propagation's
+    `convert_element_type` transfer declines the form"* while the assertion
+    was `status != VERIFIED` — strictly weaker, and passed by ANY refusal
+    for ANY reason. So when `jnp.take`'s `fill_value` joined the bucket with
+    no `convert_element_type` in its jaxpr at all, the sentence became false
+    of one of this test's own rows and the test stayed green. The name of
+    this function was the same claim and went stale with it; it was
+    `test_every_deferred_route_is_caught_by_the_transfer_instead`.
+
+    The mechanism is DECLARED now, in :data:`DEFERRED_CATCHER`, and this
+    holds the verdict's own notes to it. Driven: declaring
+    `'convert_element_type' declined this form` for `jnp.take`'s row turns
+    this red. `status != VERIFIED` stays as the weaker half, because "no
+    note says what was declared" and "nothing declined this at all" are
+    different failures and both should be legible.
     """
     deferred = [k for k, v in GATE_COVERAGE.items() if v == "deferred"]
     assert deferred, "no deferred routes, so this claim is vacuous"
+    assert set(DEFERRED_CATCHER) == set(deferred), (
+        "`DEFERRED_CATCHER` is a declaration per `deferred` row, not a list "
+        "of the rows someone remembered. Declares a catcher and is not in "
+        f"the bucket: {sorted(set(DEFERRED_CATCHER) - set(deferred))}; in "
+        f"the bucket and declares none: "
+        f"{sorted(set(deferred) - set(DEFERRED_CATCHER))}. A route admitted "
+        "to `deferred` without naming what declines it is the bucket back "
+        "to asserting a catcher it may not have."
+    )
     for name in deferred:
         bucket, verdict = _measure(name)
         assert bucket == "deferred", name
         assert verdict.status != "VERIFIED", (
-            f"{name} is declared covered by the convert transfer rather than "
-            f"by the gate, and NOTHING covered it: {verdict.status}"
+            f"{name} is declared covered by {DEFERRED_CATCHER[name]!r} "
+            f"rather than by the gate, and NOTHING covered it: "
+            f"{verdict.status}"
+        )
+        catcher = DEFERRED_CATCHER[name]
+        assert any(catcher in note for note in verdict.notes), (
+            f"{name} declares that {catcher!r} is what declines it and no "
+            f"note in the verdict says so. The verdict is {verdict.status}, "
+            f"so SOMETHING refused this route — but not the mechanism this "
+            f"bucket's account of it names, which makes that account prose "
+            f"about a different program. Notes: "
+            f"{[note[:110] for note in verdict.notes]}"
         )
 
 

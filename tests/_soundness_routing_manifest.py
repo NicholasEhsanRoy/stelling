@@ -48,8 +48,11 @@ It is measured now, twice over. Each edited block records
 `source_commit:CHANGELOG.md` and asserts EQUALITY — not a bound. Quoting
 the lines is what makes an edit reviewable: a summarisation with a note
 attached would have to write every line it summarised away into this file,
-where a reader will meet them. One, three, two and eleven lines; the rest
-of all four blocks moved untouched.
+where a reader will meet them. Two, three, three and eleven lines, in the
+order the four are named above; the rest of all four blocks moved
+untouched. Those numerals are restated here for a reader and are held to
+nothing — each block's row carries its own, and the row is what the test
+measures.
 
 **Nothing was dropped.** `DROPPED` is empty and the test requires each
 section's blocks to partition its span exactly, so a block that went
@@ -207,19 +210,27 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(671, 691),
         src_lines=21,
         src_sha256="319d09cf527d0ae754196875b8d8dfca3923025a8608c1cafe026bde9242a455",
-        dest_sha256="748fb03c94e7e78405347c3e48396950634db46f0db2e4459458d39ead80ed85",
-        src_lines_not_carried=2,
+        dest_sha256="3d81c7c7c2ce0736e47497fc5037e16591633849a60401a472d5500a7adac00b",
+        src_lines_not_carried=3,
         not_carried=(
             '  for each of 32 constant-construction routes — 17 `watched`, 7',
             '  `unwatched`, 3 `loud` (jax raises), 5 `deferred` (the constant reaches the',
+            '  jaxpr and the convert transfer declines it) — and the suite MEASURES every',
         ),
         edit_note=(
             "the route census it states was wrong on arrival: 32 routes "
             "and 7 `unwatched` against a GATE_COVERAGE holding 33 and 8 "
             "since this batch's own fc98241; and the corrected 33/8 "
             "went stale in the B8c fixup, which enrolled two measured "
-            "routes and moved it to 35/9. Both corrections stated in "
-            "the block. No behaviour change."
+            "routes and moved it to 35/9. And the census line glossed "
+            "the `deferred` bucket as the one the convert transfer "
+            "declines, which is true of five of its six rows -- "
+            "`jnp.take`'s `fill_value` has no `convert_element_type` in "
+            "its jaxpr and is declined by an out-of-bounds `gather` -- so "
+            "the gloss now claims only that something downstream declines "
+            "the row, and the block names the two mechanisms and the "
+            "per-row declaration that holds them. All three corrections "
+            "stated in the block. No behaviour change."
         ),
     ),
     Block(
@@ -890,7 +901,7 @@ _MODE_2: tuple[Block, ...] = (
         src_span=(134, 276),
         src_lines=143,
         src_sha256="b5f2a21a36aba075d22a2a8ee56fe2383d86fcf31bbc0ef9b8830025b4605287",
-        dest_sha256="a4c4ce4a6117db727b48db0edd24829fa632a0d288dcd3c848281832b94cae21",
+        dest_sha256="10251ade6a40f0f5c52fe5d22058c2d2c007e8071d67a054d251ef1173a6aac5",
         src_lines_not_carried=11,
         not_carried=(
             '  Six of the **eight** `unwatched` routes in',
@@ -906,14 +917,19 @@ _MODE_2: tuple[Block, ...] = (
             '  `8f0adf2`: 33 routes — 17 `watched`, 8 `unwatched`, 3 `loud`, 5',
         ),
         edit_note=(
-            'the route census it carried was corrected in the same commit'
-            'that routed it: `lax.select`-of-`full` was enrolled in'
-            'GATE_COVERAGE and EAGER_COVERAGE, which moves the closed'
-            "fraction from six of eight to seven of nine; `jnp.take`'s"
-            '`fill_value` was measured `deferred` rather than a hole the'
-            'detector closes; and the published diagnosis of why the old'
-            'fraction survived was replaced by the measured one. No'
-            'behaviour change.'
+            'the route census it carried was corrected in the same commit '
+            'that routed it: `lax.select`-of-`full` was enrolled in '
+            'GATE_COVERAGE and EAGER_COVERAGE, which moves the closed '
+            "fraction from six of eight to seven of nine; `jnp.take`'s "
+            '`fill_value` was measured `deferred` rather than a hole the '
+            'detector closes; and the published diagnosis of why the old '
+            'fraction survived was replaced by the measured one. And the '
+            'account of what declines that `deferred` row was corrected in '
+            'turn, one commit later: it named the transfer that declines '
+            'the other five `deferred` rows, of a route whose jaxpr holds '
+            'no `convert_element_type` at all, and the mechanism is the '
+            'definite out-of-bounds index on its `gather`. No behaviour '
+            'change.'
         ),
     ),
     Block(

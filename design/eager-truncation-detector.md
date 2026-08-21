@@ -615,10 +615,20 @@ misleading**, which the same day's measurement settled. The detector does raise
 on it. But it was never one of the gate's holes: driven through `check()` in
 three spellings — over the traced array, over a `jnp.zeros` of its shape, and
 over a constant `jnp.zeros` — the written constant reaches the jaxpr INTACT in
-all three, so the route is `deferred` and the `convert_element_type` transfer
-is what declines it. It is the one row that is `deferred` for the gate and
-`raises` for this detector, and reading it as a hole this instrument plugs
-credited the instrument with a hole that was not there.
+all three, so the route is `deferred` and the gate never had anything to see.
+**What declines it is not the `convert_element_type` transfer that declines the
+other five `deferred` rows**, and the distinction is the whole reason this
+paragraph exists: the constant arrives as `gather`'s own `fill_value`
+parameter, so there is no `convert_element_type` equation in the jaxpr at all,
+and the note the verdict carries is the definite out-of-bounds index on that
+`gather` — the index that makes the fill reachable in the first place. Each
+`deferred` row declares its own catcher in
+`tests/test_tripwire_gate_coverage.py::DEFERRED_CATCHER` and the verdict's
+notes are read against the declaration, because "the transfer declines them"
+had been written of the whole bucket in six places while being true of five of
+its rows. This is the one row that is `deferred` for the gate and `raises` for
+this detector, and reading it as a hole this instrument plugs credited the
+instrument with a hole that was not there.
 
 **Not closed, and named:** two numpy routes. `np.asarray(N).astype(dt)` is
 PERMANENTLY unhookable — `np.ndarray.astype` is an immutable type attribute, so
