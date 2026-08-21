@@ -362,13 +362,40 @@ and a count over entries that happened to say something is not a count.
   measured clamp. Two further constructions — `(x+x)·0` on a finite box
   and `r ≤ +∞` over a ⊤ loop output — discharge correctly **under the
   registered ℝ semantics** and are false in IEEE (overflow→NaN); they are
-  not code defects under the declared dial, are pinned as marker tests
-  that must flip if the dial ever moves, and the ⊤-widening vacuity
-  guard already excludes the second shape from every count. The
-  "monotone arithmetic is float-conservative" scope claim is corrected:
-  outward rounding guards rounding divergence, not overflow→NaN
-  existence divergence. No shipped verdict flipped — re-verified by
-  re-running every recorded harness after the fixes. 119 tests green.
+  not code defects under the declared dial and are pinned as marker tests
+  that must flip if the dial ever moves. The "monotone arithmetic is
+  float-conservative" scope claim is corrected: outward rounding guards
+  rounding divergence, not overflow→NaN existence divergence. No shipped
+  verdict flipped — re-verified by re-running every recorded harness
+  after the fixes. 119 tests green.
+
+  **A THIRD MITIGATION CLAIMED IN THIS ENTRY IS FALSE AND IS WITHDRAWN
+  (2026-08-21).** It read: *"…and the ⊤-widening vacuity guard already
+  excludes the second shape from every count."* The same claim stood at
+  `design/soundness-audit.md`'s finding-1/2 row and is struck there too.
+  The guard's predicate is a property of the WHOLE obligation — does it
+  still discharge with every declared bound widened to (−inf, +inf)? — so
+  it fences an obligation that is a tautology *entire*, and fences nothing
+  once the same ℝ-true/IEEE-false sub-expression sits inside an obligation
+  whose envelope is load-bearing. Driven with a control, one run, both x64
+  cells (jax 0.11.0, `vacuity_mode="inputs-only"`), the same in both:
+
+      construction (declared box)             verdict   guard   jax true
+      r ≤ +∞ over a ⊤ while output  (0, 1)    VERIFIED  FIRES     25 / 25
+      the same r, ×0.0, ∧ x ≥ 0    (0.5, 1)   VERIFIED  silent     0 / 25
+      max(sqrt x, x·x) ≥ 1         (−2, −1)   VERIFIED  silent     0 / 25
+
+  The middle row **is** the withdrawn clause's own shape — `r ≤ +∞` over a
+  ⊤ loop output, with the first construction's 0·∞ convention beside it —
+  and it counts: the stamp reads *"no obligation discharges with the
+  declared bounds widened"* while the program is false at every point of
+  the declared box. The third reaches ⊤ by a different road, `sqrt`'s own
+  decline, quoted in the same verdict at 83% coverage. **What catches all
+  three is the `semantics="ieee"` dial** — UNKNOWN on each, measured in
+  the same run — which is this entry's first disclosure and is now its
+  only one: there is no second, independent protection here. The two
+  marker tests in `tests/test_audit_findings.py` carried the same
+  sentence in their comments and no longer do.
 
   *Versions: 0.1.0 pre-release builds only.*
 
