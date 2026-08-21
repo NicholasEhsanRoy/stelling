@@ -140,17 +140,23 @@ quiet.
     checkout of this repository whose manifest simply names a commit that
     is not there — sending a maintainer to the CI job's fetch depth when
     the file to open is the manifest. `_why_the_history_is_out_of_reach`
-    names the environments that legitimately cannot answer — no git here,
-    someone else's git here, a shallow history here — and
-    `_source_changelog` FAILS rather than skips when none of them holds.
-    Driven all four ways: full
+    names the environments that legitimately cannot answer — no git
+    here, someone else's git here, someone else's REPOSITORY ROOTED
+    here, a shallow history here — and `_source_changelog` FAILS rather
+    than skips when none of them holds. Driven all six ways: full
     checkout with a bad commit, `4 failed, 23 passed`; `--depth 1` clone
     that does not reach the commit, `19 passed, 8 skipped` reading *"a
     shallow clone, whose history does not reach that commit"*; `.git`
     removed, `19 passed, 8 skipped` reading *"not a git checkout at
-    all"*; and the tree unpacked inside an unrelated repository, which
+    all"*; the tree unpacked inside an unrelated repository, which
     `--git-dir` alone would have failed, `19 passed, 8 skipped` naming
-    the outer repository it merely sits inside.
+    the outer repository it merely sits inside; and the two the ROOT
+    COMMIT probe was added for, where two probes had been read as a
+    third proposition neither establishes — an sdist unpacked and
+    `git init`-ed, and `GIT_DIR` pointed at an unrelated repository from
+    inside a real checkout, where `--show-toplevel` answers with the cwd
+    so the identity test passed VACUOUSLY. Both are `8 failed,
+    19 passed` at `a7fe65f` and `19 passed, 8 skipped` here.
 
   **So the earlier form of this bullet was wrong twice.** It said the
   destination checks *"catch any mutation that touches only one of the
@@ -224,6 +230,61 @@ from _soundness_routing_manifest import (  # noqa: E402
 REPO = pathlib.Path(__file__).resolve().parents[1]
 CHANGELOG = REPO / "CHANGELOG.md"
 SOUNDNESS = REPO / "SOUNDNESS.md"
+
+#: A commit this project's history CANNOT be missing, and the third probe
+#: in `_why_the_history_is_out_of_reach`. It is this repository's ROOT
+#: commit — `git rev-list --max-parents=0` returns exactly this one — and
+#: the shape is the one `_adapter_jax._KNOWN_HASHES` already uses: a
+#: pinned value typed where a reader can check it, which turns a claim
+#: about the environment into a measurement.
+#:
+#: WHY THE ROOT AND NOT SOME RECENT COMMIT. Git's connectivity invariant
+#: is that a repository holding a commit holds every ancestor of it unless
+#: the history was truncated, and truncation is what the shallow probe
+#: above this one tests for. So a repository that can serve THIS working
+#: tree's own commit holds the root too, and `cat-file -e` failing here —
+#: after a git work tree has been shown to be rooted at this directory and
+#: not to be shallow — means the repository rooted here holds no commit of
+#: this project's history at all. That is derived, not assumed, which is
+#: the whole reason the probe is worth its two lines: it is the difference
+#: between the caller's message asserting an identity and reporting one.
+#:
+#: THE ALTERNATIVE WAS DISCLOSURE ONLY — keep the failure, and have the
+#: message name the third possibility without deciding it — argued from
+#: the premise that no local probe can separate *"this repository, missing
+#: a commit"* from *"a different repository rooted here"*. That premise is
+#: false here, and this constant is the counter-example, which is why the
+#: identity is measured instead of hedged.
+#:
+#: WHAT IT COSTS, STATED SO IT IS NOT A SURPRISE, IN BOTH DIRECTIONS.
+#:
+#: A history rewrite that replaces the root — `filter-repo`, a squash of
+#: everything, a graft — leaves a repository this probe does not recognise,
+#: so the four git-gated tests SKIP in what is otherwise this project's own
+#: checkout rather than run. That is the safe direction and it is not
+#: silent: the eight skips carry a reason no `Rule` in
+#: `tests/test_skip_inventory.py` matches, so
+#: `test_no_session_skip_is_undisclosed` reds. Driven in exactly that
+#: shape — this tree committed into a fresh repository, which is what a
+#: rewrite leaves behind — this file is `19 passed, 8 skipped` and the
+#: session is `1 failed, 4284 passed, 17 skipped`, exit 1 —
+#: the ONE failure being `test_no_session_skip_is_undisclosed` and the
+#: eight ids it names being exactly these four tests over two sections.
+#:
+#: AND THIS CONSTANT IS READ ONLY ON THE `git show` FAILURE PATH, so a
+#: wrong value here is invisible until the day it is needed, and then it
+#: turns a FAIL into a SKIP — the safe direction again, and the skip QUOTES
+#: the sha it looked for, so a maintainer meets the typo and not a mystery.
+#: Driven, this constant replaced by a well-formed sha that is in no
+#: repository: this file is `27 passed` in a healthy checkout, unchanged,
+#: because `git show` does not fail there and the probe never runs.
+#:
+#: THE ONE LEGITIMATE SHAPE THAT COULD HAVE MISFIRED IS THE PARTIAL CLONE,
+#: AND IT DOES NOT. Driven against a promisor-enabled mirror,
+#: `--filter=blob:none` and `--filter=tree:0` clones of this repository
+#: both answer `is-shallow-repository false` and hold this commit locally:
+#: an object filter drops blobs and trees, not commits.
+_ANCHOR = "bb45bd76b4ee32a478f1b8732b7bd1d031f5a8c1"
 
 #: Every routed ID, as a pattern. Built from the sections rather than
 #: written out, so a new section's IDs are seen by every check here on the
@@ -464,24 +525,68 @@ def files() -> tuple[str, str]:
 def _why_the_history_is_out_of_reach() -> str | None:
     """Why `git show <commit>` could not reach the source, or `None`.
 
-    `None` means THIS TREE IS THE REPOSITORY, in full, and the commit is
-    simply not in it -- which is a defect in the manifest and not a
-    property of the checkout, so the caller fails instead of skipping.
+    `None` means THE REPOSITORY ROOTED HERE IS THIS ONE, in full, and the
+    commit is simply not in it -- which is a defect in the manifest and
+    not a property of the checkout, so the caller fails instead of
+    skipping.
 
     **THIS EXISTS BECAUSE THE SKIP MESSAGE ASSERTED A CAUSE IT NEVER
     CHECKED.** It read *"cannot read <ref> (shallow clone or sdist)"* on
     every failure of `git show`, including in a full non-shallow checkout
     of this repository with a bad commit in the manifest -- sending the
     maintainer to the CI job's fetch depth when the file to open was
-    `tests/_soundness_routing_manifest.py`. The cases are trivially
-    distinguishable, and these two probes are what this runs — nothing
-    else, so the message asserts only what was measured:
+    `tests/_soundness_routing_manifest.py`.
 
-        git rev-parse --show-toplevel          rc=128 outside any repo;
-                                               otherwise the tree the git
-                                               directory actually governs
+    **AND THE FIRST FIX HAD THE SAME DEFECT ONE LEVEL UP, UNTIL
+    2026-08-21.** It ran two probes -- a git work tree is rooted at this
+    directory, and it is not shallow -- and concluded *"THIS TREE IS THE
+    REPOSITORY"*, which is a THIRD proposition neither of them
+    establishes. Any environment where SOME OTHER repository is rooted at
+    this tree satisfies both and turned eight skips into eight failures,
+    under a message asserting three things that are all false there.
+    Driven at `a7fe65f`, `8 failed, 19 passed` in each against
+    `19 passed, 8 skipped` here:
+
+        an sdist unpacked and `git init`-ed    the sdist SHIPS `/tests`
+                                               (`pyproject.toml`), so this
+                                               is a vendoring path a real
+                                               consumer takes
+        GIT_DIR at an unrelated repository     `--show-toplevel` then
+                                               answers with the cwd, so
+                                               the identity test passed
+                                               VACUOUSLY
+
+    So identity is MEASURED now, against :data:`_ANCHOR`, and these three
+    probes are what this runs — nothing else, so the message asserts only
+    what was measured:
+
+        git rev-parse --show-toplevel          rc=128 where NO WORK TREE
+                                               governs this directory --
+                                               outside any repository and
+                                               inside a bare one alike,
+                                               measured both ways. Only
+                                               git's own stderr separates
+                                               those two, which is why
+                                               the message names both and
+                                               carries it. Otherwise, the
+                                               tree the git directory
+                                               actually governs
         git rev-parse --is-shallow-repository  `true` only in a shallow
                                                clone
+        git cat-file -e _ANCHOR^{commit}       the repository rooted here
+                                               holds this project's root
+                                               commit, which by git's
+                                               connectivity invariant a
+                                               non-shallow repository
+                                               holding ANY commit of this
+                                               history holds too
+
+    ORDER IS LOAD-BEARING AND IS WHY THE THIRD PROBE COSTS NOTHING.
+    Shallow is tested BEFORE the anchor, because a `--depth 1` clone of
+    this very repository has no root commit either and its honest
+    diagnosis is its fetch depth and not its identity. Driven: that
+    environment still reads *"a shallow clone, whose history does not
+    reach that commit"*, unchanged.
 
     That the commit itself is absent needs no probe: the caller's
     `git show` has already said so, and its `stderr` goes into the
@@ -506,8 +611,12 @@ def _why_the_history_is_out_of_reach() -> str | None:
     if r is None:  # pragma: no cover - git vanished between two calls
         return "git stopped answering between two calls"
     if r.returncode != 0:
-        return "this tree is not a git checkout at all -- an sdist, or an "\
-               "export"
+        return (
+            f"this tree is not a git checkout at all -- an sdist, or an "
+            f"export -- or the git answering here is bare and has no work "
+            f"tree; rc=128 is both, and only git's own words separate "
+            f"them: {r.stderr.strip()[:120]}"
+        )
     top = pathlib.Path(r.stdout.strip())
     if not top.is_dir() or top.resolve() != REPO:
         return (
@@ -519,6 +628,18 @@ def _why_the_history_is_out_of_reach() -> str | None:
         return "git cannot say whether this checkout is shallow"
     if r.stdout.strip() == "true":
         return "a shallow clone, whose history does not reach that commit"
+    r = git("cat-file", "-e", f"{_ANCHOR}^{{commit}}")
+    if r is None:  # pragma: no cover - git vanished between two calls
+        return "git stopped answering between two calls"
+    if r.returncode != 0:
+        return (
+            f"the git repository rooted here is not this project's: it "
+            f"does not have {_ANCHOR[:12]}, this project's root commit, "
+            f"which a non-shallow repository holding any commit of this "
+            f"history holds too -- so this is a vendored copy someone ran "
+            f"`git init` in, a fork with rewritten history, or a GIT_DIR "
+            f"pointing at something else"
+        )
     return None
 
 
@@ -580,9 +701,12 @@ def _source_changelog(section: Section) -> str:
                 f"`{section.key}` names {section.source_commit} as the "
                 f"commit its source-side columns were measured from, and "
                 f"`git show {ref}` fails in a tree that IS this repository's "
-                f"own full, non-shallow checkout -- both conditions tested "
-                f"here, just now, rather than assumed. So this is neither "
-                f"the sdist nor the shallow clone this check skips for: the "
+                f"own full, non-shallow checkout -- all THREE conditions "
+                f"tested here, just now, rather than assumed: a git work "
+                f"tree rooted at this directory, not shallow, and holding "
+                f"{_ANCHOR[:12]}, this project's root commit. So this is "
+                f"neither the sdist nor the shallow clone nor the foreign "
+                f"repository this check skips for: the "
                 f"commit is unresolvable in a tree that can resolve "
                 f"commits, and what is wrong is the MANIFEST naming a "
                 f"commit that is not there, not the CI configuration's "

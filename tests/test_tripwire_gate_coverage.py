@@ -455,7 +455,7 @@ def test_every_deferred_route_is_declined_by_the_mechanism_it_declares():
     `test_every_deferred_route_is_caught_by_the_transfer_instead`.
 
     The mechanism is DECLARED now, in :data:`DEFERRED_CATCHER`, and this
-    holds the verdict's own notes to it. Driven: declaring
+    holds the verdict's FIRST note to it. Driven: declaring
     `'convert_element_type' declined this form` for `jnp.take`'s row turns
     this red. `status != VERIFIED` stays as the weaker half, because "no
     note says what was declared" and "nothing declined this at all" are
@@ -1170,10 +1170,18 @@ def found_deferred_mechanism_sites() -> dict[str, set[str]]:
 
     RETRACTIONS ARE NOT EXCLUDED HERE, unlike `_live_fractions`: a file
     that writes a mechanism inside a quoted retraction at all is a file a
-    reader can take a mechanism from, and the two that do — this one, in
-    the history it records, and `tests/_soundness_routing_manifest.py`, in
-    the source line `SF-0.2.0-07` did not carry — both name the other
-    mechanism as well, which is the whole requirement.
+    reader can take a mechanism from, and this one does, in the sentence
+    it records having gone false. **IT NAMED A SECOND SITE UNTIL
+    2026-08-21 AND MEASUREMENT REFUTES THAT ONE**: it said
+    `tests/_soundness_routing_manifest.py` writes a mechanism in the
+    source line `SF-0.2.0-07` did not carry, and that block's three
+    `not_carried` lines hold no mechanism in any spelling. That file
+    reaches the list live, not by retraction — its four in-window matches
+    are all `edit_note` prose (`:239-240` and `:956-957`) — and the one
+    mechanism a `not_carried` line in it does hold, `M2-0.2.0-01`'s
+    `` `lax.convert_element_type` ``, is the dotted spelling
+    `_MECHANISM_NAMED` deliberately does not match. Both files name both
+    mechanisms either way, which is the whole requirement.
     """
     out: dict[str, set[str]] = {}
     for rel, text in read_text_files():
