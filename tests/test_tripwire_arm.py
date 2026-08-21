@@ -876,7 +876,17 @@ def test_eager_execution_is_uncovered_and_the_value_still_wraps(armed):
     _, rec = armed
     x = jnp.zeros(3, jnp.int8)
     before = rec.invocations
-    assert int((x + 256)[0]) == 0
+    # DECLARED FOR THE THIRD INSTRUMENT, whose whole subject is `x + 256`.
+    # This test's subject is that the const-fold site is NOT reached here, and
+    # the only way to show that is to perform the narrowing; under
+    # `--stelling-narrowing-perimeter=error` the dunder perimeter refuses it
+    # at this line, correctly, before the value is ever computed. The region
+    # permits it and prints this reason beside the site.
+    with expected_truncation(
+        "the wrap is this test's subject: it shows the const-fold site is "
+        "NOT reached by eager `x + 256`, which requires performing it"
+    ):
+        assert int((x + 256)[0]) == 0
     assert rec.invocations == before, (
         "the const-fold site was reached outside jit. Measured, it is not: "
         "the constant arrives as a pjit argument and XLA truncates it."

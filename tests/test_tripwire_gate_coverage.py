@@ -71,6 +71,7 @@ from stelling.harness import any_array, assert_  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
 
 from _repo_files import read_text_files  # noqa: E402
+from conftest import lowered_perimeter  # noqa: E402
 
 #: Out of int16 range; wraps to -25536.
 OVER = 40000
@@ -794,12 +795,23 @@ def _eager_bucket(name):
     import stelling
 
     x = jnp.array([0, 100], DTYPE)
-    try:
-        ROUTES[name](x)
-    except stelling.EagerTruncationError:
-        return "raises"
-    except OverflowError:
-        return "loud"
+    # THE DUNDER PERIMETER OUT OF THE WAY, not permitted. Mode 3 refuses
+    # `x + 40000` at the operator, one layer ABOVE the construction site this
+    # function is measuring, so with it armed the first route raises
+    # `NarrowingError` and nothing here is measured at all. A region is the
+    # wrong tool and that is measured rather than argued: `expected_truncation`
+    # covers both instruments by design, so opening one to permit Mode 3 makes
+    # every `raises` row below read `silent` -- this inventory reporting that
+    # the eager detector has gone blind, because of a declaration added to keep
+    # it running. `conftest.lowered_perimeter` hands the hold back through the
+    # shipped `arm()` and raises if it cannot.
+    with lowered_perimeter():
+        try:
+            ROUTES[name](x)
+        except stelling.EagerTruncationError:
+            return "raises"
+        except OverflowError:
+            return "loud"
     return "silent"
 
 
@@ -1381,17 +1393,26 @@ def test_the_default_path_is_BYTE_IDENTICAL_without_the_flag():
 
     @contextlib.contextmanager
     def detached():
-        """The hook GONE, not the truncation permitted, and put back after.
+        """The hooks GONE, not the truncation permitted, and put back after.
 
         A region declaration would be the wrong tool: what is being measured
         is the program with nothing patched, and `expected_truncation` leaves
         the wrapper installed.
+
+        THE DUNDER PERIMETER IS LOWERED HERE FOR THE SAME REASON, one
+        instrument over. Under `--stelling-narrowing-perimeter=error` it is
+        armed for the whole session, its wrapper sits on the very slots these
+        routes go through, and it refuses `x + 40000` before jax's own
+        `__add__` is reached -- so "the program with nothing patched" was
+        being measured through a patch. `conftest.lowered_perimeter` hands the
+        hold back through the shipped `arm()` and raises if it cannot.
         """
         was_armed = _eager.is_armed()
         if was_armed:
             _tripwire.disarm_eager()
         try:
-            yield
+            with lowered_perimeter():
+                yield
         finally:
             if was_armed:
                 _tripwire.arm_eager()

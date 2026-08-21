@@ -3,7 +3,7 @@
 
 # VENDORED, NOT WRITTEN HERE, AND DELIBERATELY NOT REWRITTEN. This file is
 # `/home/nick/MSF/stelling-sweeps/artifacts/prop_guard.py` -- the mitigation
-# bundle of the 0.2.0 dunder-perimeter fuzz round -- copied in with FOUR edits
+# bundle of the 0.2.0 dunder-perimeter fuzz round -- copied in with FIVE edits
 # and no others, so that a reviewer can `diff` it against the artefact and see
 # the whole of what changed:
 #
@@ -11,7 +11,10 @@
 #   2. `_jnp()` takes `jnp` from `stelling._jax_compat` instead of importing
 #      `jax.numpy` itself;
 #   3. `_x64()` takes `jax` from the same place;
-#   4. `_selftest()` takes both from the same place.
+#   4. `_selftest()` takes both from the same place;
+#   5. `_target_dtype()` RETURNS on its own except branch instead of caching
+#      the `None` that branch produced -- one line, and the only edit that
+#      touches behaviour at all. See below.
 #
 # Edits 2-4 exist because this repository allows the `import jax` / `from jax`
 # token in exactly one file (`_jax_compat.py`) and
@@ -20,6 +23,26 @@
 # same laziness, the same objects. NOTHING in the predicate itself was
 # touched, and `tests/test_narrowing_perimeter.py` re-runs the artefact's own
 # 24-case self-test against this copy.
+#
+# EDIT 5, AND WHY IT DOES NOT SPEND THE ARTEFACT'S EVIDENCE. `_target_dtype`
+# memoises on `(dtype, is-float-slot, x64)` and wrote its result into the memo
+# on EVERY path, its own `except` branch included -- so a single transient
+# fault cached `None` for that key and the guard was blind on it for the rest
+# of the process, having counted the failure exactly ONCE. It is reachable
+# through public API: the `truediv` branch allocates `jnp.zeros((0,), dt) / 1`
+# and `jax.transfer_guard` -- documented, and used by real code -- makes that
+# allocation raise. Driven end to end, jax 0.11.0 at x64=0: after the guard
+# window CLOSES the reference defect fires 0 times in 20, over a run of 21
+# checks whose report named exactly ONE decline while twenty more were
+# answered out of the memo. With the return, the same drive fires 20 of 20 and
+# the memo is empty.
+#
+# The change is ANSWER-PRESERVING ON THE SCORED CORPUS, which is what keeps
+# the census below evidence about this copy: `INTERNAL_DECLINES` was empty in
+# all nine scored configurations, so this branch was never taken during
+# scoring and no scored answer can differ. What it changes is only what
+# happens AFTER a fault -- the next call recomputes rather than reading a
+# cached blindness -- which is the fail-safe the module already documents.
 #
 # WHY IT IS NOT REWRITTEN. It came out of a 204,300-evaluation property census
 # and was then scored, by a context that did not write it, over 482,691
@@ -381,7 +404,15 @@ def _target_dtype(dt, slot):
             out = np.dtype(jnp.result_type(dt, 1))
     except Exception as exc:
         INTERNAL_DECLINES[type(exc).__name__] += 1
-        out = None
+        # EDIT 5: `return None` rather than falling through to the memo. A
+        # value this call did not compute must not be cached: one transient
+        # fault -- `jax.transfer_guard`, a public and documented API, closing
+        # over the `zeros((0,), dt) / 1` allocation this branch makes -- would
+        # otherwise blind the guard for that key for the REST OF THE PROCESS,
+        # while `INTERNAL_DECLINES` recorded exactly 1. Declining is fail-safe
+        # only while it is counted, and a memoised decline is counted once and
+        # taken forever after. See the note at the top of this file.
+        return None
     _TARGET_CACHE[key] = out
     return out
 

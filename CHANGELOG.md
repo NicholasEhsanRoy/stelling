@@ -239,7 +239,8 @@ is 0.2.0 development work throughout.
 - **The predicate is vendored, not written.** `stelling/_tripwire/prop_guard.py`
   is the artefact of the 0.2.0 dunder-perimeter fuzz round, copied in with
   four import-route edits and no others, its self-test and its provenance
-  comment intact. Its 24 cases run in this repository's suite. **The evidence
+  comment intact. (A fifth edit, one line and answer-preserving on the scored
+  corpus, lands in this batch's fixup below.) Its 24 cases run in this repository's suite. **The evidence
   behind it is two kinds and they are not interchangeable**: a 482,691-check
   real-corpus census with zero false positives, which establishes that the
   predicate is not trigger-happy on code people write — and a
@@ -303,6 +304,90 @@ is 0.2.0 development work throughout.
   identity against the dtype jax actually converts a literal into. Three
   injected faults are driven against those rows. A displaced perimeter now
   also reaches `_tripwire.displaced()`, which the trace gate consults.
+
+- **The dial can be turned on over this repository's own suite, and the seven
+  tests it refused are now declared.** With
+  `--stelling-narrowing-perimeter=error` the whole suite is **4397 passed, 10
+  skipped**, exit 0 — armed at the end, `1447 integer literal(s)` checked,
+  `11 narrowing(s) PERMITTED at 9 site(s)`, each printed with the reason its
+  author gave. With the seven declarations taken back out it is **7 failed**,
+  which is the measurement they answer.
+
+  Three of the seven are new `expected_truncation` regions
+  (`test_tripwire_arm.py`, and two in `test_tripwire_gate.py` where an
+  incidental `int8` bound of `200` runs as `-56`). **The other four could not
+  use one, and that is measured rather than argued.** `expected_truncation`
+  is a single declaration covering BOTH runtime instruments by design — which
+  is right for code whose subject is a narrowing and exactly wrong for a test
+  whose subject is *Mode 2 firing on* a narrowing. Driven with a region
+  there: `assert fired["a + 200"] == (200, -56)` reads
+  `'SILENT' == (200, -56)`, and `test_tripwire_gate_coverage.py`'s eager
+  inventory reports every `raises` route as `silent` — a detector reported
+  blind by the declaration added to keep it running. Those four take Mode 3
+  DOWN for the block instead, through `conftest.lowered_perimeter`, exactly
+  as that file already detaches Mode 2 when the subject is the unpatched
+  program. The helper hands the hold back through the shipped `arm()` with
+  its self-check and raises if it cannot.
+
+- **`_isolate` used to unhook the session's own hold, and the dial was
+  therefore unmeasurable on the shipped tree.**
+  `tests/test_narrowing_perimeter.py`'s autouse fixture restored
+  unconditionally — the exact asymmetry `arm(owner=...)` exists to prevent,
+  aimed at the plugin's hold. That file sorts **71 of 146**, so its first test
+  took the perimeter out and roughly **4,300 later tests ran unprotected with
+  nothing red**; the documented dial-on command reported `NOT ARMED
+  [detached] ... 0 integer literal(s) ... were checked`. It now records what
+  it found, lowers the hold for its own window only, and hands it back by
+  identity through `arm()`, raising if it cannot.
+
+- **`prop_guard._target_dtype` no longer memoises a fault.** It cached the
+  `None` produced inside its own `except` branch, so one transient failure
+  blinded the guard for that dtype for the rest of the process while
+  `INTERNAL_DECLINES` recorded exactly **1**. Reachable through public API:
+  the `truediv` branch asks jax for the promotion by allocating
+  `jnp.zeros((0,), dt) / 1`, and `jax.transfer_guard("disallow")` makes that
+  raise. Driven — after the window closed the reference defect fired **0 times
+  in 20**, over a run of 21 checks whose report named exactly one decline
+  while twenty more were answered out of the memo. The branch now returns
+  instead of caching; the same drive fires **20 of 20**. This is the
+  **fifth** edit to the vendored predicate and the only one that touches
+  behaviour; it is
+  answer-preserving on the scored corpus, whose `INTERNAL_DECLINES` was empty
+  in all nine configurations, so the branch was never taken during scoring.
+
+- **`arm()`'s exception handler no longer restores faces another owner
+  holds.** It restored everything installed rather than what that call
+  installed — B8b's shape through the exception door. Driven: OWNER-1 armed
+  both faces, OWNER-2's `arm()` faulted, and OWNER-1's perimeter was gone
+  while OWNER-1 was still registered and still believed armed.
+
+- **The state guard now watches the perimeter.**
+  `tests/_state_guard.py::ENTRIES` had four entries and none covered
+  `perimeter._installed`, `_owners`, the 39 live slot bindings or the
+  predicate's lazy module caches — while `ci.yml`'s `random-order` lane reads
+  a shuffled failure the guard did not name as "state outside that
+  inventory". A fifth entry, `perimeter:installed`, reads the saved original
+  by identity and the live binding as *which* of the three known objects it
+  is, which is stable under a restore-to-equivalent and fires on an
+  installation, a release or a foreign patch that outlives a test.
+
+- **Two more `does NOT see` bullets, and Mode 3 now has a "what it does not
+  cover" section like Modes 1 and 2.** Its limits lived only in
+  `report.PERIMETER_UNCOVERED`, which prints at the END of a session — after
+  the decision to arm. Driven with all three instruments armed, the same
+  moved `2**31 - 1` threshold in three spellings of one harness:
+  `assert_(x <= 2**31 - 1)` is **REFUSED**, `assert_(jnp.less_equal(x, 2**31
+  - 1))` is **VERIFIED** and `assert_((x - (2**31 - 1)) <= 0.0)` is
+  **VERIFIED** — identical in both x64 cells. Two causes, neither previously
+  named: a `jnp.*` FUNCTION form carries no Python operator at all, so no
+  slot is entered (`jnp.add(x_int16, 40000)` is `-25536` in silence); and the
+  tracer face carries the six comparisons only, so of the 39 armed slots just
+  those six can fire on a traced operand — `x - N` inside a harness goes
+  through `Tracer.__sub__`, which is not installed. The second is a **scope
+  decision, not a jax limitation**: measured, jax's tracer type owns all 27
+  arithmetic slots. The printed list's last bullet did cover the function
+  form *in general*, and its three examples were all about tracing and
+  caching, which is how a true disclosure gets read as the examples.
 
 ### Verification pipeline
 

@@ -59,6 +59,7 @@ from stelling._tripwire import eager, record, report  # noqa: E402
 from stelling._tripwire.eager import expected_truncation  # noqa: E402
 
 from _repo_files import read_text_files  # noqa: E402
+from conftest import lowered_perimeter  # noqa: E402
 
 _REPO = pathlib.Path(__file__).resolve().parents[1]
 
@@ -1709,18 +1710,26 @@ def test_the_user_s_own_constants_still_fire_with_jit_OFF(armed):
     the only thing standing between that bullet and a false one.
     """
     fired = {}
-    with jax.disable_jit():
-        for name, route in ROUTES.items():
+    # THE DUNDER PERIMETER OUT OF THE WAY, not permitted, and the difference
+    # is the whole of this test. Mode 3 refuses `a + 200` at the operator, one
+    # layer above the construction site, so with it armed this test dies
+    # before its subject runs. A region cannot buy that back:
+    # `expected_truncation` covers BOTH instruments by design, so opening one
+    # here silences the very detector this test asserts fires -- driven,
+    # `assert fired["a + 200"] == (200, -56)` became `'SILENT' == (200, -56)`.
+    with lowered_perimeter():
+        with jax.disable_jit():
+            for name, route in ROUTES.items():
+                try:
+                    route(300)
+                    fired[name] = "SILENT"
+                except stelling.EagerTruncationError as exc:
+                    fired[name] = (exc.written, exc.became)
             try:
-                route(300)
-                fired[name] = "SILENT"
+                jnp.zeros((3,), jnp.int8) + 200
+                fired["a + 200"] = "SILENT"
             except stelling.EagerTruncationError as exc:
-                fired[name] = (exc.written, exc.became)
-        try:
-            jnp.zeros((3,), jnp.int8) + 200
-            fired["a + 200"] = "SILENT"
-        except stelling.EagerTruncationError as exc:
-            fired["a + 200"] = (exc.written, exc.became)
+                fired["a + 200"] = (exc.written, exc.became)
     assert fired["a + 200"] == (200, -56)
     assert all(value != "SILENT" for value in fired.values()), fired
 
@@ -1802,9 +1811,16 @@ def test_the_inline_door_is_open_with_jit_ON_and_closed_with_jit_OFF(armed):
         f"`design/d4-wrap-disclosure.md` is about this silence"
     )
     eager.reset_counters()
-    with jax.disable_jit():
-        with pytest.raises(stelling.EagerTruncationError) as caught:
-            x + 40000
+    # AND THE OTHER HALF TAKES THE OPPOSITE TOOL, which is the point worth
+    # reading: the jit-ON half above is about SILENCE, so a region declaring
+    # the narrowing is right and permits Mode 3 with it. This half is about
+    # Mode 2 FIRING, and a region would silence Mode 2 along with Mode 3 --
+    # one declaration, both instruments, by design. So Mode 3 is lowered
+    # instead of declared, and the fire this test is named for survives.
+    with lowered_perimeter():
+        with jax.disable_jit():
+            with pytest.raises(stelling.EagerTruncationError) as caught:
+                x + 40000
     assert (caught.value.written, caught.value.became) == (40000, -25536)
 
 

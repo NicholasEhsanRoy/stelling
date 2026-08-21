@@ -902,6 +902,26 @@ PERIMETER_UNCOVERED = (
     "all -- inside a jitted function jax has already traced, inside a "
     "primitive's own lowering, or in code that never re-enters Python "
     "because a trace cache answered for it.",
+    # THE FUNCTION SPELLING, NAMED RATHER THAN LEFT TO THE CLAUSE ABOVE. It is
+    # an instance of it, and that was the whole problem: a reader with
+    # `jnp.less_equal(x, 2**31 - 1)` in front of them does not recognise their
+    # program in "a route with no Python operator", whose three examples are
+    # all about tracing and caching. Driven with all three instruments armed:
+    # the operator spelling is REFUSED and the function spelling comes back
+    # VERIFIED, about the same moved threshold.
+    "the `jnp.*` FUNCTION spelling of an operator. `jnp.less_equal(x, N)` "
+    "and `jnp.add(x, N)` are calls, not operators -- no slot is entered and "
+    "nothing is checked. Measured: `x <= 2**31 - 1` on float32 is refused "
+    "and `jnp.less_equal(x, 2**31 - 1)` is VERIFIED, and "
+    "`jnp.add(x_int16, 40000)` is -25536 in silence.",
+    # AND THE FACE ASYMMETRY, which decides how much of the list above is live
+    # in a verification run rather than at a REPL.
+    "arithmetic inside a TRACED harness. The tracer face carries the six "
+    "comparisons only, so of the slots armed above just those six can fire "
+    "on a traced operand: `(x - N) <= 0.0` converts N in `Tracer.__sub__`, "
+    "which is not installed, and is VERIFIED. The arithmetic slots are on "
+    "the concrete array type -- the eager spelling -- and jax's tracer type "
+    "owns them too, so this is a scope decision rather than a jax limit.",
 )
 
 

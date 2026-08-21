@@ -184,6 +184,7 @@ cannot be a static read of the tree.
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import os
 import pathlib
@@ -1335,3 +1336,65 @@ def deterministic_order_args() -> tuple[str, ...]:
     environment and therefore no answer to get wrong.
     """
     return ("-p", "no:randomly")
+
+
+@contextlib.contextmanager
+def lowered_perimeter():
+    """The dunder perimeter DOWN for this block, and back exactly as found.
+
+    Yields the faces that were armed on the way in — ``()`` when there was
+    nothing to lower, in which case this does nothing at all.
+
+    **WHY THIS EXISTS RATHER THAN A REGION.** ``expected_truncation`` is one
+    declaration covering BOTH runtime instruments, by design. That is right
+    for code whose subject is a narrowing, and it is exactly wrong for a test
+    whose subject is *the eager detector firing on* a narrowing: a region
+    opened to permit Mode 3's refusal silences Mode 2 in the same breath, and
+    the inventory in ``tests/test_tripwire_gate_coverage.py`` then reads every
+    ``raises`` row as ``silent`` — a detector reported blind by the very
+    declaration added to keep it running. So where an instrument UNDER the
+    perimeter is the subject, the perimeter is taken out of the way instead,
+    exactly as that file's ``detached()`` takes Mode 2 out of the way when the
+    subject is the unpatched program.
+
+    **AND WHY IT IS HERE RATHER THAN WRITTEN OUT FIVE TIMES.** Three files
+    call it — the perimeter's own autouse fixture, and two places in the eager
+    inventories — and hand-rolled surgery on ``perimeter._installed`` and ``._owners``
+    is precisely what this batch was faulted for: the unconditional restore in
+    ``tests/test_narrowing_perimeter.py::_isolate`` unhooked the session's own
+    hold and left ~4,300 tests running unprotected with nothing red. One
+    implementation, which hands the hold back through the shipped ``arm()``
+    with its self-check, restores the owner list BY IDENTITY, and **raises**
+    if it cannot — a lowering that fails to re-arm must be a red test here and
+    not a silent hole in everything after it.
+    """
+    from stelling._tripwire import perimeter
+
+    faces = perimeter.armed_faces()
+    if not faces:
+        yield ()
+        return
+    # AN OWNERLESS INSTALL IS POSSIBLE and is not this helper's to diagnose:
+    # `arm()` registers its owner only after the self-check passes, so a
+    # `BaseException` between the two leaves faces installed with `_owners`
+    # empty. Re-arming under a fresh token puts the SLOTS back, which is what
+    # everything after this block depends on, and leaves the owner list as
+    # empty as it was found.
+    owners = list(perimeter._owners)
+    del perimeter._owners[:]
+    for face in list(perimeter._installed):
+        perimeter._restore_face(face)
+    try:
+        yield faces
+    finally:
+        for face in list(perimeter._installed):
+            perimeter._restore_face(face)
+        del perimeter._owners[:]
+        status = perimeter.arm(faces, owner=owners[0] if owners else object())
+        del perimeter._owners[:]
+        perimeter._owners.extend(owners)
+        if not status.armed:  # pragma: no cover - a jax that moved mid-session
+            raise AssertionError(
+                f"the perimeter was lowered and could not be re-armed "
+                f"[{status.code}]: {status.detail}"
+            )
