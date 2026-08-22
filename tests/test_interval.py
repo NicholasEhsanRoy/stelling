@@ -1136,14 +1136,14 @@ def _check(name: str, op: Op, cases) -> list[str]:
                 exactly_returned += 1
             if _f(lo) < elo and ehi < _f(hi):
                 strictly_inside += 1
-            if d is CORRECTLY_ROUNDED:
+            if d == CORRECTLY_ROUNDED:
                 want = (_rounded_down(elo), _rounded_up(ehi))
                 if (lo, hi) != want:
                     bad.append(
                         f"{where}: declared {d} but returned "
                         f"({lo!r}, {hi!r}); the correctly directed rounding "
                         f"of [{elo}, {ehi}] is ({want[0]!r}, {want[1]!r})")
-            elif d is ONE_ULP_BUMPED:
+            elif d == ONE_ULP_BUMPED:
                 want = (math.nextafter(_rounded_down(elo), -math.inf),
                         math.nextafter(_rounded_up(ehi), math.inf))
                 if (lo, hi) != want:
@@ -1151,36 +1151,36 @@ def _check(name: str, op: Op, cases) -> list[str]:
                         f"{where}: declared {d} but returned "
                         f"({lo!r}, {hi!r}); one ulp outside [{elo}, {ehi}] "
                         f"is ({want[0]!r}, {want[1]!r})")
-        if d is CORRECTLY_ROUNDED and not exactly_returned:
+        if d == CORRECTLY_ROUNDED and not exactly_returned:
             bad.append(f"{name}: declared {d} and no case returns its exact "
                        f"image UNWIDENED, which is the half of the rule an "
                        f"unconditional bump breaks")
-        if d is CORRECTLY_ROUNDED and exactly_returned == len(cases):
+        if d == CORRECTLY_ROUNDED and exactly_returned == len(cases):
             bad.append(f"{name}: declared {d} and every case is exact, so "
                        f"nothing here measures the DIRECTION of its "
                        f"rounding. Drive one inexact case too")
-        if d is ONE_ULP_BUMPED and not any(
+        if d == ONE_ULP_BUMPED and not any(
                 _f(_rounded_down(c[3])) == c[3] for c in cases):
             bad.append(f"{name}: declared {d} and no case has a "
                        f"REPRESENTABLE exact image, so nothing here "
                        f"measures that the bump is unconditional")
-        if d is EXACT_PER_STEP and not exactly_returned:
+        if d == EXACT_PER_STEP and not exactly_returned:
             bad.append(f"{name}: declared {d} and no case folds EXACTLY, so "
                        f"nothing distinguishes it from an unconditional bump")
-        if d is EXACT_PER_STEP and not strictly_inside:
+        if d == EXACT_PER_STEP and not strictly_inside:
             bad.append(f"{name}: declared {d} and no case puts a "
                        f"representable exact total STRICTLY inside both "
                        f"endpoints, so nothing distinguishes it from "
                        f"correctly directed rounding")
 
-    elif d is NO_ROUNDING:
+    elif d == NO_ROUNDING:
         for label, got_los, got_his, want_los, want_his in cases:
             if (got_los, got_his) != (want_los, want_his):
                 bad.append(f"{name}: {label}: declared {d} and returned "
                            f"{(got_los, got_his)}, not "
                            f"{(want_los, want_his)}")
 
-    elif d is NOT_OUTWARD:
+    elif d == NOT_OUTWARD:
         for label, lo, hi, rlo, rhi in cases:
             if not (_f(hi) < rlo or _f(lo) > rhi):
                 bad.append(
@@ -1192,7 +1192,7 @@ def _check(name: str, op: Op, cases) -> list[str]:
                     f"the ℝ-mode carve-out in `interval.__doc__`, which "
                     f"says it is not")
 
-    elif d is NO_ENDPOINTS:
+    elif d == NO_ENDPOINTS:
         for label, got, want in cases:
             if got != want:
                 bad.append(f"{name}: {label}: {got!r}, not {want!r}")
