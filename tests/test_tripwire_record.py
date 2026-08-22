@@ -1943,6 +1943,66 @@ def test_the_canarys_documented_exit_codes_are_exactly_the_ones_it_produces():
     )
 
 
+def _canary_jobs(workflow: str):
+    """``(job name, block)`` for every job of the nightly workflow, in order.
+
+    The layout this reads is a two-space job key whose first child is
+    ``name:``; a workflow that stops matching it has moved. Every caller
+    below FAILS on an empty list rather than passing over one — two by
+    asserting it directly and the third because the cells it collects come
+    from these blocks, so no jobs means no cells and no cells means red.
+    """
+    import re
+
+    starts = [
+        (m.start(), m.group(1))
+        for m in re.finditer(r"\n  ([a-z-]+):\n    name: ", workflow)
+    ]
+    bounds = [pos for pos, _ in starts] + [len(workflow)]
+    return [
+        (job, workflow[bounds[index]:bounds[index + 1]])
+        for index, (_, job) in enumerate(starts)
+    ]
+
+
+def _x64_cells(workflow: str, block: str, wanted) -> list[str]:
+    """The ``JAX_ENABLE_X64`` cell each step of ``block`` ``wanted`` runs in.
+
+    RESOLVE THE SETTING THE WAY THE RUNNER DOES: a step's own ``env:`` wins,
+    else the job's (which lives in the block HEAD, before ``steps:``), else
+    the workflow's top-level one. Reading only the step chunk and calling a
+    miss "unset" is how the sweep guard first went blind: hoisting the
+    repeated ``env:`` up to the job -- a tidy-up this workflow openly invites,
+    now six steps repeat it -- left every canary run at x64=1 with the guard
+    still green. What must NOT leak is ANOTHER STEP's ``env:``, so the
+    per-step search stays per-step and the job's is taken from the head alone.
+    Anchored, because a comment QUOTING the setting is not the workflow
+    SETTING it -- two of the mutants that killed the old guard were caught
+    only by that accident.
+
+    **IT IS ONE FUNCTION BECAUSE TWO CALLERS NEED THE SAME RULE**, and the
+    second caller is why: the guard on the tripwire's own test step was added
+    without this resolution and read no cell at all. A resolution rule this
+    subtle, typed twice, is the shape
+    `.github/workflows/nightly-jax-canary.yml` has already drifted on twice
+    in prose.
+    """
+    import re
+
+    setting_re = re.compile(r'^\s*JAX_ENABLE_X64:\s*"?([01])"?', re.M)
+    head = block.split("\n    steps:", 1)[0]
+    inherited = setting_re.search(head) or setting_re.search(
+        workflow.split("\njobs:", 1)[0]
+    )
+    cells = []
+    for step in re.split(r"\n      - (?=name:|uses:|run:)", block)[1:]:
+        if not wanted(step):
+            continue
+        setting = setting_re.search(step) or inherited
+        cells.append(setting.group(1) if setting else "unset")
+    return cells
+
+
 def test_the_canary_and_the_workflow_agree_about_the_two_legs():
     """The guidance a red run prints is a claim about a workflow. Check it.
 
@@ -2005,13 +2065,11 @@ def test_the_canary_and_the_workflow_agree_about_the_two_legs():
     # only workflow that runs it without a single test noticing. The guidance
     # is a claim about what the two legs MEASURE, and a leg that does not arm
     # the tripwire measures nothing to compare.
-    starts = [
-        (m.start(), m.group(1))
-        for m in re.finditer(r"\n  ([a-z-]+):\n    name: ", workflow)
-    ]
-    bounds = [pos for pos, _ in starts] + [len(workflow)]
-    for index, (_, job) in enumerate(starts):
-        block = workflow[bounds[index]:bounds[index + 1]]
+    jobs_and_blocks = _canary_jobs(workflow)
+    assert jobs_and_blocks, (
+        "no jobs found; the workflow layout this reads has moved"
+    )
+    for job, block in jobs_and_blocks:
         # ON A `run:` LINE, not anywhere in the block: this file is YAML and
         # a `#` turns the step into prose that still contains every word
         # below. Commenting the step out is the same mutation as deleting it.
@@ -2098,11 +2156,33 @@ def test_the_nightly_runs_the_tests_OF_THE_HOOK_ON_A_PRIVATE_FUNCTION():
     present in that cell — so adding the file would have made the leg
     permanently red.
 
+    **AND THE CELL IS THE OTHER HALF, WHICH THIS TEST DID NOT CHECK.** "115
+    passed in both cells" is what licensed adding the step, and it says the
+    file is GREEN in both cells — not that it WATCHES in both. It does not:
+    of the eight tests converted to complements, the two that carry the
+    eager detector's suppression SITING put it behind `if
+    jax.config.jax_enable_x64: … return`, so the siting is asserted at x64
+    OFF only. Driven, with `observe()` still counting `SUPPRESSED_JAX` but
+    never writing the `SUPPRESSED` row:
+
+        x64=0    2 failed, 113 passed
+        x64=1    115 passed            <- the neutered detector is invisible
+
+    Run at `JAX_ENABLE_X64: "1"` alone, the step added to close an
+    unwatched hook was itself an instrument that could not fire — and
+    nothing guarded the cell: flipping that step's setting to `"0"` left
+    this file at `68 passed`, with
+    `::test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN`
+    standing one function below as the precedent for exactly this check.
+    So BOTH cells are required here, resolved through `_x64_cells`, the
+    same rule that guard uses.
+
     NOT EVERY `test_tripwire_*.py` IS ON THAT STEP, and this does not ask for
     them: `test_tripwire_xdist.py` needs `pytest-xdist`, which the nightly
     does not install, and the two gate files drive the 35-route inventory
     twice over. What is checked is that the file naming the hook on a private
-    FUNCTION is there, and that nothing on the step names a file that is not.
+    FUNCTION is there, that nothing on the step names a file that is not, and
+    that the file is run in both cells.
     """
     import re
 
@@ -2139,6 +2219,36 @@ def test_the_nightly_runs_the_tests_OF_THE_HOOK_ON_A_PRIVATE_FUNCTION():
         f"4 rather than saying so"
     )
 
+    # ...AND IN BOTH CELLS. See the paragraph above for the measurement; the
+    # short of it is that the file's suppression-siting assertions sit behind
+    # an x64 branch, so a step at x64=1 alone runs the tests and watches
+    # nothing that the eager hook actually does.
+    cells = [
+        cell
+        for _, block in _canary_jobs(workflow)
+        for cell in _x64_cells(
+            workflow,
+            block,
+            lambda step: (
+                re.search(r"^\s*run:", step, re.M)
+                and "-m pytest" in step
+                and "test_tripwire_eager.py" in step
+            ),
+        )
+    ]
+    off = [cell for cell in cells if cell in ("0", "unset")]
+    on = [cell for cell in cells if cell == "1"]
+    assert off and on, (
+        f"`tests/test_tripwire_eager.py` is run on the nightly at "
+        f"JAX_ENABLE_X64={cells}, and it has to be run in BOTH cells. At x64 "
+        f"OFF is where its suppression-siting assertions live — with the "
+        f"detector's siting neutered that cell is `2 failed, 113 passed` and "
+        f"x64 ON is `115 passed`, so a step in the ON cell alone runs 115 "
+        f"tests and watches none of the finding, attributing or suppressing "
+        f"this step was added for. At x64 ON is where the complementary "
+        f"denominators bite and where this repository does its jax work"
+    )
+
 
 def test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN():
     """An alarm wired to a condition that cannot occur is not an alarm.
@@ -2163,36 +2273,21 @@ def test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN():
         _pathlib_for_canary() / ".github" / "workflows" / "nightly-jax-canary.yml"
     ).read_text(encoding="utf-8")
 
-    starts = [
-        (m.start(), m.group(1))
-        for m in re.finditer(r"\n  ([a-z-]+):\n    name: ", workflow)
-    ]
-    assert starts, "no jobs found; the workflow layout this test reads has moved"
-    bounds = [pos for pos, _ in starts] + [len(workflow)]
-    for index, (_, job) in enumerate(starts):
-        block = workflow[bounds[index]:bounds[index + 1]]
-        # RESOLVE THE SETTING THE WAY THE RUNNER DOES: a step's own `env:`
-        # wins, else the job's (which lives in the block HEAD, before
-        # `steps:`), else the workflow's top-level one. Reading only the step
-        # chunk and calling a miss "unset" is how this guard first went blind:
-        # hoisting the repeated `env:` up to the job -- a tidy-up this
-        # workflow openly invites, four steps repeat it -- left every canary
-        # run at x64=1 with the guard still green. What must NOT leak is
-        # ANOTHER STEP's `env:`, so the per-step search stays per-step and the
-        # job's is taken from the head alone. Anchored, because a comment
-        # QUOTING the setting is not the workflow setting it -- two of the
-        # mutants that killed the old guard were caught only by that accident.
-        setting_re = re.compile(r'^\s*JAX_ENABLE_X64:\s*"?([01])"?', re.M)
-        head = block.split("\n    steps:", 1)[0]
-        inherited = setting_re.search(head) or setting_re.search(
-            workflow.split("\njobs:", 1)[0]
+    jobs_and_blocks = _canary_jobs(workflow)
+    assert jobs_and_blocks, (
+        "no jobs found; the workflow layout this test reads has moved"
+    )
+    for job, block in jobs_and_blocks:
+        # The resolution rule lives in `_x64_cells` — see there for what it
+        # refuses to guess and for the hoisted-`env:` mutant that killed the
+        # first version of this guard.
+        cells = _x64_cells(
+            workflow,
+            block,
+            lambda step: re.search(
+                r"^\s*run:[^\n]*tripwire_canary\.py", step, re.M
+            ),
         )
-        cells = []
-        for step in re.split(r"\n      - (?=name:|uses:|run:)", block)[1:]:
-            if not re.search(r"^\s*run:[^\n]*tripwire_canary\.py", step, re.M):
-                continue
-            setting = setting_re.search(step) or inherited
-            cells.append(setting.group(1) if setting else "unset")
         assert cells, (
             f"the `{job}` leg does not run the canary at all"
         )
