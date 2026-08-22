@@ -40,7 +40,7 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
     ``(1.0, 1.0000000000000004)`` while the exact total,
     ``1.0000000000000002``, is representable and is *neither* endpoint —
     the single-op property that one endpoint equals ``fl(R)`` does not
-    extend. :func:`reduce_sum`'s own docstring says this in the same words.
+    extend. :func:`reduce_sum`'s own docstring says the same thing.
   - the **⊤ escapes and endpoint conventions** that are not real arithmetic
     at all: a divisor interval containing zero, ``inf/inf``, an infinite
     operand under ``mul``'s ``0·±inf = 0`` rule. Those widen deliberately
@@ -64,7 +64,12 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   docstring said so sixty lines below. Nothing unsound rested on either —
   what rests on it is every reader's model of how much slack a chain of
   operations accumulates, and a reader told the bracket is tighter than it
-  is is the worse of the two errors.
+  is is the worse of the two errors. Nothing in the suite had ever read
+  this bullet, either time. ``tests/test_interval.py``'s
+  ``test_the_module_docstring_states_a_scope_and_the_counter_examples_hold``
+  now does: it re-drives all four measurements above and requires this text
+  to contain each endpoint, so tightening one of these operations reddens
+  on the SCOPE rather than passing quietly.
 
   The stamp still reads ``interval/f64/outward-1ulp``. That string is a
   published surface and is not changed here; it names the guarantee's
