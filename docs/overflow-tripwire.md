@@ -140,11 +140,13 @@ and **the value wraps in every UNCOVERED row**.
 this page is named for and did not give.** Every row below is an integer route,
 because both instruments in this section are integer→integer: this tripwire
 watches integer RANGE, the eager detector watches integer CONSTRUCTION, and
-`stelling.intentional_wrap` refuses every non-integer dtype by name. Three
-different things get called float overflow, the release answers them
-differently, and **only one of the three is genuinely silent** — which is the
-opposite way round from what this section said before it was driven under
-`warnings.simplefilter("error")`:
+`stelling.intentional_wrap` refuses every non-integer dtype by name. Two
+different things get called float overflow — a value that is already a float
+and overflows, and an integer literal with no finite image in the float dtype
+it meets — and the first of them **splits again by route**, which is what
+decides whether it is silent. Driven under `warnings.simplefilter("error")`,
+the answer is the opposite way round from what this section said before it was
+driven at all:
 
 * **A value that is already a FLOAT and overflows the format it is converted
   into is seen by none of these three instruments — but "seen by nothing" is
