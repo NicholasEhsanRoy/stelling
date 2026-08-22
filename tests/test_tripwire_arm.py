@@ -1211,12 +1211,22 @@ def test_strict_promotion_is_a_DTYPE_check_measured_over_the_WHOLE_door_set():
         f"Python int does not get. 'never rejects it' is the false reading "
         f"that was there. Rendered advice:\n{advice}"
     )
-    for door in sorted(loud_for_a_bare_int):
-        assert door in advice, (
-            f"report._suggestions does not name {door} among the doors that "
-            f"raise OverflowError on a bare Python int, and this test just "
-            f"measured that it does"
-        )
+    # ...against the CLAUSE, not against the whole rendered advice. `door in
+    # advice` passed for any door list at all: all three names already appear
+    # earlier in the same bullet, as members of the FIVE construction doors
+    # strict promotion is silent at. Measured: rewriting the OverflowError
+    # clause to `(jnp.full, jnp.full_like, jnp.where)` left this green.
+    clause = (
+        f"three of the construction doors "
+        f"({', '.join(sorted(loud_for_a_bare_int))}) raise OverflowError on "
+        f"the VALUE instead"
+    )
+    assert clause in advice, (
+        f"report._suggestions does not name the doors that raise "
+        f"OverflowError on a bare Python int as this test just measured "
+        f"them. Expected the clause:\n  {clause}\nRendered advice:\n{advice}"
+    )
+    assert len(loud_for_a_bare_int) == 3, sorted(loud_for_a_bare_int)
 
     # ...and the control for all of it: without strict, none of the eleven
     # raises, so the sets above are about the SETTING and not about the doors
