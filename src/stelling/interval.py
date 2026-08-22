@@ -6,11 +6,32 @@
 This is the one module where paranoia is the design: **a rounding bug here
 is a false VERIFIED**, which is the project's own thesis defect. The rules:
 
-* Every arithmetic endpoint is computed in double precision and then
-  **bumped one ulp outward** (``math.nextafter``). IEEE basic operations
-  (+, -, *, /) are correctly rounded (≤ 0.5 ulp), so the true real result
-  always lies inside the bumped bracket. We do not attempt tight rounding;
-  we buy soundness with one deliberate ulp of slack per operation.
+* Every arithmetic endpoint is **correctly directed-rounded**: the
+  endpoint is the nearest double on the outward side of the EXACT real
+  result, computed against ``Fraction`` and bumped with
+  ``math.nextafter`` **only when the double is on the wrong side**
+  (:func:`_exact_down`, :func:`_exact_up`). So the true real result always
+  lies inside the bracket, and the bracket is as tight as doubles allow:
+  when the exact result is representable, both endpoints ARE it and
+  nothing is bumped. Measured, in float64: ``[0.25, 0.5]`` op
+  ``[0.25, 0.5]`` gives exactly ``[0.0625, 0.25]`` for ``mul``,
+  ``[0.5, 1.0]`` for ``add``, ``[-0.25, 0.25]`` for ``sub`` and
+  ``[0.5, 2.0]`` for ``div``.
+
+  *This bullet read "computed in double precision and then **bumped one
+  ulp outward** … we do not attempt tight rounding; we buy soundness with
+  one deliberate ulp of slack per operation". That was the rule once and
+  is not the rule now — a claim divergence in the one module whose
+  docstring opens by calling paranoia the design. It was NARROWER than the
+  code in the safe direction, so nothing unsound rested on it; what rested
+  on it was every reader's model of how much slack a chain of operations
+  accumulates, and ``tests/test_interval.py``'s own
+  ``test_add_brackets_true_result_exactly`` had already written the tight
+  rule down and cited this docstring as agreeing with it.*
+
+  The stamp still reads ``interval/f64/outward-1ulp``. That string is a
+  published surface and is not changed here; it names the guarantee's
+  DIRECTION and its worst case, both of which still hold.
 * ``integer_pow`` endpoints take a **tighter** route to the same
   guarantee: a double is a dyadic rational, so ``Fraction(x) ** n`` is the
   EXACT power, and it is bumped one ulp outward only on the side the
