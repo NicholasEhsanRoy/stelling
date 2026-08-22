@@ -233,8 +233,12 @@ Every verdict object stamps, at minimum:
   withheld. Driven verbatim from the sentence above through
   `preconditions.check(h, vacuity_mode="inputs-only", solver_timeout_ms=60_000)`:
   `status UNKNOWN, witnesses ()`, with both solvers answering `sat` and the
-  verdict declining to mint a REFUTED out of either, in three cells — jax
-  0.11.0 with `JAX_ENABLE_X64` unset, jax 0.11.0 with it set, and jax 0.10.2.
+  verdict declining to mint a REFUTED out of either. **Four cells** — jax
+  0.11.0 and jax 0.10.2, each with `JAX_ENABLE_X64` unset and set — same
+  status and same empty witness tuple in every one. (With x64 unset the
+  `float64` declaration truncates to `float32`, so those two cells ask a
+  slightly different question; they are reported because the withholding is
+  what is being measured and it does not depend on the width.)
   The regression is
   `tests/test_dropped_assume.py::test_the_reproducer_no_longer_refutes`,
   whose module docstring carries the pre-fix measurement in the same words
