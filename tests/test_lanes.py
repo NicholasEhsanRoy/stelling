@@ -814,6 +814,27 @@ def test_no_reader_asks_whether_a_lane_HAS_JAX_by_comparing_the_STRING():
     AST, not grep: a comparison is a shape, and `# lane.jax != "absent"` in a
     comment is prose about the rule rather than a use of it — which this
     file's own docstrings are full of.
+
+    **THE EXEMPTION IS KEYED TO `_lanes.py` AND NOT TO THE NAME**, from
+    2026-08-22, and the difference was driven. It collected `FunctionDef`s
+    called `has_jax` PER FILE, so any file under `tests/` licensed the bare
+    comparison inside a function it chose to call that: appending
+    `def has_jax(lane): return lane.jax != "absent"` to this very file gave
+    **`1 passed`**, while the identical body in a function called anything
+    else is **`1 failed`**. A licence that travels with a NAME anyone can
+    type is not a licence; the accessor lives in one module and the exemption
+    now says so. Named rather than line-ranged inside that module, so moving
+    it up `_lanes.py` still changes nothing here.
+
+    **AND THE COMPARISON IS READ FROM EITHER SIDE.** `"absent" != lane.jax`
+    reaches the same permissive answer and was invisible — the scan looked at
+    `node.left` alone, so the reversed spelling passed anywhere in the tree
+    (driven: `1 passed`). Both operand orders are now the same shape to this.
+    **What it still cannot see, said rather than left to be found:** a local
+    binding (`j = lane.jax` and then `j != "absent"`), the comparison built
+    through `getattr(lane, "jax")`, and `"absent"` reached through a name
+    rather than written as a literal. None is in the tree today; an AST shape
+    scan is incomplete by nature and this is which incompleteness it has.
     """
     import ast
 
@@ -824,30 +845,35 @@ def test_no_reader_asks_whether_a_lane_HAS_JAX_by_comparing_the_STRING():
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:  # pragma: no cover
             continue
-        # The accessor's own body is the one place the comparison belongs.
-        # Named rather than line-ranged, so moving it up the file changes
-        # nothing here.
+        # The accessor's own body is the one place the comparison belongs,
+        # and that body is in `_lanes.py` — see the docstring for the plant
+        # that made a name-keyed exemption travel.
         exempt = {
             (n.lineno, n.end_lineno)
             for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef) and n.name == "has_jax"
-        }
+        } if path.name == "_lanes.py" else set()
         for node in ast.walk(tree):
             if not isinstance(node, ast.Compare):
                 continue
             if any(lo <= node.lineno <= hi for lo, hi in exempt):
                 continue
-            left = node.left
-            if not (isinstance(left, ast.Attribute) and left.attr == "jax"):
-                continue
-            for comparator in node.comparators:
-                if (
-                    isinstance(comparator, ast.Constant)
-                    and comparator.value == "absent"
-                ):
-                    offenders.append(
-                        f"{path.relative_to(tests_dir.parent)}:{node.lineno}"
-                    )
+            # EITHER OPERAND ORDER. `lane.jax != "absent"` and
+            # `"absent" != lane.jax` are one shape with the sides swapped and
+            # answer the same forbidden question.
+            operands = [node.left, *node.comparators]
+            reads_jax = any(
+                isinstance(n, ast.Attribute) and n.attr == "jax"
+                for n in operands
+            )
+            names_absent = any(
+                isinstance(n, ast.Constant) and n.value == "absent"
+                for n in operands
+            )
+            if reads_jax and names_absent:
+                offenders.append(
+                    f"{path.relative_to(tests_dir.parent)}:{node.lineno}"
+                )
     assert offenders == [], (
         f"these ask whether a lane has jax by comparing `Lane.jax` with "
         f"`'absent'`: {offenders}. `matrix` is a truthy string in that field, "

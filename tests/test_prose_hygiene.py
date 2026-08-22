@@ -69,11 +69,21 @@ def test_core_lines_naming_libraries_carry_provenance_markers():
 # prefix. Both forms are resolved rather than one being skipped, because
 # skipping is how a citation stops being checked without anyone deciding to.
 #: The citation, allowing the IDENTIFIER to be wrapped. `SOUNDNESS.md`
-#: wraps nine of its eighteen citations mid-name, always after an underscore
+#: wraps EIGHT of its eighteen citations mid-name, always after an underscore
 #: because that is where a long identifier breaks; a line-by-line scan sees
 #: `…::test_a_lying_` and calls it dangling. The continuation is tried only
 #: when the unwrapped name does NOT resolve, so this can never turn a live
 #: citation into a different one by swallowing the next word.
+#:
+#: EIGHT AND NOT NINE, RE-DERIVED. This read *"nine of its eighteen"*, which
+#: is the count of everything the plain spelling does not resolve. Staged by
+#: how each one actually resolves, `SOUNDNESS.md`'s eighteen are **9 plain /
+#: 8 mid-name wrap / 1 supersession / 0 dangling**: the ninth non-plain one
+#: is `tests/test_verified_bar.py::test_the_pairing_gate_binds_the_ESCALATION
+#: _and_not_the_propagation`, which is not wrapped and resolves through the
+#: annotation beside it. A numeral that counts two mechanisms as one is how
+#: a residue gets bounded at the wrong width — which is what happened to
+#: :data:`_SUPERSEDED_BY`'s below.
 _TEST_REF_WRAPPED = re.compile(
     r"(tests/[A-Za-z0-9_./]+\.py)::(test_[A-Za-z0-9_]+)"
     r"((?<=_)[ \t]*\n[ \t#*>]*[A-Za-z0-9_]+)?(\*?)"
@@ -85,11 +95,35 @@ _TEST_REF_WRAPPED = re.compile(
 #: now `::test_the_two_pairing_gates_…`"* — and rewriting the original would
 #: destroy the record this file exists to keep. A supersession only licenses
 #: the stale citation when the replacement it names RESOLVES, so it cannot be
-#: used to license nothing. THE RESIDUE, stated: a paragraph carrying a
-#: resolving `::name` licenses every stale citation in it, not only the one
-#: the annotation is about. One paragraph in the tree carries a supersession
-#: today, so the residue is one paragraph wide; a second would be worth
-#: keying the licence to the citation it annotates.
+#: used to license nothing.
+#:
+#: **THE LICENCE IS KEYED TO THE CITATION IT ANNOTATES, AND ITS OWN TRIGGER
+#: IS WHY.** This comment used to say the residue was one PARAGRAPH wide —
+#: any resolving `::name` in a paragraph licensed every stale citation in it
+#: — on the ground that *"one paragraph in the tree carries a supersession
+#: today … a second would be worth keying the licence to the citation it
+#: annotates."* There are two. Both are in `SOUNDNESS.md`, and staging every
+#: citation in the shipped set finds exactly them: the `So the correct
+#: statement is not "scoping cost a backstop"` paragraph, whose annotation is
+#: in use, and the `FOUR arguments, not one` paragraph, whose bare `::name`
+#: is not an annotation at all but an ABBREVIATED second citation of a test
+#: in the file already named — a licence nothing needs, covering a paragraph
+#: 1382 characters wide. Driven at `24a77cb`: a deleted-long-ago citation of
+#: `tests/test_propagation_identity.py` planted at the head of that paragraph
+#: gave **5 passed**; the identical plant one paragraph later gave **1
+#: failed**.
+#:
+#: So an annotation licenses the citation it FOLLOWS, with no other
+#: `path::name` citation in between — which is the shape both real ones have
+#: (*"…`tests/test_verified_bar.py::test_x`. **[CLOSED …; that test is now
+#: `::test_y`.]**"*) and is what "the citation it annotates" means when the
+#: only thing a checker can read is position. The residue that remains is one
+#: citation wide and stated: a supersession still licenses the whole span
+#: back to the previous citation — 307 characters in that same paragraph,
+#: down from 1382 — so an annotation and the sentence it corrects may still
+#: be a clause apart, and the licence still requires only that the
+#: replacement RESOLVE IN THE CITED FILE, not that it be related to the name
+#: it replaces.
 _SUPERSEDED_BY = re.compile(r"(?<!\w)::(test_[A-Za-z0-9_]+)")
 
 #: Where a `path::name` citation is checked. Shipped prose and the scripts
@@ -127,11 +161,17 @@ def _citation_sources():
                 continue
 
 
-def _enclosing_paragraph(text: str, index: int) -> str:
+def _enclosing_paragraph(text: str, index: int) -> tuple[int, str]:
+    """The paragraph around ``index``, and where in ``text`` it starts.
+
+    The offset is returned because the supersession licence is keyed to a
+    POSITION inside the paragraph and not to the paragraph — see
+    :data:`_SUPERSEDED_BY`.
+    """
     start = text.rfind("\n\n", 0, index)
     start = 0 if start < 0 else start + 2
     end = text.find("\n\n", index)
-    return text[start:len(text) if end < 0 else end]
+    return start, text[start:len(text) if end < 0 else end]
 
 
 def _defined_test_names(text):
@@ -213,13 +253,16 @@ def test_every_test_cited_in_core_prose_still_exists():
     widened set, and the widening is what found it.
 
     Two shapes had to be handled for the wider scan to mean anything, and
-    both are enumerated beside their patterns: a citation WRAPPED mid-name
-    (nine of `SOUNDNESS.md`'s eighteen are), and a citation the same
-    paragraph SUPERSEDES by naming the test it became — which is how the
-    ledger records a closed finding without rewriting the sentence it closed.
-    `tests/` and `scratchpad/` stay out, and `tests/` for a reason rather
-    than by omission: three test modules write citation-shaped source strings
-    as PLANTS, and are supposed to name tests that do not exist.
+    both are enumerated beside their patterns: a citation WRAPPED mid-name,
+    and a citation an ANNOTATION BESIDE IT supersedes by naming the test it
+    became — which is how the ledger records a closed finding without
+    rewriting the sentence it closed. Staged by mechanism, `SOUNDNESS.md`'s
+    eighteen citations are **9 plain / 8 mid-name wrap / 1 supersession / 0
+    dangling**; this said *"nine of eighteen"* wrap, which counted the
+    supersession as a wrap. `tests/` and `scratchpad/` stay out, and `tests/`
+    for a reason rather than by omission: three test modules write
+    citation-shaped source strings as PLANTS, and are supposed to name tests
+    that do not exist.
 
     `src/stelling` cites tests by `path::name` in nineteen places. Those
     citations are how a reader checks that a guard is pinned rather than
@@ -274,11 +317,19 @@ def test_every_test_cited_in_core_prose_still_exists():
             # ... then the wrapped spelling, and only then
             if wrap and resolves(defined, name + wrap.split("\n")[1].strip(" \t#*>"), star):
                 continue
-            # ... and last, a supersession the same paragraph declares
-            para = _enclosing_paragraph(text, m.start())
+            # ... and last, a supersession ANNOTATING THIS CITATION: one the
+            # same paragraph declares AFTER it, with no other `path::name`
+            # citation in between. A paragraph-wide licence was the residue
+            # `_SUPERSEDED_BY`'s comment bounded at one paragraph and the
+            # tree now has two, one of whose bare `::name`s annotates
+            # nothing.
+            para_start, para = _enclosing_paragraph(text, m.start())
+            after = m.end() - para_start
+            following = _TEST_REF_WRAPPED.search(para, after)
+            window = para[after:following.start() if following else len(para)]
             if any(
                 resolves(defined, replacement, "")
-                for replacement in _SUPERSEDED_BY.findall(para)
+                for replacement in _SUPERSEDED_BY.findall(window)
             ):
                 continue
             dangling.append(f"{source}:{lineno}: {rel}::{name}{star}")

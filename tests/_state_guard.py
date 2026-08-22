@@ -813,7 +813,30 @@ def _carry(previous: object, moved_from: object, moved_to: object) -> object:
 def _outside_a_test(
     traj: dict[str, dict[str, object]], reading: dict[str, object]
 ) -> None:
-    """Fold a reading taken outside any test into ``traj``, part by part."""
+    """Fold a reading taken outside any test into ``traj``, part by part.
+
+    **THE `!=` IN FRONT OF THE FOLD IS A PREDECESSOR GUARD AND IS REDUNDANT
+    IN EFFECT FOR EVERY READING IN THIS TREE**, said here because the
+    previous version of this docstring did not say it and because
+    ``_matrix_include`` in ``tests/_lanes.py`` sets the precedent for saying
+    it. It was the whole of the fold before :func:`_carry` became part-wise:
+    a reading that had not moved was skipped, and one that had was written
+    through whole. Now that the fold is per KEY, an unmoved MAPPING carries
+    to a copy of what ``shadow`` already held — ``_carry`` ``continue``s on
+    every key whose two sides agree — so the guard decides nothing. All five
+    :data:`ENTRIES` read as mappings today. Driven: replacing the condition
+    with ``if True:`` leaves ``tests/test_state_guard.py`` at **29 passed**.
+
+    IT STAYS, AND NOT ONLY AS A CHEAP GUARD IN FRONT OF A LOOP. A reading
+    that is NOT a mapping — an :class:`Unreadable` from a reader that raised,
+    or :data:`ABSENT` — is one opaque part and carries WHOLE, so for those
+    ``_carry`` would return the unmoved value and overwrite the predecessor
+    ``shadow`` is holding on the module's behalf. That is reachable only when
+    a test moves such an entry and is exempted from the function-scope guard
+    for it, and :data:`PINNED_EXEMPTIONS` is empty today, which is why no
+    test distinguishes the two. Redundant in effect, not redundant in
+    argument.
+    """
     last, shadow = traj["last"], traj["shadow"]
     for name, value in reading.items():
         if last.get(name) != value:

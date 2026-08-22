@@ -119,13 +119,23 @@ _PREAMBLE_MAX_LINES = 60
 _PREAMBLE_BULLET = re.compile(r"^[-*+] ", re.M)
 
 
-def log_bullets() -> list[tuple[int, str]]:
+def log_bullets(text: str | None = None) -> list[tuple[int, str]]:
     """`(line, text)` for every top-level bullet of `SOUNDNESS.md`'s `## Log`.
 
     Top-level means column 0 — the same rule
     `tests/test_soundness_routing.py::split_blocks` uses on the changelog,
     for the same reason: a nested bullet is part of its parent's argument
     and is not an entry.
+
+    **`text` IS THE DOCUMENT TO READ, DEFAULTING TO `SOUNDNESS.md`, AND IT
+    EXISTS SO THE PREAMBLE RULE BELOW IS DRIVEN THROUGH THIS FUNCTION.**
+    `test_an_ENTRY_CANNOT_BE_HIDDEN_IN_THE_LOGS_PREAMBLE` re-implemented the
+    three legs inline on a synthetic section — its docstring said *"the three
+    legs of `log_bullets`'s preamble rule, driven"* and a COPY of them was
+    what got driven. Measured: deleting all three legs from here left
+    `tests/test_soundness_log_reach.py` at **`9 passed`**, the pin green over
+    the rule's absence. A test that edits the file it reads can leave the tree
+    changed, so a parameter is how the real rule meets a synthetic section.
 
     **THE PREAMBLE IS HELD SHUT HERE AND NOT IN A TEST BESIDE IT**, because
     every count in this file is derived from what this function returns and a
@@ -146,7 +156,9 @@ def log_bullets() -> list[tuple[int, str]]:
     in backticks rather than writing one), no column-0 list marker of any
     spelling may either, and the whole preamble is bounded.
     """
-    lines = SOUNDNESS.read_text(encoding="utf-8").split("\n")
+    if text is None:
+        text = SOUNDNESS.read_text(encoding="utf-8")
+    lines = text.split("\n")
     lo = next(i for i, line in enumerate(lines, 1) if line.rstrip() == "## Log")
     hi = next(
         i for i, line in enumerate(lines, 1) if i > lo and line.startswith("## ")
@@ -183,7 +195,8 @@ def log_bullets() -> list[tuple[int, str]]:
 
 
 def test_an_ENTRY_CANNOT_BE_HIDDEN_IN_THE_LOGS_PREAMBLE():
-    """The three legs of :func:`log_bullets`'s preamble rule, driven.
+    """The three legs of :func:`log_bullets`'s preamble rule, driven —
+    THROUGH IT.
 
     `log_bullets()` starts at the first column-0 `- ` after `## Log`, so
     everything above it was unread and unbounded until 2026-08-22. Driven on
@@ -192,51 +205,100 @@ def test_an_ENTRY_CANNOT_BE_HIDDEN_IN_THE_LOGS_PREAMBLE():
     reached-release count still reading seven while eight entries declared
     reach. The count is the whole point of this file.
 
-    Each leg is exercised on a synthetic section rather than by editing
-    `SOUNDNESS.md`, because a test that mutates the file it reads is a test
-    that can leave the tree changed.
+    **THIS PIN DID NOT DRIVE THE RULE IT PINS.** It re-implemented the three
+    legs inline — the same `starts` scan, the same body slice, the same
+    field, bullet and size readings — and asserted on the COPY. Measured:
+    deleting the entire preamble guard from `log_bullets()` left this file at
+    **`9 passed`**. A pin over a re-implementation goes green over the
+    absence of the thing it pins, which is the defect class this file's own
+    subject is about.
+
+    So each leg is now a synthetic section handed to `log_bullets()` itself,
+    which is what the `text` parameter is for — a test that edits the file it
+    reads can leave the tree changed. **ONE LEG PER SECTION**, because the
+    real function reports the FIRST leg that fires: the field leg and the
+    bullet leg both catch the realistic shape (a `*` bullet carrying a reach
+    field), and asserting both are live needs them isolated. The fourth
+    section is the control that keeps the three reds non-vacuous — a
+    preamble breaking none of the rules is ACCEPTED and its entry comes back.
     """
-    def preamble_verdict(preamble: str):
-        lines = ["## Log", ""] + preamble.split("\n") + [
+    def section(preamble: str) -> str:
+        return "\n".join(["## Log", ""] + preamble.split("\n") + [
             "- **an entry.** body.",
             "",
             f"  {REACHES_V010}",
             "",
             "## After",
-        ]
-        starts = [i for i in range(3, len(lines) + 1) if lines[i - 1].startswith("- ")]
-        body = lines[1:starts[0] - 1]
-        text = "\n".join(body)
-        return (
-            [f for f in REACH_FIELDS if f in text],
-            [line for line in body if _PREAMBLE_BULLET.match(line)],
-            len([line for line in body if line.strip()]),
-        )
+        ])
 
-    fields, bullets, size = preamble_verdict(
-        "* **a planted entry.** body.\n"
-        f"  {REACHES_V010}"
+    def refusal(preamble: str) -> str | None:
+        """`log_bullets`'s complaint about this preamble, `None` if it
+        took it."""
+        try:
+            bullets = log_bullets(section(preamble))
+        except AssertionError as exc:
+            return str(exc)
+        assert len(bullets) == 1, (
+            f"the synthetic section did not parse: {bullets}"
+        )
+        return None
+
+    # THE CONTROL FIRST: a preamble that breaks none of the three is taken,
+    # so every red below is the leg named and not the scaffolding.
+    control = refusal("prose about what the `*Versions:*` fields mean.")
+    assert control is None, (
+        "the synthetic section this test is built on is refused before any "
+        "leg is planted, so the three reds below would prove nothing"
     )
-    assert fields and bullets, (
-        "a `*` bullet carrying a reach field in the preamble is caught by "
-        "neither the field leg nor the bullet leg"
-    )
-    fields, bullets, size = preamble_verdict(
+
+    # LEG 1, the reach FIELD, isolated: a paragraph, so no list marker.
+    field_only = refusal(
         f"**a planted entry, as a paragraph.** body. {REACHES_V010}"
     )
-    assert fields, (
-        "a paragraph carrying a reach field in the preamble is invisible, so "
-        "the ceiling is the only thing between the section and an entry"
+    assert field_only and "reach field" in field_only, (
+        "a paragraph carrying a reach field in the preamble is not refused by "
+        f"the field leg: {field_only!r}"
     )
-    assert not bullets
-    fields, bullets, size = preamble_verdict("\n".join(
-        [f"line {n} of a preamble nobody bounded" for n in range(_PREAMBLE_MAX_LINES + 1)]
+
+    # LEG 2, the column-0 list MARKER, isolated: no reach field on it.
+    bullet_only = refusal("* **a planted entry.** body, declaring nothing.")
+    assert bullet_only and "column-0 list item" in bullet_only, (
+        "a `* ` entry above the first `- ` is not refused by the bullet leg: "
+        f"{bullet_only!r}"
+    )
+
+    # LEG 3, the CEILING, isolated: neither a field nor a marker in it.
+    ceiling = refusal("\n".join(
+        f"line {n} of a preamble nobody bounded"
+        for n in range(_PREAMBLE_MAX_LINES + 1)
     ))
-    assert not fields and not bullets
-    assert size > _PREAMBLE_MAX_LINES, (
-        "the ceiling does not measure non-blank lines, so a preamble can be "
-        "grown past it with blank ones"
+    assert ceiling and "ceiling" in ceiling, (
+        f"an unbounded preamble is not refused by the ceiling leg: {ceiling!r}"
     )
+    # ... and the ceiling counts NON-BLANK lines, so it cannot be walked past
+    # with blank ones: the same body, blank-separated, is longer in lines and
+    # still refused.
+    padded = refusal("\n\n".join(
+        f"line {n} of a preamble nobody bounded"
+        for n in range(_PREAMBLE_MAX_LINES + 1)
+    ))
+    assert padded and "ceiling" in padded, (
+        f"blank lines walk the preamble past its ceiling: {padded!r}"
+    )
+    # ... and one line under it is accepted, so the ceiling is a ceiling and
+    # not a refusal of every preamble.
+    assert refusal("\n".join(
+        f"line {n} of a preamble somebody bounded"
+        for n in range(_PREAMBLE_MAX_LINES)
+    )) is None, "the ceiling refuses a preamble that is inside it"
+
+    # ... and the realistic shape — a `*` entry that also declares reach —
+    # is refused, which is what both isolated legs are there to make sure of.
+    assert refusal(
+        "* **a planted entry.** body.\n"
+        f"  {REACHES_V010}"
+    ), "a `*` bullet carrying a reach field in the preamble is accepted"
+
     # ... and the real preamble passes all three, which is what makes the
     # rule a rule rather than a thing that would have to be relaxed at once.
     assert log_bullets(), "the real `## Log` no longer parses"
