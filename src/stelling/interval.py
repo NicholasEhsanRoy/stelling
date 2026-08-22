@@ -6,28 +6,65 @@
 This is the one module where paranoia is the design: **a rounding bug here
 is a false VERIFIED**, which is the project's own thesis defect. The rules:
 
-* Every arithmetic endpoint is **correctly directed-rounded**: the
-  endpoint is the nearest double on the outward side of the EXACT real
-  result, computed against ``Fraction`` and bumped with
-  ``math.nextafter`` **only when the double is on the wrong side**
-  (:func:`_exact_down`, :func:`_exact_up`). So the true real result always
-  lies inside the bracket, and the bracket is as tight as doubles allow:
-  when the exact result is representable, both endpoints ARE it and
-  nothing is bumped. Measured, in float64: ``[0.25, 0.5]`` op
-  ``[0.25, 0.5]`` gives exactly ``[0.0625, 0.25]`` for ``mul``,
-  ``[0.5, 1.0]`` for ``add``, ``[-0.25, 0.25]`` for ``sub`` and
+* Every endpoint is rounded **OUTWARD**, and that — not a width — is this
+  module's one universal claim: the exact real result of the operation lies
+  inside the returned bracket, always. It is what the stamp
+  ``interval/f64/outward-1ulp`` names, a DIRECTION and a worst case, and it
+  is the invariant a new operation added to this module has to preserve.
+  **How TIGHT the bracket is is per-operation and is NOT universal**, so
+  the scope below travels with any claim about tightness.
+
+  **Correctly directed-rounded** — the endpoint is the nearest double on
+  the outward side of the EXACT real result, computed against ``Fraction``
+  and bumped with ``math.nextafter`` **only when the double is on the
+  wrong side** (:func:`_exact_down`, :func:`_exact_up`), so a
+  representable exact result is returned unwidened. Measured, in float64:
+  ``[0.25, 0.5]`` op ``[0.25, 0.5]`` gives exactly ``[0.0625, 0.25]`` for
+  ``mul``, ``[0.5, 1.0]`` for ``add``, ``[-0.25, 0.25]`` for ``sub`` and
   ``[0.5, 2.0]`` for ``div``.
 
-  *This bullet read "computed in double precision and then **bumped one
-  ulp outward** … we do not attempt tight rounding; we buy soundness with
-  one deliberate ulp of slack per operation". That was the rule once and
-  is not the rule now — a claim divergence in the one module whose
-  docstring opens by calling paranoia the design. It was NARROWER than the
-  code in the safe direction, so nothing unsound rested on it; what rested
-  on it was every reader's model of how much slack a chain of operations
-  accumulates, and ``tests/test_interval.py``'s own
-  ``test_add_brackets_true_result_exactly`` had already written the tight
-  rule down and cited this docstring as agreeing with it.*
+  **Not correctly directed-rounded, and here is what that costs.** Three
+  kinds of operation are outside it, every one still sound and every one
+  wider:
+
+  - the **unconditional one-ulp bump** — ``exp``, ``pow``, ``sqrt``, where
+    the ulp is paying for a libm assumption or a sqrt-fidelity margin
+    rather than for endpoint representation. Measured, on arguments whose
+    exact result is a small integer: ``sqrt([4, 4])`` is
+    ``(1.9999999999999998, 2.0000000000000004)``, ``exp([0, 0])`` is
+    ``(0.9999999999999999, 1.0000000000000002)`` and
+    ``pow_([2, 2], [3, 3])`` is ``(7.999999999999999, 8.000000000000002)``.
+    Neither endpoint is the exact value, and nothing here collapses to it.
+  - **multi-step reductions**, where each STEP is correctly directed-rounded
+    and the total is not. ``reduce_sum`` of ``[1, 2**-53, 2**-53]`` returns
+    ``(1.0, 1.0000000000000004)`` while the exact total,
+    ``1.0000000000000002``, is representable and is *neither* endpoint —
+    the single-op property that one endpoint equals ``fl(R)`` does not
+    extend. :func:`reduce_sum`'s own docstring says this in the same words.
+  - the **⊤ escapes and endpoint conventions** that are not real arithmetic
+    at all: a divisor interval containing zero, ``inf/inf``, an infinite
+    operand under ``mul``'s ``0·±inf = 0`` rule. Those widen deliberately
+    and are named where they happen.
+
+  So: *outward* is a claim about the module; *tight* is a claim about one
+  operation, and the operation's own docstring is the authority for it.
+  **Do not read a tightness claim off this bullet for an operation it does
+  not name** — that is the direction the old wording failed in, one level
+  up.
+
+  *This bullet has now been wrong in both directions.* It read "computed
+  in double precision and then **bumped one ulp outward** … we do not
+  attempt tight rounding; we buy soundness with one deliberate ulp of
+  slack per operation" — the rule once, and not the rule now, which was
+  NARROWER than the code in the safe direction. It was then replaced by
+  "**Every** arithmetic endpoint is correctly directed-rounded … when the
+  exact result is representable, both endpoints ARE it and nothing is
+  bumped", which is BROADER than the code: the four measurements above are
+  counter-examples to it, and ``reduce_sum`` is a counter-example whose own
+  docstring said so sixty lines below. Nothing unsound rested on either —
+  what rests on it is every reader's model of how much slack a chain of
+  operations accumulates, and a reader told the bracket is tighter than it
+  is is the worse of the two errors.
 
   The stamp still reads ``interval/f64/outward-1ulp``. That string is a
   published surface and is not changed here; it names the guarantee's
@@ -70,8 +107,17 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
 **TWO ENDPOINT DISCIPLINES LIVE HERE. They are not interchangeable and the
 call site does not say which one applies, so the rule is:**
 
-* **exact-when-representable** — ``add``, ``sub``, ``mul``, ``reduce_sum``,
-  ``integer_pow``. The endpoint is computed exactly (``Fraction``; a double
+**This is not a census, and must not be read as one.** It names the
+operations whose discipline a reader is most likely to guess wrong; the
+authority for any single operation is that operation's own docstring, and an
+operation added to this module states its discipline THERE. A list here that
+someone forgets to extend is exactly how the universal claim above went
+wrong, so nothing is inferred from an absence from it.
+
+* **exact-when-representable** — ``add``, ``sub``, ``mul``,
+  ``integer_pow``, and ``reduce_sum`` PER ACCUMULATION STEP (see the third
+  bullet below, and :func:`reduce_sum`, for why the step rule is not a rule
+  about the total). The endpoint is computed exactly (``Fraction``; a double
   is a dyadic rational) and then rounded outward ONLY if the exact result
   is not representable. Sound because these are correctly-rounded ops whose
   slack was pure *endpoint-representation* conservatism. (``div`` belongs
@@ -93,6 +139,14 @@ call site does not say which one applies, so the rule is:**
   quantity BELOW zero, which defeated ``reduce_sum``'s nonnegative clamp and
   made ``x*x`` and ``x**2`` reach different verdicts on the same property
   (audit 0.2.0 M16).
+* **exact per step, not per result** — ``reduce_sum``, and any other
+  operation that folds. Every step is exact-when-representable and rounds
+  outward only where THAT step is inexact, which is sound and is NOT the
+  first discipline: for an ``n``-element sum with ``n >= 3`` neither
+  endpoint need be a neighbour of the exact total. Measured, in float64:
+  ``reduce_sum`` of ``[1, 2**-53, 2**-53]`` is
+  ``(1.0, 1.0000000000000004)`` around an exact total of
+  ``1.0000000000000002`` that a double represents exactly.
 
 * Endpoints may be ``±inf`` (overflow saturates outward; half-infinite
   sets are representable). Interval multiplication uses the ``0·±inf = 0``
@@ -1573,11 +1627,18 @@ def reduce_sum(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
     commutative, so the true sum of the reduced elements lies in
     ``[Σ lo_i, Σ hi_i]`` whatever order the compiler picks — the bracket
     bounds every association order at once, because in ℝ they all denote
-    the same number. Each accumulation step is bumped one ulp outward, so
-    an ``n``-element sum spends exactly the ``n - 1`` bumps its ``n - 1``
-    real additions earn: the accumulator is SEEDED with the first
-    contributor rather than with 0, which also makes a one-element
-    reduction exact.
+    the same number. The accumulator is SEEDED with the first contributor
+    rather than with 0, so an ``n``-element reduction runs the ``n - 1``
+    additions its ``n - 1`` real additions earn and no more, and a
+    one-element reduction is exact.
+
+    *This paragraph read "each accumulation step is bumped one ulp
+    outward, so an n-element sum spends exactly the n − 1 bumps its n − 1
+    real additions earn". That was the rule before the exact-endpoint
+    route landed, and the very next paragraph has contradicted it since:
+    a step that is exact is not bumped at all, so the count of bumps is a
+    property of the DATA and not of ``n``. The seeding claim was the true
+    half and is kept.*
 
     The fold identity is 0: an empty reduction range yields exactly
     ``[0, 0]``, matching jax (measured: ``jnp.sum`` of a size-0 array is

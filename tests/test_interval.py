@@ -50,6 +50,77 @@ def test_add_brackets_true_result_exactly():
     assert (0.1 + 0.2) in (r.los[0], r.his[0])
 
 
+def test_the_module_docstring_states_a_scope_and_the_counter_examples_hold():
+    """The tightness claim in ``interval.__doc__`` is scoped, and the four
+    measurements it scopes it WITH are re-driven here.
+
+    That bullet has been wrong in both directions. It first claimed one
+    deliberate ulp per operation after the exact-endpoint route had removed
+    it — narrower than the code, in the safe direction. It was then
+    corrected to *"**Every** arithmetic endpoint is correctly
+    directed-rounded … when the exact result is representable, both
+    endpoints ARE it and nothing is bumped"*, which is BROADER than the
+    code: ``sqrt``, ``exp`` and ``pow`` bump unconditionally, and
+    ``reduce_sum`` is exact per STEP and not per total. A reader told the
+    bracket is tighter than it is is the worse of the two errors, and
+    nothing in this file had ever read the bullet.
+
+    So this drives each counter-example and requires the docstring to
+    contain its value verbatim. Tighten one of these operations and the
+    test goes red on the docstring, which is the intended failure: the
+    scope is what has to be re-decided, not the digits.
+    """
+    from fractions import Fraction
+
+    doc = iv.__doc__
+
+    # the universal claim: outward, never a width
+    assert "one deliberate ulp of slack per operation" not in doc
+    assert "Every arithmetic endpoint is **correctly directed-rounded**" \
+        not in doc
+
+    cases = []
+
+    r = iv.sqrt(scalar(4.0, 4.0))
+    cases.append(("sqrt([4, 4])", r, Fraction(2)))
+    assert (r.los[0], r.his[0]) == (1.9999999999999998, 2.0000000000000004)
+
+    r = iv.exp(scalar(0.0, 0.0))
+    cases.append(("exp([0, 0])", r, Fraction(1)))
+    assert (r.los[0], r.his[0]) == (0.9999999999999999, 1.0000000000000002)
+
+    r = iv.pow_(scalar(2.0, 2.0), scalar(3.0, 3.0))
+    cases.append(("pow_([2, 2], [3, 3])", r, Fraction(8)))
+    assert (r.los[0], r.his[0]) == (7.999999999999999, 8.000000000000002)
+
+    eps = 2.0 ** -53
+    a = iv.IntervalArray(shape=(3,), los=(1.0, eps, eps), his=(1.0, eps, eps))
+    r = iv.reduce_sum(a, (0,))
+    total = Fraction(1) + Fraction(eps) + Fraction(eps)
+    cases.append(("reduce_sum([1, 2**-53, 2**-53])", r, total))
+    assert (r.los[0], r.his[0]) == (1.0, 1.0000000000000004)
+    # the total IS representable, and is neither endpoint -- the reason
+    # `reduce_sum` needs a discipline of its own
+    assert Fraction(float(total)) == total
+    assert float(total) not in (r.los[0], r.his[0])
+
+    for label, r, exact in cases:
+        # the one universal claim: outward, so the exact real result is in
+        assert Fraction(r.los[0]) <= exact <= Fraction(r.his[0]), label
+        # and NOT correctly directed-rounded: neither endpoint is the exact
+        # value, which a representable exact result would give under the
+        # first discipline
+        assert Fraction(r.los[0]) != exact and Fraction(r.his[0]) != exact, \
+            label
+        for endpoint in (r.los[0], r.his[0]):
+            assert repr(endpoint) in doc, (
+                f"{label}: the module docstring scopes its tightness claim "
+                f"with {endpoint!r}, which this run does not reproduce. "
+                f"Re-decide the SCOPE in `stelling.interval.__doc__`; do "
+                f"not retype the digit."
+            )
+
+
 def test_sub_directed():
     """Directed subtraction — lo = a.lo - b.hi, hi = a.hi - b.lo — and
     EXACT here: -0.5 and 1.5 are both representable, so the
