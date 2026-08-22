@@ -2085,11 +2085,12 @@ def test_the_nightly_runs_the_tests_OF_THE_HOOK_ON_A_PRIVATE_FUNCTION():
 
     THE ASYMMETRY IS THE ARGUMENT. The const-fold hook installs an entry in a
     private REGISTRY; the eager hook patches a module attribute on
-    `jax._src.lax.lax` — a private FUNCTION, with a signature and a set of
-    callers. A release that reorders `_convert_element_type`'s parameters, or
-    routes one construction spelling around it, changes what the hook sees
-    while leaving it attached, and `arm_eager()`'s own self-check is the only
-    other thing that would notice.
+    a private jax MODULE's function — with a signature and a set of callers,
+    named by path in `design/private-jax-boundary.md` and reachable only
+    through `_adapter_jax.py`. A release that reorders
+    `_convert_element_type`'s parameters, or routes one construction spelling
+    around it, changes what the hook sees while leaving it attached, and
+    `arm_eager()`'s own self-check is the only other thing that would notice.
 
     IT COULD NOT BE ADDED BEFORE THE CELL WAS GREEN. The step runs at
     `JAX_ENABLE_X64: "1"`, and `tests/test_tripwire_eager.py` had EIGHT

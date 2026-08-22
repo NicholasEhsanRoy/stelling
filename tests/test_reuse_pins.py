@@ -52,6 +52,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import warnings
 
 import pytest
 
@@ -205,13 +206,23 @@ def test_the_scratchpad_annotation_is_load_bearing_and_present():
     # must not report the same thing as a guard that examined it and was
     # satisfied, so this skips (visible in `-ra`) instead of returning.
     if tracked.returncode != 0:
-        pytest.skip(
-            "not a git checkout, so `git ls-files scratchpad` cannot enumerate "
-            "the tracked files this test's non-vacuity floor counts "
-            f"(rc={tracked.returncode}, stderr={tracked.stderr.strip()!r}). "
-            "The annotation assertion above DID run; the floor did not, and a "
-            "skip is what says so."
+        # THE REASON IS A CONSTANT AND THE DETAIL IS A WARNING, from
+        # 2026-08-22. `tests/test_skip_inventory.py` excuses a skip only by an
+        # EXACT string typed on its own disclosure surface, and this reason
+        # carried `rc=` and git's stderr — so no rule could ever have named
+        # it, and this skip was one of the NINE that made a git-less tree exit
+        # 1 no matter what (`1 failed, 2106 passed, 159 skipped` in the
+        # zero-dep lane with `.git` removed, at `844ba48`). Nothing is lost:
+        # the floor is still not run, the skip still says so, and the
+        # `rc`/`stderr` a reader would want are in a warning rather than in a
+        # string `pytest -rs` truncates to the terminal width anyway.
+        warnings.warn(
+            f"`git ls-files scratchpad` failed (rc={tracked.returncode}, "
+            f"stderr={tracked.stderr.strip()!r}), so this test's non-vacuity "
+            f"floor did not run. The annotation assertion above DID.",
+            stacklevel=2,
         )
+        pytest.skip("not a git checkout (an unpacked sdist, say)")
     headerless = []
     for rel in tracked.stdout.split("\n"):
         if not rel:

@@ -982,8 +982,15 @@ def _run_z3(script_text: str, wall_s: float) -> _RawResult:
     # and 80 is over `INTEGER_POW_EXPANSION_CAP = 64` regardless.
     #
     # WHAT IT ACTUALLY BUYS, and what it costs. Re-measured 2026-08-20 on
-    # z3 5.0.0 over this module's own emitted scripts for the five pairs
-    # `obligation.py`'s cost table names, all five `unsat` in both modes at
+    # z3 5.0.0 over this module's own emitted scripts for five `(p, q)`
+    # pairs -- `1/128`, `127/2`, `127/128`, `113/128` and `105/128`. FOUR of
+    # them are rows of `obligation.py`'s cost table and the fifth, `113/128`,
+    # is named in the paragraph under it as the `q=128` row that is neither
+    # the worst nor the cheapest; this comment said "the five pairs
+    # `obligation.py`'s cost table names" until 2026-08-22, and a reader who
+    # went and counted that table found four. Written out here so the set is
+    # this comment's own rather than a pointer at a table with a different
+    # membership. All five `unsat` in both modes at
     # a 120 s script timeout: `1/128` 0.31 -> 0.38 s, `127/2` 0.04 ->
     # 0.04 s, `127/128` 50.03 -> 21.39 s, `113/128` 50.01 -> 18.23 s,
     # `105/128` (the worst of the 448) 50.01 -> 69.80 s; total 150.39 ->

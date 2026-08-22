@@ -110,12 +110,15 @@ quiet.
   `test_nothing_was_dropped_and_every_edit_is_declared` and
   `test_the_record_says_how_many_blocks_were_edited_in_transit`. A
   mutation that leaves that partition alone is not — the same corruption
-  applied to an *edited* block's `src_sha256` is `19 passed, 8 skipped`,
-  the whole git-less tally.
+  applied to an *edited* block's `src_sha256` is the whole git-less tally,
+  green (`19 passed, 8 skipped` when measured; `21 passed, 8 skipped`
+  re-driven on 2026-08-22).
 
   Four mutations of ONE file, `tests/_soundness_routing_manifest.py`, all
-  **`19 passed, 8 skipped`** git-less — this file's entire git-less tally,
-  so nothing at all goes red — and driven:
+  git-less-green and driven. **The tallies below were taken before this
+  file grew two git-less checks on 2026-08-22**; re-driven at that commit
+  the tally is `21 passed, 8 skipped` and all four still go green, so the
+  residue is unchanged and only the denominator moved:
 
   * `SF-0.2.0-51`'s three quoted `not_carried` lines replaced by three
     inventions with the count preserved — **`1 failed, 26 passed`** with
@@ -125,7 +128,14 @@ quiet.
     reader will meet them."* In an sdist the reader meets three lines that
     never stood in `CHANGELOG.md`, no material is missing from either
     shipped file, and `CHANGELOG.md` is untouched.
-  * `src_span` shrunk by a line — **`1 failed, 26 passed`** with git.
+  * `src_span` shrunk by a line, `src_lines` shrunk with it — **`1 failed,
+    26 passed`** with git. **`src_lines` LEFT ALONE IS CAUGHT GIT-LESS
+    NOW**, and it is the one member of this list that changed:
+    `test_every_block_declares_the_number_of_source_lines_its_span_holds`
+    measures `src_lines` against the span, so a span shrunk on its own is
+    `1 failed, 20 passed, 8 skipped` with no git at all. An editor who
+    shrinks both is still invisible here, which is why `src_span` stays on
+    the unverified list and `src_lines` came off it.
   * an *edited* block's `src_sha256` corrupted — `1 failed, 26 passed`
     with git.
   * a section's `source_commit` zeroed — **`4 failed, 23 passed`** with
@@ -197,9 +207,21 @@ quiet.
   after that. It is measured now, in the file whose entire thesis is that
   a declaration nothing measures is not a declaration.
 
-  The skip messages carry the general statement too, so a reader who
-  meets one there learns which columns are unverified and not merely that
-  something is.
+  The skip WARNINGS carry the general statement too, so a reader who meets
+  one there learns which columns are unverified and not merely that
+  something is. **THEY WERE THE SKIP REASONS UNTIL 2026-08-22, AND THAT IS
+  WHY A GIT-LESS TREE EXITED 1 REGARDLESS.** A reason built from an f-string
+  carrying the section key, the ref and git's stderr can never be an exact
+  string typed in `tests/test_skip_inventory.py`, and exact is the only kind
+  that file excuses — so all eight of this file's git-less skips were
+  undisclosed, `test_no_session_skip_is_undisclosed` failed, and the lane
+  whose whole point is that an sdist is a supported way to consume this
+  project could not come back green. Driven at `844ba48`: `1 failed, 2106
+  passed, 159 skipped` in the zero-dep lane with `.git` removed, naming NINE
+  — the eight here and one in `tests/test_reuse_pins.py`. The reason is the
+  constant `_GIT_LESS_SKIP` now and the detail is a warning, which is where
+  a reader was going to meet it anyway: `-rs` truncates a skip reason to the
+  terminal width.
 
   **AND UNTIL 2026-08-21 THEY CARRIED A DIFFERENT ONE.** This list named
   SEVEN columns; `_LOST`, the string both skip messages are built from,
@@ -224,6 +246,7 @@ import hashlib
 import pathlib
 import re
 import subprocess
+import warnings
 
 import pytest
 
@@ -269,15 +292,22 @@ SOUNDNESS = REPO / "SOUNDNESS.md"
 #: A history rewrite that replaces the root — `filter-repo`, a squash of
 #: everything, a graft — leaves a repository this probe does not recognise,
 #: so the four git-gated tests SKIP in what is otherwise this project's own
-#: checkout rather than run. That is the safe direction and it is not
-#: silent: the eight skips carry a reason no `Rule` in
-#: `tests/test_skip_inventory.py` matches, so
-#: `test_no_session_skip_is_undisclosed` reds. Driven in exactly that
-#: shape — this tree committed into a fresh repository, which is what a
-#: rewrite leaves behind — this file is `19 passed, 8 skipped` and the
-#: session is `1 failed, 4284 passed, 17 skipped`, exit 1 —
-#: the ONE failure being `test_no_session_skip_is_undisclosed` and the
-#: eight ids it names being exactly these four tests over two sections.
+#: checkout rather than run. That is the safe direction.
+#:
+#: **AND IT USED TO BE ARGUED AS LOUD, WHICH WAS THE DEFECT ONE FILE OVER.**
+#: This paragraph read *"it is not silent: the eight skips carry a reason no
+#: `Rule` in `tests/test_skip_inventory.py` matches, so
+#: `test_no_session_skip_is_undisclosed` reds"* — and what that describes is
+#: an UNDISCLOSED skip being sold as an alarm. It reds identically in an
+#: unpacked sdist and in a shallow CI clone, which are supported ways to
+#: consume this project and are not a rewritten history; measured at
+#: `844ba48`, the zero-dep lane with `.git` removed is `1 failed, 2106
+#: passed, 159 skipped`, and the one failure names NINE undisclosed skips.
+#: An exit code that cannot tell a rewritten root from an sdist is not a
+#: signal about the root. The skips are disclosed now, by `_GIT_LESS_SKIP`
+#: and the `Rule` that names it, so all three of those environments come
+#: back green — and what still tells a maintainer which one they are in is
+#: the WARNING each skip emits, which names the cause git reported.
 #:
 #: AND THIS CONSTANT IS READ ONLY ON THE `git show` FAILURE PATH, so a
 #: wrong value here is invisible until the day it is needed, and then it
@@ -319,6 +349,29 @@ _ONE_LINER_MAX_LINES = 5
 #: lines, and the average routed soundness block is 45 (2989 source lines
 #: over 66 blocks), so this admits an explanation and refuses an entry.
 _PREAMBLE_MAX_LINES = 60
+
+#: THE REASON BOTH GIT-LESS SKIPS IN THIS FILE CARRY, AND IT IS A CONSTANT.
+#: `tests/test_skip_inventory.py` excuses a skip only by an EXACT string typed
+#: on its own disclosure surface — no patterns, because every bound on a
+#: pattern turned out to be a list of the ways somebody had already been
+#: broad. These reasons were f-strings carrying the section key, the ref and
+#: GIT'S STDERR, so no rule could ever have named them, and a git-less tree
+#: therefore exited 1 on `test_no_session_skip_is_undisclosed` no matter what:
+#: driven at `844ba48`, `1 failed, 2106 passed, 159 skipped` in the zero-dep
+#: lane with `.git` removed, naming NINE undisclosed skips — the eight here
+#: and one in `tests/test_reuse_pins.py`. **The sdist lane's own skip
+#: disclosure was inconsistent with its rule table**, in the two files whose
+#: subject is that a checkout without git cannot verify the routing.
+#:
+#: WHAT THE REASON CANNOT CARRY TRAVELS AS A WARNING, one per skip: the ref,
+#: which of the five causes `_why_the_history_is_out_of_reach` measured, the
+#: `_LOST` general statement and git's own words. `pytest -rs` truncates a
+#: skip reason to the terminal width anyway, so a 1,500-character reason was
+#: never the place a reader met that text.
+_GIT_LESS_SKIP = (
+    "git cannot read this tree's own history, so the routing manifest's "
+    "source-side columns are unverified here"
+)
 
 #: `**N blocks were edited in transit**` — the count beside the data, in
 #: the paragraph whose subject is that nothing was lost. The digit is
@@ -723,8 +776,9 @@ def _source_changelog(section: Section) -> str:
         "unverified here, so "
         "any mutation confined to those columns survives -- one file or "
         "three, and whether or not a shipped file is touched. Measured, "
-        "one file and 19 passed, 8 skipped -- the whole of this file's "
-        "git-less tally, so nothing at all went red: fabricated "
+        "one file and the whole of this file's git-less tally green -- "
+        "19 passed, 8 skipped when measured, 21 passed, 8 skipped "
+        "re-driven on 2026-08-22 -- so nothing at all went red: fabricated "
         "`not_carried` quotes with the count preserved; a shrunk "
         "`src_span`; a corrupted `src_sha256` on a block already declared "
         "edited; and this section's own source_commit zeroed. Each of the "
@@ -744,13 +798,51 @@ def _source_changelog(section: Section) -> str:
             cwd=REPO, capture_output=True, text=True, timeout=60,
         )
     except (OSError, subprocess.SubprocessError) as e:  # pragma: no cover
-        pytest.skip(
-            f"git unavailable, so `{section.key}`'s source cannot be read: "
-            f"{_LOST}: {e}"
+        warnings.warn(
+            f"{section.key}: git is unavailable, so its source cannot be "
+            f"read at all. {_LOST}: {e}",
+            stacklevel=2,
         )
+        pytest.skip(_GIT_LESS_SKIP)
     if r.returncode != 0:
         why = _why_the_history_is_out_of_reach()
         if why is None:
+            # WHICH OF TWO THINGS IS MISSING, and it is the same idiom the
+            # anchor probe uses one function up. The three probes above
+            # establish that this tree is this repository, in full; they say
+            # nothing about whether the OBJECT STORE is complete. A
+            # `--filter=blob:none` / `--filter=tree:0` clone whose promisor
+            # remote has moved away holds the COMMIT and the TREE and not the
+            # BLOB, so `git show <commit>:CHANGELOG.md` fails there while the
+            # manifest is correct and every probe answers correctly. Driven:
+            # such a clone at `844ba48` gave `8 failed, 19 passed` under a
+            # message asserting the manifest names a commit that is not
+            # there, which is false there -- `git cat-file -e <commit>^{commit}`
+            # answers rc=0 in it. Pre-existing and identical at `a7fe65f`.
+            #
+            # IT STAYS A FAILURE EITHER WAY, and that is deliberate: an
+            # incomplete object store is a broken checkout somebody can repair
+            # with one `git fetch`, not a supported consumption mode like an
+            # sdist or a shallow CI clone, so it does not join the skip
+            # disclosure. What changes is which of the two it names.
+            probe = subprocess.run(
+                ["git", "cat-file", "-e", f"{section.source_commit}^{{commit}}"],
+                cwd=REPO, capture_output=True, text=True, timeout=60,
+            )
+            if probe.returncode == 0:
+                pytest.fail(
+                    f"`{section.key}` names {section.source_commit}, and this "
+                    f"tree HAS that commit object -- `git cat-file -e "
+                    f"{section.source_commit}^{{commit}}` answers yes -- while "
+                    f"`git show {ref}` cannot read the file out of it. The "
+                    f"MANIFEST IS NOT WHAT IS WRONG: this is an incomplete "
+                    f"OBJECT STORE, which is what a `--filter=blob:none` or "
+                    f"`--filter=tree:0` partial clone becomes when its "
+                    f"promisor remote is unreachable -- the commit and the "
+                    f"tree are local and the blob was never fetched. Restore "
+                    f"the remote and `git fetch`, or re-clone without a "
+                    f"filter. git said: {r.stderr[:200]}"
+                )
             pytest.fail(
                 f"`{section.key}` names {section.source_commit} as the "
                 f"commit its source-side columns were measured from, and "
@@ -758,18 +850,22 @@ def _source_changelog(section: Section) -> str:
                 f"own full, non-shallow checkout -- all THREE conditions "
                 f"tested here, just now, rather than assumed: a git work "
                 f"tree rooted at this directory, not shallow, and holding "
-                f"{_ANCHOR[:12]}, this project's root commit. So this is "
-                f"neither the sdist nor the shallow clone nor the foreign "
-                f"repository this check skips for: the "
-                f"commit is unresolvable in a tree that can resolve "
-                f"commits, and what is wrong is the MANIFEST naming a "
-                f"commit that is not there, not the CI configuration's "
-                f"fetch depth. git said: {r.stderr[:200]}"
+                f"{_ANCHOR[:12]}, this project's root commit. The commit "
+                f"OBJECT is absent too -- `git cat-file -e "
+                f"{section.source_commit}^{{commit}}` says so, which is what "
+                f"separates this from a partial clone whose blobs are gone. "
+                f"So this is neither the sdist nor the shallow clone nor the "
+                f"foreign repository this check skips for, and not an "
+                f"incomplete object store either: what is wrong is the "
+                f"MANIFEST naming a commit that is not there, not the CI "
+                f"configuration's fetch depth. git said: {r.stderr[:200]}"
             )
-        pytest.skip(
-            f"cannot read {ref} ({why}), so `{section.key}`'s {_LOST}: "
-            f"{r.stderr[:200]}"
+        warnings.warn(
+            f"{section.key}: cannot read {ref} ({why}), so {_LOST}: "
+            f"{r.stderr[:200]}",
+            stacklevel=2,
         )
+        pytest.skip(_GIT_LESS_SKIP)
     return r.stdout
 
 

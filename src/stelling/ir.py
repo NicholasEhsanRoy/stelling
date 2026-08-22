@@ -3378,11 +3378,26 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
         # to ``"dtype" in params`` is therefore a BRANCH-SELECTION change
         # and not only a type check, and the enumeration in the paragraph
         # above — ``b'float64'``, ``0``, ``('float64',)`` — does not
-        # contain the document it moved. Measured, on a document whose
-        # declaration carries ``["dtype", null]`` under a ``float64``
-        # outvar aval — a traced ``any_array((2,), float64, (0.0, 1.0))``
-        # with ``assert_(x >= 0.0)``, round-tripped through ``to_dict()``
-        # with that one param set to ``null``:
+        # contain the document it moved. Measured at ``JAX_ENABLE_X64=1``,
+        # on a document whose declaration carries ``["dtype", null]`` under
+        # a ``float64`` outvar aval — a traced
+        # ``any_array((2,), float64, (0.0, 1.0))`` with
+        # ``assert_(x >= 0.0)``, round-tripped through ``to_dict()`` with
+        # that one param set to ``null``.
+        #
+        # THE CELL IS PART OF THE RECIPE AND THIS SENTENCE OMITTED IT UNTIL
+        # 2026-08-22. Without ``JAX_ENABLE_X64=1`` the outvar aval is not
+        # ``float64`` at all: jax warns that the requested dtype "is not
+        # available, and will be truncated to dtype float32", so a reader
+        # following the recipe traces a DIFFERENT document. Measured on this
+        # commit, the same harness in the two cells:
+        #
+        #     x64=1   float64 only         content_hash a037be6d…
+        #     x64=0   float32 in the doc   content_hash 4d4d1c33…
+        #
+        # The PROPERTY below holds either way; the document does not, and a
+        # recipe a reader cannot re-trace is how a measurement turns into a
+        # claim:
         #
         #     dff95fc, main (198a2b5)   ACCEPTED, both to the SAME hash
         #     this commit               TranscriptionError
