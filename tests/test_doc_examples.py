@@ -364,7 +364,24 @@ def _docstring_inventory() -> dict[str, int]:
 
 
 def _doc_files() -> list[pathlib.Path]:
-    return [REPO / "README.md", *sorted((REPO / "docs").glob("*.md"))]
+    """The population: the root README and every ``.md`` under ``docs/``.
+
+    ``rglob``, not ``glob``. The non-recursive form was a ceiling on
+    everything in this module -- the keying by ``path.relative_to(REPO)``
+    was verified across sdist, symlink and checkout, so the key was never
+    the limit, the POPULATION was. Measured on ``6387a34``: a page at
+    ``docs/nested/page.md`` carrying one unmarked ``python`` block and one
+    unattached fence left this entire module green at ``14 passed, 43
+    skipped``, gated by nothing and counted by nothing.
+
+    There are no subdirectories under ``docs/`` today, so this changes no
+    figure in ``EXPECTED_INVENTORY`` -- which is exactly when widening a
+    population is cheap. What stays outside it, deliberately, is every
+    other ``.md`` in the tree: ``README.md`` and ``docs/`` are the pages a
+    reader is sent to, and ``design/``, ``CONTRIBUTING.md`` and the rest
+    carry their own gates.
+    """
+    return [REPO / "README.md", *sorted((REPO / "docs").rglob("*.md"))]
 
 
 def _fences(text: str):
@@ -1315,6 +1332,23 @@ def test_every_page_outside_the_gate_has_been_decided_about():
 # which leaves one.
 _OWED_PAGES = {"docs/overflow-tripwire.md"}
 
+# How big the debt is, and it RATCHETS DOWN. Derived and re-measured on
+# every run below; recorded here so that GROWING it is an edit somebody has
+# to make on purpose, in a line that says growing it is not allowed.
+#
+# THE BOUND THIS REPLACES COULD NOT BITE. It read
+# `owed_items * 2 <= total_items` with `total_items` INCLUDING `owed_items`
+# -- which says `owed <= classified`, and an ungated block added to an OWED
+# page raises the numerator only, against a denominator that does not move.
+# Measured on `6387a34`: appending fifteen ungated fences to
+# `docs/overflow-tripwire.md` and bumping its recorded pair from (5, 10) to
+# (5, 25) left BOTH blind-spot gates green while the undecided share went
+# 15/61 = 24.6% to 30/76 = 39.5%, doubling the debt; the bound first bites
+# at 47 owed items, more than three times today's. Nothing ratcheted, so the
+# drift was silent, and the assertion's "most of what this gate is supposed
+# to cover" named a trip point the arithmetic did not deliver.
+_OWED_DEBT = 15
+
 
 def test_every_blind_spot_entry_carries_a_reason_from_the_closed_set():
     """A reason like "legacy" would satisfy the test above and nothing else.
@@ -1354,13 +1388,18 @@ def test_every_blind_spot_entry_carries_a_reason_from_the_closed_set():
         f"with no owner is the allowlist this replaced."
     )
 
-    # Derived, not described: how much of the blind spot is undecided.
+    # Derived, not described: how much of the blind spot is undecided, and
+    # it may only ever go DOWN.
     owed_items = sum(i + u for name, (i, u, _w) in BLIND_SPOT.items()
                      if name in _OWED_PAGES)
     total_items = sum(i + u for i, u, _w in BLIND_SPOT.values())
-    assert owed_items * 2 <= total_items, (
-        f"{owed_items} of {total_items} blind-spot items are OWED rather "
-        f"than classified, which is most of what this gate is supposed to "
-        f"cover. Classify a page or shrink _OWED_PAGES; do not raise this "
-        f"bound."
+    assert owed_items == _OWED_DEBT, (
+        f"the OWED debt moved: {owed_items} of {total_items} blind-spot "
+        f"items ({100.0 * owed_items / total_items:.1f}%) are OWED rather "
+        f"than classified, and _OWED_DEBT records {_OWED_DEBT}.\n"
+        f"THIS NUMBER RATCHETS DOWN. If it GREW, an ungated block was added "
+        f"to a page whose blocks nobody has classified: classify it, or put "
+        f"it on a page that is gated -- do not raise this number, which is "
+        f"what the bound it replaced silently allowed three times over. If "
+        f"it SHRANK, lower _OWED_DEBT in the commit that classified them."
     )

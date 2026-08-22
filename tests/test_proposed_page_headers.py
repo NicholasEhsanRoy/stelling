@@ -104,24 +104,53 @@ _HEADING = re.compile(r"^#{1,6} ", re.M)
 
 
 def _status_block(text: str) -> str | None:
-    """The status block: the **Status:** line to the next heading.
+    """The status block: the **Status:** line to the next heading, or
+    ``None`` when there is no status line -- or no heading after it.
 
     Wider than the sha gate's single paragraph, because every shipped page
     in this tree puts the status in one paragraph and the pin that supports
     it in the next; narrower than the page, because a ``tests/…py``
     mentioned in an argument four hundred lines down is not a header making
-    a claim. Measured over `docs/proposed-*.md`: the block is 13-68 lines,
-    and each of the five shipped pages names its pin inside its own.
+    a claim.
+
+    **THE SECOND ``None`` IS THE POINT, AND IT WAS A HOLE.** This ran to the
+    next heading *or to the end of the file if there was none*, so on a page
+    with no heading below its status paragraph the "block" was the whole
+    page and the narrowing silently reverted -- the exact defect ``6e9aa22``
+    was written to close, reachable again with no diagnostic. Measured on
+    ``6387a34`` against ``docs/proposed-tier-clause.md``: remove the pin from
+    the status paragraph, demote every heading below it, append 400 filler
+    lines and put ``tests/test_tier_clause.py`` at the very bottom -- **18
+    passed**. The docstring here said the block was *"narrower than the
+    page"*; that was true of the pages in the tree and was not a property of
+    this function.
+
+    So the narrowing is now a property of the MECHANISM: a page that does
+    not bound its own status block does not get a status block, and
+    :func:`test_every_status_block_is_bounded_by_a_heading` is the gate that
+    says so in those words rather than leaving the shipped-pin gate to
+    report it as a missing pin. No block size is written down here;
+    :func:`test_every_status_block_is_bounded_by_a_heading` measures them.
     """
     m = _STATUS_LINE.search(text)
     if not m:
         return None
     h = _HEADING.search(text, m.end())
-    return text[m.start(): h.start() if h else len(text)]
+    if not h:
+        return None
+    return text[m.start(): h.start()]
 
 
 def _pages() -> list[pathlib.Path]:
-    return sorted(DOCS.glob("proposed-*.md"))
+    """Every ``proposed-*.md`` under ``docs/``, at any depth.
+
+    ``rglob``, not ``glob``: a non-recursive population is a ceiling nobody
+    can see, and one subdirectory is all it takes to put a page with an
+    unchecked header outside every gate in this file. There are no
+    subdirectories under ``docs/`` today, so this changes nothing that is
+    in the tree -- which is exactly when it is cheap to fix.
+    """
+    return sorted(DOCS.rglob("proposed-*.md"))
 
 
 PAGES = _pages()
@@ -188,6 +217,51 @@ def test_the_title_declares_a_status_from_the_closed_set(path):
     )
 
 
+def test_every_status_block_is_bounded_by_a_heading():
+    """A status block that runs to the end of the file is the whole page.
+
+    :func:`_status_block` used to fall back to end-of-file, so a page could
+    lose its narrowing by having no heading below the status paragraph, and
+    nothing said so -- see that function for the measurement (18 passed,
+    with the pin 400 lines below the header it was satisfying).
+
+    The block sizes are MEASURED and reported here rather than written into
+    a docstring: the last hand-typed figure beside this mechanism said
+    "each of the five shipped pages", and six of them are shipped. It was
+    wrong the moment it was typed, in the commit whose subject was deleting
+    hand-typed numerals.
+    """
+    unbounded = []
+    sizes = {}
+    for path in PAGES:
+        text = path.read_text(encoding="utf-8")
+        m = _STATUS_LINE.search(text)
+        if not m:
+            continue                      # no status paragraph to bound
+        block = _status_block(text)
+        if block is None:
+            unbounded.append(path.name)
+            continue
+        sizes[path.name] = block.count("\n")
+    assert sizes, (
+        "no proposed-*.md has a bounded status block, so every gate in this "
+        "file that reads one measured nothing"
+    )
+    assert not unbounded, (
+        f"these pages carry a **Status:** paragraph with NO heading below "
+        f"it: {unbounded}. The status block would be the whole page, so a "
+        f"`tests/...py` named anywhere on it -- four hundred lines under the "
+        f"header, in an argument -- would satisfy the header at the top. "
+        f"Put the status paragraph above a heading."
+    )
+    whole = {name: n for name, n in sizes.items()
+             if n >= (DOCS / name).read_text(encoding="utf-8").count("\n")}
+    assert not whole, (
+        f"these status blocks are the whole page: {whole}. The narrowing is "
+        f"what this gate is."
+    )
+
+
 def test_a_page_that_says_it_shipped_names_a_test_that_pins_it():
     """The difference between a corrected header and an asserted one.
 
@@ -229,7 +303,9 @@ def test_a_page_that_says_it_shipped_names_a_test_that_pins_it():
         f"in their STATUS BLOCK: {unpinned}. A status that shipped is a "
         f"claim about running code; name what holds it down where the "
         f"claim is made. (`test_every_test_file_a_proposed_page_names_exists`"
-        f" is what checks the file is really there.)"
+        f" is what checks the file is really there, and "
+        f"`test_every_status_block_is_bounded_by_a_heading` is what reports "
+        f"a page whose status block could not be narrowed at all.)"
     )
 
 
