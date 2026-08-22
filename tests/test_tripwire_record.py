@@ -18,6 +18,8 @@ driven from stack shapes MEASURED against real jax (recorded in
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from stelling._tripwire import record, report
@@ -1943,20 +1945,197 @@ def test_the_canarys_documented_exit_codes_are_exactly_the_ones_it_produces():
     )
 
 
+# The GitHub job-id charset, and the ONE place this file spells it. A job id
+# may begin with a letter or `_` and carry letters, digits, `-` and `_`; this
+# pattern read `[a-z-]+` until 2026-08-22, and a job id is the cheapest thing
+# there is to add to a workflow. Driven: a THIRD job `nightly_x64:` running
+# `tripwire_canary.py` at `JAX_ENABLE_X64: "1"` ONLY -- an alarm wired to the
+# one cell the eager sweep cannot redden in, which is the defect
+# `test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN` exists
+# for -- was invisible to every test in this repository and left this file at
+# `68 passed`. TWO readers used that spelling and they are now one, for the
+# same reason `_strip_comment` and `_x64_cells` are each one function: a rule
+# typed twice drifts on whichever copy nobody edits.
+_JOB_ID = r"[A-Za-z_][A-Za-z0-9_-]*"
+
+# JAX'S OWN GRAMMAR FOR THIS VARIABLE, because jax's is the grammar that
+# decides what a run measures and this reader's opinion is worth nothing next
+# to it. Its boolean-environment reader takes `y yes t true on 1` as true and
+# `n no f false off 0` as false, case-insensitively, and RAISES on anything
+# else. That is not read off its source -- naming the private module it lives
+# in is what `tests/test_import_hygiene.py` forbids outside the adapter, and
+# it caught this comment doing it. It is MEASURED, on jax 0.11.0, through the
+# public `jax.config.jax_enable_x64` after import: `true`, `on`, `yes`, `t`,
+# `y`, `TRUE`, `On` -> True; `false`, `off`, `no`, `n`, `f` -> False;
+# unset -> False.
+#
+# The YAML layer agrees with it rather than fighting it, which is why one
+# table serves both: `JAX_ENABLE_X64: true` and `JAX_ENABLE_X64: on` are YAML
+# booleans, the runner renders them into the environment as `"true"`, and jax
+# reads `"true"` as ON -- the same answer as reading the token as written.
+# Same for `off`/`no` and OFF.
+_X64_TRUE = ("y", "yes", "t", "true", "on", "1")
+_X64_FALSE = ("n", "no", "f", "false", "off", "0")
+
+# The step conditions this reader knows how to evaluate. A step whose `if:`
+# is not one of these MIGHT NOT RUN, and a step that might not run cannot be
+# credited with running in a cell -- so it is a can't-tell and not a cell.
+# Driven: `if: steps.install.outcome == 'success' && false` on the x64=0
+# pytest step left this file at `68 passed` while that step never runs.
+# Adding a condition here is a decision that it still runs; that is the point
+# of it being a written list rather than a pattern.
+_STEP_CONDITIONS_THIS_READER_KNOWS = frozenset({
+    "steps.install.outcome == 'success'",
+})
+
+# A step's `JAX_ENABLE_X64:` mapping entry, anchored on a line of its own so
+# that a comment QUOTING the setting is not the workflow SETTING it -- two of
+# the mutants that killed the first version of this guard were caught only by
+# that anchor. `[ \t]*` and not `\s*`: `#` is not whitespace, so a commented
+# line cannot reach the name.
+_X64_SETTING = re.compile(r"^[ \t]*JAX_ENABLE_X64:[ \t]*(.*?)[ \t]*$", re.M)
+
+# `${{ matrix.<axis> }}`, the ONE expression shape this reader follows, and it
+# follows it the way `tests/_lanes.py` follows `${EXTRAS}`: the chain is read
+# entry by entry, and any link failing is a NAMED can't-tell rather than a
+# default.
+_X64_MATRIX_REF = re.compile(
+    r"\$\{\{[ \t]*matrix\.([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\}\}"
+)
+
+
+def _cannot_tell(reason: str) -> str:
+    """A cell nobody may read as a cell. `?` prefixed so it can never be
+    mistaken for one: `"0"`, `"1"` and `"unset"` are the only readable
+    values and every caller goes through :func:`_refuse_unreadable` first."""
+    return "?" + reason
+
+
+def _refuse_unreadable(cells, where: str) -> None:
+    """FAIL on a can't-tell instead of passing over it.
+
+    THIS IS THE WHOLE POINT OF THE SPLIT. `_x64_cells` returned the single
+    string ``"unset"`` for BOTH "no setting anywhere" -- which is jax's
+    default and genuinely OFF, measured -- AND "a setting I could not parse",
+    and both callers then read the conflated value as OFF. Eight measured
+    mutations of `.github/workflows/nightly-jax-canary.yml` ran at x64 ON
+    while the guard believed otherwise and this file stayed at `68 passed`:
+    `JAX_ENABLE_X64: true`, `"on"`, `${{ matrix.x64 }}` over a one-cell
+    matrix, `export JAX_ENABLE_X64=1` inside the `run:` block, a
+    `JAX_ENABLE_X64=1` command prefix, an earlier step writing the name into
+    `$GITHUB_ENV`, `&& false` on the OFF step, and the OFF step moved into
+    the other job. Two of those -- `true` and `on` -- jax itself accepts.
+
+    A can't-tell that defaults to the answer the caller wanted is the shape
+    this campaign has already named once, in `Lane.jax`. It gets a name here
+    and a red there.
+    """
+    unreadable = [cell[1:] for cell in cells if cell.startswith("?")]
+    assert not unreadable, (
+        f"{where}: this reader cannot tell which JAX_ENABLE_X64 cell "
+        f"{'these steps run' if len(unreadable) > 1 else 'this step runs'} "
+        f"in — {unreadable}. That is a can't-tell and not a cell, and it is "
+        f"refused rather than read as OFF: every one of the eight shapes "
+        f"listed in `_refuse_unreadable` ran at x64 ON while the guard that "
+        f"conflated the two believed otherwise. Either spell the setting so "
+        f"this reader can resolve it, or teach the reader the shape and say "
+        f"in the same commit what you measured it to mean"
+    )
+
+
+def _x64_word(token: str) -> str:
+    """One written value -> ``"0"`` / ``"1"`` / a can't-tell, jax's grammar."""
+    word = token.strip().strip('"').strip("'").strip().lower()
+    if word in _X64_TRUE:
+        return "1"
+    if word in _X64_FALSE:
+        return "0"
+    return _cannot_tell(
+        f"JAX_ENABLE_X64: {token!r} is not a value jax's own `bool_env` "
+        f"reads ({'/'.join(_X64_TRUE)} or {'/'.join(_X64_FALSE)})"
+    )
+
+
+def _matrix_axis(head: str, axis: str):
+    """The values of ``strategy.matrix.<axis>``, or ``None`` if unreadable.
+
+    Two spellings, both YAML's: a flow sequence on the key's own line and a
+    block sequence under it. Anything else is ``None`` and the caller turns
+    that into a named can't-tell -- the same four-link discipline
+    `tests/_lanes.py`'s `_matrix_values` applies to `${EXTRAS}`.
+    """
+    matrix = re.search(r"^([ \t]*)matrix:[ \t]*$", head, re.M)
+    if matrix is None:
+        return None
+    body = head[matrix.end():]
+    indent = len(matrix.group(1))
+    key = re.search(
+        rf"^[ \t]{{{indent + 1},}}{re.escape(axis)}:[ \t]*(.*?)[ \t]*$",
+        body,
+        re.M,
+    )
+    if key is None:
+        return None
+    inline = key.group(1)
+    if inline.startswith("["):
+        if not inline.endswith("]"):
+            return None
+        return [v.strip() for v in inline[1:-1].split(",") if v.strip()]
+    if inline:
+        return None  # a scalar, or a spelling this reader has not been taught
+    items = []
+    for line in body[key.end():].lstrip("\n").split("\n"):
+        entry = re.fullmatch(r"[ \t]+-[ \t]+(.*?)[ \t]*", line)
+        if entry is None:
+            break
+        items.append(entry.group(1))
+    return items or None
+
+
+def _x64_resolve(raw: str, head: str) -> list[str]:
+    """A written setting -> the cell(s) the steps under it actually run in.
+
+    A `${{ matrix.<axis> }}` setting is EXPANDED, entry by entry, because a
+    matrix multiplies the job and one step over a two-cell axis genuinely
+    runs in both. That is the honest refactor of this workflow -- one pytest
+    step, `matrix: x64: ["0", "1"]` -- and forbidding expressions outright
+    rejected it while PASSING `${{ matrix.x64 }}` over `x64: ["1"]`, which
+    runs in one cell. The guard was strict against the sound shape and
+    permissive against the unsound one, which is the wrong way round twice.
+    """
+    ref = _X64_MATRIX_REF.fullmatch(raw.strip().strip('"').strip("'").strip())
+    if ref is None:
+        if "${{" in raw:
+            return [_cannot_tell(
+                f"JAX_ENABLE_X64: {raw!r} is an expression this reader does "
+                f"not follow; only `${{{{ matrix.<axis> }}}}` is followed"
+            )]
+        return [_x64_word(raw)]
+    values = _matrix_axis(head, ref.group(1))
+    if not values:
+        return [_cannot_tell(
+            f"JAX_ENABLE_X64: {raw!r} names matrix axis {ref.group(1)!r} and "
+            f"this job's `strategy.matrix` does not carry it in a spelling "
+            f"this reader can expand"
+        )]
+    return [_x64_word(value) for value in values]
+
+
 def _canary_jobs(workflow: str):
-    """``(job name, block)`` for every job of the nightly workflow, in order.
+    """``(job id, block)`` for every job of the nightly workflow, in order.
 
     The layout this reads is a two-space job key whose first child is
     ``name:``; a workflow that stops matching it has moved. Every caller
     below FAILS on an empty list rather than passing over one — two by
     asserting it directly and the third because the cells it collects come
     from these blocks, so no jobs means no cells and no cells means red.
-    """
-    import re
 
+    The id pattern is `_JOB_ID` and is spelled once — see there for the third
+    job that hid behind the underscore `[a-z-]+` could not see.
+    """
     starts = [
         (m.start(), m.group(1))
-        for m in re.finditer(r"\n  ([a-z-]+):\n    name: ", workflow)
+        for m in re.finditer(rf"\n  ({_JOB_ID}):\n    name: ", workflow)
     ]
     bounds = [pos for pos, _ in starts] + [len(workflow)]
     return [
@@ -1967,6 +2146,15 @@ def _canary_jobs(workflow: str):
 
 def _x64_cells(workflow: str, block: str, wanted) -> list[str]:
     """The ``JAX_ENABLE_X64`` cell each step of ``block`` ``wanted`` runs in.
+
+    Every entry is ``"0"``, ``"1"``, ``"unset"`` or a ``?``-prefixed
+    can't-tell, and **``"unset"`` and the can't-tell are different things** —
+    that they were one string is the defect this docstring's second half is
+    about. ``"unset"`` is *no setting anywhere*, which is jax's default and
+    measured OFF (`jax.config.jax_enable_x64` is `False` with the variable
+    unset); a can't-tell is *a setting this reader will not guess at*, and
+    :func:`_refuse_unreadable` turns it into a red. Callers must call that
+    before reading a cell.
 
     RESOLVE THE SETTING THE WAY THE RUNNER DOES: a step's own ``env:`` wins,
     else the job's (which lives in the block HEAD, before ``steps:``), else
@@ -1980,26 +2168,107 @@ def _x64_cells(workflow: str, block: str, wanted) -> list[str]:
     SETTING it -- two of the mutants that killed the old guard were caught
     only by that accident.
 
+    AND THREE THINGS THAT ARE NOT AN ``env:`` ENTRY AT ALL SET THIS VARIABLE,
+    each of which this reader refuses rather than misses:
+
+    * the step's ``run:`` script naming it — ``export JAX_ENABLE_X64=1`` on a
+      line of its own, or a ``JAX_ENABLE_X64=1 .venv/bin/python …`` command
+      prefix. This reader does not evaluate shell, so a script that names the
+      variable is a can't-tell about that step;
+    * any step of the job writing it into ``$GITHUB_ENV``, which changes the
+      environment of every LATER step. Ordering steps against a shell this
+      reader does not run is not a thing it will do, so ONE such write is a
+      can't-tell for the whole job;
+    * an ``if:`` this reader cannot evaluate, because a step that might not
+      run cannot be credited with running in a cell.
+
     **IT IS ONE FUNCTION BECAUSE TWO CALLERS NEED THE SAME RULE**, and the
     second caller is why: the guard on the tripwire's own test step was added
     without this resolution and read no cell at all. A resolution rule this
     subtle, typed twice, is the shape
     `.github/workflows/nightly-jax-canary.yml` has already drifted on twice
-    in prose.
-    """
-    import re
+    in prose. It also carried the conflation above into BOTH callers the day
+    it was extracted, which is the risk a shared resolver runs and the reason
+    every shape it refuses is named in `_refuse_unreadable`.
 
-    setting_re = re.compile(r'^\s*JAX_ENABLE_X64:\s*"?([01])"?', re.M)
+    **WHAT IT STILL ASSUMES, SAID RATHER THAN LEFT TO BE FOUND.** The step
+    split is on ``- `` followed by ``name:``, ``uses:`` or ``run:``, which is
+    every step in this workflow and not every step YAML permits: one whose
+    first key is ``if:`` or ``env:`` would not open a chunk and would be read
+    as part of its predecessor. A reusable-workflow ``uses:`` job, a
+    ``defaults.run`` env, and a composite action that sets the variable are
+    all outside what this reads. This is a text reader with a named grammar,
+    not a YAML evaluator; what it does NOT do is guess when it is outside it.
+    """
     head = block.split("\n    steps:", 1)[0]
-    inherited = setting_re.search(head) or setting_re.search(
-        workflow.split("\njobs:", 1)[0]
-    )
-    cells = []
-    for step in re.split(r"\n      - (?=name:|uses:|run:)", block)[1:]:
+    steps = re.split(r"\n      - (?=name:|uses:|run:)", block)[1:]
+
+    def _script(step: str) -> str:
+        """The step's `run:` SCRIPT, by YAML's own rule and not to the end of
+        the chunk. A step chunk ends where the next one begins, so it carries
+        the next step's COMMENT preamble — and in this workflow those
+        comments quote `JAX_ENABLE_X64` at length. Reading to the end of the
+        chunk made every `control` step a can't-tell on its neighbour's prose,
+        which is the false-positive direction of the same laziness.
+
+        An inline `run: cmd` is that one line; a `run: |` block scalar is the
+        following lines indented strictly deeper than the `run:` key.
+        """
+        run = re.search(r"^([ \t]*)run:[ \t]*(.*)$", step, re.M)
+        if run is None:
+            return ""
+        if run.group(2).strip() not in ("|", ">", "|-", ">-", "|+", ">+"):
+            return run.group(2)
+        depth = len(run.group(1))
+        lines = []
+        for line in step[run.end():].split("\n")[1:]:
+            if line.strip() and len(line) - len(line.lstrip()) <= depth:
+                break
+            lines.append(line)
+        return "\n".join(lines)
+
+    poisoned = None
+    for step in steps:
+        script = _script(step)
+        if "JAX_ENABLE_X64" in script and "GITHUB_ENV" in script:
+            poisoned = _cannot_tell(
+                "a step of this job writes JAX_ENABLE_X64 into $GITHUB_ENV, "
+                "which sets it for every later step of the job"
+            )
+            break
+
+    top = workflow.split("\njobs:", 1)[0]
+    inherited = _X64_SETTING.search(head) or _X64_SETTING.search(top)
+
+    cells: list[str] = []
+    for step in steps:
         if not wanted(step):
             continue
-        setting = setting_re.search(step) or inherited
-        cells.append(setting.group(1) if setting else "unset")
+        if poisoned is not None:
+            cells.append(poisoned)
+            continue
+        condition = re.search(r"^[ \t]*if:[ \t]*(.*?)[ \t]*$", step, re.M)
+        if (
+            condition is not None
+            and condition.group(1) not in _STEP_CONDITIONS_THIS_READER_KNOWS
+        ):
+            cells.append(_cannot_tell(
+                f"the step's `if: {condition.group(1)}` is not a condition "
+                f"this reader can evaluate, so it cannot be credited with "
+                f"running at all"
+            ))
+            continue
+        if "JAX_ENABLE_X64" in _script(step):
+            cells.append(_cannot_tell(
+                "the step's `run:` script names JAX_ENABLE_X64, and this "
+                "reader does not evaluate shell"
+            ))
+            continue
+        setting = _X64_SETTING.search(step) or inherited
+        if setting is None:
+            cells.append("unset")
+            continue
+        cells.extend(_x64_resolve(setting.group(1), head))
     return cells
 
 
@@ -2041,7 +2310,15 @@ def test_the_canary_and_the_workflow_agree_about_the_two_legs():
         _pathlib_for_canary() / ".github" / "workflows" / "nightly-jax-canary.yml"
     ).read_text(encoding="utf-8")
 
-    jobs = dict(re.findall(r"\n  ([a-z-]+):\n    name: (.*)", workflow))
+    # ONE READER FOR JOBS, `_canary_jobs`. This line carried a SECOND copy of
+    # the job-id pattern until 2026-08-22 and the copy was the same too-narrow
+    # `[a-z-]+`, so a third job `nightly_x64:` was invisible here as well as
+    # there and this assertion passed on a workflow with three legs. The
+    # titles come off the blocks that reader already returns.
+    jobs = {
+        job: re.search(r"^    name: (.*)$", block, re.M).group(1)
+        for job, block in _canary_jobs(workflow)
+    }
     assert set(jobs) == {"control", "nightly"}, (
         f"the guidance names two legs and the workflow has jobs {sorted(jobs)}"
     )
@@ -2184,14 +2461,27 @@ def test_the_nightly_runs_the_tests_OF_THE_HOOK_ON_A_PRIVATE_FUNCTION():
     FUNCTION is there, that nothing on the step names a file that is not, and
     that the file is run in both cells.
     """
-    import re
-
     root = _pathlib_for_canary()
     workflow = (
         root / ".github" / "workflows" / "nightly-jax-canary.yml"
     ).read_text(encoding="utf-8")
+
+    # THE JOB THIS TEST NAMES, AND ONLY IT. This read the WHOLE workflow and
+    # the cells below were collected from EVERY job into one flat list tied to
+    # none of them, while the name and the paragraph above both say *the
+    # nightly*. Driven: moving the x64 OFF pytest step bodily into the
+    # `control` job left this file at `68 passed` — the union still held one
+    # of each cell, and the nightly ran the tripwire's own tests at x64=1
+    # alone, which is exactly the state this test exists to forbid.
+    blocks = dict(_canary_jobs(workflow))
+    assert "nightly" in blocks, (
+        f"the workflow has no `nightly` job; its jobs are {sorted(blocks)}, "
+        f"and this test is a claim about that leg by name"
+    )
+    nightly = blocks["nightly"]
+
     steps = [
-        step for step in re.split(r"\n      - (?=name:|uses:|run:)", workflow)[1:]
+        step for step in re.split(r"\n      - (?=name:|uses:|run:)", nightly)[1:]
         # `run: |` puts the command on the FOLLOWING lines, so the match is
         # over the step rather than over the `run:` line -- and it is anchored
         # on a `run:` being there, so a step that merely mentions pytest in a
@@ -2199,7 +2489,7 @@ def test_the_nightly_runs_the_tests_OF_THE_HOOK_ON_A_PRIVATE_FUNCTION():
         if re.search(r"^\s*run:", step, re.M) and "-m pytest" in step
     ]
     assert steps, (
-        "no step of the nightly workflow runs pytest at all, so the "
+        "no step of the `nightly` job runs pytest at all, so the "
         "tripwire's own tests are not run against the nightly by anything"
     )
     named = {
@@ -2223,19 +2513,21 @@ def test_the_nightly_runs_the_tests_OF_THE_HOOK_ON_A_PRIVATE_FUNCTION():
     # short of it is that the file's suppression-siting assertions sit behind
     # an x64 branch, so a step at x64=1 alone runs the tests and watches
     # nothing that the eager hook actually does.
-    cells = [
-        cell
-        for _, block in _canary_jobs(workflow)
-        for cell in _x64_cells(
-            workflow,
-            block,
-            lambda step: (
-                re.search(r"^\s*run:", step, re.M)
-                and "-m pytest" in step
-                and "test_tripwire_eager.py" in step
-            ),
-        )
-    ]
+    cells = _x64_cells(
+        workflow,
+        nightly,
+        lambda step: (
+            re.search(r"^\s*run:", step, re.M)
+            and "-m pytest" in step
+            and "test_tripwire_eager.py" in step
+        ),
+    )
+    # A CAN'T-TELL IS NOT A CELL. See `_refuse_unreadable` for the eight
+    # measured shapes that ran at x64 ON while the conflated `"unset"` read
+    # as OFF here.
+    _refuse_unreadable(
+        cells, "the `nightly` job's `tests/test_tripwire_eager.py` steps"
+    )
     off = [cell for cell in cells if cell in ("0", "unset")]
     on = [cell for cell in cells if cell == "1"]
     assert off and on, (
@@ -2291,6 +2583,11 @@ def test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN():
         assert cells, (
             f"the `{job}` leg does not run the canary at all"
         )
+        # A CAN'T-TELL IS NOT A CELL, and this assertion read one as a PASS:
+        # `any(cell in ("0", "unset"))` credited a leg with the cell it can
+        # redden in on the strength of a setting nobody could parse. See
+        # `_refuse_unreadable` for the eight shapes that measured green here.
+        _refuse_unreadable(cells, f"the `{job}` leg's `tripwire_canary.py` steps")
         assert any(cell in ("0", "unset") for cell in cells), (
             f"every `tripwire_canary.py` step on the `{job}` leg runs at "
             f"JAX_ENABLE_X64={cells}, and the eager constant sweep cannot "
@@ -2299,6 +2596,189 @@ def test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN():
             "empty by construction. That leg cannot go red for the reason "
             "`eager:unenumerated-jax-constant` exists"
         )
+
+
+# --------------------------------------------------------------------------
+# THE INSTRUMENT ITSELF, DRIVEN. The two guards above read one workflow, so
+# every shape they refuse would otherwise be evidenced only by a mutation
+# somebody once ran by hand and wrote a number down for. These drive the
+# resolver directly, over synthetic workflows, and they are the regression
+# tests for the eight measured shapes that ran at x64 ON while the guard
+# believed otherwise.
+# --------------------------------------------------------------------------
+
+_SYNTHETIC = """\
+# a workflow shaped like `.github/workflows/nightly-jax-canary.yml`
+name: synthetic
+jobs:
+  control:
+    name: control — the newest released jax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: .venv/bin/python .github/scripts/tripwire_canary.py --require
+
+  nightly:
+    name: nightly jax
+{matrix}    steps:
+      - uses: actions/checkout@v4
+{extra}      - name: the tripwire's own tests
+{condition}        env:
+{setting}          JAX_PLATFORMS: cpu
+        run: |
+{script}          .venv/bin/python -m pytest -q tests/test_tripwire_eager.py
+"""
+
+
+def _synthetic(setting=None, matrix=None, condition=None, script="", extra=""):
+    """One `nightly` job with one wanted step, spelled however the case asks."""
+    return _SYNTHETIC.format(
+        setting="" if setting is None else f"          JAX_ENABLE_X64: {setting}\n",
+        matrix="" if matrix is None else (
+            f"    strategy:\n      matrix:\n        {matrix}\n"
+        ),
+        condition="" if condition is None else f"        if: {condition}\n",
+        script=script,
+        extra=extra,
+    )
+
+
+def _wanted(step):
+    return bool(re.search(r"^\s*run:", step, re.M)) and "-m pytest" in step
+
+
+def _cells_of(workflow):
+    return _x64_cells(workflow, dict(_canary_jobs(workflow))["nightly"], _wanted)
+
+
+# (label, kwargs, the cells this reader may claim). `None` means it must
+# claim NOTHING -- a can't-tell, refused rather than read as a cell.
+_RESOLUTIONS = [
+    # jax's own grammar, and the YAML booleans that render into it. Driven
+    # against `jax.config.jax_enable_x64` on jax 0.11.0, every row.
+    ('quoted "0"', dict(setting='"0"'), ["0"]),
+    ('quoted "1"', dict(setting='"1"'), ["1"]),
+    ("bare 0", dict(setting="0"), ["0"]),
+    ("bare 1", dict(setting="1"), ["1"]),
+    ("YAML true", dict(setting="true"), ["1"]),
+    ("YAML on", dict(setting="on"), ["1"]),
+    ("YAML off", dict(setting="off"), ["0"]),
+    ("YAML no", dict(setting="no"), ["0"]),
+    ('quoted "on"', dict(setting='"on"'), ["1"]),
+    ('quoted "yes"', dict(setting='"yes"'), ["1"]),
+    ("uppercase TRUE", dict(setting='"TRUE"'), ["1"]),
+    # NO SETTING ANYWHERE IS NOT A CAN'T-TELL. jax's default is OFF -- driven,
+    # `jax.config.jax_enable_x64` is `False` with the variable unset -- so
+    # this is a READING and the one thing `"unset"` may mean.
+    ("no setting anywhere", dict(), ["unset"]),
+    # ...and everything else is refused.
+    ("a word jax would raise on", dict(setting='"maybe"'), None),
+    ("the empty string", dict(setting='""'), None),
+    # THE MATRIX CHAIN, FOLLOWED ENTRY BY ENTRY, which is what makes the
+    # honest two-cell refactor legal and the one-cell pin illegal. Forbidding
+    # expressions outright had it exactly the wrong way round on both.
+    ("matrix over both cells",
+     dict(setting="${{ matrix.x64 }}", matrix='x64: ["0", "1"]'), ["0", "1"]),
+    ("matrix over both cells, block sequence",
+     dict(setting="${{ matrix.x64 }}", matrix='x64:\n          - "0"\n          - "1"'),
+     ["0", "1"]),
+    ("matrix pinned to ON",
+     dict(setting="${{ matrix.x64 }}", matrix='x64: ["1"]'), ["1"]),
+    ("matrix axis the job does not carry",
+     dict(setting="${{ matrix.x64 }}", matrix='other: ["0", "1"]'), None),
+    ("matrix reference with no matrix at all",
+     dict(setting="${{ matrix.x64 }}"), None),
+    ("an expression that is not a matrix reference",
+     dict(setting="${{ env.CELL }}"), None),
+    # THREE WAYS TO SET IT THAT ARE NOT AN `env:` ENTRY. This reader does not
+    # evaluate shell and does not order steps against one.
+    ("`export` inside the run: block",
+     dict(script="          export JAX_ENABLE_X64=1\n"), None),
+    ("a command prefix",
+     dict(setting='"0"', script="          JAX_ENABLE_X64=1 \\\n"), None),
+    ("an earlier step writing $GITHUB_ENV",
+     dict(setting='"0"',
+          extra='      - run: echo "JAX_ENABLE_X64=1" >> $GITHUB_ENV\n'), None),
+    # A STEP THAT MIGHT NOT RUN CANNOT BE CREDITED WITH RUNNING IN A CELL.
+    ("the one condition this reader knows",
+     dict(setting='"0"', condition="steps.install.outcome == 'success'"), ["0"]),
+    ("a condition it does not",
+     dict(setting='"0"', condition="steps.install.outcome == 'success' && false"),
+     None),
+    ("any other condition",
+     dict(setting='"0"', condition="github.event_name == 'schedule'"), None),
+]
+
+
+@pytest.mark.parametrize(
+    "label,kwargs,expected", _RESOLUTIONS, ids=[r[0] for r in _RESOLUTIONS]
+)
+def test_the_cell_resolver_REFUSES_WHAT_IT_CANNOT_PARSE(label, kwargs, expected):
+    """A can't-tell is not a cell, and it used to be spelled like one.
+
+    `_x64_cells` returned the single string ``"unset"`` for BOTH "no setting
+    anywhere" -- jax's default, genuinely OFF -- and "a setting I could not
+    parse", and both callers read the conflated value as OFF. EIGHT measured
+    mutations of the real workflow ran at x64 ON with this file at
+    `68 passed`: `JAX_ENABLE_X64: true`; `"on"`; `${{ matrix.x64 }}` over
+    `x64: ["1"]`; `export JAX_ENABLE_X64=1` in the `run:` block; a
+    `JAX_ENABLE_X64=1` command prefix; an earlier step writing the name into
+    `$GITHUB_ENV`; `&& false` on the OFF step; and the OFF step moved into the
+    other job. `true` and `on` are not exotic -- jax's own boolean-environment
+    reader takes `y yes t true on 1`, driven through `jax.config` on jax
+    0.11.0 -- and the regex saw only `0`/`1`.
+
+    A can't-tell that defaults to the answer the caller wanted is the shape
+    this campaign has already named once, in `Lane.jax`, and this table is
+    what stops it being renamed here. Each row is a workflow this reader
+    either RESOLVES to named cells or REFUSES; there is no third outcome, and
+    "refused" is checked through the caller's own gate rather than by reading
+    the sentinel, because the sentinel is not what the guards depend on.
+    """
+    cells = _cells_of(_synthetic(**kwargs))
+    if expected is None:
+        with pytest.raises(AssertionError, match="cannot tell"):
+            _refuse_unreadable(cells, "the synthetic job")
+        assert all(cell.startswith("?") for cell in cells), (
+            f"{label}: refused, but only partly — {cells}. A step whose cell "
+            f"this reader cannot resolve must contribute no cell at all"
+        )
+    else:
+        _refuse_unreadable(cells, "the synthetic job")
+        assert cells == expected, f"{label}: read {cells}, not {expected}"
+
+
+def test_the_reader_sees_a_job_id_WITH_AN_UNDERSCORE_OR_A_DIGIT():
+    """`[a-z-]+` is not the job-id charset, and a job id is cheap to add.
+
+    GitHub allows a leading letter or `_` and then letters, digits, `-` and
+    `_`. Driven on the real workflow: a THIRD job `nightly_x64:` running
+    `tripwire_canary.py` at `JAX_ENABLE_X64: "1"` only -- an alarm in the one
+    cell the eager constant sweep cannot redden in -- left this file at
+    `68 passed`, and
+    `test_the_canary_and_the_workflow_agree_about_the_two_legs` passed too
+    because it carried a SECOND copy of the same pattern. Both now read
+    through `_canary_jobs`, and both go red on that mutation.
+    """
+    workflow = _synthetic(setting='"0"') + """
+  nightly_x64:
+    name: nightly jax, x64 only
+    runs-on: ubuntu-latest
+    steps:
+      - run: .venv/bin/python .github/scripts/tripwire_canary.py --require
+
+  Build2:
+    name: a leading capital and a digit
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+"""
+    assert [job for job, _ in _canary_jobs(workflow)] == [
+        "control", "nightly", "nightly_x64", "Build2"
+    ], (
+        "the job reader cannot see every job of this workflow, so a leg can "
+        "be added that no test in this repository reads"
+    )
 
 
 def test_every_message_about_the_two_legs_carries_the_SAME_guidance(
