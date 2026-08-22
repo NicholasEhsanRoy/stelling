@@ -133,7 +133,9 @@ here is the conclusive direction: a real implementation can only break less.
   strict reachability. Three instruments, three partitions — the partition is
   operationalization-dependent, so none is quoted as THE count. The earlier
   "33 both" conflated two buckets of one partition. All of these are the
-  count-error class recorded in CONTRIBUTING.md, made inside documents about
+  count-error class recorded at `docs/norms.md`'s *A figure in a norm states
+  the UNIT it counts* (CONTRIBUTING.md links that norm; it does not record
+  it), made inside documents about
   message quality.*
 - **It has not been measured on external code.** Both external agents reached
   escalation; whether a first-time user on the default path hits this is

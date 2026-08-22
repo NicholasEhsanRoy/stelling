@@ -133,9 +133,9 @@ mesh machinery, no method internals.
 
 **Out of scope today, stated plainly:**
 
-- **Properties of the solve's behaviour** — conditioning over the
-  envelope, residual-implies-error — are a different, planned layer.
-  The boundary is exactly the solve: this module checks what goes *in*.
+- **Residual-implies-error, and properties of the solve's behaviour
+  generally** — are a different, planned layer. The boundary is exactly
+  the solve: **`stelling.preconditions` checks what goes *in***.
 - **Array obligations escalate for small static shapes.** Interval
   propagation judges array obligations elementwise (the first example
   is an array, and VERIFIED means every element), and the SMT step now
@@ -196,8 +196,48 @@ true and the default (`real`) verdict of VERIFIED is correct *for what it
 claims*. Executed in float32 it is exactly `0.0` at every point of that
 envelope, so the predicate is **false everywhere the program actually
 runs**. Measured on jax 0.11.0; the same VERIFIED-against-executed-zero
-appears for `jnp.sum(k * x)` and for `jnp.matmul(k, x)`, so it is a
-property of the semantics dial rather than of any one primitive or row.
+appears when the addend `jnp.float32(1e-9)` above is replaced by
+`jnp.sum(k * x)` or by `jnp.matmul(k, x)` — **the rest of the expression held
+fixed**, which is the part that has to be said: `assert_(jnp.sum(k * x) > 0.0)`
+on its own is a different claim and comes back REFUTED. So it is a property of
+the semantics dial rather than of any one primitive or row, and the block below
+runs under `tests/test_doc_examples.py`:
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp
+from stelling.harness import any_array, assert_
+from stelling.preconditions import check
+
+K = jnp.float32(1e-9)
+ADDENDS = {
+    "(x[0] + k) - x[0]           ": lambda x: K,
+    "(x[0] + sum(k*x)) - x[0]    ": lambda x: jnp.sum(K * x),
+    "(x[0] + matmul(k,x)) - x[0] ": lambda x: jnp.matmul(jnp.full((3,), K), x),
+}
+
+
+def harness_for(addend):
+    def harness():
+        x = any_array((3,), "float32", (1.0 - 1e-12, 1.0 + 1e-12))
+        return assert_((x[0] + addend(x)) - x[0] > 0.0)
+    return harness
+
+
+real = jnp.full((3,), 1.0, dtype=jnp.float32)
+for name, addend in ADDENDS.items():
+    verdict = check(harness_for(addend), vacuity_mode="all")
+    executed = (real[0] + addend(real)) - real[0]
+    print(f"{name.strip():28} verdict={verdict.status:9} executed={executed}")
+```
+
+```
+(x[0] + k) - x[0]            verdict=VERIFIED  executed=0.0
+(x[0] + sum(k*x)) - x[0]     verdict=VERIFIED  executed=0.0
+(x[0] + matmul(k,x)) - x[0]  verdict=VERIFIED  executed=0.0
+```
 
 The verdict is not wrong — it says `real` on the stamp, and in ℝ the
 claim holds. But **"VERIFIED" plus a `real` semantics line does not mean
@@ -211,6 +251,52 @@ Each limit shows up in the verdict itself — as a quoted decline, an
 UNKNOWN with its reason, or a stamped assumption — never as a silent
 pass. That is the design: the tool tells you when it could not earn the
 claim, so a VERIFIED means exactly what it says.
+
+<a id="contracts"></a>
+
+## Conditioning is not planned — it is `stelling.contracts`
+
+**One item of that out-of-scope list is built and shipped**, and this section
+exists because the bullet above used to bury it: *"conditioning over the
+envelope, residual-implies-error — are a different, **planned** layer"* welded
+a shipped layer to an unbuilt one. Residual-implies-error really is absent.
+Conditioning is not.
+
+```python
+import inspect
+
+from stelling import contracts
+
+for name in contracts.__all__:
+    obj = getattr(contracts, name)
+    try:
+        print(f"{name}{inspect.signature(obj)}")
+    except (TypeError, ValueError):
+        print(name)
+```
+
+```
+Contract(name: 'str', requires_description: 'str', harness: 'Callable[[], tuple]', ensures: 'EnsuresFace | None', no_ensures_reason: 'str' = '') -> None
+ContractVerdict(contract_name: 'str', requires_description: 'str', requires: 'object', ensures: 'EnsuresFace | None', no_ensures_reason: 'str' = '') -> None
+ENSURES_DECLARED
+EnsuresFace(statement: 'str', derivation: 'str', conditional_on: 'str', status: 'str' = 'DECLARED') -> None
+check_contract(contract, *, vacuity_mode, solver_timeout_ms=None, refine=None, falsify=None)
+coefficient_contrast(shape, dtype, chi_range, contrast_bound, transform=None) -> 'Contract'
+conditioning_2x2(dtype, a_range, c_range, b_range, kappa) -> 'Contract'
+conditioning_2x2_field(shape, dtype, theta_range, kappa, transform) -> 'Contract'
+```
+
+`conditioning_2x2` and its `_field` sibling mechanize a conditioning bound over declared closed ranges, as a
+requires/ensures `Contract` whose boundary is proved in the docstring —
+`cond_2(M) <= kappa  <=>  tr^2 <= det * (kappa + 1/kappa + 2)`. They are run
+through `contracts.check_contract`, which takes the same `vacuity_mode`,
+`solver_timeout_ms`, `refine` and `falsify` as `check` does.
+
+**One difference worth knowing before you reach for it:** `check_contract`
+does **not** take `solver=`, so the portfolio cannot be restricted from the
+contracts layer. See
+[proposed-solver-selection.md](proposed-solver-selection.md), which records
+that as one of the two rows of its change table that did not land.
 
 ## The libm accuracy budget: `exp` and `pow` under `ieee`
 
@@ -227,9 +313,16 @@ normal and finite, XLA's result is up to **5.51 float32 ulps** from the
 true value — so it is not faithfully rounded at all, and no fixed widening
 of the bracket can be sound. On the *same* backend, `bfloat16` `exp` is
 exhaustively **correctly rounded** over every normal finite result, and
-`float16` misses correct rounding on 2 of its 63,487 arguments by 3e-5 of
-an ulp — both are evaluated in `float32` and rounded. A factor of eleven
+`float16` misses correct rounding on 2 of the **37,479** arguments whose
+result is normal and finite, by 3e-5 of an ulp — both are evaluated in `float32` and rounded. A factor of eleven
 between two formats of one op: no single number is right for all four.
+
+*(That denominator was `63,487` — the count of distinct finite `float16`
+arguments the row ENUMERATES, of which 19,616 have a subnormal or non-finite
+result and were measured separately, at a different maximum. Both numerals are
+real; the ratio was over a population that was not the measurement's. The row
+in `stelling.propagate.LIBM_MEASURED` carries the same weld, and states both
+populations in the same string, which is how this was found.)*
 
 **Not every row is exhaustive, and the difference matters.** `exp` is
 measured exhaustively in `float16`, `bfloat16` and `float32`. `exp` in

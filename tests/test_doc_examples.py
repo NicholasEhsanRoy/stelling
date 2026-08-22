@@ -19,17 +19,17 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                55
+    ```python blocks                                57
       marked illustrative — not run                 14
-      EXECUTED (exit 0 required)                    41
+      EXECUTED (exit 0 required)                    43
         marked run-only — output not compared        3
-        OUTPUT COMPARED against a fence             38
-    plain ``` fences                                81
-      consumed as an example's claimed output       38
-      HAND-WRITTEN, compared to nothing             43
-So the claim this file earns is: *every runnable example runs, and 38 of
-the 41 have their stdout compared byte for byte after a narrow
-normalisation.* The 43 unattached fences — a render pasted into prose, a
+        OUTPUT COMPARED against a fence             40
+    plain ``` fences                                85
+      consumed as an example's claimed output       40
+      HAND-WRITTEN, compared to nothing             45
+So the claim this file earns is: *every runnable example runs, and 40 of
+the 43 have their stdout compared byte for byte after a narrow
+normalisation.* The 45 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
 
@@ -161,6 +161,28 @@ EXPECTED_INVENTORY = {
     # the eager detector armed it raises by design, and with it off it prints
     # nothing, so there is no output to compare either way; it is a record of
     # what jax does, which is what `illustrative` means.
+    # B19 on `docs/preconditions.md`: THREE more, and two of them exist
+    # because a whole shipped layer had no route from the docs. That page's
+    # out-of-scope list welded a built layer to an unbuilt one --
+    # "conditioning over the envelope, residual-implies-error ... are a
+    # different, PLANNED layer" -- while `stelling.contracts` ships
+    # `conditioning_2x2` and `conditioning_2x2_field`, and `docs/README.md`
+    # had no index row for the module at all. The new section prints the
+    # contracts surface FROM the object; drafting it against the page's own
+    # description produced four wrong signatures, which is the argument for
+    # printing rather than typing. The third block pins the substitution
+    # behind "the same VERIFIED-against-executed-zero appears for
+    # `jnp.sum(k * x)`" -- the naive reading of that sentence gives REFUTED.
+    #
+    # THREE FENCES ARE ADDED UNATTACHED, DELIBERATELY, and named here so the
+    # decision is on the record rather than absorbed into the total:
+    # `norms.md`'s cost table (quoted from `obligation.py`, whose comment is
+    # the maintained copy), `norms.md`'s corpus-sweep output (a subprocess
+    # this module does not run), and `state-0.1.0.md`'s pre-change `jnp.where`
+    # reading (a HISTORICAL measurement -- gating it would assert the old
+    # answer). The live reading of that last one IS gated, on
+    # `proposed-int-literal-convert.md`.
+    #
     # B19 on `docs/reading-a-verdict.md`: ROW 1 of the status table -- the
     # first thing a reader of that page reads -- said VERIFIED means "true at
     # every point of the declared box", and under a narrowing `assume` it does
@@ -215,11 +237,11 @@ EXPECTED_INVENTORY = {
     # booleans, not a render, because the normaliser only rewrites a source-info
     # line that begins the line and a fence carrying an inline temp path could
     # not be byte-compared.
-    "python_blocks": 55,
+    "python_blocks": 57,
     "illustrative": 14,
-    "executed": 41,
+    "executed": 43,
     "run_only": 3,
-    "compared": 38,
+    "compared": 40,
     # B15 added two: `docs/overflow-tripwire.md` now quotes the trace gate's
     # narrowed refusal and its NOT-FULLY-OBSERVED refusal side by side, which
     # is the whole point of that section — the two sentences have to be
@@ -242,8 +264,8 @@ EXPECTED_INVENTORY = {
     # which is the gap that program has in jax's DEFAULT configuration.
     # Measured, hand-written, attached to nothing;
     # `tests/test_tripwire_eager.py` re-drives every line of it.
-    "plain_fences": 81,
-    "plain_unattached": 43,
+    "plain_fences": 85,
+    "plain_unattached": 45,
 }
 
 _MARKER = re.compile(r"<!--\s*doc-example:\s*(illustrative|run-only)\s*-->")
