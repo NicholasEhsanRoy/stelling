@@ -233,18 +233,35 @@ Every verdict object stamps, at minimum:
   withheld. Driven verbatim from the sentence above through
   `preconditions.check(h, vacuity_mode="inputs-only", solver_timeout_ms=60_000)`:
   `status UNKNOWN, witnesses ()`, with both solvers answering `sat` and the
-  verdict declining to mint a REFUTED out of either. **Four cells** — jax
-  0.11.0 and jax 0.10.2, each with `JAX_ENABLE_X64` unset and set — same
-  status and same empty witness tuple in every one. (With x64 unset the
-  `float64` declaration truncates to `float32`, so those two cells ask a
-  slightly different question; they are reported because the withholding is
-  what is being measured and it does not depend on the width.)
-  The regression is
+  verdict declining to mint a REFUTED out of either. **TWO cells measure
+  that** — jax 0.11.0 and jax 0.10.2, both with `JAX_ENABLE_X64` set — and
+  they agree: `z3` and `cvc5` each answer `sat`, the obligation reads
+  *"violation WITHHELD from REFUTED"*, and taking the fix away by forcing
+  `assume_dropped` to `False` brings the witness straight back as
+  `[0, 0, -1]`, replay-confirmed, on both. **The other two cells do not bear
+  on it, and this is the correction.** With `JAX_ENABLE_X64` unset the
+  `float64` declaration truncates to `float32`, `convert_element_type`
+  declines the value-changing conversion, and **no solver runs at all**: the
+  note is *"escalation declined — `convert_element_type` `float64` ->
+  `float32` is value-changing"*, and with the fix neutralised the same way
+  the witness is STILL `None`. So the UNKNOWN there is OVER-DETERMINED — it
+  would read identically with the withholding removed — and those two cells
+  report a number rather than measure this. The regression is
   `tests/test_dropped_assume.py::test_the_reproducer_no_longer_refutes`,
   whose module docstring carries the pre-fix measurement in the same words
   this paragraph now dates, and the one-sidedness is
   `tests/test_dropped_assume.py::test_a_verified_under_a_dropped_assume_is_STILL_RENDERED`
   beside it.
+
+  *(This read "**Four cells** … same status and same empty witness tuple in
+  every one", parenthesised with "the withholding is what is being measured
+  and it does not depend on the width". The `status UNKNOWN, witnesses ()`
+  half is right in all four and drove clean; the parenthetical is what the
+  neutralisation refutes. A cell that would report the same answer with the
+  mechanism removed is not evidence about the mechanism, and counting it as
+  a cell inflates the population a claim is standing on — `docs/norms.md`'s
+  "A figure in a norm states the UNIT it counts", applied to a cell count
+  rather than a figure.)*
 
   **THIS SENTENCE STOOD IN THE PRESENT TENSE FOR TWENTY-FIVE DAYS AND
   NOTHING IN THE TREE COULD SEE IT.** It was written at 19:51 on 2026-07-28
@@ -255,8 +272,20 @@ Every verdict object stamps, at minimum:
   touched. Every citation,
   identifier and path in it resolved throughout — what was false was the
   verb, and a measured claim in the present tense is the one shape this
-  document's instruments do not reach. It is the `:6962` shape, in the
-  section a reviewer leans on hardest.
+  document's instruments do not reach. **A STALE PRESENT-TENSE MEASUREMENT
+  WHOSE EVERY CITATION STILL RESOLVES**: that is the shape, and this is the
+  first of the two in this file, in the section a reviewer leans on hardest.
+
+  *(Both sentences that name this shape called it the `:6962` shape, which
+  was a finding-ID in the out-of-tree sweep report that found it and not a
+  line of anything a reader holds. Read the obvious way it lands on
+  unrelated text at every revision it has had: line 6962 is an interval
+  `mul` note at `5ad906f` and a boundary-division sweep note at `becad2b`,
+  and it moves again with every edit above it — including this one. Nothing
+  could catch that either: `_LINE_CITATION` in
+  `tests/test_prose_hygiene.py` requires a path in front of the colon, so a
+  bare `:NNNN` is invisible to the citation gate as well. The shape is named
+  here instead of numbered.)*
 
   The earlier claim that a witness-backed REFUTED "cannot
   suffer this failure mode — a witness is a model, and interval arithmetic does
@@ -470,15 +499,26 @@ against the tree; fourteen findings came back, a fifteenth was found while
 repairing them, and the repairs are in place above and in
 `DOCUMENTATION_ARCHITECTURE.md`. **What that does NOT mean:**
 
-* **The `## Log` below was not read line by line.** It is 11,000-odd lines
-  and it was swept EXHAUSTIVELY BY INSTRUMENT — every `path::name` citation,
-  every backticked module-qualified identifier, every backticked path, every
-  markdown anchor, every `Versions:` field, every occurrence of "today" —
-  with only the flagged passages read. **A present-tense claim about current
-  code that carries none of those markers was not reached.** Both of the
-  defects the D5 pass found in the Log surfaced through an identifier scan,
-  which is the only reason either surfaced; there is no basis for believing
-  they are the only two of their shape in 11,000 lines.
+* **The `## Log` below was not read line by line.** It is **14,926 lines** as
+  this is written — the `## Log` heading to the end of the file, and that is
+  the population — and it was swept EXHAUSTIVELY BY INSTRUMENT — every
+  `path::name` citation, every backticked module-qualified identifier, every
+  backticked path, every markdown anchor, every `Versions:` field, every
+  occurrence of "today" — with only the flagged passages read. **A
+  present-tense claim about current code that carries none of those markers
+  was not reached.** Both of the defects the D5 pass found in the Log
+  surfaced through an identifier scan, which is the only reason either
+  surfaced; there is no basis for believing they are the only two of their
+  shape in a Log that size. *(This said "11,000-odd lines", and then "in
+  11,000 lines". Neither is the Log at any revision it has had: 14,924 at
+  `391e50e`, the commit that wrote the sentence, and 14,823 back at
+  `5ad906f`. The only derivation that yields 11,000-odd is the Log MINUS the
+  72 routed detail sections, which `tests/test_soundness_routing.py`'s own
+  splitter measures at 3,349 lines: 14,926 − 3,349 = 11,577. That is a real
+  population, it is not the one the sentence stated, and the routed regions
+  are what the NEXT bullet treats. `docs/norms.md`'s "A figure in a norm
+  states the UNIT it counts" is the rule, and it is the rule this page
+  invokes above against the `105` figure.)*
 * **The large stamped measurement tables inside the two routed regions were
   read but NOT re-derived** — SF-0.2.0-14's 20,424-cell partition and its
   583,792-document product, SF-0.2.0-19's cost census, SF-0.2.0-51's timing
@@ -501,6 +541,25 @@ repairing them, and the repairs are in place above and in
   measured, not assumed. They are recorded with their price in the
   2026-08-15 `mul`/`dot_general` entry below, under *"THE DEFERRAL
   STANDS"*.
+* **THE REPAIRS WERE THEMSELVES AUDITED, AND NINE OF THEM WERE WRONG.**
+  Everything else in this list is what the sweep did not reach; this is
+  about what it did. Every D5 repair was re-driven afterwards, claim by
+  claim, and nine sentences the pass ITSELF wrote came back false — seven
+  across these two documents and two inside the bare-name gate it built.
+  Two were numerals (a module-name count short by two; a `## Log` size
+  naming a population it did not state); one stated a residue in the wrong
+  DIRECTION, having reasoned it instead of measuring it; one put a false
+  MECHANISM where a false attribution had been; one counted four measuring
+  cells where two of them measure nothing about the thing claimed; one
+  back-referenced an identifier that exists nowhere in this tree; one sent
+  a reader to §9 for text under §10.8; one inventory was still an entry
+  short; and one exception list over-named by one. Each is corrected at its
+  own site, with what it said and what drove the correction. **A pass that
+  repairs measured claims writes measured claims of its own, and those need
+  driving on exactly the same terms.** Two further limits of the new gate
+  were found and are recorded in its residue list rather than closed, and
+  one defect it inherited from a sibling batch — a supersession named by
+  line number — is repaired by naming the citation instead.
 * **A green suite says nothing about any of this.** Every defect the pass
   found was green on the day it was found, and two of them are sharper than
   that: one sentence cited, as its pin, a test that now asserts the
@@ -10267,8 +10326,8 @@ in place and marked.*
   `tests/test_shape_param_rule.py::test_the_door_INSTALLS_what_it_VALIDATED_so_a_second_read_cannot_differ`,
   which close the divergence at the door rather than measuring it. The
   measurement above is a stamped historical one and is left standing as
-  such; what was wrong was the tense. This is the second instance in this
-  file of the `:6962` shape found by a bare-name resolution rather than by
+  such; what was wrong was the tense. This is the second stale present-tense
+  measurement in this file, found by a bare-name resolution rather than by
   any citation checker, and the reason a bare-name gate now exists.*
 
   The 2.85% of atoms the box witness cannot see are exactly the inner-scope
