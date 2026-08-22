@@ -2250,10 +2250,19 @@ _X64_MATRIX_REF = re.compile(
 #: 1. **The parser's column of `_RESOLUTIONS` is asserted in CI**, not only
 #:    wherever a developer's environment happens to carry PyYAML.
 #: 2. **That job is the ONLY place the two-reader agreement can be checked
-#:    at all.** `test_which_reader_this_lane_uses_IS_ASSERTED_AND_NOT_ASSUMED`
+#:    at all** -- with one bound this could not close, stated rather than
+#:    glossed. `test_which_reader_this_lane_uses_IS_ASSERTED_AND_NOT_ASSUMED`
 #:    compares the line grammar and the parser on the real workflow, and the
 #:    comparison needs both readers present; in every other lane its second
-#:    half returns without comparing anything.
+#:    half returns without comparing anything. "Every other" was taken from
+#:    installed metadata for every whole-suite job but ONE:
+#:    `acceptance-any-pytree` installs `blackjax` and `diffrax` WITH their
+#:    dependencies, `blackjax` is in no venv on this machine, and installing
+#:    one to find out is not something this repository's test work does. So
+#:    that job's closure is UNMEASURED and it may carry a parser too. If it
+#:    does the count is two jobs and not one, and nothing else here moves:
+#:    `ci.yml` says in as many words that both of them must be left out of
+#:    the required list.
 #: 3. **And by `ci.yml`'s own policy that job MUST NOT be a required check**
 #:    — it fetches a third-party repository at a commit, so an upstream
 #:    force-push can redden it on a day this repository did not change. So
@@ -2310,7 +2319,20 @@ def _refuse_unreadable(cells, where: str) -> None:
       above it and never classified — and the reading came back ``"unset"``,
       the one word that means *I have read all of it*. Whether GitHub's own
       parser breaks a line there is untested here (YAML 1.1 does, 1.2 does
-      not), which is why these are refused rather than resolved;
+      not), which is why the LINE GRAMMAR refuses the three characters it
+      cannot pick a side about rather than resolving them. **THAT REFUSAL
+      IS ONE READER'S AND NOT THE FILE'S**, and this sentence said
+      otherwise unconditionally: `_read_workflow(text)` with `parser=None`
+      takes the strongest reader the lane has, so where PyYAML is
+      importable it parses, and the same U+2028 / U+0085 / U+2029 workflow
+      comes back `['1', '0']` with `blockers=()`. Measured in
+      `stelling-jax`, all three characters -- and that is the lane
+      `acceptance-reproducer` runs in, the one lane where both readers are
+      present. `_RESOLUTIONS`' own columns had it right all along (parser
+      `["1"]`, grammar `None`); it was the word "these" that outran them.
+      A CR is a fourth case and refused by neither: it is a line break in
+      YAML 1.1 and 1.2 alike, so the grammar normalises it and the two
+      readers agree;
     * a **key written twice in one mapping**, which this grammar merged and
       PyYAML replaces — a reader divergence on the real workflow, with the
       zero-dep suite unmoved;
@@ -2387,6 +2409,96 @@ def _x64_word(value) -> str:
 # --------------------------------------------------------------------------
 
 
+#: THE CHARACTERS AFTER WHICH A `#` BEGINS A WORD, and so begins a comment.
+#: POSIX recognises a comment only at the start of a word -- the rule is
+#: reached only when no token is already being built -- which is why `a#b`
+#: is the ordinary word `a#b` and not the word `a` followed by a comment.
+#: A word may begin at the start of the line, after a blank, and after an
+#: operator that ends one. Measured against bash 5.2.21, every character
+#: here: `a;#b`, `a&&#b`, `a|#b` and `(#b` all take `#b` as a comment.
+#:
+#: **`)` IS DELIBERATELY NOT HERE AND THAT IS THE ONE THAT MATTERS**,
+#: because the same character answers two ways:
+#:
+#:     (echo a)#b; export FOO=1       -> prints `a`, FOO UNSET   (a comment)
+#:     echo $(echo a)#b; export FOO=1 -> prints `a#b`, FOO=1     (not one)
+#:
+#: A subshell's `)` ends a word; a command substitution's does not. Calling
+#: it a comment in the second case would discard `export FOO=1` -- a command
+#: the shell RUNS, hidden from the whitelist, which is the very defect this
+#: rule exists to close. So it is left out, and the first case is refused
+#: conservatively instead. `` ` `` is out for the same reason (`` `echo a`#b ``
+#: prints `a#b`), and `<` and `>` are out because a shell reads `>#x` as a
+#: comment where a redirection target belongs and bash makes that a SYNTAX
+#: ERROR rather than a redirect.
+#:
+#: **A DOUBTFUL POSITION IS ALWAYS RESOLVED TO "NOT A COMMENT" HERE.** Text
+#: this reader declines to discard is text it tokenises, which can only put
+#: MORE command words in front of `_SHELL_WORDS_THIS_READER_KNOWS`, never
+#: fewer -- the same direction `_shell_reason` splits lines in, and the only
+#: direction that cannot hide a command.
+_A_WORD_MAY_START_AFTER = " \t;&|("
+
+
+def _without_the_shells_comment(line: str) -> str:
+    """One line with its comment removed -- where the SHELL has one.
+
+    **`shlex`'s `commenters` DEFAULTS TO `'#'` AND TRUNCATES AT THE FIRST
+    `#` ANYWHERE IN THE LINE**, which is not what any shell does. Measured,
+    one character apart:
+
+        "echo v1; set -a; . ./ci.env; set +a"    -> every word tokenised
+        "echo v1#x; set -a; . ./ci.env; set +a"  -> ['echo', 'v1']
+
+    and bash on the second prints `v1#x` and exports every variable of
+    `ci.env`. So a single `#` inside a word hid every command after it from
+    `_SHELL_WORDS_THIS_READER_KNOWS` -- the bypass that whitelist exists to
+    close, restored by one character. It was live end to end on the real
+    nightly workflow; see
+    `test_the_shell_readers_COMMENT_is_THE_ONE_THE_SHELL_HAS` for the two
+    payloads and the four figures.
+
+    So the comment is found HERE, by the shell's own rule, and `shlex` is
+    given `commenters = ""` so it cannot apply its own. Quoting is tracked
+    because it is the one thing that can go wrong in the UNSAFE direction:
+    calling a quoted `#` a comment would discard commands the shell runs.
+    A backslash escapes the next character outside quotes and inside double
+    quotes, and nothing escapes inside single quotes, exactly as POSIX has
+    it. An unbalanced quote reaches the end with `quote` still set, no
+    comment is cut, and `shlex` raises the refusal it already had.
+    """
+    quote = None
+    at_word_start = True
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if quote == "'":
+            quote = None if char == "'" else quote
+            index += 1
+            continue
+        if quote == '"':
+            if char == "\\" and index + 1 < len(line):
+                index += 2
+                continue
+            quote = None if char == '"' else quote
+            index += 1
+            continue
+        if char == "\\":
+            index += 2
+            at_word_start = False
+            continue
+        if char in "'\"":
+            quote = char
+            at_word_start = False
+            index += 1
+            continue
+        if char == "#" and at_word_start:
+            return line[:index]
+        at_word_start = char in _A_WORD_MAY_START_AFTER
+        index += 1
+    return line
+
+
 def _shell_reason(script: str):
     """``None`` if this script cannot change the environment, else why not.
 
@@ -2409,6 +2521,17 @@ def _shell_reason(script: str):
     reject, never fewer. (Driven both ways: `#comment<U+2028>export FOO=1` was
     read as one comment line and is two lines now, the second of which
     refuses.)
+
+    **AND "COMMENT" WAS SHLEX'S AND NOT THE SHELL'S.** `shlex`'s
+    `commenters` defaults to `'#'` and drops the rest of the line at the
+    first one ANYWHERE in it, where a shell has a comment only where a `#`
+    BEGINS A WORD -- so `echo v1#x; set -a; . ./ci.env; set +a` tokenised
+    as `['echo', 'v1']`, this function returned ``None``, and bash on the
+    same line prints `v1#x` and exports every variable of a file this
+    reader has never seen. That is the bypass the whitelist exists to
+    close, restored by one character, and it was live end to end on the
+    real workflow. The comment comes off in `_without_the_shells_comment`
+    now and `shlex` is given no `commenters` of its own.
     """
     joined = script
     for brk in _LINE_BREAKS_A_SHELL_MIGHT_MEET:
@@ -2416,10 +2539,18 @@ def _shell_reason(script: str):
     joined = re.sub(r"\\\n[ \t]*", " ", joined)
     for raw in joined.split("\n"):
         line = raw.strip()
-        if not line or line.startswith("#"):
+        # THE COMMENT COMES OFF BY THE SHELL'S RULE AND NOT BY SHLEX'S. See
+        # `_without_the_shells_comment`: shlex truncates at the first `#`
+        # anywhere in the line, and a `#` inside a word made every command
+        # after it invisible to the whitelist below -- measured end to end
+        # on the real workflow. The line itself is kept for the refusals,
+        # which quote what is written rather than what is left of it.
+        code = _without_the_shells_comment(line).strip()
+        if not code:
             continue
-        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer = shlex.shlex(code, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
+        lexer.commenters = ""
         try:
             tokens = list(lexer)
         except ValueError as exc:  # an unbalanced quote, say
@@ -2857,6 +2988,39 @@ def _lines_of_this_grammar(text: str) -> list:
                 f"it — measured, at `4a13824`, reported as the cell 'unset'"
             )
     return text.split("\n")
+
+
+def _a_line_of_it_opens(text: str, key: str) -> bool:
+    """True if any LINE of ``text`` is a `key:` entry -- by every notion of
+    a line, and not by `re.M`'s.
+
+    THE THIRD SCAN OF THIS SHAPE, and the same defect twice already:
+    Python's `^` under `re.M` matches after a newline and NOT after a
+    carriage return, so `re.search(r"^\\s*needs:", workflow, re.M)` -- the
+    check that holds the `control` job's comment about the two legs running
+    concurrently -- could not see a `needs:` opened by a CR. Controlled on
+    the real `nightly-jax-canary.yml`:
+
+        clean                     -> not found  (correct)
+        `needs:` on an LF line    -> found      (correct)
+        `needs:` opened by a CR   -> NOT FOUND, and PyYAML on the same
+                                     text reads `jobs.nightly.needs`
+                                     as `'control'`
+
+    (`\\s` covers `\\r` only when the line before it is blank, which is why
+    the shape looks safe until it is driven.) It is not live through the
+    file path -- `Path.read_text()` translates the CR before this ever sees
+    it -- and **that is the whole objection**: it is the last place on this
+    branch whose correctness is a property of how the caller opened the
+    file rather than of the check, which is exactly what
+    `_lines_of_this_grammar` refused to leave standing for the grammar.
+
+    `str.splitlines()` breaks on every character YAML 1.1 does and a few
+    more besides. For an absence claim that is the safe direction and the
+    same one `_shell_reason` splits in: an extra break can only expose MORE
+    candidate lines to the scan, never fewer.
+    """
+    return any(line.lstrip().startswith(f"{key}:") for line in text.splitlines())
 
 
 def _put(mapping, key, value, where: str, what: str):
@@ -3551,7 +3715,11 @@ def test_the_canary_and_the_workflow_agree_about_the_two_legs():
     # worse, because a `needs:` makes GitHub skip the dependent leg. That
     # comment claimed the opposite ordering for one commit with no `needs:`
     # in the file to make it true, which is why the fact is measured here.
-    assert not re.search(r"^\s*needs:", workflow, re.M), (
+    # ...AND THE SCAN READS LINES AND NOT `re.M`'s. See
+    # `_a_line_of_it_opens`: this was `re.search(r"^\s*needs:", workflow,
+    # re.M)`, which cannot see a `needs:` opened by a carriage return --
+    # the third scan on this file with the shape `^---` had.
+    assert not _a_line_of_it_opens(workflow, "needs"), (
         "a job now `needs:` another and the `control` job's comment says the "
         "two legs run concurrently; one of the two has to change"
     )
@@ -3859,11 +4027,26 @@ def _cells_of(workflow, parser=None):
 # **TWO COLUMNS BECAUSE THERE ARE TWO READERS, AND THE SECOND ONE IS THE
 # ZERO-DEP LANE'S.** PyYAML is in `stelling-jax` and not in
 # `stelling-nojax`, and it is not a declared dependency, so the guards above
-# must work with a parser and without one. Where the columns differ it is
-# always the same way round -- the parser RESOLVES a legal spelling and the
-# line grammar REFUSES it -- and that is the shape a fallback is allowed to
-# have. What it is not allowed to do is the other one: read less and claim
-# the same, which is what `"unset"` did for nine spellings.
+# must work with a parser and without one. In every ROW OF THIS TABLE where
+# the columns differ they differ the same way round -- the parser RESOLVES a
+# legal spelling and the line grammar REFUSES it -- and that is the shape a
+# fallback is allowed to have. What it is not allowed to do is the other
+# one: read less and claim the same, which is what `"unset"` did for nine
+# spellings.
+#
+# **THAT IS A STATEMENT ABOUT THESE ROWS AND IT USED TO BE WRITTEN AS A
+# UNIVERSAL ABOUT THE TWO READERS.** The reverse direction exists. Measured
+# on the real workflow, one extra space on `  schedule:`, on
+# `  workflow_dispatch:`, on `  group:` or on `  cancel-in-progress:` --
+# four lines inside bodies this grammar skips wholesale by indentation --
+# gives a file PyYAML REFUSES and this grammar READS. No CR and no exotic
+# character anywhere near them; it is pre-existing and has nothing to do
+# with the rows below. It is also the direction that costs least: in any
+# lane with PyYAML `_readable_workflow` refuses first, so the reading stops
+# there, and what the zero-dep lane reads past is a workflow GitHub's own
+# parser would reject -- a canary that never runs, not one that runs in the
+# wrong cell. Recorded because the sentence above claimed more than this
+# table can carry.
 #
 # **THAT INVARIANT WAS FALSIFIED ONCE, BY A KEY WRITTEN TWICE.** `jobs`,
 # `env` at all three levels and `strategy.matrix` were written with
@@ -4354,6 +4537,28 @@ def test_the_grammars_LINE_is_YAMLS_LINE_AND_NOT_STR_SPLITS():
         f"refused: {hidden.blockers}"
     )
 
+    # AND A THIRD SCAN OF THE SAME SHAPE, over the same file: the `needs:`
+    # the `control` job's comment says is deliberately absent was looked for
+    # with `re.search(r"^\s*needs:", workflow, re.M)`. Driven here rather
+    # than argued: `\s` covers `\r` only when the line before it is blank,
+    # so a `needs:` opened by a lone CR after a NON-BLANK line is invisible
+    # to that pattern while PyYAML reads `jobs.nightly.needs == 'control'`
+    # from the same text. Not live through `read_text` -- and that accident
+    # of loading is the objection. See `_a_line_of_it_opens`.
+    concurrent = "jobs:\n  a:\n    runs-on: x\n"
+    assert not _a_line_of_it_opens(concurrent, "needs"), (
+        "a workflow with no `needs:` in it reads as having one"
+    )
+    for label, sequenced in (
+        ("an LF", concurrent + "    needs: control\n"),
+        ("a lone CR", "jobs:\n  a:\n    runs-on: x\r    needs: control\n"),
+    ):
+        assert _a_line_of_it_opens(sequenced, "needs"), (
+            f"a `needs:` opened by {label} was invisible to the scan that "
+            f"exists to refuse it, and the `control` job's comment claims "
+            f"the two legs run concurrently on the strength of that scan"
+        )
+
     # AND THE SAME DEFECT IN THE SHELL READER. `shlex` does not treat any of
     # these four as whitespace, so `echo preparing<break>./setup-the-cell.sh`
     # was ONE command whose head is the whitelisted `echo` -- and
@@ -4381,6 +4586,123 @@ def test_the_grammars_LINE_is_YAMLS_LINE_AND_NOT_STR_SPLITS():
 
 def _wanted_canary(step):
     return isinstance(step.run, str) and "tripwire_canary.py" in step.run
+
+
+#: One line of a `run:` script, whether a SHELL takes the rest of it as a
+#: COMMENT from the `#` on, and what this reader owes as a result. Measured
+#: against GNU bash 5.2.21 on 2026-08-22, every row, by exporting
+#: `JAX_ENABLE_X64` from a sourced file and printing it afterwards. `dash`
+#: agrees on the row that matters (`echo v1#x; export FOO=1` -> `FOO=1`), so
+#: this is POSIX and not a bashism. The two OPERATOR rows were measured with
+#: the `set -a` on the NEXT line -- a line ending in `&&` or `(` whose
+#: remainder is commented out is a bash SYNTAX ERROR and runs nothing at
+#: all, which is a third thing and not the question being asked here.
+#:
+#: Three answers and not two, because the third is the honest one for a
+#: position the character itself does not settle -- see
+#: `_A_WORD_MAY_START_AFTER` on `)`:
+#:
+#:   `"runs"`         the shell runs it, so this reader MUST refuse;
+#:   `"comment"`      the shell does not, and this reader agrees;
+#:   `"conservative"` the shell does not, and this reader refuses ANYWAY
+#:                    rather than resolve a doubtful `#` towards silence.
+_A_HASH_AND_WHETHER_THE_SHELL_RUNS_WHAT_FOLLOWS_IT = (
+    ("no `#` at all", "echo v1; {hidden}", "runs"),
+    ("a `#` inside a word", "echo v1#x; {hidden}", "runs"),
+    ("a `#` inside a later word", "echo v1 x#y; {hidden}", "runs"),
+    ("a `#` in double quotes", 'echo "v1 #x"; {hidden}', "runs"),
+    ("a `#` in single quotes", "echo 'v1 #x'; {hidden}", "runs"),
+    ("a backslash-escaped `#`", "echo v1\\#x; {hidden}", "runs"),
+    ("a `#` after a command substitution's `)`",
+     "echo $(echo v1)#x; {hidden}", "runs"),
+    ("a `#` after a backquoted substitution",
+     "echo `echo v1`#x; {hidden}", "runs"),
+    ("a `#` opening a word", "echo v1 #x; {hidden}", "comment"),
+    ("a `#` after a `;`", "echo v1;#x; {hidden}", "comment"),
+    ("a `#` after an `&&`", "echo v1 &&#x; {hidden}", "comment"),
+    ("a `#` after a `(`", "(#x; {hidden}", "comment"),
+    ("a `#` at the start of the line", "#x; {hidden}", "comment"),
+    ("a `#` after a subshell's `)`", "(echo v1)#x; {hidden}", "conservative"),
+)
+
+
+def test_the_shell_readers_COMMENT_is_THE_ONE_THE_SHELL_HAS():
+    """A `#` is a comment where the SHELL has one, and nowhere else.
+
+    `_shell_reason` tokenises with `shlex.shlex(line, posix=True,
+    punctuation_chars=True)`, and shlex's `commenters` DEFAULTS TO `'#'`:
+    it drops the rest of the line at the first `#` ANYWHERE in it. POSIX
+    recognises a comment only where a `#` BEGINS A WORD — the rule is
+    reached only when no token is being built — so `a#b` is the ordinary
+    word `a#b`. Measured directly, one character apart:
+
+        "echo v1; set -a; . ./ci.env; set +a"    -> every word tokenised
+        "echo v1#x; set -a; . ./ci.env; set +a"  -> ['echo', 'v1']
+
+    and bash on the second prints `v1#x` and exports every variable in
+    `ci.env`. **So one `#` inside one word made every command after it
+    invisible to `_SHELL_WORDS_THIS_READER_KNOWS`, which is the whole of
+    what that whitelist is for** — the `set -a` above is the measured
+    export that names no variable, the one the substring test lost to.
+
+    DRIVEN END TO END at `a7ff4c3` on the real
+    `.github/workflows/nightly-jax-canary.yml`, the nightly x64-OFF canary
+    step's `run:` opened as a block scalar (a plain scalar carrying a `#`
+    is refused by `_scalar` before any of this):
+
+        echo v1;   set -a; . ./ci.env; set +a  ->   4 failed, 120 passed
+        echo v1#x; set -a; . ./ci.env; set +a  ->   124 passed
+
+    in the line-grammar lane and the PyYAML lane alike, with the whole
+    zero-dep suite at `2186 passed, 149 skipped` — IDENTICAL to clean —
+    and `blockers=()` under both readers. That is the bypass restored by
+    one character.
+
+    THE FIX GOES IN THE SAME DIRECTION `_shell_reason` SPLITS IN. A `#`
+    this reader declines to call a comment can only leave MORE words in
+    front of the whitelist, never fewer, so the doubtful positions are
+    resolved towards "not a comment": `)`, `` ` ``, `<` and `>` are
+    left out of `_A_WORD_MAY_START_AFTER` for that reason. `)` is the one that
+    matters: `(echo a)#b` IS a comment in bash and `echo $(echo a)#b` is
+    not, so calling that character a word end would have hidden commands
+    the shell runs -- the same defect one level down.
+    """
+    hidden = "set -a; . ./ci.env; set +a"
+    for label, template, owed in (
+            _A_HASH_AND_WHETHER_THE_SHELL_RUNS_WHAT_FOLLOWS_IT):
+        script = template.format(hidden=hidden)
+        reason = _shell_reason(script)
+        if owed == "comment":
+            assert reason is None, (
+                f"{label}: {script!r} is a comment from the `#` on in every "
+                f"shell, so there is no `set -a` on this line to refuse: "
+                f"{reason!r}"
+            )
+        else:
+            assert reason is not None and "allexport" in reason, (
+                f"{label}: {script!r} must be refused ({owed}) and this "
+                f"reader called it inert ({reason!r}). A `#` is a comment "
+                f"only where it begins a word, and shlex's default "
+                f"`commenters` drops the rest of the line at every one"
+            )
+
+    # AND THE COMMENT IS STILL DROPPED, which is the other half. Without it
+    # this line's apostrophe is an unbalanced quote and the reader refuses a
+    # script the shell runs happily -- safe, and noise.
+    trailing = _shell_reason("echo v1   # don't source anything here")
+    assert trailing is None, (
+        f"a trailing comment is a comment, and this reader refused the line "
+        f"it is on: {trailing!r}"
+    )
+
+    # ...AND A COMMENT ENDS AT THE END OF ITS OWN LINE. `_shell_reason`
+    # splits on more break characters than the shell does; a `#` that ran
+    # past one of them would undo that on the same argument.
+    for brk in ("\n",) + _LINE_BREAKS_A_SHELL_MIGHT_MEET:
+        behind = _shell_reason("echo v1 #x" + brk + hidden)
+        assert behind is not None and "allexport" in behind, (
+            f"a `#` comment hid `{hidden}` behind a {brk!r}: {behind!r}"
+        )
 
 
 def test_a_KEY_WRITTEN_TWICE_is_REFUSED_and_not_merged():

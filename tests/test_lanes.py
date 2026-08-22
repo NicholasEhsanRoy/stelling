@@ -243,6 +243,51 @@ def test_a_comment_is_stripped_the_same_way_everywhere():
     ], "a comment line vanished instead of becoming an empty one"
 
 
+def test_the_lane_reader_reads_ONE_FILE_however_its_lines_end():
+    """:func:`_lanes._code_lines` splits on every break, and that is checked.
+
+    THE SHAPE THIS IS A FENCE AGAINST is the one
+    `tests/test_tripwire_record.py` met three times: a check written
+    `^`-anchored under ``re.M``, where Python's ``^`` matches after a newline
+    and NOT after a carriage return, whose correctness then rests on
+    ``read_text()`` having translated the file's line breaks on the way in.
+    That is a property of how the file was OPENED, not of the check.
+
+    This module is not exposed to it, and this test is why that is a
+    measurement rather than a hope: every pattern here is matched against one
+    line of ``_code_lines``, and ``str.splitlines()`` breaks on CR, CRLF,
+    U+0085, U+2028 and U+2029 as well as on LF. Re-render `ci.yml` with each
+    of those in place of every newline and the same eleven blocks and eight
+    lanes come back. ``split("\\n")`` would pass every other test in this
+    file and fail this one.
+    """
+    text = _lanes.CI.read_text(encoding="utf-8")
+    assert "\r" not in text, "this test re-renders the breaks and needs LF in"
+
+    def read(rendered: str):
+        blocks = _lanes._blocks(_lanes._code_lines(rendered))
+        return blocks.keys(), tuple(sorted(
+            (job, dataclasses.astuple(lane))
+            for job, lane in ((job, _lanes._classify(body))
+                              for job, body in blocks.items())
+            if lane is not None
+        ))
+
+    jobs, lanes = read(text)
+    assert len(jobs) > 1 and len(lanes) > 1, (
+        f"this test watches nothing unless the clean file reads as several "
+        f"jobs and several lanes: {sorted(jobs)}, {len(lanes)} lanes"
+    )
+    for label, brk in (("CRLF", "\r\n"), ("CR", "\r"), ("U+0085", "\u0085"),
+                       ("U+2028", "\u2028"), ("U+2029", "\u2029")):
+        assert read(text.replace("\n", brk)) == (jobs, lanes), (
+            f"`ci.yml` re-rendered with {label} in place of every newline "
+            f"does not read as the same jobs and the same lanes, so what "
+            f"this repository believes CI runs depends on how the file's "
+            f"lines happen to end"
+        )
+
+
 def test_a_COMMENT_cannot_change_what_a_LANE_INSTALLS():
     """The third site of the same strip: :func:`_lanes._code_lines`.
 

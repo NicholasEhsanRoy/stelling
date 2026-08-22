@@ -1329,6 +1329,37 @@ _HASH_LITERAL_RECORDS = ("CHANGELOG.md", "SOUNDNESS.md", "README.md",
 # `sentence` stays, because a sha nobody can read is a diff nobody can
 # review, and `_prose_block_text` prints the block beside any entry that
 # moved.
+#
+# **AND THE BLOCK'S BOUNDARY HAS A CONSEQUENCE, WRITTEN DOWN HERE RATHER
+# THAN WIDENED AWAY.** A block ends at a `#`-only separator on purpose:
+# `test_the_ratchets_MEMORY_is_the_BLOCK_and_not_the_LINE` asserts that a
+# rewrite on the far side of one does NOT move an entry, because otherwise
+# every entry would be a claim about its whole file. So a FOURTH repurpose
+# exists, is permitted by construction, and is not a hole to be closed by
+# enlarging the unit. Two variants, both driven, both green at
+# `2190 passed, 149 skipped` with the inventory unmoved:
+#
+#   * a NEW comment paragraph one separator BELOW the tracked block --
+#     naming no digits, so nothing new enters the scan -- saying the
+#     withdrawn figure *"is reproducible after all and is retained as a
+#     measurement"*. The retraction stands untouched and is overturned by
+#     prose the ratchet's memory does not reach.
+#   * editing the harness the retraction POINTS AT, so its own
+#     justification -- *"the document is above, so the hash is not
+#     needed"* -- no longer names the document it claims. The document is
+#     in a different block; the sentence that leans on it is in this one.
+#
+# **THE CONSEQUENCE, STATED: a tracked retraction can be overturned by
+# prose one separator away, and EVERY CROSS-BLOCK REFERENCE A TRACKED
+# BLOCK MAKES IS OUTSIDE ITS OWN MEMORY.** A block sha is a claim about one
+# paragraph and about nothing that paragraph refers to. What this ratchet
+# delivers, exactly: a literal's own sentence and its own paragraph cannot
+# be repurposed without the entry moving. What it does not and by
+# construction cannot deliver: that the paragraph is still true. A
+# retraction that has to stand alone should carry inside its own block
+# everything it rests on, and one that points elsewhere is pointing at
+# unwatched ground -- which is a fact about this instrument, said here,
+# and not a defect to be fixed by making it measure a whole file.
 class _Truncated(typing.NamedTuple):
     """One truncated hash literal: where it is, what it is, what the line it
     stands in SAYS about it, and the sha256 of the whole prose BLOCK that
@@ -1696,6 +1727,15 @@ def test_the_ratchets_MEMORY_is_the_BLOCK_and_not_the_LINE():
     it does NOT move for a rewrite on the far side of a block boundary —
     which is what keeps the entry a claim about one paragraph rather than
     about a whole file.
+
+    THE SECOND HALF IS A BOUNDARY AND A BOUNDARY HAS A FAR SIDE. A fourth
+    repurpose lives there, permitted by construction and measured: see the
+    paragraph above `_Truncated` for the two variants and for the
+    consequence they carry — a tracked retraction can be overturned by
+    prose one separator away, and every cross-block reference a tracked
+    block makes is outside its own memory. Do not widen this test to catch
+    them; the assertion below is what stops every entry from becoming a
+    claim about its whole file.
     """
     withdrawn = [
         "        # return the identical hash, and it is not ``64a0ce8d…``. What a",

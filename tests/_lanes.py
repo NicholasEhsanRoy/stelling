@@ -312,6 +312,23 @@ def _code_lines(text: str) -> list[str]:
     ``test_a_comment_is_stripped_the_same_way_everywhere`` pins it: dropping
     the emptied lines instead leaves every reader in this module green, which
     makes it exactly the stated-but-unheld shape this file is a fence against.
+
+    **AND "LINE" IS ``str.splitlines()``'s, WHICH IS WHY THIS READER IS NOT
+    EXPOSED TO THE THING THE NIGHTLY READER WAS.**
+    `tests/test_tripwire_record.py` met the same question three times --
+    ``^---``, ``^\\s*needs:`` and the shell reader's line -- and each time the
+    check was `^`-anchored under ``re.M``, where Python's ``^`` matches after
+    a newline and NOT after a carriage return. Every pattern in this module
+    is matched against ONE LINE of this list instead, and ``splitlines()``
+    breaks on CR, CRLF, U+0085, U+2028 and U+2029 as well as on LF. Measured
+    on this repository's own ``ci.yml``, re-rendered with each of those in
+    place of every newline: 11 job blocks and 8 pytest lanes, identical
+    tuples, in all four renderings. So the ``read_text()`` above does not
+    have to translate anything for this reader to be right, which is exactly
+    what could not be said of the nightly reader's scans;
+    ``test_the_lane_reader_reads_ONE_FILE_however_its_lines_end`` holds it,
+    because ``split("\\n")`` here would be green until the day a workflow
+    arrived over a wire.
     """
     return [_strip_comment(line) for line in text.splitlines()]
 

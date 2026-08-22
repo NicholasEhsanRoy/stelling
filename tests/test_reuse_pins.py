@@ -90,9 +90,91 @@ _DRIFT = (
 )
 
 
+def _one_line_break(text: str) -> str:
+    """``text`` with every line break spelled ``\\n`` -- done HERE.
+
+    THE THREE SCANS BELOW ARE `^`-ANCHORED UNDER `re.M`, and Python's `^`
+    there matches after a newline and NOT after a carriage return. Until
+    2026-08-22 they were correct only because `open()` in text mode
+    translated the file's line breaks before they ran -- a property of how
+    the file was OPENED and not of the check, which is the accident
+    `tests/test_tripwire_record.py::_lines_of_this_grammar` refused to
+    leave standing for the workflow grammar after `^---` missed a document
+    marker opened by a CR.
+
+    Measured on this tree, the same `ci.yml` and `.pre-commit-config.yaml`
+    rendered with CR line endings and read without translation: the
+    `fsfe/reuse-action@` pin goes from one hit to NONE -- loud -- and the
+    two `re.sub`s that strip the pin lines out of what this file then calls
+    prose strip NOTHING, which is quiet and is the direction that matters.
+    A pin left standing in "prose" satisfies the write-up assertion without
+    a word of write-up existing.
+
+    So the files are opened with `newline=""` and normalised here.
+    `test_the_reuse_pins_are_READ_however_the_files_lines_end` holds it,
+    with the untranslated rendering as its negative control.
+    """
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _read(path: str) -> str:
-    with open(path, encoding="utf-8") as fh:
-        return fh.read()
+    # `newline=""` so nothing is translated on the way in and the
+    # normalisation is visibly this reader's. See `_one_line_break`.
+    with open(path, encoding="utf-8", newline="") as fh:
+        return _one_line_break(fh.read())
+
+
+def test_the_reuse_pins_are_READ_however_the_files_lines_end():
+    """A carriage return is a line break, and `re.M`'s `^` does not know it.
+
+    Driven both ways on this repository's own two files: the CRLF and
+    CR-only renderings read back to the same pin and the same stripped
+    prose, and the CR-only rendering with its breaks LEFT ALONE finds no
+    pin at all and strips no line -- which is what `_one_line_break` is
+    worth. The quiet half is the second: an unstripped `uses:` line leaves
+    the version named in what this file calls the write-up, so the
+    assertion that a human was told how to close the skew passes on a file
+    with no write-up in it.
+    """
+    ci = _read(CI)
+    precommit = _read(PRECOMMIT)
+    assert "\r" not in ci and "\r" not in precommit, (
+        "`_read` handed back a carriage return, so the normalisation it "
+        "exists to do did not happen"
+    )
+
+    def scans(one_ci: str, one_pc: str):
+        return (
+            re.findall(r"^\s*-?\s*uses:\s*(fsfe/reuse-action@\S+)\s*$",
+                       one_ci, re.MULTILINE),
+            len(re.findall(r"^\s*-?\s*uses:\s*\S+\s*$", one_ci,
+                           re.MULTILINE)),
+            len(re.findall(r"^\s*rev:\s*\S+\s*$", one_pc, re.MULTILINE)),
+        )
+
+    wanted = scans(ci, precommit)
+    assert wanted[0] and wanted[1] and wanted[2], (
+        f"one of this module's anchored scans no longer finds anything in "
+        f"the clean files, so the test below would watch nothing: {wanted}"
+    )
+
+    for label, breaks in (("CRLF", "\r\n"), ("CR only", "\r")):
+        rendered = (ci.replace("\n", breaks), precommit.replace("\n", breaks))
+        assert scans(*[_one_line_break(text) for text in rendered]) == wanted, (
+            f"a {label} rendering of the two files does not read back to "
+            f"the pin and the stripped lines this module reads"
+        )
+
+    # THE NEGATIVE CONTROL. Without the normalisation above, a CR-only
+    # checkout finds no pin (loud) and strips no pin line out of the prose
+    # (quiet, and permissive).
+    blind = scans(ci.replace("\n", "\r"), precommit.replace("\n", "\r"))
+    assert blind == ([], 0, 0), (
+        f"CR-only renderings of `ci.yml` and `.pre-commit-config.yaml` were "
+        f"expected to be invisible to all three anchored scans and were not: "
+        f"{blind}. If `re.M` has changed, say so where `_one_line_break` "
+        f"explains why it exists"
+    )
 
 
 def test_the_two_reuse_pins_are_the_pair_this_repository_recorded():

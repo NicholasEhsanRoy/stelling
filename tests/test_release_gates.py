@@ -156,9 +156,109 @@ _NUMBER_WORDS = {
 _IMPLICIT_REFUSALS = 2
 
 
+def _one_line_break(text: str) -> str:
+    """``text`` with every line break spelled ``\\n`` -- done HERE.
+
+    EVERY SCAN IN THIS MODULE IS `^`-ANCHORED UNDER `re.M`, and Python's
+    `^` there matches after a newline and NOT after a carriage return.
+    That is the defect `tests/test_tripwire_record.py` met three times --
+    `^---`, `^\\s*needs:` and the shell reader's notion of a line -- and it
+    is latent here for exactly the reason it was latent there: `read_text`
+    happens to translate the file's line breaks on the way in, so these
+    checks are correct because of how the file was OPENED and not because
+    of anything they do.
+
+    Measured on this tree, the same `release.yml` rendered with CR line
+    endings and read without translation: the verdict recorder, the
+    `rm -f` of the verdict path and the `verdict=` assignment each go from
+    one hit to ZERO, and the refusal-count header from `EIGHT` to nothing.
+    Those four fail LOUDLY. `tests/test_reuse_pins.py` carries two
+    `re.sub`s of the same shape that fail quietly, leaving the pin lines
+    standing in what that file then calls prose.
+
+    So the file is opened with `newline=""` and normalised here, which
+    makes the property this function's rather than the loader's --
+    `_lines_of_this_grammar` in the tripwire record made the same move for
+    the same reason.
+    `test_the_release_gates_READ_ONE_FILE_however_its_lines_end` holds it,
+    with the untranslated rendering as its negative control.
+    """
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _release_text() -> str:
     assert RELEASE.is_file(), f"no release workflow at {RELEASE}"
-    return RELEASE.read_text(encoding="utf-8")
+    # `newline=""` so nothing is translated on the way in and the
+    # normalisation is visibly this reader's. See `_one_line_break`.
+    with RELEASE.open(encoding="utf-8", newline="") as handle:
+        return _one_line_break(handle.read())
+
+
+#: The `^`-anchored scans this module makes over `release.yml`, each of
+#: which must find exactly one thing. Named here so the line-ending test
+#: below drives the same patterns the tests do rather than a copy of them.
+_ANCHORED_SCANS = (
+    ("the verdict recorder",
+     r"^\s*STELLING_SKIP_INVENTORY_VERDICT:\s*(.+?)\s*$"),
+    ("the `rm -f` of the verdict path", r'^\s*rm -f "([^"]+)"\s*$'),
+    ("the `verdict=` assignment", r'^\s*verdict="([^"]+)"\s*$'),
+    ("the refusal-count header",
+     r"^# ([A-Z]+) REFUSAL POINTS STAND BETWEEN A TAG AND PyPI"),
+)
+
+
+def test_the_release_gates_READ_ONE_FILE_however_its_lines_end():
+    """A carriage return is a line break, and `re.M`'s `^` does not know it.
+
+    Every pin in this module is `^`-anchored under `re.M`, and until
+    2026-08-22 every one of them was correct only because `read_text()`
+    translated the file's line breaks before they ran. That is a property
+    of the loader and not of the check, and it is the accident
+    `tests/test_tripwire_record.py::_lines_of_this_grammar` refused to
+    leave standing for the workflow grammar after `^---` missed a document
+    marker opened by a CR.
+
+    Both directions are driven: the CRLF and CR-only renderings of this
+    repository's own `release.yml` read back to the same four hits, and the
+    CR-only rendering with its breaks LEFT ALONE is invisible to all four
+    -- which is what the normalisation is worth.
+    """
+    text = _release_text()
+    assert "\r" not in text, (
+        "`_release_text` handed back a carriage return, so the "
+        "normalisation it exists to do did not happen"
+    )
+    wanted = {name: re.findall(pattern, text, re.M)
+              for name, pattern in _ANCHORED_SCANS}
+    assert all(len(hits) == 1 for hits in wanted.values()), (
+        f"one of this module's anchored scans no longer finds exactly one "
+        f"thing in `release.yml`, so the test below would watch nothing: "
+        f"{wanted}"
+    )
+
+    for label, rendered in (("CRLF", text.replace("\n", "\r\n")),
+                            ("CR only", text.replace("\n", "\r"))):
+        normalised = _one_line_break(rendered)
+        assert normalised == text, (
+            f"a {label} rendering of `release.yml` does not normalise back "
+            f"to the text every check in this module reads"
+        )
+        got = {name: re.findall(pattern, normalised, re.M)
+               for name, pattern in _ANCHORED_SCANS}
+        assert got == wanted, f"{label}: {got} where {wanted} was read"
+
+    # THE NEGATIVE CONTROL, and it is what makes `_one_line_break`
+    # load-bearing rather than decorative: the same scans over the same
+    # bytes with their line breaks left as the file spells them.
+    untranslated = text.replace("\n", "\r")
+    blind = {name: re.findall(pattern, untranslated, re.M)
+             for name, pattern in _ANCHORED_SCANS}
+    assert not any(blind.values()), (
+        f"a CR-only `release.yml` was expected to be invisible to every "
+        f"`^`-anchored scan in this module and some of them saw it: "
+        f"{blind}. If `re.M` has changed, say so where `_one_line_break` "
+        f"explains why it exists"
+    )
 
 
 def _code_lines(text: str) -> list[str]:
