@@ -3387,6 +3387,27 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
         #         x = any_array((2,), "float64", (0.0, 1.0))
         #         return assert_(x >= 0.0)
         #
+        # TWO DOCUMENTS COME OUT OF THAT HARNESS AND THIS BLOCK IS ABOUT
+        # BOTH, WHICH IT DID NOT SAY UNTIL 2026-08-23. Name them:
+        #
+        #     the TRACED document   what tracing the harness produces
+        #     the NULLED document   that document round-tripped through
+        #                           ``to_dict()`` with the declaration's
+        #                           ``dtype`` param set to ``null``
+        #
+        # The ACCEPT/REFUSE property this whole block exists for is about
+        # the NULLED one — it is the document ``_validate_decl_eqn``'s
+        # branch-SELECTION change moved. Every ``content_hash`` figure
+        # below is about the TRACED one, and has to be: this tree produces
+        # no hash for the nulled document at all, because this tree refuses
+        # it. The sentence four lines above introduces the harness by the
+        # NULLED document and the arithmetic below counts hashes of the
+        # TRACED one, so as written the recipe named FOUR documents where
+        # it meant two — the ``return`` ambiguity below, times which of
+        # these two is meant. (That four is not the four VALUES the
+        # spelling sweep below collapses to. The sweep is over the traced
+        # document alone.)
+        #
         # THE ``return`` IS PART OF THE RECIPE AND THIS SENTENCE OMITTED IT
         # UNTIL 2026-08-22, which is a bigger hole than the cell was and the
         # cause of the whole disagreement recorded below. It read "a traced
@@ -3426,8 +3447,8 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
         # was deleted, under the heading ``THEY ARE NOT WRONG`` and the claim
         # that an independent re-derivation landing on a DIFFERENT pair was
         # an unexplained "three contexts, three pairs, one recipe". BOTH
-        # PAIRS RE-DERIVE. The recipe above does not say what the harness
-        # RETURNS, and that is the whole of the disagreement:
+        # PAIRS RE-DERIVE, and what separates them is that the recipe above
+        # does not say what the harness RETURNS:
         #
         #     return assert_(x >= 0.0)     outvars[0] bool
         #     assert_(x >= 0.0); return x  outvars[0] float64
@@ -3441,6 +3462,19 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
         # here is what returning the ``assert_`` gives; the pair the audit
         # measured is what returning ``x`` gives. Nothing was wrong with
         # either measurement and the recipe was wrong with both.
+        #
+        # THAT ACCOUNTS FOR TWO OF THE THREE PAIRS THIS CAMPAIGN RECORDED,
+        # AND "THE WHOLE OF THE DISAGREEMENT" WAS TOO STRONG FOR IT —
+        # withdrawn 2026-08-23. A THIRD pair was written down for this same
+        # recipe in a sweep, and it is not what either reading above
+        # produces in either cell. It is withdrawn there and nothing in this
+        # tree asserts it, so there is no figure here to correct; what is
+        # corrected is the claim to have accounted for every recorded pair,
+        # which had accounted for two. **Two is what is demonstrable**, and
+        # why the third is not is this block's own subject: no document was
+        # published beside it, so nobody can now say what was traced. That
+        # is the argument for deleting digits, made against a sentence of
+        # this comment's own.
         #
         # THE HASH DOES NOT MOVE FOR ANYTHING, WHICH IS WORSE. The earlier
         # version of this paragraph said it did, and that overstates the

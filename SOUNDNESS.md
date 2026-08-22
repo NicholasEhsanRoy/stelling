@@ -13872,17 +13872,23 @@ was measured on a B6-free tree unless it says otherwise.
   `params.get("dtype") is not None`, so `.get` used `None` as its own
   sentinel and could not tell an ABSENT `dtype` param from one present and
   `null`; it is `"dtype" in params` now, which is a branch-SELECTION
-  change and not only a type check. A hand-built document carrying
-  `["dtype", null]` under a `float64` outvar aval was ACCEPTED at
+  change and not only a type check. The document it moved is ONE document
+  and this entry called it two — *"a hand-built document"* in one sentence
+  and *"a traced … persisted through JSON"* in the next, which is this
+  fixup's own subject and is corrected 2026-08-23. It is the TRACED
+  document, persisted: `any_array((2,), float64, (0.0, 1.0))` traced at
+  `JAX_ENABLE_X64=1` with a harness ending `return assert_(x >= 0.0)`,
+  round-tripped through `to_dict()`/JSON with the declaration's `dtype`
+  param set to `null`, so that the declaration carries `["dtype", null]`
+  under a `float64` outvar aval. Hand-built IR could carry the same param;
+  what was measured was not hand-built.
+  That document was ACCEPTED at
   `dff95fc` and on `main` at `198a2b5` — **accepted on both, and to the
   same `content_hash()`** — and is a `TranscriptionError` here. That is
   the property, and it is what a reader can re-derive: this sentence
   pinned a hash literal (`64a0ce8d…`) instead, and a hash literal is
   meaningless without the document that produced it, which was never
-  published. Re-derived 2026-08-20 at `JAX_ENABLE_X64=1` over a traced
-  `any_array((2,), float64, (0.0, 1.0))` whose harness ends
-  `return assert_(x >= 0.0)`, persisted through
-  JSON with the declaration's `dtype` param set to `null`: `dff95fc`
+  published. Re-derived 2026-08-20: `dff95fc`
   and `198a2b5` both accept and both return the identical hash, and
   this tree refuses. Twenty other shapes of the same document were
   driven at `198a2b5` and none reproduces `64a0ce8d…`. The refusal is right —
@@ -13903,8 +13909,14 @@ was measured on a B6-free tree unless it says otherwise.
   x` — and they trace documents that differ in the jaxpr's outvars, so each
   has its own `content_hash` in each cell; that ambiguity is why two
   contexts re-derived this recipe and got two different pairs, each correct
-  for the harness it typed. `src/stelling/ir.py` carries the measurement.
-  **The property is indifferent to all four documents**: driven at both
+  for the harness it typed. `src/stelling/ir.py` carries the measurement,
+  and it also carries the SECOND ambiguity this paragraph left standing:
+  every `content_hash` figure the two contexts compared is of the TRACED
+  document, while the accept/refuse property above is of that document
+  NULLED — so a recipe that says only *"a traced `any_array…`"* names the
+  `return` twice over, once in each document.
+  **The property is indifferent to all four (two readings, two cells)**:
+  driven at both
   commits, in both cells, under both readings, `dff95fc` and `198a2b5`
   accept every one of them and this tree refuses every one of them — which
   is the whole of why the property is the measurement and the literal was

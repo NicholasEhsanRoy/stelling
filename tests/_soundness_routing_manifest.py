@@ -48,11 +48,13 @@ It is measured now, twice over. Each edited block records
 `source_commit:CHANGELOG.md` and asserts EQUALITY — not a bound. Quoting
 the lines is what makes an edit reviewable: a summarisation with a note
 attached would have to write every line it summarised away into this file,
-where a reader will meet them. Two, three, three and eleven lines, in the
+where a reader will meet them. Four, three, three and eleven lines, in the
 order the four are named above; the rest of all four blocks moved
-untouched. Those numerals are restated here for a reader and are held to
-nothing — each block's row carries its own, and the row is what the test
-measures.
+untouched. (`SF-0.2.0-59` was two until 2026-08-23, when its destination
+stopped calling ONE document two — *"a hand-built document"* in one
+sentence and *"a traced … persisted through JSON"* in the next.) Those
+numerals are restated here for a reader and are held to nothing — each
+block's row carries its own, and the row is what the test measures.
 
 **Nothing was dropped.** `DROPPED` is empty and the test requires each
 section's blocks to partition its span exactly, so a block that went
@@ -838,13 +840,15 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(2596, 2962),
         src_lines=367,
         src_sha256="d3581e50075343e79b60c8f20f4337f69e6bbae7ee912c42ccce895f040d3ef9",
-        dest_sha256="e02837127521bf9f37c67d878ee8ecd78a11b0c2044c47837423a77a4a805b6b",
-        src_lines_not_carried=2,
+        dest_sha256="8d606ece8b93fdb3bcbf34eeca671c258a7e005d4963981f38a35320780add9e",
+        src_lines_not_carried=4,
         not_carried=(
+            "  change and not only a type check. A hand-built document carrying",
+            "  `[\"dtype\", null]` under a `float64` outvar aval was ACCEPTED at",
             "  `dff95fc` and on `main` at `198a2b5` (both hashing to `64a0ce8d\u2026`) and",
             "  is a `TranscriptionError` here. The refusal is right \u2014",
         ),
-        edit_note="replaces an unreproducible hash literal with the property it was standing for, re-derived across the two trees; and states the CELL and the `return` the recipe omitted. No behaviour change.",
+        edit_note="replaces an unreproducible hash literal with the property it was standing for, re-derived across the two trees; states the CELL and the `return` the recipe omitted; and says WHICH DOCUMENT, because the source called one document two -- `a hand-built document` in one sentence and `a traced ... persisted through JSON` in the next. It is the traced document, persisted. No behaviour change.",
     ),
     Block(
         id="SF-0.2.0-60",

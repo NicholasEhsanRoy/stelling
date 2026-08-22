@@ -832,6 +832,15 @@ def test_no_reader_asks_whether_a_lane_HAS_JAX_by_comparing_the_STRING():
     INSIDE that file, so moving the accessor up `_lanes.py` changes nothing
     here; what may not move is which file it is in.
 
+    **AND THE THIRD GO WAS THE NESTING.** `ast.walk` descends, so the
+    exemption was every `has_jax` anywhere in `_lanes.py` and not the
+    accessor: driven at `1f55eef`, `def _outer(): def has_jax(lane): return
+    lane.jax != "absent"` appended to `tests/_lanes.py` is **`1 passed`**,
+    and so is the same body as a method on a class there — while the
+    identical body under a different module-level NAME is **`1 failed`**.
+    It is `tree.body` now, so the exemption is the module-level definition
+    and a nested one is an ordinary offender.
+
     **AND THE COMPARISON IS READ FROM EITHER SIDE.** `"absent" != lane.jax`
     reaches the same permissive answer and was invisible — the scan looked at
     `node.left` alone, so the reversed spelling passed anywhere in the tree
@@ -852,11 +861,15 @@ def test_no_reader_asks_whether_a_lane_HAS_JAX_by_comparing_the_STRING():
         except SyntaxError:  # pragma: no cover
             continue
         # The accessor's own body is the one place the comparison belongs,
-        # and that body is in `_lanes.py` — see the docstring for the plant
-        # that made a name-keyed exemption travel.
+        # and that body is THE MODULE-LEVEL `def has_jax` of `_lanes.py` —
+        # see the docstring for the two plants that made a name-keyed and
+        # then a basename-keyed exemption travel, and for the third, which
+        # is that `ast.walk` reaches every nesting level: a `has_jax`
+        # defined INSIDE another function, or inside a class body, is not
+        # the accessor and is as typeable as the other two were.
         exempt = {
             (n.lineno, n.end_lineno)
-            for n in ast.walk(tree)
+            for n in tree.body
             if isinstance(n, ast.FunctionDef) and n.name == "has_jax"
         } if path == tests_dir / "_lanes.py" else set()
         for node in ast.walk(tree):

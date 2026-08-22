@@ -18,7 +18,10 @@ driven from stack shapes MEASURED against real jax (recorded in
 
 from __future__ import annotations
 
+import dataclasses
+import importlib.util
 import re
+import shlex
 
 import pytest
 
@@ -1945,17 +1948,92 @@ def test_the_canarys_documented_exit_codes_are_exactly_the_ones_it_produces():
     )
 
 
-# The GitHub job-id charset, and the ONE place this file spells it. A job id
-# may begin with a letter or `_` and carry letters, digits, `-` and `_`; this
-# pattern read `[a-z-]+` until 2026-08-22, and a job id is the cheapest thing
-# there is to add to a workflow. Driven: a THIRD job `nightly_x64:` running
-# `tripwire_canary.py` at `JAX_ENABLE_X64: "1"` ONLY -- an alarm wired to the
-# one cell the eager sweep cannot redden in, which is the defect
-# `test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN` exists
-# for -- was invisible to every test in this repository and left this file at
-# `68 passed`. TWO readers used that spelling and they are now one, for the
-# same reason `_strip_comment` and `_x64_cells` are each one function: a rule
-# typed twice drifts on whichever copy nobody edits.
+# ==========================================================================
+# THE WORKFLOW READER, AND WHY IT IS A PARSER RATHER THAN A PATTERN
+# ==========================================================================
+#
+# WHAT WAS HERE UNTIL 2026-08-23 WAS A LINE-ANCHORED REGEX, AND THREE ROUNDS
+# OF AUDIT WENT PAST IT — nine ways in the third round alone, every one of
+# them ORDINARY WORKFLOW YAML that GitHub accepts and runs. All nine were
+# measured on `.github/workflows/nightly-jax-canary.yml` and every one left
+# this file at `95 passed`:
+#
+#     "JAX_ENABLE_X64": "1"              a quoted key       — the step ran ON
+#     env: { JAX_ENABLE_X64: "1", … }    a flow mapping     — the step ran ON
+#     env: *x64on                        an alias           — the step ran ON
+#     strategy.matrix.exclude            the OFF cell excluded from the matrix
+#     runs-on: before name:              a whole third leg invisible
+#     if: … at JOB level                 the whole job may not run
+#     defaults: {run: {shell: bash -lc}} a shell whose startup nobody read
+#     set -a; . ./ci.env; set +a         sets it without naming it
+#     continue-on-error: true            the step's red cannot fail the job
+#
+# **AND THEY FAIL IN THREE DIFFERENT DIRECTIONS, WHICH IS THE ARGUMENT.**
+# The first three are ONE `env:` mapping spelled three legal ways: there the
+# pattern matched nothing, the reader concluded `"unset"`, and both callers
+# read `"unset"` as OFF while the step ran at ON. `matrix.exclude` is a cell
+# the reader RESOLVED and still got wrong — it expanded the axis and never
+# saw the entry taken back out of it. `runs-on:` before `name:` is a whole
+# LEG it never saw at all. And the last four are cells it read CORRECTLY and
+# was not entitled to CLAIM, because the step might not run, might run under
+# a shell nobody read, or could not fail the job if it did. One pattern set
+# cannot be patched into covering three failure directions; a parse and a
+# whitelist can.
+#
+# **THE FIX IS NOT A TENTH PATTERN.** A regex cannot parse YAML, and every
+# round bought one coordinate: the charset fix bought job-id characters and
+# the next round found key ORDER. What is wrong is not the patterns, it is
+# that a MISS was allowed to produce a VALUE. `"unset"` was a can't-tell
+# wearing a cell's name — the same conflation this branch already fixed one
+# layer up, moved from the value layer to the FIND layer.
+#
+# So there are two readers and one model:
+#
+# 1. **`yaml.safe_load` where PyYAML is importable.** A real parse resolves
+#    quoted keys, flow mappings, aliases, key order and `exclude` together,
+#    because YAML semantics replace text matching. Measured: PyYAML 6.0.3 is
+#    in `/home/nick/venvs/stelling-jax` and NOT in
+#    `/home/nick/venvs/stelling-nojax`, and it is not a declared dependency
+#    of this project — so it cannot be required, and the zero-dep lane is
+#    exactly where this guard must keep working.
+# 2. **A TOTAL LINE GRAMMAR where it is not**, which is the whole of why the
+#    fallback can now say "there is no setting" at all. A pattern that
+#    searches can only ever report "I did not find one"; a grammar that
+#    CLASSIFIES EVERY LINE of the file can report "I have read all of it and
+#    it is not there". Every line the grammar cannot place makes the whole
+#    reading a can't-tell — so the failure of the fallback is loud, and the
+#    thing it must never do (call a miss a cell) is now structurally
+#    impossible rather than patched out one spelling at a time.
+#
+# Both produce the SAME mapping — the one PyYAML would build — and
+# everything below `_model` is shared, so a cell is decided in one place.
+# `test_which_reader_this_lane_uses_IS_ASSERTED_AND_NOT_ASSUMED` holds them
+# to each other on the file that matters.
+#
+# WHAT IS STILL NOT PARSED, said rather than left to be found: expressions
+# (`${{ … }}`) other than a bare `matrix.<axis>` reference, shell, and what
+# a third-party action does. None of the three is guessed at — each is a
+# named can't-tell, and the lists that make an action or a shell word
+# readable are written out below so that widening one is a decision in a
+# diff rather than a silence.
+#
+# AND ONE THING THAT CANNOT BE A CAN'T-TELL, BECAUSE REFUSING IT WOULD
+# REFUSE THE WORKFLOW: WHAT AN INVOKED PROGRAM DOES. Every step this reader
+# credits runs `.venv/bin/python <something>`, and a python program is free
+# to write `os.environ["JAX_ENABLE_X64"]` before it imports jax. The reader
+# reads the environment the RUNNER hands the process; it does not and
+# cannot follow the process. So the claim these two guards make is bounded,
+# and this is the bound: *this step is started in this cell*. `--require`,
+# and the canary's own live control rows, are what stand behind the rest of
+# it. The one place that boundary is watchable from here is the shell layer,
+# which is why `.venv/bin/python` is on the word list and `.` and `source`
+# and `env` are not: a program's own behaviour is somebody's code, a
+# sourced file is a fact about the step.
+
+#: A GitHub job id: a leading letter or `_`, then letters, digits, `-`, `_`.
+#: Spelled once. This read `[a-z-]+` until 2026-08-22, and a third job
+#: `nightly_x64:` — an alarm wired to the one cell the eager sweep cannot
+#: redden in — was invisible to every test in this repository.
 _JOB_ID = r"[A-Za-z_][A-Za-z0-9_-]*"
 
 # JAX'S OWN GRAMMAR FOR THIS VARIABLE, because jax's is the grammar that
@@ -1973,7 +2051,9 @@ _JOB_ID = r"[A-Za-z_][A-Za-z0-9_-]*"
 # table serves both: `JAX_ENABLE_X64: true` and `JAX_ENABLE_X64: on` are YAML
 # booleans, the runner renders them into the environment as `"true"`, and jax
 # reads `"true"` as ON -- the same answer as reading the token as written.
-# Same for `off`/`no` and OFF.
+# Same for `off`/`no` and OFF. It is also why the two readers agree on them:
+# PyYAML resolves `on` to `True` and the line grammar reads the word `on`,
+# and both land on `"1"`.
 _X64_TRUE = ("y", "yes", "t", "true", "on", "1")
 _X64_FALSE = ("n", "no", "f", "false", "off", "0")
 
@@ -1984,16 +2064,102 @@ _X64_FALSE = ("n", "no", "f", "false", "off", "0")
 # pytest step left this file at `68 passed` while that step never runs.
 # Adding a condition here is a decision that it still runs; that is the point
 # of it being a written list rather than a pattern.
+#
+# **AND THE DECISION IS CONDITIONAL ON ITS REFERENT, WHICH IT WAS NOT.**
+# `steps.install.outcome == 'success'` is a decision that the step still runs
+# only while a step with `id: install` EXISTS. Driven on the real workflow:
+# renaming that one step to `id: install-nightly` and touching nothing else
+# left this file at `95 passed` with the cells unchanged — while on the
+# runner all four canary and pytest steps skip, the `!= 'success'` branch
+# goes true, and the leg reports *"SKIPPED (infrastructure)"* and comes back
+# GREEN. Nothing in `tests/` or `.github/` pinned that id. Every
+# `steps.<id>.` a known condition names is now resolved against the job's own
+# steps, and an unresolvable one is a can't-tell.
 _STEP_CONDITIONS_THIS_READER_KNOWS = frozenset({
     "steps.install.outcome == 'success'",
 })
 
-# A step's `JAX_ENABLE_X64:` mapping entry, anchored on a line of its own so
-# that a comment QUOTING the setting is not the workflow SETTING it -- two of
-# the mutants that killed the first version of this guard were caught only by
-# that anchor. `[ \t]*` and not `\s*`: `#` is not whitespace, so a commented
-# line cannot reach the name.
-_X64_SETTING = re.compile(r"^[ \t]*JAX_ENABLE_X64:[ \t]*(.*?)[ \t]*$", re.M)
+#: `steps.<id>.` inside a condition. The referent, which has to exist.
+_STEP_REFERENCE = re.compile(r"\bsteps\.([A-Za-z_][A-Za-z0-9_-]*)\.")
+
+# THE ACTIONS THIS READER HAS DECIDED DO NOT SET THIS VARIABLE. A `uses:`
+# step runs somebody else's code, and a composite action writing
+# `JAX_ENABLE_X64` into `$GITHUB_ENV` would change the cell of every later
+# step of the job with nothing in this file to see. That was named as a known
+# hole and left open; it is a can't-tell now, and these two are the written
+# exception. THE CLAIM IS NARROW AND IS THE ONLY ONE BEING MADE: neither
+# action sets `JAX_ENABLE_X64`. It is not a claim that either action is
+# inert — an action is free to write other names into `$GITHUB_ENV`, and
+# this list would still be right — which is why the entry is about this
+# variable and not about the action.
+_ACTIONS_THIS_READER_KNOWS = frozenset({
+    "actions/checkout@v4",
+    "astral-sh/setup-uv@v6",
+})
+
+# THE SHELL WORDS THIS READER HAS DECIDED CANNOT CHANGE THE ENVIRONMENT, and
+# the reason this is a whitelist. The `run:` can't-tell used to be a
+# SUBSTRING TEST FOR THE VARIABLE'S NAME, which asks whether the script
+# mentions it rather than whether it sets it. Driven on the real workflow's
+# x64 OFF pytest step:
+#
+#     set -a; . ./ci.env; set +a
+#
+# — three words, no `JAX_ENABLE_X64` anywhere, every variable in `ci.env`
+# exported into the step, and this file at `95 passed`. `export`, `eval`,
+# `env`, `source`, a `VAR=value` command prefix and `declare -x` are six
+# more, and enumerating them is the game this reader keeps losing. So a
+# script is INERT only if every command word in it is one of these; anything
+# else is a can't-tell that names the word. THE LIST IS EXACTLY WHAT THIS
+# WORKFLOW RUNS and nothing kept in reserve, because a word nobody uses is a
+# licence nobody reviewed. Adding one is a decision that it cannot export a
+# variable, in a diff, like every other list in this file.
+_SHELL_WORDS_THIS_READER_KNOWS = frozenset({"uv", ".venv/bin/python", "echo"})
+
+#: `set` is the one word with an argument this reader has an opinion about:
+#: `set -a` and `set -o allexport` turn every later assignment into an
+#: export, which is how the measured mutation above worked without naming
+#: anything.
+_SET_FLAGS_THAT_EXPORT = ("a", "allexport")
+
+# THE KEYS THIS READER KNOWS, AT EACH LEVEL, AND WHY AN UNKNOWN ONE IS A
+# CAN'T-TELL. FOUR of the nine ways past the old reader were a key it had no
+# pattern for — a job-level `if:`, a `defaults:` block,
+# `strategy.matrix.exclude` and `continue-on-error:` — and a fifth (a
+# reusable-workflow `uses:` job) was named in the old docstring as a known
+# hole. They are one defect: the reader read the keys it knew and was SILENT
+# about the rest, and silence resolved to a cell. A key that is not here
+# stops the reading instead, which also means the next GitHub feature nobody
+# has heard of fails closed on arrival. (`continue-on-error:` is on the step
+# list and MODELLED rather than merely refused, because a step may
+# legitimately carry it — the `install` step does, and that is the whole of
+# how the infrastructure carve-out works. What it may not do is carry it and
+# still be counted as a step that can go red.)
+#
+# `on`, `permissions` and `concurrency` are listed as IRRELEVANT rather than
+# modelled: nothing under them reaches a step's environment. The one route
+# they could — an anchor defined there and merged into a job — is refused at
+# the point of USE, because `<<` is not a job key and an alias is not a value
+# either reader will resolve to a cell.
+_WORKFLOW_KEYS_THIS_READER_KNOWS = frozenset({
+    "name", "on", "permissions", "concurrency", "jobs", "env",
+})
+_JOB_KEYS_THIS_READER_KNOWS = frozenset({
+    "name", "runs-on", "env", "steps", "strategy", "timeout-minutes",
+    "permissions", "concurrency",
+})
+_STRATEGY_KEYS_THIS_READER_KNOWS = frozenset(
+    {"matrix", "fail-fast", "max-parallel"}
+)
+_STEP_KEYS_THIS_READER_KNOWS = frozenset({
+    "name", "uses", "run", "env", "if", "id", "continue-on-error", "with",
+})
+#: Top-level keys whose bodies cannot reach a step's environment, so the line
+#: grammar skips them wholesale rather than parsing structure it has no use
+#: for. See the paragraph above for why that is safe.
+_WORKFLOW_KEYS_WITH_NOTHING_IN_THEM_FOR_US = frozenset({
+    "name", "on", "permissions", "concurrency",
+})
 
 # `${{ matrix.<axis> }}`, the ONE expression shape this reader follows, and it
 # follows it the way `tests/_lanes.py` follows `${EXTRAS}`: the chain is read
@@ -2002,6 +2168,30 @@ _X64_SETTING = re.compile(r"^[ \t]*JAX_ENABLE_X64:[ \t]*(.*?)[ \t]*$", re.M)
 _X64_MATRIX_REF = re.compile(
     r"\$\{\{[ \t]*matrix\.([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\}\}"
 )
+
+#: Is a real YAML parser importable in THIS lane? PyYAML 6.0.3 is in
+#: `/home/nick/venvs/stelling-jax` and absent from `stelling-nojax`, and it is
+#: not a declared dependency of this project — so this is a fact about the
+#: environment and never a reason to skip: the guards run, and can fail,
+#: either way.
+#:
+#: **AND WHERE IT IS PRESENT, IT IS PRESENT BY ACCIDENT, WHICH IS WHY THE
+#: LINE GRAMMAR IS THE ONE THAT HAS TO BE RIGHT.** Measured 2026-08-23:
+#: nothing in `pyproject.toml` names PyYAML and no `uv pip install` line in
+#: `.github/workflows/ci.yml` names it. In the shared jax venv it arrives
+#: only as a transitive requirement of test-only libraries (`flax`,
+#: `maddening`, `ml_collections`). The one CI job whose install closure does
+#: carry it — `acceptance-reproducer`, where `ci.yml` records that "pyyaml
+#: arrives with jaxfluids" — runs eighteen NAMED acceptance tests and not
+#: this file. **So no CI job that runs this file has a YAML parser**, and the
+#: reader those runs answer with is the line grammar; the parser's column of
+#: `_RESOLUTIONS` is asserted wherever a developer's environment happens to
+#: carry PyYAML and nowhere else. That is a fact worth knowing rather than a
+#: defect — the fallback is the one the guards depend on, so it is the one
+#: driven in every lane — and
+#: `test_which_reader_this_lane_uses_IS_ASSERTED_AND_NOT_ASSUMED` makes which
+#: reader answered a thing the run says out loud rather than assumes.
+_YAML_IS_IMPORTABLE = importlib.util.find_spec("yaml") is not None
 
 
 def _cannot_tell(reason: str) -> str:
@@ -2026,6 +2216,15 @@ def _refuse_unreadable(cells, where: str) -> None:
     `$GITHUB_ENV`, `&& false` on the OFF step, and the OFF step moved into
     the other job. Two of those -- `true` and `on` -- jax itself accepts.
 
+    NINE MORE WERE FOUND THE ROUND AFTER, and they are why the reader above
+    this line is a parser: a quoted key, a flow mapping, an alias,
+    `matrix.exclude`, `runs-on:` written before `name:`, a job-level `if:`,
+    a `defaults:` block, `set -a; . ./ci.env; set +a`, and
+    `continue-on-error: true` on the step whose red is the whole signal.
+    All nine measured at `95 passed` on the real workflow: the first four
+    a cell read WRONG, the fifth a whole LEG never seen, the last four a
+    cell this reader was not entitled to claim at all.
+
     A can't-tell that defaults to the answer the caller wanted is the shape
     this campaign has already named once, in `Lane.jax`. It gets a name here
     and a red there.
@@ -2035,7 +2234,7 @@ def _refuse_unreadable(cells, where: str) -> None:
         f"{where}: this reader cannot tell which JAX_ENABLE_X64 cell "
         f"{'these steps run' if len(unreadable) > 1 else 'this step runs'} "
         f"in — {unreadable}. That is a can't-tell and not a cell, and it is "
-        f"refused rather than read as OFF: every one of the eight shapes "
+        f"refused rather than read as OFF: every one of the seventeen shapes "
         f"listed in `_refuse_unreadable` ran at x64 ON while the guard that "
         f"conflated the two believed otherwise. Either spell the setting so "
         f"this reader can resolve it, or teach the reader the shape and say "
@@ -2043,8 +2242,43 @@ def _refuse_unreadable(cells, where: str) -> None:
     )
 
 
-def _x64_word(token: str) -> str:
-    """One written value -> ``"0"`` / ``"1"`` / a can't-tell, jax's grammar."""
+def _key_name(key) -> str:
+    """A mapping key as this reader names it.
+
+    PyYAML resolves the bare words `on`, `off`, `yes` and `no` to booleans,
+    so a workflow's own `on:` trigger key comes back as `True` and a
+    whitelist of strings would not contain it. The line grammar reads the
+    word. Normalising here is what lets ONE whitelist serve both readers.
+    """
+    if key is True:
+        return "on"
+    if key is False:
+        return "off"
+    return str(key)
+
+
+def _x64_word(value) -> str:
+    """One written value -> ``"0"`` / ``"1"`` / a can't-tell, jax's grammar.
+
+    The value arrives already typed from PyYAML (`True`, `0`, `"1"`) and as
+    written text from the line grammar (`true`, `0`, `"1"` with the quotes
+    still on). Both land on the same table, which is the point: a YAML
+    boolean renders into the environment as `"true"` and jax reads `"true"`
+    as ON, so reading the word and reading the type give one answer.
+    """
+    if value is True:
+        return "1"
+    if value is False:
+        return "0"
+    if isinstance(value, int):
+        token = str(value)
+    elif isinstance(value, str):
+        token = value
+    else:
+        return _cannot_tell(
+            f"JAX_ENABLE_X64: {value!r} is a {type(value).__name__} and not a "
+            f"value that can be put in an environment at all"
+        )
     word = token.strip().strip('"').strip("'").strip().lower()
     if word in _X64_TRUE:
         return "1"
@@ -2056,43 +2290,743 @@ def _x64_word(token: str) -> str:
     )
 
 
-def _matrix_axis(head: str, axis: str):
+# --------------------------------------------------------------------------
+# THE SHELL GRAMMAR: which scripts this reader will believe are inert
+# --------------------------------------------------------------------------
+
+
+def _shell_reason(script: str):
+    """``None`` if this script cannot change the environment, else why not.
+
+    Not "does it name JAX_ENABLE_X64" — that question was answered `no` by
+    `set -a; . ./ci.env; set +a`, which exports every variable in a file the
+    reader has never seen. Every command word must be one this reader has
+    decided cannot export (see `_SHELL_WORDS_THIS_READER_KNOWS`), and a
+    `VAR=value` command prefix, a `set` that turns on `allexport`, and an
+    unparseable line are each a refusal of their own.
+    """
+    joined = re.sub(r"\\\n[ \t]*", " ", script)
+    for raw in joined.split("\n"):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        try:
+            tokens = list(lexer)
+        except ValueError as exc:  # an unbalanced quote, say
+            return f"this reader cannot even tokenise the line {line!r} ({exc})"
+        command: list[str] = []
+        for token in [*tokens, ";"]:
+            if token in (";", "&&", "||", "|", "&", "\n"):
+                reason = _command_reason(command, line)
+                if reason is not None:
+                    return reason
+                command = []
+                continue
+            command.append(token)
+    return None
+
+
+def _command_reason(command, line):
+    """``None`` if one command of a script is inert, else why not."""
+    words = [w for w in command if w not in ("{", "}", "(", ")")]
+    while words and words[0] in (">", ">>", "<"):
+        words = words[2:]
+    if not words:
+        return None
+    head, *rest = words
+    if head in (">", ">>", "<"):
+        return None
+    if "=" in head.split("/")[0]:
+        return (
+            f"the line {line!r} carries a `{head}` assignment, which sets a "
+            f"variable for the command that follows it"
+        )
+    if head == "set":
+        for flag in rest:
+            stripped = flag.lstrip("-+")
+            if stripped in _SET_FLAGS_THAT_EXPORT or (
+                not flag.startswith(("-o", "+o")) and "a" in stripped
+                and flag.startswith(("-", "+"))
+            ):
+                return (
+                    f"the line {line!r} turns on shell `allexport`, which "
+                    f"exports every variable set after it — including any a "
+                    f"sourced file sets"
+                )
+        return None
+    if head not in _SHELL_WORDS_THIS_READER_KNOWS:
+        return (
+            f"the line {line!r} runs `{head}`, which is not a command this "
+            f"reader has decided cannot export a variable (it knows "
+            f"{sorted(_SHELL_WORDS_THIS_READER_KNOWS)} and `set`)"
+        )
+    return None
+
+
+# --------------------------------------------------------------------------
+# THE MODEL: one shape, two readers
+# --------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class _Step:
+    """One step, as either reader sees it.
+
+    ``blockers`` are can't-tells about THIS step alone; ``job_blockers`` are
+    the ones that reach every other step of the job, which is the split the
+    `$GITHUB_ENV` mutant taught: a script this reader cannot read might
+    write the variable for every LATER step, so it poisons the job and not
+    just itself.
+    """
+
+    name: object = None
+    uses: object = None
+    run: object = None
+    id: object = None
+    condition: object = None
+    env: object = None
+    continue_on_error: object = None
+    blockers: tuple = ()
+    job_blockers: tuple = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class _Job:
+    id: str
+    name: object = None
+    env: object = None
+    matrix: object = None
+    steps: tuple = ()
+    blockers: tuple = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class _Workflow:
+    parser: str
+    env: object = None
+    jobs: tuple = ()
+    blockers: tuple = ()
+
+
+class _Opaque:
+    """A region the line grammar read past without modelling — see
+    `_WORKFLOW_KEYS_WITH_NOTHING_IN_THEM_FOR_US`."""
+
+    def __repr__(self):  # pragma: no cover - diagnostics only
+        return "<opaque>"
+
+
+class _Unloadable(str):
+    """A parse that failed, carrying its own reason. `_model` refuses it,
+    so a workflow PyYAML will not load is a can't-tell with a sentence
+    rather than a traceback."""
+
+
+def _mapping_of_strings(value, where):
+    """``(mapping, blockers)`` for an ``env:`` block."""
+    if value is None:
+        return {}, ()
+    if not isinstance(value, dict):
+        return {}, (f"the {where} `env:` is {value!r}, which is not a mapping "
+                    f"this reader can read entry by entry",)
+    return {_key_name(k): v for k, v in value.items()}, ()
+
+
+def _model(raw, parser: str) -> _Workflow:
+    """The mapping a YAML parser builds -> the model both guards read.
+
+    EVERYTHING THAT DECIDES A CELL IS DECIDED HERE, once, for both readers.
+    The two parsers differ only in how they turn text into this mapping, and
+    `test_which_reader_this_lane_uses_IS_ASSERTED_AND_NOT_ASSUMED` holds
+    them to the same answer on the file the guards actually read.
+    """
+    blockers = []
+    if isinstance(raw, _Unloadable):
+        return _Workflow(parser=parser, blockers=(str(raw),))
+    if not isinstance(raw, dict):
+        return _Workflow(parser=parser,
+                         blockers=("this workflow is not a mapping at all",))
+    for key in raw:
+        if _key_name(key) not in _WORKFLOW_KEYS_THIS_READER_KNOWS:
+            blockers.append(
+                f"the workflow carries a top-level `{_key_name(key)}:` key, "
+                f"which this reader does not model — `defaults:` alone can "
+                f"change the shell every `run:` in the file executes in"
+            )
+    env, env_blockers = _mapping_of_strings(raw.get("env"), "workflow's")
+    blockers += list(env_blockers)
+
+    jobs = []
+    raw_jobs = raw.get("jobs")
+    if raw_jobs is None:
+        blockers.append("the workflow has no `jobs:` mapping")
+        raw_jobs = {}
+    elif not isinstance(raw_jobs, dict):
+        blockers.append("the workflow's `jobs:` is not a mapping")
+        raw_jobs = {}
+    for job_id, body in raw_jobs.items():
+        jobs.append(_model_job(_key_name(job_id), body))
+    return _Workflow(parser=parser, env=env, jobs=tuple(jobs),
+                     blockers=tuple(blockers))
+
+
+def _model_job(job_id: str, body) -> _Job:
+    blockers = []
+    if not isinstance(body, dict):
+        return _Job(id=job_id, blockers=(f"the `{job_id}` job is not a mapping",))
+    for key in body:
+        if _key_name(key) not in _JOB_KEYS_THIS_READER_KNOWS:
+            blockers.append(
+                f"the `{job_id}` job carries a `{_key_name(key)}:` key, which "
+                f"this reader does not model — a job-level `if:` can stop the "
+                f"whole job, a `uses:` makes it somebody else's workflow, and "
+                f"a `defaults:` changes every script in it"
+            )
+    env, env_blockers = _mapping_of_strings(body.get("env"), f"`{job_id}` job's")
+    blockers += list(env_blockers)
+
+    matrix = None
+    strategy = body.get("strategy")
+    if strategy is not None:
+        if not isinstance(strategy, dict):
+            blockers.append(f"the `{job_id}` job's `strategy:` is not a mapping")
+        else:
+            for key in strategy:
+                if _key_name(key) not in _STRATEGY_KEYS_THIS_READER_KNOWS:
+                    blockers.append(
+                        f"the `{job_id}` job's `strategy:` carries "
+                        f"`{_key_name(key)}:`, which this reader does not model"
+                    )
+            matrix = strategy.get("matrix")
+
+    steps = []
+    raw_steps = body.get("steps")
+    if raw_steps is None:
+        raw_steps = []
+    elif not isinstance(raw_steps, list):
+        blockers.append(f"the `{job_id}` job's `steps:` is not a sequence")
+        raw_steps = []
+    for index, raw_step in enumerate(raw_steps):
+        steps.append(_model_step(job_id, index, raw_step))
+    return _Job(id=job_id, name=body.get("name"), env=env, matrix=matrix,
+                steps=tuple(steps), blockers=tuple(blockers))
+
+
+def _model_step(job_id: str, index: int, raw) -> _Step:
+    where = f"step {index} of the `{job_id}` job"
+    if not isinstance(raw, dict):
+        return _Step(job_blockers=(f"{where} is not a mapping",))
+    blockers, job_blockers = [], []
+    for key in raw:
+        if _key_name(key) not in _STEP_KEYS_THIS_READER_KNOWS:
+            job_blockers.append(
+                f"{where} carries a `{_key_name(key)}:` key, which this "
+                f"reader does not model"
+            )
+    env, env_blockers = _mapping_of_strings(raw.get("env"), where)
+    blockers += list(env_blockers)
+
+    uses = raw.get("uses")
+    if uses is not None and uses not in _ACTIONS_THIS_READER_KNOWS:
+        job_blockers.append(
+            f"{where} `uses: {uses}`, and an action this reader has not been "
+            f"told about can write JAX_ENABLE_X64 into $GITHUB_ENV for every "
+            f"later step of the job"
+        )
+
+    run = raw.get("run")
+    if run is not None:
+        if not isinstance(run, str):
+            job_blockers.append(f"{where} has a `run:` that is not a string")
+        else:
+            if "GITHUB_ENV" in run:
+                job_blockers.append(
+                    f"{where} names $GITHUB_ENV, which sets variables for "
+                    f"every LATER step of the job"
+                )
+            if "JAX_ENABLE_X64" in run:
+                blockers.append(
+                    f"{where}'s `run:` script names JAX_ENABLE_X64, and this "
+                    f"reader does not evaluate shell"
+                )
+            reason = _shell_reason(run)
+            if reason is not None:
+                job_blockers.append(f"{where}: {reason}")
+
+    continue_on_error = raw.get("continue-on-error")
+    if continue_on_error is not None and continue_on_error is not False:
+        blockers.append(
+            f"{where} is `continue-on-error: {continue_on_error!r}`, so its "
+            f"red cannot fail the job and it cannot carry a signal"
+        )
+    return _Step(name=raw.get("name"), uses=uses, run=run, id=raw.get("id"),
+                 condition=raw.get("if"), env=env,
+                 continue_on_error=continue_on_error,
+                 blockers=tuple(blockers), job_blockers=tuple(job_blockers))
+
+
+def _resolve_conditions(job: _Job) -> _Job:
+    """A step's `if:` against the job's OWN steps, which is where its
+    referent lives.
+
+    See `_STEP_CONDITIONS_THIS_READER_KNOWS` for the measured mutation: the
+    condition stayed on the list, the step it names was renamed, and the
+    reader went on crediting four steps with cells they no longer run in.
+    """
+    ids = {step.id for step in job.steps if step.id is not None}
+    steps = []
+    for index, step in enumerate(job.steps):
+        extra = []
+        condition = step.condition
+        if condition is not None:
+            where = f"step {index} of the `{job.id}` job"
+            written = condition if isinstance(condition, str) else repr(condition)
+            if written.strip() not in _STEP_CONDITIONS_THIS_READER_KNOWS:
+                extra.append(
+                    f"{where}'s `if: {written}` is not a condition this "
+                    f"reader can evaluate, so it cannot be credited with "
+                    f"running at all"
+                )
+            else:
+                missing = sorted(
+                    set(_STEP_REFERENCE.findall(written)) - ids
+                )
+                if missing:
+                    extra.append(
+                        f"{where}'s `if: {written}` is evaluated against step "
+                        f"id(s) {missing} that no step of this job carries, so "
+                        f"the condition this reader was told still runs names "
+                        f"nothing — on the runner it is false and the step "
+                        f"SKIPS"
+                    )
+        steps.append(dataclasses.replace(
+            step, blockers=step.blockers + tuple(extra)))
+    return dataclasses.replace(job, steps=tuple(steps))
+
+
+# --------------------------------------------------------------------------
+# READER 1: PyYAML, where it is importable
+# --------------------------------------------------------------------------
+
+
+def _parse_with_yaml(text: str):
+    """``yaml.safe_load``, and a MALFORMED file is a refusal and not a crash.
+
+    A workflow this parser cannot load is a workflow nobody can read, which
+    is a can't-tell like any other and belongs in `_refuse_unreadable`'s
+    message rather than in a traceback.
+    """
+    import yaml
+
+    try:
+        return yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        return _Unloadable(f"PyYAML will not load this workflow: {exc}")
+
+
+
+# --------------------------------------------------------------------------
+# READER 2: A TOTAL LINE GRAMMAR, where it is not
+# --------------------------------------------------------------------------
+#
+# EVERY LINE IS CLASSIFIED OR THE WHOLE READING STOPS. That is the property
+# that lets this reader say "there is no setting" rather than only "I did not
+# find one", and it is the difference between this and the pattern it
+# replaced. The grammar is deliberately narrower than YAML: this workflow is
+# two-space-indented block mappings and `- ` step sequences, and a file that
+# has grown a flow mapping, an anchor, an alias, a merge key, a quoted key,
+# a tab or a second document is not read PERMISSIVELY — it is not read.
+
+
+_LINE_BLANK = re.compile(r"^[ \t]*$")
+_LINE_COMMENT = re.compile(r"^[ \t]*#")
+_KEY = r"[A-Za-z_][A-Za-z0-9_.-]*"
+_LINE_TOP = re.compile(rf"^({_KEY}):[ \t]*(.*?)[ \t]*$")
+_LINE_JOB = re.compile(rf"^  ({_JOB_ID}):[ \t]*(.*?)[ \t]*$")
+_LINE_JOB_KEY = re.compile(rf"^    ({_KEY}):[ \t]*(.*?)[ \t]*$")
+_LINE_SIX = re.compile(rf"^      ({_KEY}):[ \t]*(.*?)[ \t]*$")
+_LINE_STEP = re.compile(rf"^      - ({_KEY}):[ \t]*(.*?)[ \t]*$")
+_LINE_EIGHT = re.compile(rf"^        ({_KEY}):[ \t]*(.*?)[ \t]*$")
+_LINE_TEN = re.compile(rf"^          ({_KEY}):[ \t]*(.*?)[ \t]*$")
+_LINE_TEN_ITEM = re.compile(r"^          - [ \t]*(.*?)[ \t]*$")
+_BLOCK_SCALAR = ("|", ">", "|-", ">-", "|+", ">+")
+
+
+class _Refused(Exception):
+    """The line grammar met something it will not read."""
+
+
+def _scalar(raw: str, where: str):
+    """A written scalar -> a Python value, or a refusal.
+
+    The refusals are the point. An anchor (`&x`), an alias (`*x`), a merge
+    key (`<<:`) and a flow mapping (`{a: b}`) are legal YAML this grammar
+    does not resolve; the alias and the flow mapping were each a MEASURED
+    way past its predecessor, at `95 passed`. A block scalar is refused here
+    because only `run:` may open one, and a flow SEQUENCE reaching this
+    function is a sequence somewhere a sequence does not belong — the one
+    place this workflow may carry one, a `strategy.matrix` axis, reads it
+    before it gets here and passes the ENTRIES down.
+    """
+    if raw == "":
+        return None
+    if raw[0] in "&*<":
+        raise _Refused(
+            f"{where} is `{raw}`: this reader does not resolve YAML anchors, "
+            f"aliases or merge keys, and an alias to an anchored `env:` "
+            f"mapping was a measured way past its predecessor"
+        )
+    if raw[0] in "{[":
+        raise _Refused(
+            f"{where} is the flow collection `{raw}`, which this reader does "
+            f"not parse — `env: {{ JAX_ENABLE_X64: \"1\" }}` was a measured "
+            f"way past its predecessor"
+        )
+    if raw in _BLOCK_SCALAR:
+        raise _Refused(f"{where} opens a block scalar, which only `run:` may")
+    if "#" in raw and not (raw[0] in "\"'" and raw[-1] == raw[0]):
+        raise _Refused(
+            f"{where} is `{raw}`, which carries a `#` this reader will not "
+            f"guess is or is not a comment"
+        )
+    if raw[0] in "\"'":
+        if len(raw) < 2 or raw[-1] != raw[0] or raw[0] in raw[1:-1]:
+            raise _Refused(f"{where} is `{raw}`, which this reader cannot unquote")
+        return raw[1:-1]
+    # ...and an UNQUOTED scalar gets YAML 1.1's own resolution, because that
+    # is what the other reader does and the two have to land on one value.
+    # `on`/`off`/`yes`/`no` are booleans here exactly as PyYAML makes them,
+    # which is also why `JAX_ENABLE_X64: on` reads ON in both: the runner
+    # renders the boolean as `"true"` and jax reads `"true"` as ON.
+    lowered = raw.lower()
+    if lowered in ("true", "yes", "on"):
+        return True
+    if lowered in ("false", "no", "off"):
+        return False
+    if lowered in ("null", "~"):
+        return None
+    if re.fullmatch(r"[+-]?[0-9]+", raw):
+        return int(raw)
+    return raw
+
+
+def _scalar_must_nest(raw: str, what: str, where: str) -> None:
+    """A key that opens a mapping may not also carry a value."""
+    if raw:
+        raise _Refused(
+            f"{where}: {what} carries the value `{raw}` on its own line "
+            f"instead of opening a mapping under it — a flow mapping and an "
+            f"alias are both spelled that way and this reader resolves "
+            f"neither"
+        )
+
+
+def _parse_by_line(text: str):
+    """The workflow's text -> the mapping PyYAML would build, or `_Refused`.
+
+    Total over the lines it reads: the top-level keys, and everything inside
+    `jobs:`. The bodies of `on:`, `permissions:` and `concurrency:` are
+    skipped by indentation because nothing in them can reach a step's
+    environment except through an alias, and an alias is refused where it is
+    USED.
+    """
+    if "\t" in text:
+        raise _Refused(
+            "this file contains a tab; YAML forbids one in indentation and "
+            "this grammar measures indentation in spaces, so it will not "
+            "guess which kind this is"
+        )
+    if re.search(r"^---", text, re.M) or re.search(r"^\.\.\.", text, re.M):
+        raise _Refused("this file carries a document marker; a multi-document "
+                       "workflow is outside this grammar")
+
+    workflow: dict = {}
+    jobs: dict = {}
+    job = env = step = matrix = axis = None
+    state = "top"
+    skip_below = None
+    run_key_indent = None
+    run_lines: list = []
+    run_owner = None
+
+    lines = text.split("\n")
+    for number, line in enumerate(lines, 1):
+        where = f"line {number}"
+        indent = len(line) - len(line.lstrip(" "))
+
+        if run_owner is not None:
+            if _LINE_BLANK.match(line) or indent > run_key_indent:
+                run_lines.append(line)
+                continue
+            run_owner["run"] = "\n".join(run_lines)
+            run_owner, run_lines, run_key_indent = None, [], None
+
+        if _LINE_BLANK.match(line) or _LINE_COMMENT.match(line):
+            continue
+        if skip_below is not None:
+            if indent > skip_below:
+                continue
+            skip_below = None
+
+        top = _LINE_TOP.match(line)
+        if top is not None:
+            key, raw = top.group(1), top.group(2)
+            state = "top"
+            job = env = step = matrix = axis = None
+            if key in _WORKFLOW_KEYS_WITH_NOTHING_IN_THEM_FOR_US:
+                workflow[key] = _Opaque()
+                skip_below = 0
+                continue
+            if key in ("jobs", "env"):
+                # Same rule as the job and step levels: a key that opens a
+                # mapping may not also carry a value.
+                _scalar_must_nest(raw, f"the workflow's `{key}` key", where)
+            if key == "jobs":
+                workflow["jobs"] = jobs
+                state = "jobs"
+                continue
+            if key == "env":
+                env = workflow.setdefault("env", {})
+                state = "workflow-env"
+                continue
+            workflow[key] = _Opaque()
+            skip_below = 0
+            continue
+
+        if state == "workflow-env":
+            entry = _LINE_TOP.match(line[2:]) if indent == 2 else None
+            if entry is None or indent != 2:
+                raise _Refused(f"{where}: {line!r} is not an `env:` entry")
+            env[entry.group(1)] = _scalar(entry.group(2),
+                                          f"the workflow's `{entry.group(1)}`")
+            continue
+
+        if state not in ("jobs", "job", "job-env", "steps", "step", "step-env",
+                         "strategy", "matrix", "axis"):
+            raise _Refused(f"{where}: {line!r} is outside this grammar")
+
+        head = _LINE_JOB.match(line)
+        if head is not None and indent == 2:
+            if head.group(2):
+                raise _Refused(
+                    f"{where}: the job `{head.group(1)}` has a value on its "
+                    f"own line, which this reader does not read"
+                )
+            job = jobs.setdefault(head.group(1), {})
+            env = step = matrix = axis = None
+            state = "job"
+            continue
+
+        if indent == 4:
+            key_line = _LINE_JOB_KEY.match(line)
+            if key_line is None:
+                raise _Refused(f"{where}: {line!r} is not a job key")
+            key, raw = key_line.group(1), key_line.group(2)
+            env = step = matrix = axis = None
+            if key in ("steps", "env", "strategy"):
+                # A NESTING KEY MAY NOT CARRY A VALUE. `env: *x64on` and
+                # `env: { JAX_ENABLE_X64: "1" }` are two of the nine measured
+                # ways past the pattern this grammar replaced, and both are a
+                # nesting key with something on its own line.
+                _scalar_must_nest(raw, f"the `{key}` key of this job", where)
+            if key == "steps":
+                job["steps"] = []
+                state = "steps"
+                continue
+            if key == "env":
+                env = job.setdefault("env", {})
+                state = "job-env"
+                continue
+            if key == "strategy":
+                job["strategy"] = {}
+                state = "strategy"
+                continue
+            job[key] = _scalar(raw, f"the `{key}` key of this job")
+            state = "job"
+            continue
+
+        if state == "job-env" and indent == 6:
+            entry = _LINE_SIX.match(line)
+            if entry is None:
+                raise _Refused(f"{where}: {line!r} is not an `env:` entry")
+            env[entry.group(1)] = _scalar(entry.group(2),
+                                          f"this job's `{entry.group(1)}`")
+            continue
+
+        if state in ("strategy", "matrix", "axis"):
+            if indent == 6:
+                entry = _LINE_SIX.match(line)
+                if entry is None:
+                    raise _Refused(f"{where}: {line!r} is not a `strategy:` key")
+                if entry.group(1) == "matrix":
+                    if entry.group(2):
+                        raise _Refused(f"{where}: an inline `matrix:` value")
+                    matrix = job["strategy"].setdefault("matrix", {})
+                    state = "matrix"
+                    continue
+                job["strategy"][entry.group(1)] = _scalar(
+                    entry.group(2), f"this job's `strategy.{entry.group(1)}`")
+                state = "strategy"
+                continue
+            if indent == 8 and state in ("matrix", "axis"):
+                entry = _LINE_EIGHT.match(line)
+                if entry is None:
+                    raise _Refused(f"{where}: {line!r} is not a matrix axis")
+                axis, raw = entry.group(1), entry.group(2)
+                if raw.startswith("["):
+                    # A FLOW SEQUENCE, SPLIT ON COMMAS. This is the one place
+                    # the grammar splits rather than parses, and it is wrong
+                    # for an entry containing a quoted comma — which would
+                    # give two entries where YAML gives one, and so an extra
+                    # cell. The axis values this reader resolves are `"0"` and
+                    # `"1"`; anything a comma could hide inside is not a value
+                    # `_x64_word` reads, so the extra entry is a can't-tell
+                    # and not a cell. Said here rather than left to be found.
+                    if not raw.endswith("]"):
+                        raise _Refused(f"{where}: an unterminated flow sequence")
+                    matrix[axis] = [
+                        _scalar(v.strip(), f"an entry of matrix axis `{axis}`")
+                        for v in raw[1:-1].split(",") if v.strip()
+                    ]
+                    state = "matrix"
+                    continue
+                if raw:
+                    matrix[axis] = _scalar(raw, f"matrix axis `{axis}`")
+                    state = "matrix"
+                    continue
+                matrix[axis] = []
+                state = "axis"
+                continue
+            if indent == 10 and state == "axis":
+                item = _LINE_TEN_ITEM.match(line)
+                if item is None:
+                    raise _Refused(f"{where}: {line!r} is not a matrix entry")
+                matrix[axis].append(
+                    _scalar(item.group(1), f"an entry of matrix axis `{axis}`"))
+                continue
+            raise _Refused(f"{where}: {line!r} is not part of a `strategy:` block")
+
+        if state in ("steps", "step", "step-env"):
+            start = _LINE_STEP.match(line)
+            if start is not None:
+                step = {}
+                job["steps"].append(step)
+                env = None
+                state = "step"
+                key, raw = start.group(1), start.group(2)
+                if key == "env" or raw in _BLOCK_SCALAR and key != "run":
+                    raise _Refused(
+                        f"{where}: this reader does not open a step on `{key}:`"
+                    )
+                if key == "run" and raw in _BLOCK_SCALAR:
+                    run_owner, run_lines, run_key_indent = step, [], 8
+                    continue
+                step[key] = _scalar(raw, f"a step's `{key}`")
+                continue
+            if indent == 8:
+                entry = _LINE_EIGHT.match(line)
+                if entry is None:
+                    raise _Refused(f"{where}: {line!r} is not a step key")
+                key, raw = entry.group(1), entry.group(2)
+                if step is None:
+                    raise _Refused(f"{where}: a step key before any step")
+                if key == "env":
+                    _scalar_must_nest(raw, "a step's `env`", where)
+                    env = step.setdefault("env", {})
+                    state = "step-env"
+                    continue
+                if key == "run" and raw in _BLOCK_SCALAR:
+                    run_owner, run_lines, run_key_indent = step, [], 8
+                    state = "step"
+                    continue
+                step[key] = _scalar(raw, f"a step's `{key}`")
+                state = "step"
+                continue
+            if state == "step-env" and indent == 10:
+                entry = _LINE_TEN.match(line)
+                if entry is None:
+                    raise _Refused(f"{where}: {line!r} is not an `env:` entry")
+                env[entry.group(1)] = _scalar(
+                    entry.group(2), f"a step's `{entry.group(1)}`")
+                continue
+            raise _Refused(f"{where}: {line!r} is not part of a `steps:` block")
+
+        raise _Refused(f"{where}: {line!r} is outside this grammar")
+
+    if run_owner is not None:
+        run_owner["run"] = "\n".join(run_lines)
+    return workflow
+
+
+# --------------------------------------------------------------------------
+# THE ONE ENTRY POINT
+# --------------------------------------------------------------------------
+
+
+def _read_workflow(text: str, parser: str | None = None) -> _Workflow:
+    """The workflow's text -> the model, through whichever reader is asked for.
+
+    ``parser=None`` means *the strongest one this lane has*, which is what
+    the guards use. The tests drive both by name, so the line grammar is
+    exercised in the jax lane too and is never only as good as the lane that
+    cannot check it.
+    """
+    if parser is None:
+        parser = "yaml" if _YAML_IS_IMPORTABLE else "text"
+    if parser == "yaml":
+        return _model(_parse_with_yaml(text), "yaml")
+    try:
+        raw = _parse_by_line(text)
+    except _Refused as exc:
+        return _Workflow(parser="text", blockers=(
+            f"this lane has no YAML parser and the line grammar stopped: "
+            f"{exc}",))
+    return _model(raw, "text")
+
+
+def _canary_jobs(workflow):
+    """``(job id, job)`` for every job of the nightly workflow, in order.
+
+    Takes the workflow's TEXT or an already-read `_Workflow`. Every caller
+    below FAILS on an empty list rather than passing over one — two by
+    asserting it directly and the third because the cells it collects come
+    from these jobs, so no jobs means no cells and no cells means red.
+
+    THE JOBS COME OFF A PARSE NOW. This read
+    ``\\n  (job):\\n    name: `` — a two-space key whose FIRST CHILD is
+    ``name:`` — and YAML mapping keys are unordered, so a third job written
+    with ``runs-on:`` first was invisible: driven on the real workflow, a
+    `nightly_x64:` leg running the canary at `JAX_ENABLE_X64: "1"` only left
+    this file at `95 passed` with `jobs seen: ['control', 'nightly']`.
+    """
+    if isinstance(workflow, str):
+        workflow = _read_workflow(workflow)
+    return [(job.id, job) for job in workflow.jobs]
+
+
+def _matrix_axis(job: _Job, axis: str):
     """The values of ``strategy.matrix.<axis>``, or ``None`` if unreadable.
 
-    Two spellings, both YAML's: a flow sequence on the key's own line and a
-    block sequence under it. Anything else is ``None`` and the caller turns
-    that into a named can't-tell -- the same four-link discipline
-    `tests/_lanes.py`'s `_matrix_values` applies to `${EXTRAS}`.
+    ``include:`` and ``exclude:`` are NOT axes and their presence makes the
+    whole expansion unreadable rather than being ignored: driven, a
+    ``matrix: {x64: ["0", "1"], exclude: [{x64: "0"}]}`` over
+    ``${{ matrix.x64 }}`` left this file at `95 passed` while the job runs in
+    the ON cell only.
     """
-    matrix = re.search(r"^([ \t]*)matrix:[ \t]*$", head, re.M)
-    if matrix is None:
+    if not isinstance(job.matrix, dict):
         return None
-    body = head[matrix.end():]
-    indent = len(matrix.group(1))
-    key = re.search(
-        rf"^[ \t]{{{indent + 1},}}{re.escape(axis)}:[ \t]*(.*?)[ \t]*$",
-        body,
-        re.M,
-    )
-    if key is None:
-        return None
-    inline = key.group(1)
-    if inline.startswith("["):
-        if not inline.endswith("]"):
+    for key in job.matrix:
+        if _key_name(key) in ("include", "exclude"):
             return None
-        return [v.strip() for v in inline[1:-1].split(",") if v.strip()]
-    if inline:
-        return None  # a scalar, or a spelling this reader has not been taught
-    items = []
-    for line in body[key.end():].lstrip("\n").split("\n"):
-        entry = re.fullmatch(r"[ \t]+-[ \t]+(.*?)[ \t]*", line)
-        if entry is None:
-            break
-        items.append(entry.group(1))
-    return items or None
+    values = job.matrix.get(axis)
+    if not isinstance(values, list) or not values:
+        return None
+    return values
 
 
-def _x64_resolve(raw: str, head: str) -> list[str]:
+def _x64_resolve(raw, job: _Job) -> list:
     """A written setting -> the cell(s) the steps under it actually run in.
 
     A `${{ matrix.<axis> }}` setting is EXPANDED, entry by entry, because a
@@ -2103,15 +3037,15 @@ def _x64_resolve(raw: str, head: str) -> list[str]:
     runs in one cell. The guard was strict against the sound shape and
     permissive against the unsound one, which is the wrong way round twice.
     """
-    ref = _X64_MATRIX_REF.fullmatch(raw.strip().strip('"').strip("'").strip())
-    if ref is None:
-        if "${{" in raw:
-            return [_cannot_tell(
-                f"JAX_ENABLE_X64: {raw!r} is an expression this reader does "
-                f"not follow; only `${{{{ matrix.<axis> }}}}` is followed"
-            )]
+    if not isinstance(raw, str) or "${{" not in raw:
         return [_x64_word(raw)]
-    values = _matrix_axis(head, ref.group(1))
+    ref = _X64_MATRIX_REF.fullmatch(raw.strip())
+    if ref is None:
+        return [_cannot_tell(
+            f"JAX_ENABLE_X64: {raw!r} is an expression this reader does "
+            f"not follow; only `${{{{ matrix.<axis> }}}}` is followed"
+        )]
+    values = _matrix_axis(job, ref.group(1))
     if not values:
         return [_cannot_tell(
             f"JAX_ENABLE_X64: {raw!r} names matrix axis {ref.group(1)!r} and "
@@ -2121,31 +3055,8 @@ def _x64_resolve(raw: str, head: str) -> list[str]:
     return [_x64_word(value) for value in values]
 
 
-def _canary_jobs(workflow: str):
-    """``(job id, block)`` for every job of the nightly workflow, in order.
-
-    The layout this reads is a two-space job key whose first child is
-    ``name:``; a workflow that stops matching it has moved. Every caller
-    below FAILS on an empty list rather than passing over one — two by
-    asserting it directly and the third because the cells it collects come
-    from these blocks, so no jobs means no cells and no cells means red.
-
-    The id pattern is `_JOB_ID` and is spelled once — see there for the third
-    job that hid behind the underscore `[a-z-]+` could not see.
-    """
-    starts = [
-        (m.start(), m.group(1))
-        for m in re.finditer(rf"\n  ({_JOB_ID}):\n    name: ", workflow)
-    ]
-    bounds = [pos for pos, _ in starts] + [len(workflow)]
-    return [
-        (job, workflow[bounds[index]:bounds[index + 1]])
-        for index, (_, job) in enumerate(starts)
-    ]
-
-
-def _x64_cells(workflow: str, block: str, wanted) -> list[str]:
-    """The ``JAX_ENABLE_X64`` cell each step of ``block`` ``wanted`` runs in.
+def _x64_cells(workflow, job, wanted) -> list:
+    """The ``JAX_ENABLE_X64`` cell each step of ``job`` that ``wanted`` runs in.
 
     Every entry is ``"0"``, ``"1"``, ``"unset"`` or a ``?``-prefixed
     can't-tell, and **``"unset"`` and the can't-tell are different things** —
@@ -2156,31 +3067,40 @@ def _x64_cells(workflow: str, block: str, wanted) -> list[str]:
     :func:`_refuse_unreadable` turns it into a red. Callers must call that
     before reading a cell.
 
+    **AND `"unset"` IS NOW A THING ONLY A PARSE MAY SAY.** A pattern that
+    searches can report a miss and nothing more, so the old reader's
+    ``"unset"`` meant *I did not find one* — which is why `env: *x64on` and
+    `"JAX_ENABLE_X64": "1"` both read as OFF. Either reader here has read
+    the WHOLE file before it says the word: PyYAML by parsing it, the line
+    grammar by classifying every line and refusing the reading outright on
+    the first line it cannot place.
+
     RESOLVE THE SETTING THE WAY THE RUNNER DOES: a step's own ``env:`` wins,
-    else the job's (which lives in the block HEAD, before ``steps:``), else
-    the workflow's top-level one. Reading only the step chunk and calling a
-    miss "unset" is how the sweep guard first went blind: hoisting the
-    repeated ``env:`` up to the job -- a tidy-up this workflow openly invites,
-    six steps repeat it today -- left every canary run at x64=1 with the guard
-    still green. What must NOT leak is ANOTHER STEP's ``env:``, so the
-    per-step search stays per-step and the job's is taken from the head alone.
-    Anchored, because a comment QUOTING the setting is not the workflow
-    SETTING it -- two of the mutants that killed the old guard were caught
-    only by that accident.
+    else the job's, else the workflow's top-level one. Reading only the step
+    and calling a miss "unset" is how the sweep guard first went blind:
+    hoisting the repeated ``env:`` up to the job -- a tidy-up this workflow
+    openly invites, six steps repeat it today -- left every canary run at
+    x64=1 with the guard still green.
 
-    AND THREE THINGS THAT ARE NOT AN ``env:`` ENTRY AT ALL SET THIS VARIABLE,
-    each of which this reader refuses rather than misses:
+    AND FOUR THINGS THAT ARE NOT AN ``env:`` ENTRY AT ALL SET THIS VARIABLE
+    OR TAKE THE STEP AWAY, each of which this reader refuses rather than
+    misses:
 
-    * the step's ``run:`` script naming it — ``export JAX_ENABLE_X64=1`` on a
-      line of its own, or a ``JAX_ENABLE_X64=1 .venv/bin/python …`` command
-      prefix. This reader does not evaluate shell, so a script that names the
-      variable is a can't-tell about that step;
-    * any step of the job writing it into ``$GITHUB_ENV``, which changes the
-      environment of every LATER step. Ordering steps against a shell this
-      reader does not run is not a thing it will do, so ONE such write is a
-      can't-tell for the whole job;
-    * an ``if:`` this reader cannot evaluate, because a step that might not
-      run cannot be credited with running in a cell.
+    * the step's ``run:`` script. Not "does it name the variable" — a
+      substring test for the name answered `no` to `set -a; . ./ci.env;
+      set +a`. Every command word must be one `_SHELL_WORDS_THIS_READER_
+      KNOWS` names;
+    * any step of the job naming ``$GITHUB_ENV``, which changes the
+      environment of every LATER step, or ``uses:`` an action outside
+      `_ACTIONS_THIS_READER_KNOWS`, which can do the same thing from inside
+      somebody else's repository;
+    * an ``if:`` this reader cannot evaluate, or one it can whose referent
+      does not exist — see `_STEP_CONDITIONS_THIS_READER_KNOWS`;
+    * ``continue-on-error: true``, which does not change the cell but takes
+      away the step's ability to fail the job, and both callers here are
+      claims about a step that CAN go red. Driven: `continue-on-error: true`
+      on the real workflow's x64 OFF canary step left this file at
+      `95 passed`.
 
     **IT IS ONE FUNCTION BECAUSE TWO CALLERS NEED THE SAME RULE**, and the
     second caller is why: the guard on the tripwire's own test step was added
@@ -2190,85 +3110,38 @@ def _x64_cells(workflow: str, block: str, wanted) -> list[str]:
     in prose. It also carried the conflation above into BOTH callers the day
     it was extracted, which is the risk a shared resolver runs and the reason
     every shape it refuses is named in `_refuse_unreadable`.
-
-    **WHAT IT STILL ASSUMES, SAID RATHER THAN LEFT TO BE FOUND.** The step
-    split is on ``- `` followed by ``name:``, ``uses:`` or ``run:``, which is
-    every step in this workflow and not every step YAML permits: one whose
-    first key is ``if:`` or ``env:`` would not open a chunk and would be read
-    as part of its predecessor. A reusable-workflow ``uses:`` job, a
-    ``defaults.run`` env, and a composite action that sets the variable are
-    all outside what this reads. This is a text reader with a named grammar,
-    not a YAML evaluator; what it does NOT do is guess when it is outside it.
     """
-    head = block.split("\n    steps:", 1)[0]
-    steps = re.split(r"\n      - (?=name:|uses:|run:)", block)[1:]
+    if isinstance(workflow, str):
+        workflow = _read_workflow(workflow)
+    if isinstance(job, str):
+        jobs = dict(_canary_jobs(workflow))
+        if job not in jobs and workflow.blockers:
+            # A REFUSED READING HAS NO JOBS, and the reason it has none is
+            # the answer. Returning the workflow's own can't-tells here is
+            # what keeps `_refuse_unreadable` the one gate every caller
+            # passes through, rather than some callers meeting a KeyError.
+            return [_cannot_tell(reason) for reason in workflow.blockers]
+        job = jobs[job]
+    job = _resolve_conditions(job)
 
-    def _script(step: str) -> str:
-        """The step's `run:` SCRIPT, by YAML's own rule and not to the end of
-        the chunk. A step chunk ends where the next one begins, so it carries
-        the next step's COMMENT preamble — and in this workflow those
-        comments quote `JAX_ENABLE_X64` at length. Reading to the end of the
-        chunk made every `control` step a can't-tell on its neighbour's prose,
-        which is the false-positive direction of the same laziness.
+    poison = [_cannot_tell(reason) for reason in workflow.blockers]
+    poison += [_cannot_tell(reason) for reason in job.blockers]
+    for step in job.steps:
+        poison += [_cannot_tell(reason) for reason in step.job_blockers]
 
-        An inline `run: cmd` is that one line; a `run: |` block scalar is the
-        following lines indented strictly deeper than the `run:` key.
-        """
-        run = re.search(r"^([ \t]*)run:[ \t]*(.*)$", step, re.M)
-        if run is None:
-            return ""
-        if run.group(2).strip() not in ("|", ">", "|-", ">-", "|+", ">+"):
-            return run.group(2)
-        depth = len(run.group(1))
-        lines = []
-        for line in step[run.end():].split("\n")[1:]:
-            if line.strip() and len(line) - len(line.lstrip()) <= depth:
-                break
-            lines.append(line)
-        return "\n".join(lines)
-
-    poisoned = None
-    for step in steps:
-        script = _script(step)
-        if "JAX_ENABLE_X64" in script and "GITHUB_ENV" in script:
-            poisoned = _cannot_tell(
-                "a step of this job writes JAX_ENABLE_X64 into $GITHUB_ENV, "
-                "which sets it for every later step of the job"
-            )
-            break
-
-    top = workflow.split("\njobs:", 1)[0]
-    inherited = _X64_SETTING.search(head) or _X64_SETTING.search(top)
-
-    cells: list[str] = []
-    for step in steps:
+    cells: list = []
+    for step in job.steps:
         if not wanted(step):
             continue
-        if poisoned is not None:
-            cells.append(poisoned)
+        if poison or step.blockers:
+            cells += poison + [_cannot_tell(r) for r in step.blockers]
             continue
-        condition = re.search(r"^[ \t]*if:[ \t]*(.*?)[ \t]*$", step, re.M)
-        if (
-            condition is not None
-            and condition.group(1) not in _STEP_CONDITIONS_THIS_READER_KNOWS
-        ):
-            cells.append(_cannot_tell(
-                f"the step's `if: {condition.group(1)}` is not a condition "
-                f"this reader can evaluate, so it cannot be credited with "
-                f"running at all"
-            ))
-            continue
-        if "JAX_ENABLE_X64" in _script(step):
-            cells.append(_cannot_tell(
-                "the step's `run:` script names JAX_ENABLE_X64, and this "
-                "reader does not evaluate shell"
-            ))
-            continue
-        setting = _X64_SETTING.search(step) or inherited
-        if setting is None:
+        for source in (step.env, job.env, workflow.env):
+            if isinstance(source, dict) and "JAX_ENABLE_X64" in source:
+                cells.extend(_x64_resolve(source["JAX_ENABLE_X64"], job))
+                break
+        else:
             cells.append("unset")
-            continue
-        cells.extend(_x64_resolve(setting.group(1), head))
     return cells
 
 
@@ -2309,16 +3182,15 @@ def test_the_canary_and_the_workflow_agree_about_the_two_legs():
     workflow = (
         _pathlib_for_canary() / ".github" / "workflows" / "nightly-jax-canary.yml"
     ).read_text(encoding="utf-8")
+    read = _readable_workflow(workflow, "the guidance about the two legs")
 
     # ONE READER FOR JOBS, `_canary_jobs`. This line carried a SECOND copy of
     # the job-id pattern until 2026-08-22 and the copy was the same too-narrow
     # `[a-z-]+`, so a third job `nightly_x64:` was invisible here as well as
     # there and this assertion passed on a workflow with three legs. The
-    # titles come off the blocks that reader already returns.
-    jobs = {
-        job: re.search(r"^    name: (.*)$", block, re.M).group(1)
-        for job, block in _canary_jobs(workflow)
-    }
+    # titles come off the jobs that reader already returns, which since
+    # 2026-08-23 is a PARSE and no longer a pattern needing `name:` first.
+    jobs = {job.id: job.name for _, job in _canary_jobs(read)}
     assert set(jobs) == {"control", "nightly"}, (
         f"the guidance names two legs and the workflow has jobs {sorted(jobs)}"
     )
@@ -2342,15 +3214,18 @@ def test_the_canary_and_the_workflow_agree_about_the_two_legs():
     # only workflow that runs it without a single test noticing. The guidance
     # is a claim about what the two legs MEASURE, and a leg that does not arm
     # the tripwire measures nothing to compare.
-    jobs_and_blocks = _canary_jobs(workflow)
+    jobs_and_blocks = _canary_jobs(read)
     assert jobs_and_blocks, (
         "no jobs found; the workflow layout this reads has moved"
     )
-    for job, block in jobs_and_blocks:
-        # ON A `run:` LINE, not anywhere in the block: this file is YAML and
+    for job, body in jobs_and_blocks:
+        # THE STEP'S OWN `run:` SCRIPT, off the parse: this file is YAML and
         # a `#` turns the step into prose that still contains every word
-        # below. Commenting the step out is the same mutation as deleting it.
-        runs = re.findall(r"^\s*run:[^\n]*tripwire_canary\.py[^\n]*", block, re.M)
+        # below. Commenting the step out is the same mutation as deleting it,
+        # and a parser sees that where a text scan of the block did not.
+        runs = [step.run for step in body.steps
+                if isinstance(step.run, str)
+                and "tripwire_canary.py" in step.run]
         assert runs, (
             f"the `{job}` leg does not RUN `.github/scripts/"
             "tripwire_canary.py` -- deleted, or commented out, or moved to a "
@@ -2462,9 +3337,11 @@ def test_the_nightly_runs_the_tests_OF_THE_HOOK_ON_A_PRIVATE_FUNCTION():
     that the file is run in both cells.
     """
     root = _pathlib_for_canary()
-    workflow = (
-        root / ".github" / "workflows" / "nightly-jax-canary.yml"
-    ).read_text(encoding="utf-8")
+    workflow = _readable_workflow(
+        (root / ".github" / "workflows"
+         / "nightly-jax-canary.yml").read_text(encoding="utf-8"),
+        "the claim that the nightly runs the hook's own tests",
+    )
 
     # THE JOB THIS TEST NAMES, AND ONLY IT. This read the WHOLE workflow and
     # the cells below were collected from EVERY job into one flat list tied to
@@ -2480,21 +3357,19 @@ def test_the_nightly_runs_the_tests_OF_THE_HOOK_ON_A_PRIVATE_FUNCTION():
     )
     nightly = blocks["nightly"]
 
-    steps = [
-        step for step in re.split(r"\n      - (?=name:|uses:|run:)", nightly)[1:]
-        # `run: |` puts the command on the FOLLOWING lines, so the match is
-        # over the step rather than over the `run:` line -- and it is anchored
-        # on a `run:` being there, so a step that merely mentions pytest in a
-        # comment is not one.
-        if re.search(r"^\s*run:", step, re.M) and "-m pytest" in step
-    ]
+    # A STEP'S `run:` SCRIPT AND NOTHING ELSE. This used to split the job's
+    # TEXT on `- ` and then look for `-m pytest` anywhere in the chunk, so a
+    # step that merely mentioned pytest in its comment preamble was one. The
+    # parse carries the script itself and the comments are gone with it.
+    steps = [step for step in nightly.steps
+             if isinstance(step.run, str) and "-m pytest" in step.run]
     assert steps, (
         "no step of the `nightly` job runs pytest at all, so the "
         "tripwire's own tests are not run against the nightly by anything"
     )
     named = {
         name for step in steps
-        for name in re.findall(r"tests/(test_[a-z0-9_]+\.py)", step)
+        for name in re.findall(r"tests/(test_[a-z0-9_]+\.py)", step.run)
     }
     assert "test_tripwire_eager.py" in named, (
         f"the nightly runs the tripwire's own tests but not "
@@ -2517,9 +3392,9 @@ def test_the_nightly_runs_the_tests_OF_THE_HOOK_ON_A_PRIVATE_FUNCTION():
         workflow,
         nightly,
         lambda step: (
-            re.search(r"^\s*run:", step, re.M)
-            and "-m pytest" in step
-            and "test_tripwire_eager.py" in step
+            isinstance(step.run, str)
+            and "-m pytest" in step.run
+            and "test_tripwire_eager.py" in step.run
         ),
     )
     # A CAN'T-TELL IS NOT A CELL. See `_refuse_unreadable` for the eight
@@ -2561,24 +3436,25 @@ def test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN():
     """
     import re
 
-    workflow = (
-        _pathlib_for_canary() / ".github" / "workflows" / "nightly-jax-canary.yml"
-    ).read_text(encoding="utf-8")
+    workflow = _readable_workflow(
+        (_pathlib_for_canary() / ".github" / "workflows"
+         / "nightly-jax-canary.yml").read_text(encoding="utf-8"),
+        "the claim that each leg runs the sweep where it can redden",
+    )
 
     jobs_and_blocks = _canary_jobs(workflow)
     assert jobs_and_blocks, (
         "no jobs found; the workflow layout this test reads has moved"
     )
-    for job, block in jobs_and_blocks:
+    for job, body in jobs_and_blocks:
         # The resolution rule lives in `_x64_cells` — see there for what it
         # refuses to guess and for the hoisted-`env:` mutant that killed the
         # first version of this guard.
         cells = _x64_cells(
             workflow,
-            block,
-            lambda step: re.search(
-                r"^\s*run:[^\n]*tripwire_canary\.py", step, re.M
-            ),
+            body,
+            lambda step: (isinstance(step.run, str)
+                          and "tripwire_canary.py" in step.run),
         )
         assert cells, (
             f"the `{job}` leg does not run the canary at all"
@@ -2610,7 +3486,7 @@ def test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN():
 _SYNTHETIC = """\
 # a workflow shaped like `.github/workflows/nightly-jax-canary.yml`
 name: synthetic
-jobs:
+{top}jobs:
   control:
     name: control — the newest released jax
     runs-on: ubuntu-latest
@@ -2618,20 +3494,38 @@ jobs:
       - uses: actions/checkout@v4
       - run: .venv/bin/python .github/scripts/tripwire_canary.py --require
 
-  nightly:
-    name: nightly jax
-{matrix}    steps:
+{job_head}{job_extra}{matrix}    steps:
       - uses: actions/checkout@v4
+      - name: install a jax nightly
+        id: {install_id}
+        run: uv pip install jax
 {extra}      - name: the tripwire's own tests
-{condition}        env:
-{setting}          JAX_PLATFORMS: cpu
-        run: |
+{condition}{step_extra}{env_block}        run: |
 {script}          .venv/bin/python -m pytest -q tests/test_tripwire_eager.py
 """
 
+#: The `nightly` job header the cases that do not care about it get. It is a
+#: slot rather than a constant because YAML mapping keys are UNORDERED and
+#: the predecessor reader required `name:` to come first — see the key-order
+#: row below.
+_NIGHTLY_HEAD = "  nightly:\n    name: nightly jax\n"
 
-def _synthetic(setting=None, matrix=None, condition=None, script="", extra=""):
-    """One `nightly` job with one wanted step, spelled however the case asks."""
+#: ...and the wanted step's `env:` block, a slot for the same reason: a flow
+#: mapping, an alias and a quoted key are three legal spellings of it and all
+#: three read as OFF under the pattern this replaced.
+_STEP_ENV = "        env:\n{setting}          JAX_PLATFORMS: cpu\n"
+
+
+def _synthetic(setting=None, matrix=None, condition=None, script="", extra="",
+               top="", job_head=None, job_extra="", step_extra="",
+               env_block=None, install_id="install"):
+    """One `nightly` job with one wanted step, spelled however the case asks.
+
+    THE `install` STEP IS ALWAYS THERE because the one condition this reader
+    knows names it, and a condition whose referent does not exist is a step
+    that SKIPS — see `_STEP_CONDITIONS_THIS_READER_KNOWS`. `install_id` is
+    what the row that drives that mutation moves.
+    """
     return _SYNTHETIC.format(
         setting="" if setting is None else f"          JAX_ENABLE_X64: {setting}\n",
         matrix="" if matrix is None else (
@@ -2640,80 +3534,225 @@ def _synthetic(setting=None, matrix=None, condition=None, script="", extra=""):
         condition="" if condition is None else f"        if: {condition}\n",
         script=script,
         extra=extra,
+        top=top,
+        job_head=_NIGHTLY_HEAD if job_head is None else job_head,
+        job_extra=job_extra,
+        step_extra=step_extra,
+        env_block=(
+            _STEP_ENV.format(
+                setting="" if setting is None
+                else f"          JAX_ENABLE_X64: {setting}\n")
+            if env_block is None else env_block
+        ),
+        install_id=install_id,
     )
 
 
 def _wanted(step):
-    return bool(re.search(r"^\s*run:", step, re.M)) and "-m pytest" in step
+    return isinstance(step.run, str) and "-m pytest" in step.run
 
 
-def _cells_of(workflow):
-    return _x64_cells(workflow, dict(_canary_jobs(workflow))["nightly"], _wanted)
+def _cells_of(workflow, parser=None):
+    return _x64_cells(_read_workflow(workflow, parser), "nightly", _wanted)
 
 
-# (label, kwargs, the cells this reader may claim). `None` means it must
-# claim NOTHING -- a can't-tell, refused rather than read as a cell.
+# (label, kwargs, what the PARSER may claim, what the LINE GRAMMAR may claim).
+# `None` means the reader must claim NOTHING -- a can't-tell, refused rather
+# than read as a cell.
+#
+# **TWO COLUMNS BECAUSE THERE ARE TWO READERS, AND THE SECOND ONE IS THE
+# ZERO-DEP LANE'S.** PyYAML is in `stelling-jax` and not in
+# `stelling-nojax`, and it is not a declared dependency, so the guards above
+# must work with a parser and without one. Where the columns differ it is
+# always the same way round -- the parser RESOLVES a legal spelling and the
+# line grammar REFUSES it -- and that is the shape a fallback is allowed to
+# have. What it is not allowed to do is the other one: read less and claim
+# the same, which is what `"unset"` did for nine spellings.
 _RESOLUTIONS = [
     # jax's own grammar, and the YAML booleans that render into it. Driven
     # against `jax.config.jax_enable_x64` on jax 0.11.0, every row.
-    ('quoted "0"', dict(setting='"0"'), ["0"]),
-    ('quoted "1"', dict(setting='"1"'), ["1"]),
-    ("bare 0", dict(setting="0"), ["0"]),
-    ("bare 1", dict(setting="1"), ["1"]),
-    ("YAML true", dict(setting="true"), ["1"]),
-    ("YAML on", dict(setting="on"), ["1"]),
-    ("YAML off", dict(setting="off"), ["0"]),
-    ("YAML no", dict(setting="no"), ["0"]),
-    ('quoted "on"', dict(setting='"on"'), ["1"]),
-    ('quoted "yes"', dict(setting='"yes"'), ["1"]),
-    ("uppercase TRUE", dict(setting='"TRUE"'), ["1"]),
-    # NO SETTING ANYWHERE IS NOT A CAN'T-TELL. jax's default is OFF -- driven,
-    # `jax.config.jax_enable_x64` is `False` with the variable unset -- so
-    # this is a READING and the one thing `"unset"` may mean.
-    ("no setting anywhere", dict(), ["unset"]),
+    ('quoted "0"', dict(setting='"0"'), ["0"], ["0"]),
+    ('quoted "1"', dict(setting='"1"'), ["1"], ["1"]),
+    ("bare 0", dict(setting="0"), ["0"], ["0"]),
+    ("bare 1", dict(setting="1"), ["1"], ["1"]),
+    ("YAML true", dict(setting="true"), ["1"], ["1"]),
+    ("YAML on", dict(setting="on"), ["1"], ["1"]),
+    ("YAML off", dict(setting="off"), ["0"], ["0"]),
+    ("YAML no", dict(setting="no"), ["0"], ["0"]),
+    ('quoted "on"', dict(setting='"on"'), ["1"], ["1"]),
+    ('quoted "yes"', dict(setting='"yes"'), ["1"], ["1"]),
+    ("uppercase TRUE", dict(setting='"TRUE"'), ["1"], ["1"]),
+    # NO SETTING ANYWHERE IS NOT A CAN'T-TELL, AND EITHER READER MAY NOW SAY
+    # SO. jax's default is OFF -- driven, `jax.config.jax_enable_x64` is
+    # `False` with the variable unset -- so this is a READING and the one
+    # thing `"unset"` may mean. The predecessor said it by NOT FINDING one,
+    # which is why nine legal spellings read as OFF; both readers here have
+    # read the whole file before they say it, the parser by parsing and the
+    # line grammar by classifying every line of it.
+    ("no setting anywhere", dict(), ["unset"], ["unset"]),
     # ...and everything else is refused.
-    ("a word jax would raise on", dict(setting='"maybe"'), None),
-    ("the empty string", dict(setting='""'), None),
+    ("a word jax would raise on", dict(setting='"maybe"'), None, None),
+    ("the empty string", dict(setting='""'), None, None),
     # THE MATRIX CHAIN, FOLLOWED ENTRY BY ENTRY, which is what makes the
     # honest two-cell refactor legal and the one-cell pin illegal. Forbidding
     # expressions outright had it exactly the wrong way round on both.
     ("matrix over both cells",
-     dict(setting="${{ matrix.x64 }}", matrix='x64: ["0", "1"]'), ["0", "1"]),
+     dict(setting="${{ matrix.x64 }}", matrix='x64: ["0", "1"]'),
+     ["0", "1"], ["0", "1"]),
     ("matrix over both cells, block sequence",
      dict(setting="${{ matrix.x64 }}", matrix='x64:\n          - "0"\n          - "1"'),
-     ["0", "1"]),
+     ["0", "1"], ["0", "1"]),
     ("matrix pinned to ON",
-     dict(setting="${{ matrix.x64 }}", matrix='x64: ["1"]'), ["1"]),
+     dict(setting="${{ matrix.x64 }}", matrix='x64: ["1"]'), ["1"], ["1"]),
     ("matrix axis the job does not carry",
-     dict(setting="${{ matrix.x64 }}", matrix='other: ["0", "1"]'), None),
+     dict(setting="${{ matrix.x64 }}", matrix='other: ["0", "1"]'), None, None),
     ("matrix reference with no matrix at all",
-     dict(setting="${{ matrix.x64 }}"), None),
+     dict(setting="${{ matrix.x64 }}"), None, None),
     ("an expression that is not a matrix reference",
-     dict(setting="${{ env.CELL }}"), None),
-    # THREE WAYS TO SET IT THAT ARE NOT AN `env:` ENTRY. This reader does not
-    # evaluate shell and does not order steps against one.
+     dict(setting="${{ env.CELL }}"), None, None),
+    # AN AXIS ENTRY TAKEN BACK OUT. `exclude:` is not an axis and a matrix
+    # that carries one is not an expansion this reader follows. Driven on the
+    # real workflow: `x64: ["0", "1"]` with `exclude: [{x64: "0"}]` over
+    # `${{ matrix.x64 }}` left this file at `95 passed` while the job runs in
+    # the ON cell alone.
+    ("a matrix axis with an exclude",
+     dict(setting="${{ matrix.x64 }}",
+          matrix='x64: ["0", "1"]\n        exclude:\n          - x64: "0"'),
+     None, None),
+    # FOUR WAYS TO SET IT THAT ARE NOT AN `env:` ENTRY. This reader does not
+    # evaluate shell, does not order steps against one, and does not run
+    # somebody else's action.
     ("`export` inside the run: block",
-     dict(script="          export JAX_ENABLE_X64=1\n"), None),
+     dict(script="          export JAX_ENABLE_X64=1\n"), None, None),
     ("a command prefix",
-     dict(setting='"0"', script="          JAX_ENABLE_X64=1 \\\n"), None),
+     dict(setting='"0"', script="          JAX_ENABLE_X64=1 \\\n"), None, None),
     ("an earlier step writing $GITHUB_ENV",
      dict(setting='"0"',
-          extra='      - run: echo "JAX_ENABLE_X64=1" >> $GITHUB_ENV\n'), None),
-    # A STEP THAT MIGHT NOT RUN CANNOT BE CREDITED WITH RUNNING IN A CELL.
+          extra='      - run: echo "JAX_ENABLE_X64=1" >> $GITHUB_ENV\n'),
+     None, None),
+    # ...AND ONE THAT NEVER NAMES THE VARIABLE AT ALL, which is why the
+    # `run:` rule is a whitelist of command words rather than a substring
+    # test. Driven on the real workflow's x64 OFF pytest step: `95 passed`,
+    # with the step's own `env:` still saying `"0"` and a `ci.env` this
+    # reader has never seen deciding what the process actually gets. The
+    # script names nothing; `set -a` exports whatever the sourced file
+    # assigns.
+    ("`set -a` and a sourced file",
+     dict(setting='"0"',
+          script="          set -a; . ./ci.env; set +a\n"), None, None),
+    ("a $GITHUB_ENV write that names nothing",
+     dict(setting='"0"',
+          extra='      - run: cat ci.env >> $GITHUB_ENV\n'), None, None),
+    ("a command word this reader has no opinion about",
+     dict(setting='"0"', script="          ./setup-the-cell.sh\n"), None, None),
+    ("an action this reader has not been told about",
+     dict(setting='"0"', extra="      - uses: some-org/set-my-env@v1\n"),
+     None, None),
+    # A STEP THAT MIGHT NOT RUN CANNOT BE CREDITED WITH RUNNING IN A CELL,
+    # AND NEITHER CAN ONE WHOSE RED CANNOT FAIL THE JOB.
     ("the one condition this reader knows",
-     dict(setting='"0"', condition="steps.install.outcome == 'success'"), ["0"]),
+     dict(setting='"0"', condition="steps.install.outcome == 'success'"),
+     ["0"], ["0"]),
     ("a condition it does not",
      dict(setting='"0"', condition="steps.install.outcome == 'success' && false"),
-     None),
+     None, None),
     ("any other condition",
-     dict(setting='"0"', condition="github.event_name == 'schedule'"), None),
+     dict(setting='"0"', condition="github.event_name == 'schedule'"),
+     None, None),
+    # THE CONDITION'S REFERENT, WHICH THE LIST DID NOT PIN. Driven on the
+    # real workflow: `id: install` renamed to `id: install-nightly` and
+    # nothing else touched left this file at `95 passed` with the cells
+    # unchanged, while on the runner all four canary and pytest steps skip
+    # and the leg reports "SKIPPED (infrastructure)" and goes GREEN.
+    ("the condition's referent renamed away",
+     dict(setting='"0"', condition="steps.install.outcome == 'success'",
+          install_id="install-nightly"), None, None),
+    # Driven on the real workflow's x64 OFF canary step: `95 passed`.
+    ("continue-on-error on the step whose red is the signal",
+     dict(setting='"0"', step_extra="        continue-on-error: true\n"),
+     None, None),
+    ("continue-on-error: false, which takes nothing away",
+     dict(setting='"0"', step_extra="        continue-on-error: false\n"),
+     ["0"], ["0"]),
+    # A KEY NEITHER READER MODELS STOPS THE READING RATHER THAN BEING
+    # IGNORED, which is the general form of four of the nine. A job-level
+    # `if:` can stop the whole job; `defaults:` changes the shell every
+    # `run:` in the file executes in (driven on the real workflow:
+    # `defaults: {run: {shell: bash -lc}}` on the nightly job left this file
+    # at `95 passed`, and a login shell sources profile scripts this reader
+    # never sees); a job-level `uses:` makes the leg somebody else's
+    # workflow entirely.
+    ("a job-level if:", dict(setting='"0"',
+                             job_extra="    if: github.event_name == 'schedule'\n"),
+     None, None),
+    ("a job-level defaults:",
+     dict(setting='"0"',
+          job_extra="    defaults:\n      run:\n        shell: bash -lc\n"),
+     None, None),
+    ("a workflow-level defaults:",
+     dict(setting='"0"', top="defaults:\n  run:\n    shell: bash -lc\n"),
+     None, None),
+    ("a job that is somebody else's workflow",
+     dict(setting='"0"', job_extra="    uses: some-org/some-repo/.github/workflows/w.yml@v1\n"),
+     None, None),
+    ("a step key this reader does not model",
+     dict(setting='"0"', step_extra="        working-directory: /elsewhere\n"),
+     None, None),
+    # KEY ORDER IS NOT A FACT ABOUT A MAPPING, and the predecessor needed
+    # `name:` first. Both readers key on the two-space job id alone now, so
+    # this READS rather than refusing -- see
+    # `test_the_reader_sees_A_JOB_IT_WAS_NOT_EXPECTING` for the
+    # third leg that hid behind the old requirement.
+    ("runs-on: written before name:",
+     dict(setting='"0"',
+          job_head="  nightly:\n    runs-on: ubuntu-latest\n    name: nightly jax\n"),
+     ["0"], ["0"]),
+    # THREE LEGAL SPELLINGS OF ONE `env:` MAPPING. A parser resolves all
+    # three; the line grammar resolves none and REFUSES all three, which is
+    # the only other answer it is allowed to give. Each was measured on the
+    # real workflow at `95 passed` with the nightly canary running at x64 ON.
+    ("a quoted key",
+     dict(env_block='        env:\n          "JAX_ENABLE_X64": "1"\n'
+                    '          JAX_PLATFORMS: cpu\n'),
+     ["1"], None),
+    ("a flow mapping",
+     dict(env_block='        env: { JAX_ENABLE_X64: "1", JAX_PLATFORMS: cpu }\n'),
+     ["1"], None),
+    ("an alias to an anchored mapping",
+     dict(job_extra='    env: &x64on\n      JAX_ENABLE_X64: "1"\n',
+          env_block="        env: *x64on\n"),
+     ["1"], None),
 ]
 
 
+def _reading(workflow, parser, expected, label):
+    """Drive ONE reader over ONE synthetic workflow and hold it to its column.
+
+    "Refused" is checked through the caller's own gate rather than by reading
+    the sentinel, because the sentinel is not what the guards depend on.
+    """
+    cells = _cells_of(workflow, parser)
+    if expected is None:
+        with pytest.raises(AssertionError, match="cannot tell"):
+            _refuse_unreadable(cells, "the synthetic job")
+        assert all(cell.startswith("?") for cell in cells), (
+            f"{label} ({parser}): refused, but only partly — {cells}. A step "
+            f"whose cell this reader cannot resolve must contribute no cell "
+            f"at all"
+        )
+    else:
+        _refuse_unreadable(cells, f"the synthetic job ({parser})")
+        assert cells == expected, (
+            f"{label} ({parser}): read {cells}, not {expected}"
+        )
+
+
 @pytest.mark.parametrize(
-    "label,kwargs,expected", _RESOLUTIONS, ids=[r[0] for r in _RESOLUTIONS]
+    "label,kwargs,strict,plain", _RESOLUTIONS, ids=[r[0] for r in _RESOLUTIONS]
 )
-def test_the_cell_resolver_REFUSES_WHAT_IT_CANNOT_PARSE(label, kwargs, expected):
+def test_the_cell_resolver_REFUSES_WHAT_IT_CANNOT_PARSE(
+    label, kwargs, strict, plain
+):
     """A can't-tell is not a cell, and it used to be spelled like one.
 
     `_x64_cells` returned the single string ``"unset"`` for BOTH "no setting
@@ -2728,37 +3767,109 @@ def test_the_cell_resolver_REFUSES_WHAT_IT_CANNOT_PARSE(label, kwargs, expected)
     reader takes `y yes t true on 1`, driven through `jax.config` on jax
     0.11.0 -- and the regex saw only `0`/`1`.
 
+    NINE MORE WERE FOUND THE ROUND AFTER, all of them ordinary workflow YAML
+    that GitHub runs, and they are why the reader is a parser now: a quoted
+    key, a flow mapping, an alias, `matrix.exclude`, `runs-on:` before
+    `name:`, a job-level `if:`, a `defaults:` block, `set -a; . ./ci.env;
+    set +a`, and `continue-on-error: true` on the step whose red IS the
+    signal. Each measured at `95 passed` on the real workflow: the first
+    four are a cell read WRONG, the fifth a whole LEG never seen, the last
+    four a cell the reader was not entitled to claim at all.
+
     A can't-tell that defaults to the answer the caller wanted is the shape
     this campaign has already named once, in `Lane.jax`, and this table is
-    what stops it being renamed here. Each row is a workflow this reader
-    either RESOLVES to named cells or REFUSES; there is no third outcome, and
-    "refused" is checked through the caller's own gate rather than by reading
-    the sentinel, because the sentinel is not what the guards depend on.
+    what stops it being renamed here. Each row is a workflow a reader either
+    RESOLVES to named cells or REFUSES; there is no third outcome.
+
+    **BOTH READERS ARE DRIVEN, AND THE LINE GRAMMAR IN EVERY LANE.** PyYAML
+    is in `stelling-jax` and absent from `stelling-nojax`, so the fallback is
+    what the zero-dep lane's guards actually use — driving it only where the
+    parser exists would leave the reader the zero-dep lane runs on checked
+    by nothing. The parser's column is asserted wherever PyYAML is
+    importable, which is a fact about the environment and not a skip: this
+    test runs, and can fail, in every lane.
     """
-    cells = _cells_of(_synthetic(**kwargs))
-    if expected is None:
-        with pytest.raises(AssertionError, match="cannot tell"):
-            _refuse_unreadable(cells, "the synthetic job")
-        assert all(cell.startswith("?") for cell in cells), (
-            f"{label}: refused, but only partly — {cells}. A step whose cell "
-            f"this reader cannot resolve must contribute no cell at all"
-        )
-    else:
-        _refuse_unreadable(cells, "the synthetic job")
-        assert cells == expected, f"{label}: read {cells}, not {expected}"
+    workflow = _synthetic(**kwargs)
+    _reading(workflow, "text", plain, label)
+    if _YAML_IS_IMPORTABLE:
+        _reading(workflow, "yaml", strict, label)
 
 
-def test_the_reader_sees_a_job_id_WITH_AN_UNDERSCORE_OR_A_DIGIT():
-    """`[a-z-]+` is not the job-id charset, and a job id is cheap to add.
+def test_which_reader_this_lane_uses_IS_ASSERTED_AND_NOT_ASSUMED():
+    """The guards above take the strongest reader the lane has. Say which.
 
-    GitHub allows a leading letter or `_` and then letters, digits, `-` and
-    `_`. Driven on the real workflow: a THIRD job `nightly_x64:` running
-    `tripwire_canary.py` at `JAX_ENABLE_X64: "1"` only -- an alarm in the one
-    cell the eager constant sweep cannot redden in -- left this file at
-    `68 passed`, and
+    A fallback nobody can see is a fallback nobody notices going wrong. This
+    asserts the choice in BOTH directions -- with PyYAML importable the
+    guards must be parsing, and without it they must be on the line grammar
+    -- so a lane cannot quietly answer with a reader it did not mean to use,
+    and neither branch is a skip.
+
+    AND THE TWO MUST AGREE ABOUT THE FILE THE GUARDS READ. Where they differ
+    on the synthetic table it is always the same way round (the parser
+    resolves a legal spelling the line grammar refuses); on
+    `.github/workflows/nightly-jax-canary.yml` they must resolve the same
+    cells, because that is the file two guards make claims about and a
+    fallback that reads it differently is a second, non-identical rule.
+    """
+    workflow = (
+        _pathlib_for_canary() / ".github" / "workflows" / "nightly-jax-canary.yml"
+    ).read_text(encoding="utf-8")
+    read = _read_workflow(workflow)
+    assert read.parser == ("yaml" if _YAML_IS_IMPORTABLE else "text"), (
+        f"this lane read the workflow with {read.parser!r} while PyYAML "
+        f"{'is' if _YAML_IS_IMPORTABLE else 'is not'} importable"
+    )
+    canary = (lambda step: isinstance(step.run, str)
+              and "tripwire_canary.py" in step.run)
+    plain = _read_workflow(workflow, "text")
+    assert not plain.blockers, (
+        f"the line grammar cannot read this repository's own nightly "
+        f"workflow: {plain.blockers}. The zero-dep lane has no other reader, "
+        f"so this is the whole of what that lane's two canary guards can "
+        f"say"
+    )
+    by_text = {job: _x64_cells(plain, body, canary)
+               for job, body in _canary_jobs(plain)}
+    assert by_text and all(by_text.values()), by_text
+    for job, cells in by_text.items():
+        _refuse_unreadable(cells, f"the `{job}` leg, read by the line grammar")
+    if not _YAML_IS_IMPORTABLE:
+        return
+    strict = _read_workflow(workflow, "yaml")
+    by_yaml = {job: _x64_cells(strict, body, canary)
+               for job, body in _canary_jobs(strict)}
+    assert by_text == by_yaml, (
+        f"the two readers disagree about the canary steps of this "
+        f"repository's own workflow: line grammar {by_text}, parser "
+        f"{by_yaml}. They are one rule in two implementations and the "
+        f"guards take whichever the lane has"
+    )
+
+
+@pytest.mark.parametrize("parser", ["yaml", "text"])
+def test_the_reader_sees_A_JOB_IT_WAS_NOT_EXPECTING(parser):
+    """A job id is the cheapest thing there is to add to a workflow, and two
+    readings of "job" have each missed one.
+
+    THE CHARSET. GitHub allows a leading letter or `_` and then letters,
+    digits, `-` and `_`; the pattern read `[a-z-]+`. Driven on the real
+    workflow: a THIRD job `nightly_x64:` running `tripwire_canary.py` at
+    `JAX_ENABLE_X64: "1"` only -- an alarm in the one cell the eager constant
+    sweep cannot redden in -- left this file at `68 passed`, and
     `test_the_canary_and_the_workflow_agree_about_the_two_legs` passed too
-    because it carried a SECOND copy of the same pattern. Both now read
-    through `_canary_jobs`, and both go red on that mutation.
+    because it carried a SECOND copy of the same pattern.
+
+    **AND THEN KEY ORDER, WHICH IS NOT A FACT ABOUT A MAPPING AT ALL.** The
+    repaired pattern was `\n  (job):\n    name: ` — a two-space key whose
+    FIRST CHILD is `name:` — and YAML mapping keys are unordered. Driven on
+    the real workflow at `1f55eef`: the same third leg written with
+    `runs-on:` before `name:` left this file at `95 passed`, and the reader
+    reported `jobs seen: ['control', 'nightly']`. A job is a key under
+    `jobs:` and that is now what both readers key on: PyYAML because it
+    parses, the line grammar because it classifies the two-space key itself
+    and has already read the rest of the file by the time it answers.
+
+    Both readers are driven here, on one workflow carrying all four shapes.
     """
     workflow = _synthetic(setting='"0"') + """
   nightly_x64:
@@ -2768,12 +3879,19 @@ def test_the_reader_sees_a_job_id_WITH_AN_UNDERSCORE_OR_A_DIGIT():
       - run: .venv/bin/python .github/scripts/tripwire_canary.py --require
 
   Build2:
-    name: a leading capital and a digit
     runs-on: ubuntu-latest
+    name: a leading capital, a digit, and `name:` written second
     steps:
       - run: echo hello
 """
-    assert [job for job, _ in _canary_jobs(workflow)] == [
+    if parser == "yaml" and not _YAML_IS_IMPORTABLE:
+        # NOT A SKIP: the line grammar's column is the one the zero-dep lane
+        # runs on and it is asserted in every lane. This half asserts the
+        # parser's, where there is one.
+        parser = "text"
+    read = _read_workflow(workflow, parser)
+    assert not read.blockers, read.blockers
+    assert [job for job, _ in _canary_jobs(read)] == [
         "control", "nightly", "nightly_x64", "Build2"
     ], (
         "the job reader cannot see every job of this workflow, so a leg can "
@@ -2823,6 +3941,28 @@ def test_every_message_about_the_two_legs_carries_the_SAME_guidance(
             f"{code!r} says the defect is in this repository and then sends "
             "the reader to compare the two legs anyway"
         )
+
+
+def _readable_workflow(text: str, where: str):
+    """The nightly workflow, READ, or a red that says why it could not be.
+
+    THE GUARDS RUN IN A LANE WITH NO YAML PARSER and this is the sentence
+    they fail with there. `stelling-nojax` has no PyYAML and PyYAML is not a
+    declared dependency, so the line grammar is the whole of what those two
+    guards have in the zero-dep lane — and a grammar that stops on a line it
+    cannot place has to stop LOUDLY, in the file that the claim is about,
+    rather than resolving to an empty job list that reads like a moved
+    layout.
+    """
+    read = _read_workflow(text)
+    assert not read.blockers, (
+        f"{where}: this reader ({read.parser}) will not read "
+        f"`.github/workflows/nightly-jax-canary.yml` — {list(read.blockers)}. "
+        f"That is a refusal and not a reading: teach the reader the shape and "
+        f"say in the same commit what you measured it to mean, or spell the "
+        f"workflow so it can be read"
+    )
+    return read
 
 
 def _pathlib_for_canary():

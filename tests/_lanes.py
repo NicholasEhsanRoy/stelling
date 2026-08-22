@@ -34,6 +34,29 @@ acquiring one for a fence (``tests/test_release_gates.py`` reads
 workflow is more comment than code, deliberately — and what is left is scanned
 for job headers, ``uv pip install`` lines and ``pytest`` invocations.
 
+**AND A TEXT READER HAS TO SAY WHAT IT CANNOT SEE, WHICH IS WHAT THE NIGHTLY
+CANARY'S READER LEARNED THE EXPENSIVE WAY.** `tests/test_tripwire_record.py`
+read `.github/workflows/nightly-jax-canary.yml` with line-anchored patterns
+and went past NINE legal spellings, measured: a quoted key, a flow mapping
+and an alias — three ways of writing one ``env:`` mapping, each of which it
+reported as *"no setting"* — plus ``matrix.exclude``, ``runs-on:`` written
+before ``name:``, a job-level ``if:``, a ``defaults:`` block, ``set -a`` with
+a sourced file, and ``continue-on-error: true``. It parses with ``yaml``
+where PyYAML is importable and falls back to a TOTAL LINE GRAMMAR where it
+is not, which is what lets it say *"there is no setting"* rather than only
+*"I did not find one"*.
+
+**THIS MODULE IS STILL A TEXT READER OVER A DIFFERENT FILE, and this
+paragraph is not a claim that it is safe from the same thing.** What it has
+that the nightly reader did not is :func:`_agreed` and the four-link
+``${EXTRAS}`` chain, which produce a NAMED can't-tell rather than a
+permissive default — so what is exposed here is the FIND layer, not the
+value layer. Measured at this commit: `ci.yml` carries no anchor, no alias
+and no merge key, and :data:`_JOB` finds all ten jobs a real parse finds
+(and `push:` from under `on:`, which :func:`_classify` drops for having no
+``python -m pytest`` line). That gap is written down in
+`SWEEP-CARRY-FORWARD.md` rather than closed here.
+
 **COMMENTS ARE STRIPPED IN ONE PLACE, :func:`_strip_comment`, AND THAT IS THE
 POINT.** This module used to drop *whole-line* comments only, and a comment is
 the cheapest thing there is to add to this file. Three readings were defeated
