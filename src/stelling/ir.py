@@ -3398,10 +3398,32 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
         # The ACCEPT/REFUSE property this whole block exists for is about
         # the NULLED one — it is the document ``_validate_decl_eqn``'s
         # branch-SELECTION change moved. Every ``content_hash`` figure
-        # below is about the TRACED one, and has to be: this tree produces
-        # no hash for the nulled document at all, because this tree refuses
-        # it. The sentence four lines above introduces the harness by the
-        # NULLED document and the arithmetic below counts hashes of the
+        # below that is a figure of THIS TREE'S is about the TRACED one,
+        # and has to be: this tree produces no hash for the nulled document
+        # at all, because this tree refuses it.
+        #
+        # THAT JUSTIFICATION DOES NOT REACH EVERY FIGURE BELOW, AND THE
+        # SENTENCE ABOVE CLAIMED IT DID UNTIL 2026-08-24. It covers hashes
+        # produced by THIS tree. The one figure the block below DENIES is
+        # denied in a sentence about how ``dff95fc`` and ``198a2b5`` hash
+        # the NULLED document — and those two DO produce one for it.
+        # Re-driven at both commits, at ``JAX_ENABLE_X64=1``, on the
+        # document this recipe names: both ACCEPT it and both return one and
+        # the same hash, where this commit raises ``TranscriptionError``.
+        # The table below that reads ``dff95fc, 198a2b5 -> ACCEPTED, both to
+        # the SAME hash`` says exactly that and has all along, which makes
+        # this an internal contradiction and not a new measurement. (It is
+        # named by what it says rather than by how far down it sits, for the
+        # reason the parenthetical about "twelve lines below" gives.)
+        #
+        # So the rule is narrower than it read: a figure of THIS tree's is a
+        # figure of the traced document; a figure of another tree's may be
+        # either, and which it is has to be read off the sentence carrying
+        # it.
+        #
+        # The sentence that introduces the harness — *"on a document whose
+        # declaration carries ``["dtype", null]``"* — names the NULLED
+        # document and the arithmetic below counts hashes of the
         # TRACED one, so as written the recipe named FOUR documents where
         # it meant two — the ``return`` ambiguity below, times which of
         # these two is meant. (That four is not the four VALUES the

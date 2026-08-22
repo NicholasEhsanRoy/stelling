@@ -2005,10 +2005,27 @@ def test_the_canarys_documented_exit_codes_are_exactly_the_ones_it_produces():
 #    thing it must never do (call a miss a cell) is now structurally
 #    impossible rather than patched out one spelling at a time.
 #
-# Both produce the SAME mapping — the one PyYAML would build — and
-# everything below `_model` is shared, so a cell is decided in one place.
+# Where both read a file they produce the SAME mapping — the one PyYAML
+# would build — and everything below `_model` is shared, so a cell is
+# decided in one place.
 # `test_which_reader_this_lane_uses_IS_ASSERTED_AND_NOT_ASSUMED` holds them
 # to each other on the file that matters.
+#
+# **AND A FOURTH ROUND FOUND THE WORD "LINE".** "Classifies every line" is a
+# claim about the whole file only if "line" is the file's own notion of one,
+# and it was `str.split("\n")`. YAML's is wider: PyYAML breaks a line on CR,
+# U+0085, U+2028 and U+2029 as well. Driven on the real workflow with ONE
+# U+2028 in place of the newline between two entries of a step's `env:`
+# block: the whole zero-dep suite came back IDENTICAL to clean while the
+# grammar reported the cell `"unset"` — the word that means *I have read all
+# of it* — for a `JAX_ENABLE_X64:` line it had never classified. `_shell_
+# reason` had the same split and the same consequence, hiding
+# `./setup-the-cell.sh` inside an `echo`. Two more of the same round: a key
+# written TWICE merged here and replaces in PyYAML, so the two readers
+# resolved one file to two different cells; and an indent-4 job key with no
+# job above it raised `TypeError` out of the grammar, which is a third
+# outcome beside "classify" and "refuse". See `_lines_of_this_grammar`,
+# `_put` and `test_the_line_grammar_HAS_NO_THIRD_OUTCOME`.
 #
 # WHAT IS STILL NOT PARSED, said rather than left to be found: expressions
 # (`${{ … }}`) other than a bare `matrix.<axis>` reference, shell, and what
@@ -2022,13 +2039,35 @@ def test_the_canarys_documented_exit_codes_are_exactly_the_ones_it_produces():
 # credits runs `.venv/bin/python <something>`, and a python program is free
 # to write `os.environ["JAX_ENABLE_X64"]` before it imports jax. The reader
 # reads the environment the RUNNER hands the process; it does not and
-# cannot follow the process. So the claim these two guards make is bounded,
-# and this is the bound: *this step is started in this cell*. `--require`,
-# and the canary's own live control rows, are what stand behind the rest of
-# it. The one place that boundary is watchable from here is the shell layer,
-# which is why `.venv/bin/python` is on the word list and `.` and `source`
-# and `env` are not: a program's own behaviour is somebody's code, a
-# sourced file is a fact about the step.
+# cannot follow the process.
+#
+# **AND THE BOUND WAS STATED TOO NARROWLY, WHICH MADE IT SOUND LIKE ONE
+# STEP'S PROBLEM.** It read *"this is the bound: this step is started in
+# this cell"*, and that is a claim about the step whose script this reader
+# is looking at. An invoked program does not only change ITS OWN
+# environment: a program that appends `JAX_ENABLE_X64=1` to the file named
+# by `$GITHUB_ENV` changes the cell every LATER STEP OF THE JOB is started
+# in. Driven on the real workflow, as the TWELFTH way past this reader: an
+# earlier nightly step running `.venv/bin/python .github/scripts/
+# prepare_cell.py`, plus the x64-OFF step's own `env:` block removed. Both
+# readers said `unset`, `114 passed` in both lanes and the whole zero-dep
+# suite unchanged. The `GITHUB_ENV` substring guard in `_model_step` cannot
+# fire, because the name is INSIDE the program and not in the `run:` line;
+# `.venv/bin/python` is on the shell word list precisely so that steps like
+# that read as inert; and the step that ran at the wrong cell is a step this
+# reader credited with a cell it never had.
+#
+# So the bound is this, and it is a bound on the JOB and not on the step:
+# *every step of this job is started in the cell this file spells for it,
+# unless a program one of its steps invokes wrote `$GITHUB_ENV`.* That is
+# not closable from here without refusing every `.venv/bin/python` step,
+# which is every step the workflow has. `--require`, and the canary's own
+# live control rows, are what stand behind the rest of it — a canary that
+# was handed the wrong cell by a program still measures what it measures
+# and still reports the cell it ran in. The one place the boundary is
+# watchable from here is the shell layer, which is why `.venv/bin/python` is
+# on the word list and `.` and `source` and `env` are not: a program's own
+# behaviour is somebody's code, a sourced file is a fact about the step.
 
 #: A GitHub job id: a leading letter or `_`, then letters, digits, `-`, `_`.
 #: Spelled once. This read `[a-z-]+` until 2026-08-22, and a third job
@@ -2122,6 +2161,13 @@ _SHELL_WORDS_THIS_READER_KNOWS = frozenset({"uv", ".venv/bin/python", "echo"})
 #: anything.
 _SET_FLAGS_THAT_EXPORT = ("a", "allexport")
 
+#: EVERY CHARACTER SOME READER OF A `run:` SCRIPT MAY TREAT AS A LINE BREAK.
+#: `_shell_reason` split on `\n` alone until 2026-08-24 and a single U+2028
+#: put `./setup-the-cell.sh` inside an `echo` — see that function for the
+#: measurement and for why splitting on more than the shell itself does is
+#: the conservative direction here and a refusal is not needed.
+_LINE_BREAKS_A_SHELL_MIGHT_MEET = ("\r\n", "\r", "\u0085", "\u2028", "\u2029")
+
 # THE KEYS THIS READER KNOWS, AT EACH LEVEL, AND WHY AN UNKNOWN ONE IS A
 # CAN'T-TELL. FOUR of the nine ways past the old reader were a key it had no
 # pattern for — a job-level `if:`, a `defaults:` block,
@@ -2180,17 +2226,41 @@ _X64_MATRIX_REF = re.compile(
 #: nothing in `pyproject.toml` names PyYAML and no `uv pip install` line in
 #: `.github/workflows/ci.yml` names it. In the shared jax venv it arrives
 #: only as a transitive requirement of test-only libraries (`flax`,
-#: `maddening`, `ml_collections`). The one CI job whose install closure does
-#: carry it — `acceptance-reproducer`, where `ci.yml` records that "pyyaml
-#: arrives with jaxfluids" — runs eighteen NAMED acceptance tests and not
-#: this file. **So no CI job that runs this file has a YAML parser**, and the
-#: reader those runs answer with is the line grammar; the parser's column of
-#: `_RESOLUTIONS` is asserted wherever a developer's environment happens to
-#: carry PyYAML and nowhere else. That is a fact worth knowing rather than a
-#: defect — the fallback is the one the guards depend on, so it is the one
-#: driven in every lane — and
-#: `test_which_reader_this_lane_uses_IS_ASSERTED_AND_NOT_ASSUMED` makes which
-#: reader answered a thing the run says out loud rather than assumes.
+#: `maddening`, `ml_collections`).
+#:
+#: **WHAT THIS PARAGRAPH SAID UNTIL 2026-08-24 WAS FALSE, AND IT WAS THE
+#: SENTENCE A DECISION DOCUMENT QUOTED.** It read *"the one CI job whose
+#: install closure does carry it — `acceptance-reproducer` — runs eighteen
+#: NAMED acceptance tests and not this file. So no CI job that runs this
+#: file has a YAML parser."* The first half is a real step of that job and
+#: the second half ignores the step after it. `acceptance-reproducer`
+#: installs jaxfluids **with** its dependencies — deliberately, so that a
+#: dependency moving jax fails the job rather than hiding — and then runs
+#: ``.venv/bin/python -m pytest -q -ra``, the whole tree, which `ci.yml`
+#: calls *"unnarrowed on purpose"* and which `tests/_lanes.py` already reads
+#: as ``whole_suite=True``. Re-measured from installed metadata: jaxfluids
+#: requires `flax`, `flax` requires `PyYAML>=5.4.1`, and `ci.yml`'s own
+#: comment says pyyaml *"arrives as one of those dependencies"*. **So there
+#: IS a CI job that runs this file with a YAML parser importable, and it is
+#: `acceptance-reproducer` — both matrix entries.**
+#:
+#: Three things follow, and they are why this is worth a paragraph rather
+#: than a correction:
+#:
+#: 1. **The parser's column of `_RESOLUTIONS` is asserted in CI**, not only
+#:    wherever a developer's environment happens to carry PyYAML.
+#: 2. **That job is the ONLY place the two-reader agreement can be checked
+#:    at all.** `test_which_reader_this_lane_uses_IS_ASSERTED_AND_NOT_ASSUMED`
+#:    compares the line grammar and the parser on the real workflow, and the
+#:    comparison needs both readers present; in every other lane its second
+#:    half returns without comparing anything.
+#: 3. **And by `ci.yml`'s own policy that job MUST NOT be a required check**
+#:    — it fetches a third-party repository at a commit, so an upstream
+#:    force-push can redden it on a day this repository did not change. So
+#:    the one job that can catch the two readers disagreeing is a job whose
+#:    red does not block a merge. That is not an argument for making it
+#:    required; it is the reason the line grammar is still the one that has
+#:    to be right, and the reason its column is asserted in every lane.
 _YAML_IS_IMPORTABLE = importlib.util.find_spec("yaml") is not None
 
 
@@ -2228,15 +2298,37 @@ def _refuse_unreadable(cells, where: str) -> None:
     A can't-tell that defaults to the answer the caller wanted is the shape
     this campaign has already named once, in `Lane.jax`. It gets a name here
     and a red there.
+
+    THREE MORE THE ROUND AFTER THAT, AND THEY ARE A DIFFERENT KIND OF
+    MEASUREMENT, SAID SO ON PURPOSE. None of the three is a demonstrated run
+    at the wrong cell — what was measured is an un-classified line reported
+    as a cell, and two readers of one file landing on different cells:
+
+    * a **U+2028** (or U+0085, or U+2029, or a CR) in place of the newline
+      between two entries of a step's `env:` block. The line grammar split
+      on `"\n"`, so the `JAX_ENABLE_X64:` line was swallowed into the value
+      above it and never classified — and the reading came back ``"unset"``,
+      the one word that means *I have read all of it*. Whether GitHub's own
+      parser breaks a line there is untested here (YAML 1.1 does, 1.2 does
+      not), which is why these are refused rather than resolved;
+    * a **key written twice in one mapping**, which this grammar merged and
+      PyYAML replaces — a reader divergence on the real workflow, with the
+      zero-dep suite unmoved;
+    * an **invoked program writing `$GITHUB_ENV`**, which is the one bound
+      this reader states rather than closes — see the block above
+      `_JOB_ID`. That one is NOT refused and cannot be, because refusing it
+      refuses every step of the workflow.
     """
     unreadable = [cell[1:] for cell in cells if cell.startswith("?")]
     assert not unreadable, (
         f"{where}: this reader cannot tell which JAX_ENABLE_X64 cell "
         f"{'these steps run' if len(unreadable) > 1 else 'this step runs'} "
         f"in — {unreadable}. That is a can't-tell and not a cell, and it is "
-        f"refused rather than read as OFF: every one of the seventeen shapes "
-        f"listed in `_refuse_unreadable` ran at x64 ON while the guard that "
-        f"conflated the two believed otherwise. Either spell the setting so "
+        f"refused rather than read as OFF: seventeen of the twenty shapes "
+        f"`_refuse_unreadable` lists were MEASURED running at x64 ON while "
+        f"the guard that conflated the two believed otherwise, and the other "
+        f"three are a cell this reader named without having read the line it "
+        f"came from. Either spell the setting so "
         f"this reader can resolve it, or teach the reader the shape and say "
         f"in the same commit what you measured it to mean"
     )
@@ -2304,8 +2396,24 @@ def _shell_reason(script: str):
     decided cannot export (see `_SHELL_WORDS_THIS_READER_KNOWS`), and a
     `VAR=value` command prefix, a `set` that turns on `allexport`, and an
     unparseable line are each a refusal of their own.
+
+    **AND "LINE" WAS `str.split("\\n")`, WHICH HID A COMMAND BEHIND AN INERT
+    ONE.** `shlex` does not treat CR, U+0085, U+2028 or U+2029 as whitespace,
+    so `echo preparing<U+2028>./setup-the-cell.sh` tokenised as ONE command
+    whose head is `echo` — whitelisted — and this function returned ``None``,
+    while `_RESOLUTIONS` carries that same `./setup-the-cell.sh` as a row that
+    must refuse. Measured, all four characters, at `4a13824`. Every one of
+    them is now a break here, and splitting on MORE than the shell does is
+    the safe direction and the reason this is a split and not a refusal: an
+    extra break can only produce more command words for the whitelist to
+    reject, never fewer. (Driven both ways: `#comment<U+2028>export FOO=1` was
+    read as one comment line and is two lines now, the second of which
+    refuses.)
     """
-    joined = re.sub(r"\\\n[ \t]*", " ", script)
+    joined = script
+    for brk in _LINE_BREAKS_A_SHELL_MIGHT_MEET:
+        joined = joined.replace(brk, "\n")
+    joined = re.sub(r"\\\n[ \t]*", " ", joined)
     for raw in joined.split("\n"):
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -2638,6 +2746,31 @@ def _parse_with_yaml(text: str):
 # two-space-indented block mappings and `- ` step sequences, and a file that
 # has grown a flow mapping, an anchor, an alias, a merge key, a quoted key,
 # a tab or a second document is not read PERMISSIVELY — it is not read.
+#
+# **AND "EVERY LINE" IS ONLY AS TOTAL AS THE WORD "LINE".** That word was
+# `str.split("\n")` until 2026-08-24, and YAML's own is wider: CR, U+0085,
+# U+2028 and U+2029 all break a line for PyYAML. Driven on the real workflow
+# with ONE U+2028 in place of the newline between two entries of a step's
+# `env:` block, the grammar reported the cell `"unset"` — *"I have read all
+# of it and it is not there"* — about a `JAX_ENABLE_X64:` line it had never
+# classified, and the whole zero-dep suite was identical to clean. See
+# `_lines_of_this_grammar`, which is where the word is defined now.
+#
+# THREE MORE THINGS IT WILL NOT READ, each of them added because it was
+# found rather than foreseen:
+#
+#   * a **U+0085 / U+2028 / U+2029** anywhere in the file — YAML 1.1 breaks
+#     a line there and YAML 1.2 does not, so it is refused rather than
+#     guessed about;
+#   * a **key written twice in one mapping** — this grammar merged the two
+#     and PyYAML keeps the last, which is a reader divergence and not the
+#     one direction a fallback is allowed (see `_put`);
+#   * a **sequence written at its own key's indentation** —
+#     `    steps:` over `    - uses: …` — which is ordinary YAML that GitHub
+#     runs. That one is refused only because this grammar measures nesting
+#     in columns and that shape does not nest; it is the safe direction, and
+#     it is written here rather than left to be discovered by whoever
+#     re-indents the workflow.
 
 
 _LINE_BLANK = re.compile(r"^[ \t]*$")
@@ -2656,6 +2789,108 @@ _BLOCK_SCALAR = ("|", ">", "|-", ">-", "|+", ">+")
 
 class _Refused(Exception):
     """The line grammar met something it will not read."""
+
+
+#: THE LINE BREAKS YAML'S OWN VERSIONS DISAGREE ABOUT, and the reason this
+#: grammar refuses a file that carries one instead of picking a side. YAML
+#: 1.1 — which is what PyYAML implements — breaks a line on **U+0085**,
+#: **U+2028** and **U+2029** as well as on LF and CR; YAML 1.2 does not, and
+#: whether GitHub's own parser does is untested here. A character three
+#: readers may split three ways is not a character this grammar can classify
+#: lines around, so it is refused in the same breath as a tab.
+_LINE_BREAKS_THE_YAML_VERSIONS_DISAGREE_ABOUT = (
+    ("\u0085", "U+0085 NEXT LINE"),
+    ("\u2028", "U+2028 LINE SEPARATOR"),
+    ("\u2029", "U+2029 PARAGRAPH SEPARATOR"),
+)
+
+
+def _lines_of_this_grammar(text: str) -> list:
+    """The file's LINES, by YAML's notion of one and not by `str.split`.
+
+    **THIS WAS `text.split("\\n")` AND THE GRAMMAR'S TOTALITY CLAIM RESTED ON
+    IT.** A grammar that classifies every line can say *"I have read all of
+    it and the setting is not there"*; one that classifies every LF-delimited
+    run can only say it about the lines it happened to cut. Driven on
+    `.github/workflows/nightly-jax-canary.yml` at `4a13824`, with a single
+    U+2028 in place of the newline between two entries of a step's `env:`
+    block: the whole zero-dep suite was IDENTICAL to clean, this grammar
+    reported the cell ``"unset"`` for a `JAX_ENABLE_X64:` line it had never
+    classified — it was swallowed into the value of the entry above it — and
+    PyYAML read the cell. That is exactly *"I did not find it"* wearing
+    *"it is not there"*, which is the defect the grammar exists to make
+    impossible. U+0085 and U+2029 behave the same way, and so does CR.
+
+    So there are two answers here and they are different answers:
+
+    * **CR and CRLF are NORMALISED.** A carriage return is a line break in
+      YAML 1.1 and 1.2 alike, so treating it as one is reading the spec and
+      not guessing. It mattered: CR was live on an in-memory string, and
+      through the file path it was neutralised only by ``read_text``'s
+      universal-newline translation — an accident of how the caller loaded
+      the file rather than a property of this grammar. It is a property of
+      this grammar now.
+    * **U+0085, U+2028 and U+2029 are REFUSED**, because there the answer is
+      version-dependent — see
+      `_LINE_BREAKS_THE_YAML_VERSIONS_DISAGREE_ABOUT`. Splitting on them
+      would make this grammar agree with PyYAML and possibly disagree with
+      the runner; not splitting on them is what was measured above. A
+      refusal is the third answer and the only honest one.
+
+    THE ORDER MATTERS AND IS THE POINT OF DOING THIS FIRST. Every later check
+    reads the lines this returns, so the tab scan and the document-marker
+    scan see a CR-introduced line too. `re.search(r"^---", text, re.M)` did
+    not: Python's `^` under `re.M` matches after a newline and not after a
+    carriage return, so a second document opened by a CR was invisible to the
+    check written to refuse it.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    for char, name in _LINE_BREAKS_THE_YAML_VERSIONS_DISAGREE_ABOUT:
+        at = text.find(char)
+        if at >= 0:
+            raise _Refused(
+                f"line {text.count(chr(10), 0, at) + 1}: this file carries a "
+                f"{name}, which YAML 1.1 breaks a line on and YAML 1.2 does "
+                f"not. This grammar will not guess which of them the runner's "
+                f"parser is, and a character it guessed wrong about would "
+                f"hide a whole `env:` entry inside the value of the one above "
+                f"it — measured, at `4a13824`, reported as the cell 'unset'"
+            )
+    return text.split("\n")
+
+
+def _put(mapping, key, value, where: str, what: str):
+    """Set ONE entry of a mapping, refusing a key that is already there.
+
+    **DUPLICATE KEYS MERGED HERE AND REPLACE IN PyYAML, AND THAT FALSIFIED
+    THE TABLE'S STATED INVARIANT.** `jobs`, `env` at all three levels and
+    `strategy.matrix` were written with `setdefault`, so a second `env:` on
+    one step was READ — its entries folded into the first block — where
+    PyYAML keeps the last mapping and drops the first outright. Driven on
+    the real workflow at `4a13824`, a second `env:` carrying only
+    `JAX_PLATFORMS` on the nightly x64-OFF canary step: this grammar read
+    `['1', '0']` and PyYAML read `['1', 'unset']`, the zero-dep suite stayed
+    at `114 passed`, and the two-reader agreement test was the only thing
+    that moved. `_RESOLUTIONS` said *"where the columns differ it is always
+    the same way round — the parser RESOLVES a legal spelling and the line
+    grammar REFUSES it"*; here BOTH resolved, to different cells.
+
+    So a repeated key is refused rather than merged, which puts the
+    divergence back in the one direction a fallback may have. What GitHub's
+    own parser does with a duplicate key is NOT measured here — probably a
+    rejection, which is a third answer again and one more reason not to pick
+    one.
+    """
+    if key in mapping:
+        raise _Refused(
+            f"{where}: `{key}` is written twice in {what}. PyYAML keeps the "
+            f"last one and drops the first; merging them is what this grammar "
+            f"used to do and it read a different cell from the parser for it; "
+            f"what the runner's parser does is untested. Three readers and up "
+            f"to three answers, so this one refuses"
+        )
+    mapping[key] = value
+    return value
 
 
 def _scalar(raw: str, where: str):
@@ -2730,17 +2965,43 @@ def _parse_by_line(text: str):
     `jobs:`. The bodies of `on:`, `permissions:` and `concurrency:` are
     skipped by indentation because nothing in them can reach a step's
     environment except through an alias, and an alias is refused where it is
-    USED.
+    USED. "Line" is `_lines_of_this_grammar`'s and not `str.split`'s — see
+    there for the U+2028 that produced a cell out of a line nobody read.
+
+    AND EVERY WAY OUT OF HERE IS A RETURN OR A `_Refused`. It was not: an
+    indent-4 job key with no job header above it reached `job[...] = ...`
+    with `job` still `None` and raised a bare ``TypeError`` through
+    `_read_workflow`, which catches `_Refused` alone — a THIRD outcome
+    beside "classify" and "refuse", with no line number, no reader and no
+    refusal sentence. Driven by commenting out `  control:` on the real
+    workflow at `4a13824`: four tests failed on
+    ``TypeError: 'NoneType' object does not support item assignment``.
+    `test_the_line_grammar_HAS_NO_THIRD_OUTCOME` drives every one-line
+    deletion and every one-line comment-out of the real workflow through
+    here and holds that to two outcomes.
     """
-    if "\t" in text:
-        raise _Refused(
-            "this file contains a tab; YAML forbids one in indentation and "
-            "this grammar measures indentation in spaces, so it will not "
-            "guess which kind this is"
-        )
-    if re.search(r"^---", text, re.M) or re.search(r"^\.\.\.", text, re.M):
-        raise _Refused("this file carries a document marker; a multi-document "
-                       "workflow is outside this grammar")
+    # THE LINES FIRST, BECAUSE EVERY CHECK BELOW READS THEM. See
+    # `_lines_of_this_grammar` for why CR is normalised and U+0085 / U+2028 /
+    # U+2029 are refused, and for the measured `"unset"` that came of
+    # splitting on `\n` alone.
+    lines = _lines_of_this_grammar(text)
+
+    # ...AND BOTH FILE-LEVEL REFUSALS NAME A LINE NOW. Of the refusals this
+    # grammar can raise these two were the only ones that said neither WHERE
+    # nor WHAT: "this file contains a tab" over a 260-line workflow is a
+    # sentence somebody has to go and grep for.
+    for number, line in enumerate(lines, 1):
+        if "\t" in line:
+            raise _Refused(
+                f"line {number}: {line!r} contains a tab; YAML forbids one in "
+                f"indentation and this grammar measures indentation in "
+                f"spaces, so it will not guess which kind this is"
+            )
+        if line.startswith("---") or line.startswith("..."):
+            raise _Refused(
+                f"line {number}: {line!r} is a document marker; a "
+                f"multi-document workflow is outside this grammar"
+            )
 
     workflow: dict = {}
     jobs: dict = {}
@@ -2751,7 +3012,6 @@ def _parse_by_line(text: str):
     run_lines: list = []
     run_owner = None
 
-    lines = text.split("\n")
     for number, line in enumerate(lines, 1):
         where = f"line {number}"
         indent = len(line) - len(line.lstrip(" "))
@@ -2776,7 +3036,7 @@ def _parse_by_line(text: str):
             state = "top"
             job = env = step = matrix = axis = None
             if key in _WORKFLOW_KEYS_WITH_NOTHING_IN_THEM_FOR_US:
-                workflow[key] = _Opaque()
+                _put(workflow, key, _Opaque(), where, "this workflow")
                 skip_below = 0
                 continue
             if key in ("jobs", "env"):
@@ -2784,14 +3044,14 @@ def _parse_by_line(text: str):
                 # mapping may not also carry a value.
                 _scalar_must_nest(raw, f"the workflow's `{key}` key", where)
             if key == "jobs":
-                workflow["jobs"] = jobs
+                _put(workflow, "jobs", jobs, where, "this workflow")
                 state = "jobs"
                 continue
             if key == "env":
-                env = workflow.setdefault("env", {})
+                env = _put(workflow, "env", {}, where, "this workflow")
                 state = "workflow-env"
                 continue
-            workflow[key] = _Opaque()
+            _put(workflow, key, _Opaque(), where, "this workflow")
             skip_below = 0
             continue
 
@@ -2799,8 +3059,10 @@ def _parse_by_line(text: str):
             entry = _LINE_TOP.match(line[2:]) if indent == 2 else None
             if entry is None or indent != 2:
                 raise _Refused(f"{where}: {line!r} is not an `env:` entry")
-            env[entry.group(1)] = _scalar(entry.group(2),
-                                          f"the workflow's `{entry.group(1)}`")
+            _put(env, entry.group(1),
+                 _scalar(entry.group(2),
+                         f"the workflow's `{entry.group(1)}`"),
+                 where, "the workflow's `env:`")
             continue
 
         if state not in ("jobs", "job", "job-env", "steps", "step", "step-env",
@@ -2814,7 +3076,7 @@ def _parse_by_line(text: str):
                     f"{where}: the job `{head.group(1)}` has a value on its "
                     f"own line, which this reader does not read"
                 )
-            job = jobs.setdefault(head.group(1), {})
+            job = _put(jobs, head.group(1), {}, where, "`jobs:`")
             env = step = matrix = axis = None
             state = "job"
             continue
@@ -2824,6 +3086,21 @@ def _parse_by_line(text: str):
             if key_line is None:
                 raise _Refused(f"{where}: {line!r} is not a job key")
             key, raw = key_line.group(1), key_line.group(2)
+            if job is None:
+                # A JOB KEY BEFORE ANY JOB, which is a THIRD outcome and not
+                # a refusal: `job.setdefault(...)` below raised a bare
+                # `TypeError: 'NoneType' object does not support item
+                # assignment` out of `_read_workflow`, which catches
+                # `_Refused` alone. Driven by commenting out `  control:` on
+                # the real workflow at `4a13824`: four tests failed with no
+                # line number, no reader and no refusal sentence.
+                # `_parse_with_yaml` guards its analogue; this is the same
+                # guard, and it is the same shape as "a step key before any
+                # step" eighty lines down.
+                raise _Refused(
+                    f"{where}: {line!r} is a job key with no job header above "
+                    f"it — a two-space `<job-id>:` line under `jobs:`"
+                )
             env = step = matrix = axis = None
             if key in ("steps", "env", "strategy"):
                 # A NESTING KEY MAY NOT CARRY A VALUE. `env: *x64on` and
@@ -2831,19 +3108,21 @@ def _parse_by_line(text: str):
                 # ways past the pattern this grammar replaced, and both are a
                 # nesting key with something on its own line.
                 _scalar_must_nest(raw, f"the `{key}` key of this job", where)
+            what = "this job"
             if key == "steps":
-                job["steps"] = []
+                _put(job, "steps", [], where, what)
                 state = "steps"
                 continue
             if key == "env":
-                env = job.setdefault("env", {})
+                env = _put(job, "env", {}, where, what)
                 state = "job-env"
                 continue
             if key == "strategy":
-                job["strategy"] = {}
+                _put(job, "strategy", {}, where, what)
                 state = "strategy"
                 continue
-            job[key] = _scalar(raw, f"the `{key}` key of this job")
+            _put(job, key, _scalar(raw, f"the `{key}` key of this job"),
+                 where, what)
             state = "job"
             continue
 
@@ -2851,8 +3130,9 @@ def _parse_by_line(text: str):
             entry = _LINE_SIX.match(line)
             if entry is None:
                 raise _Refused(f"{where}: {line!r} is not an `env:` entry")
-            env[entry.group(1)] = _scalar(entry.group(2),
-                                          f"this job's `{entry.group(1)}`")
+            _put(env, entry.group(1),
+                 _scalar(entry.group(2), f"this job's `{entry.group(1)}`"),
+                 where, "this job's `env:`")
             continue
 
         if state in ("strategy", "matrix", "axis"):
@@ -2863,11 +3143,14 @@ def _parse_by_line(text: str):
                 if entry.group(1) == "matrix":
                     if entry.group(2):
                         raise _Refused(f"{where}: an inline `matrix:` value")
-                    matrix = job["strategy"].setdefault("matrix", {})
+                    matrix = _put(job["strategy"], "matrix", {}, where,
+                                  "this job's `strategy:`")
                     state = "matrix"
                     continue
-                job["strategy"][entry.group(1)] = _scalar(
-                    entry.group(2), f"this job's `strategy.{entry.group(1)}`")
+                _put(job["strategy"], entry.group(1),
+                     _scalar(entry.group(2),
+                             f"this job's `strategy.{entry.group(1)}`"),
+                     where, "this job's `strategy:`")
                 state = "strategy"
                 continue
             if indent == 8 and state in ("matrix", "axis"):
@@ -2886,17 +3169,18 @@ def _parse_by_line(text: str):
                     # and not a cell. Said here rather than left to be found.
                     if not raw.endswith("]"):
                         raise _Refused(f"{where}: an unterminated flow sequence")
-                    matrix[axis] = [
+                    _put(matrix, axis, [
                         _scalar(v.strip(), f"an entry of matrix axis `{axis}`")
                         for v in raw[1:-1].split(",") if v.strip()
-                    ]
+                    ], where, "this job's `strategy.matrix:`")
                     state = "matrix"
                     continue
                 if raw:
-                    matrix[axis] = _scalar(raw, f"matrix axis `{axis}`")
+                    _put(matrix, axis, _scalar(raw, f"matrix axis `{axis}`"),
+                         where, "this job's `strategy.matrix:`")
                     state = "matrix"
                     continue
-                matrix[axis] = []
+                _put(matrix, axis, [], where, "this job's `strategy.matrix:`")
                 state = "axis"
                 continue
             if indent == 10 and state == "axis":
@@ -2923,7 +3207,8 @@ def _parse_by_line(text: str):
                 if key == "run" and raw in _BLOCK_SCALAR:
                     run_owner, run_lines, run_key_indent = step, [], 8
                     continue
-                step[key] = _scalar(raw, f"a step's `{key}`")
+                _put(step, key, _scalar(raw, f"a step's `{key}`"),
+                     where, "this step")
                 continue
             if indent == 8:
                 entry = _LINE_EIGHT.match(line)
@@ -2934,22 +3219,33 @@ def _parse_by_line(text: str):
                     raise _Refused(f"{where}: a step key before any step")
                 if key == "env":
                     _scalar_must_nest(raw, "a step's `env`", where)
-                    env = step.setdefault("env", {})
+                    env = _put(step, "env", {}, where, "this step")
                     state = "step-env"
                     continue
                 if key == "run" and raw in _BLOCK_SCALAR:
+                    # A BLOCK SCALAR IS SET WHEN IT CLOSES, so the duplicate
+                    # check happens at the point the key is OPENED — by then
+                    # a first `run:` has already been flushed into the step.
+                    if "run" in step:
+                        raise _Refused(
+                            f"{where}: `run` is written twice in this step; "
+                            f"see `_put` for why a repeated key is refused "
+                            f"rather than merged or replaced"
+                        )
                     run_owner, run_lines, run_key_indent = step, [], 8
                     state = "step"
                     continue
-                step[key] = _scalar(raw, f"a step's `{key}`")
+                _put(step, key, _scalar(raw, f"a step's `{key}`"),
+                     where, "this step")
                 state = "step"
                 continue
             if state == "step-env" and indent == 10:
                 entry = _LINE_TEN.match(line)
                 if entry is None:
                     raise _Refused(f"{where}: {line!r} is not an `env:` entry")
-                env[entry.group(1)] = _scalar(
-                    entry.group(2), f"a step's `{entry.group(1)}`")
+                _put(env, entry.group(1),
+                     _scalar(entry.group(2), f"a step's `{entry.group(1)}`"),
+                     where, "this step's `env:`")
                 continue
             raise _Refused(f"{where}: {line!r} is not part of a `steps:` block")
 
@@ -3568,6 +3864,18 @@ def _cells_of(workflow, parser=None):
 # line grammar REFUSES it -- and that is the shape a fallback is allowed to
 # have. What it is not allowed to do is the other one: read less and claim
 # the same, which is what `"unset"` did for nine spellings.
+#
+# **THAT INVARIANT WAS FALSIFIED ONCE, BY A KEY WRITTEN TWICE.** `jobs`,
+# `env` at all three levels and `strategy.matrix` were written with
+# `setdefault`, so a second `env:` on one step MERGED into the first here
+# and REPLACED it in PyYAML. Driven on the real workflow at `4a13824`: this
+# grammar read `['1', '0']`, PyYAML read `['1', 'unset']`, and both were
+# resolutions -- neither reader refused, so "always the same way round" was
+# not true of this table when it said so. It is true again because the
+# grammar refuses a repeated key now (`_put`), which is a fix to the code
+# and not to the sentence. The caveat is recorded rather than glossed: what
+# GitHub's own parser does with a duplicate mapping key is untested here,
+# so what was demonstrated is a READER DIVERGENCE and not a runner exploit.
 _RESOLUTIONS = [
     # jax's own grammar, and the YAML booleans that render into it. Driven
     # against `jax.config.jax_enable_x64` on jax 0.11.0, every row.
@@ -3722,6 +4030,53 @@ _RESOLUTIONS = [
      dict(job_extra='    env: &x64on\n      JAX_ENABLE_X64: "1"\n',
           env_block="        env: *x64on\n"),
      ["1"], None),
+    # A LINE BREAK THIS GRAMMAR DOES NOT SPLIT ON AND PyYAML DOES. One
+    # U+2028 in place of the newline between two `env:` entries swallowed
+    # the `JAX_ENABLE_X64:` line into the value above it, and the grammar
+    # reported the cell `"unset"` -- "I have read all of it and it is not
+    # there" -- about a line it had never classified. Measured on the real
+    # workflow at `4a13824`, and identical for U+0085 and U+2029. The
+    # grammar refuses the character now; see `_lines_of_this_grammar` for
+    # why refusing beats agreeing with PyYAML about it.
+    ("a U+2028 where the newline goes",
+     dict(env_block='        env:\n          JAX_PLATFORMS: cpu'
+                    '\u2028          JAX_ENABLE_X64: "1"\n'),
+     ["1"], None),
+    ("a U+0085 where the newline goes",
+     dict(env_block='        env:\n          JAX_PLATFORMS: cpu'
+                    '\u0085          JAX_ENABLE_X64: "1"\n'),
+     ["1"], None),
+    ("a U+2029 where the newline goes",
+     dict(env_block='        env:\n          JAX_PLATFORMS: cpu'
+                    '\u2029          JAX_ENABLE_X64: "1"\n'),
+     ["1"], None),
+    # ...AND CR, WHICH IS THE OTHER ANSWER. A carriage return is a line
+    # break in YAML 1.1 and 1.2 alike, so this grammar normalises it instead
+    # of refusing it and the two readers AGREE. It read `unset` here until
+    # 2026-08-24; through `read_text` it was neutralised by universal-newline
+    # translation, which is an accident of how the caller loaded the file and
+    # not a property of the grammar.
+    ("a CR where the newline goes",
+     dict(env_block='        env:\n          JAX_PLATFORMS: cpu'
+                    '\r          JAX_ENABLE_X64: "1"\n'),
+     ["1"], ["1"]),
+    # A KEY WRITTEN TWICE. PyYAML keeps the LAST `env:` and drops the first
+    # -- so the setting disappears and the reading is `unset` -- where this
+    # grammar merged the two and read `1`. Both were resolutions and they
+    # differed, which is the one shape the note above this table said could
+    # not happen. Refused here now.
+    ("a step `env:` written twice",
+     dict(env_block='        env:\n          JAX_ENABLE_X64: "1"\n'
+                    '        env:\n          JAX_PLATFORMS: cpu\n'),
+     ["unset"], None),
+    ("a job `env:` written twice",
+     dict(setting='"0"',
+          job_extra='    env:\n      JAX_ENABLE_X64: "1"\n'
+                    '    env:\n      JAX_PLATFORMS: cpu\n'),
+     ["0"], None),
+    ("a matrix axis written twice",
+     dict(setting="${{ matrix.x64 }}",
+          matrix='x64: ["0", "1"]\n        x64: ["1"]'), ["1"], None),
 ]
 
 
@@ -3844,6 +4199,295 @@ def test_which_reader_this_lane_uses_IS_ASSERTED_AND_NOT_ASSUMED():
         f"{by_yaml}. They are one rule in two implementations and the "
         f"guards take whichever the lane has"
     )
+
+
+#: The four characters PyYAML breaks a line on and `str.split("\\n")` does
+#: not, with what this grammar is required to do about each. See
+#: `_lines_of_this_grammar`: CR is the spec in every YAML version, so it is
+#: NORMALISED; the other three are a version disagreement, so they are
+#: REFUSED.
+_LINE_BREAKS_AND_WHAT_THE_GRAMMAR_OWES_THEM = (
+    ("\r", "normalise"),
+    ("\u0085", "refuse"),
+    ("\u2028", "refuse"),
+    ("\u2029", "refuse"),
+)
+
+
+def test_the_grammars_LINE_is_YAMLS_LINE_AND_NOT_STR_SPLITS():
+    """A grammar that classifies every line is only as total as "line".
+
+    THE MEASUREMENT THIS EXISTS FOR. `.github/workflows/nightly-jax-canary.
+    yml` with ONE U+2028 in place of the newline between two entries of the
+    nightly x64-OFF canary step's `env:` block, at `4a13824`: the whole
+    zero-dep suite came back IDENTICAL to clean, and the reading reported the
+    cell ``"unset"`` for that step — *"I have read all of it and the setting
+    is not there"* — about a `JAX_ENABLE_X64:` line it had never classified,
+    because `text.split("\\n")` had swallowed it into the value of the entry
+    above. U+0085 and U+2029 behave the same way. That is precisely the
+    "I did not find it" wearing "it is not there" that the total grammar
+    exists to make impossible, which is why it is a defect and not a note.
+
+    WHAT IS AND IS NOT ESTABLISHED. Whether GitHub's own parser breaks a
+    line on U+0085 / U+2028 / U+2029 is NOT tested here — YAML 1.1 does and
+    YAML 1.2 does not — so what was measured is an un-classified value
+    reported as a cell and a divergence between this repository's two
+    readers, and not a demonstrated runner exploit. The grammar's claim is
+    about totality rather than about exploitability, so it is fixed on the
+    strength of the first.
+
+    CR IS THE OTHER ANSWER AND IS DRIVEN SEPARATELY. It is a line break in
+    every YAML version, so this grammar normalises it rather than refusing
+    it — and the two readers must AGREE about a file that carries one.
+    Before this it was live on an in-memory string and neutralised through
+    the file path only by ``read_text``'s universal-newline translation: an
+    accident of loading, and this asserts it is a property of the grammar.
+    """
+    workflow = (
+        _pathlib_for_canary() / ".github" / "workflows"
+        / "nightly-jax-canary.yml"
+    ).read_text(encoding="utf-8")
+    lines = workflow.split("\n")
+    # the two entries of the NIGHTLY x64-OFF canary step's `env:` block, in
+    # the other legal order -- a mapping's keys are unordered -- so that the
+    # break to be replaced is the one ABOVE the `JAX_ENABLE_X64:` line.
+    # Searched from the `nightly:` job header and not from the top of the
+    # file: the `control` job carries the same two lines first, and a
+    # mutation spliced into the OTHER job is one the cells read below cannot
+    # see at all.
+    nightly = lines.index("  nightly:")
+    sites = [index for index, line in enumerate(lines[nightly:], nightly)
+             if line == '          JAX_ENABLE_X64: "0"']
+    assert sites, (
+        "the `nightly` job of the nightly workflow no longer carries a step "
+        "`env:` entry spelled `JAX_ENABLE_X64: \"0\"`, which is the line "
+        "this test splices a line break into. Re-point it at the step whose "
+        "cell the two canary guards read, rather than deleting it"
+    )
+    off = sites[0]
+    assert lines[off + 1] == "          JAX_PLATFORMS: cpu", lines[off + 1]
+    swapped = lines[:off] + [lines[off + 1], lines[off]] + lines[off + 2:]
+
+    def canary_cells(text):
+        """The CANARY steps' cells, because the mutated `env:` is a canary
+        step's. `_cells_of`'s `-m pytest` predicate selects other steps of
+        the same job, and a mutation those steps cannot see is a test that
+        would pass without reading anything."""
+        read = _read_workflow(text, "text")
+        if read.blockers:
+            return [_cannot_tell(reason) for reason in read.blockers]
+        return _x64_cells(read, dict(_canary_jobs(read))["nightly"],
+                          _wanted_canary)
+
+    clean = canary_cells("\n".join(swapped))
+    assert clean == ["1", "0"], clean
+
+    # POSITIVE CONTROL ON THE SPLICE SITE. Everything below reads the cells
+    # of one step, and this is the proof that the line being mutilated is a
+    # line those cells come from: flip its value and the reading follows.
+    # Without it, splicing into the `control` job -- which carries the same
+    # two lines earlier in the file -- would leave every assertion below
+    # passing while watching nothing.
+    flipped = swapped[:off + 1] + ['          JAX_ENABLE_X64: "1"'] + swapped[off + 2:]
+    assert canary_cells("\n".join(flipped)) == ["1", "1"], (
+        "the line this test mutilates is not one the cells it reads come "
+        "from, so nothing below is watching anything"
+    )
+
+    for char, owed in _LINE_BREAKS_AND_WHAT_THE_GRAMMAR_OWES_THEM:
+        spliced = "\n".join(
+            swapped[:off] + [swapped[off] + char + swapped[off + 1]]
+            + swapped[off + 2:]
+        )
+        cells = canary_cells(spliced)
+        if owed == "refuse":
+            with pytest.raises(AssertionError, match="cannot tell"):
+                _refuse_unreadable(cells, "the spliced workflow")
+            assert all(cell.startswith("?") for cell in cells), (
+                f"{char!r} in place of a newline: this grammar produced the "
+                f"cells {cells} for a file it cannot cut into lines. PyYAML "
+                f"breaks a line there and YAML 1.2 does not, so the only "
+                f"answer that is not a guess is a refusal"
+            )
+        else:
+            _refuse_unreadable(cells, "the spliced workflow")
+            assert cells == clean, (
+                f"{char!r} in place of a newline: read {cells}, and a "
+                f"carriage return is a line break in YAML 1.1 and 1.2 alike, "
+                f"so this grammar owes the same reading as {clean}"
+            )
+        assert "unset" not in cells, (
+            f"{char!r} in place of a newline: the reading says {cells}, and "
+            f"`unset` means *I have read the whole file and the setting is "
+            f"not there* about a line this grammar never classified. That is "
+            f"the exact conflation the total grammar replaced a pattern to "
+            f"make impossible"
+        )
+
+    # ...AND THE WHOLE FILE IN CRLF, which is what a Windows checkout hands
+    # this reader. It was REFUSED outright before the fix -- `line 3: '\\r' is
+    # outside this grammar` -- so the zero-dep lane's only reader could not
+    # read a legal spelling of this repository's own workflow at all.
+    crlf = _read_workflow("\r\n".join(workflow.split("\n")), "text")
+    assert not crlf.blockers, crlf.blockers
+    plain = _read_workflow(workflow, "text")
+    assert ([(job, _x64_cells(crlf, body, _wanted_canary))
+             for job, body in _canary_jobs(crlf)]
+            == [(job, _x64_cells(plain, body, _wanted_canary))
+                for job, body in _canary_jobs(plain)]), (
+        "the same workflow with CRLF line endings does not read the same as "
+        "with LF, and a carriage return is a line break in every version of "
+        "YAML"
+    )
+
+    # A DOCUMENT MARKER OPENED BY A CR. The check written to refuse a
+    # multi-document workflow was `re.search(r"^---", text, re.M)`, and
+    # Python's `^` under `re.M` matches after a newline and NOT after a
+    # carriage return -- so the one line-break character the grammar was
+    # already exposed to could hide the marker from the refusal.
+    hidden = _read_workflow(
+        "name: a\r--- \nname: b\njobs:\n  x:\n    steps:\n      - run: echo hi\n",
+        "text",
+    )
+    assert hidden.blockers and "document marker" in hidden.blockers[0], (
+        f"a second document opened by a carriage return was read rather than "
+        f"refused: {hidden.blockers}"
+    )
+
+    # AND THE SAME DEFECT IN THE SHELL READER. `shlex` does not treat any of
+    # these four as whitespace, so `echo preparing<break>./setup-the-cell.sh`
+    # was ONE command whose head is the whitelisted `echo` -- and
+    # `_RESOLUTIONS` carries that same `./setup-the-cell.sh` as a row that
+    # must refuse. Measured `None` for all four at `4a13824`.
+    with_newline = _shell_reason("echo preparing\n./setup-the-cell.sh")
+    assert with_newline is not None and "setup-the-cell" in with_newline
+    for char, _ in _LINE_BREAKS_AND_WHAT_THE_GRAMMAR_OWES_THEM:
+        reason = _shell_reason("echo preparing" + char + "./setup-the-cell.sh")
+        assert reason == with_newline, (
+            f"a script whose two commands are separated by {char!r} reads as "
+            f"{reason!r}, where the same script with a newline is "
+            f"{with_newline!r}. Splitting on more breaks than the shell does "
+            f"can only put MORE command words in front of the whitelist, "
+            f"which is the safe direction"
+        )
+    # ...and the comment case, which fails the other way round: a `#` that
+    # ran to the end of a `split("\\n")` line hid whatever came after the
+    # break behind it.
+    hidden_export = _shell_reason("# nothing to see\u2028export JAX_ENABLE_X64=1")
+    assert hidden_export is not None and "export" in hidden_export, (
+        f"a `#` comment hid an `export` behind a U+2028: {hidden_export!r}"
+    )
+
+
+def _wanted_canary(step):
+    return isinstance(step.run, str) and "tripwire_canary.py" in step.run
+
+
+def test_a_KEY_WRITTEN_TWICE_is_REFUSED_and_not_merged():
+    """Two readers, two answers, and neither of them a refusal.
+
+    `jobs`, `env` at all three levels and `strategy.matrix` were written with
+    `setdefault`, so a repeated key MERGED here and REPLACES in PyYAML.
+    Driven on the real workflow at `4a13824` with a second `env:` on the
+    nightly x64-OFF canary step carrying only `JAX_PLATFORMS`: this grammar
+    read `['1', '0']` and PyYAML read `['1', 'unset']`, the whole zero-dep
+    suite stayed at `114 passed`, and the two-reader agreement test was the
+    only thing in the tree that moved. That falsified `_RESOLUTIONS`' stated
+    invariant — *"where the columns differ it is always the same way round:
+    the parser RESOLVES and the line grammar REFUSES"* — because here both
+    resolved.
+
+    The three levels of `env:` and the matrix axis are rows of that table.
+    What is here is what the table has no slot for: a repeated JOB key, a
+    repeated top-level key, and a step with two `run:` blocks, whose value is
+    written when the block CLOSES and so needed a check of its own.
+
+    HONESTLY BOUNDED: what GitHub's own parser does with a duplicate mapping
+    key is untested here — a rejection is the likely third answer — so what
+    is demonstrated is a reader divergence and not a runner exploit.
+    """
+    base = _synthetic(setting='"0"')
+    assert not _read_workflow(base, "text").blockers
+
+    for label, text in (
+        ("a job written twice",
+         base + "  nightly:\n    name: nightly again\n"
+                "    runs-on: ubuntu-latest\n"),
+        ("a top-level key written twice", base + "name: synthetic again\n"),
+        ("a step with two `run:` blocks",
+         base + "        run: |\n          echo twice\n"),
+    ):
+        read = _read_workflow(text, "text")
+        assert read.blockers, (
+            f"{label}: the line grammar read this file rather than refusing "
+            f"it. A key written twice merges here and replaces in PyYAML, so "
+            f"reading it is two readers with two answers"
+        )
+        assert "twice" in read.blockers[0], read.blockers
+
+    # ...AND THE REAL WORKFLOW STILL READS, which is the other half: a
+    # refusal that also refuses the file the guards are about buys nothing.
+    workflow = (
+        _pathlib_for_canary() / ".github" / "workflows"
+        / "nightly-jax-canary.yml"
+    ).read_text(encoding="utf-8")
+    assert not _read_workflow(workflow, "text").blockers
+
+
+def test_the_line_grammar_HAS_NO_THIRD_OUTCOME():
+    """Classify, or refuse. Not `TypeError`.
+
+    An indent-4 job key with no job header above it reached
+    `job.setdefault(...)` with `job` still `None`, and `_read_workflow`
+    catches `_Refused` alone — so the grammar raised a bare
+    ``TypeError: 'NoneType' object does not support item assignment`` out of
+    itself, with no line number, no reader named and no refusal sentence.
+    Driven by commenting out `  control:` on the real workflow at `4a13824`:
+    four tests failed that way. Red, so never a HOLE — but it is a third
+    outcome beside the two this grammar claims, and `_parse_with_yaml`
+    guards its own analogue by turning a `yaml.YAMLError` into a blocker.
+
+    So the claim is driven rather than asserted: every ONE-LINE deletion and
+    every ONE-LINE comment-out of this repository's own workflow goes
+    through the reader, and each must come back either read or refused.
+    Those two mutilations are cheap, they are what a person actually does to
+    a workflow, and between them they take away every header this grammar
+    keys on.
+    """
+    workflow = (
+        _pathlib_for_canary() / ".github" / "workflows"
+        / "nightly-jax-canary.yml"
+    ).read_text(encoding="utf-8")
+    lines = workflow.split("\n")
+    assert len(lines) > 200, len(lines)
+
+    read, refused = 0, 0
+    for index in range(len(lines)):
+        for mutilated in (
+            lines[:index] + lines[index + 1:],
+            lines[:index] + ["#" + lines[index].lstrip(" ")] + lines[index + 1:],
+        ):
+            text = "\n".join(mutilated)
+            try:
+                result = _read_workflow(text, "text")
+            except Exception as exc:  # noqa: BLE001 - that is the assertion
+                raise AssertionError(
+                    f"the line grammar raised {type(exc).__name__}({exc}) out "
+                    f"of itself on line {index + 1} of the nightly workflow "
+                    f"({lines[index]!r}). Every way out of `_parse_by_line` "
+                    f"has to be a reading or a `_Refused`: a caller that gets "
+                    f"a traceback gets no line number, no reader and no "
+                    f"refusal sentence, and `_read_workflow` catches "
+                    f"`_Refused` alone"
+                ) from exc
+            if result.blockers:
+                refused += 1
+            else:
+                read += 1
+    # Both outcomes have to occur, or this test is asserting nothing: a
+    # reader that refused everything, or read everything, would pass the
+    # loop above.
+    assert read and refused, (read, refused)
 
 
 @pytest.mark.parametrize("parser", ["yaml", "text"])

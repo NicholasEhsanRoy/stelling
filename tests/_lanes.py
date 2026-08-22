@@ -51,11 +51,21 @@ paragraph is not a claim that it is safe from the same thing.** What it has
 that the nightly reader did not is :func:`_agreed` and the four-link
 ``${EXTRAS}`` chain, which produce a NAMED can't-tell rather than a
 permissive default — so what is exposed here is the FIND layer, not the
-value layer. Measured at this commit: `ci.yml` carries no anchor, no alias
-and no merge key, and :data:`_JOB` finds all ten jobs a real parse finds
-(and `push:` from under `on:`, which :func:`_classify` drops for having no
+value layer. Measured at this commit, off PyYAML's own event stream rather
+than off a regex for `&` and `*`: `ci.yml` carries no anchor, no alias and
+no merge key, and :data:`_JOB` finds all ten jobs a real parse finds (and
+`push:` from under `on:`, which :func:`_classify` drops for having no
 ``python -m pytest`` line). That gap is written down in
 `SWEEP-CARRY-FORWARD.md` rather than closed here.
+
+**AND THE MEASUREMENT NAMED TWO FILES AND COVERED ONE.** The paragraph
+above names ``release.yml`` as read the same way for the same reason, and
+the anchor/alias/merge-key figure was taken on `ci.yml` alone — a narrower
+measurement than the exposure it was disclosing. Taken now, the same way:
+``release.yml`` carries **0 anchors, 0 aliases and 0 merge keys**, and its
+three jobs are ``build``, ``publish`` and ``test``. So nothing is wrong in
+either file today; what was wrong was a figure standing for a file it had
+not been taken on.
 
 **COMMENTS ARE STRIPPED IN ONE PLACE, :func:`_strip_comment`, AND THAT IS THE
 POINT.** This module used to drop *whole-line* comments only, and a comment is
