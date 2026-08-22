@@ -1,0 +1,103 @@
+THIS IS NOT A RE-DERIVATION OF THE PAGE'S TABLE, AND CANNOT BE ONE.
+The harnesses behind docs/choosing-a-solver-backend.md's ten rows were never
+committed and cannot be recovered from ten labels. Below are ten harnesses
+BUILT TO those labels; run --rows to see, per row, exactly which parameters
+the label left open and what this battery chose instead. The page's own cells
+are printed beside ours and are never edited into agreement. Wall times are
+this machine's, under this load. Read the direction, not the milliseconds.
+
+ENVIRONMENT (the page's whole problem was a measurement with no provenance)
+  when            : 2026-08-22 19:49 UTC
+  stelling        : 0.2.0.dev0
+  stelling tree   : /home/nick/MSF/stelling-wt/D7/src/stelling
+  jax             : 0.11.0  (jax_enable_x64=True (set by this tool: the page's configuration))
+  z3              : 5.0.0.0
+  cvc5            : 1.3.4
+  python          : 3.12.3
+  platform        : Linux-6.8.0-138-generic-x86_64-with-glibc2.39  (x86_64)
+  cpu             : 12th Gen Intel(R) Core(TM) i7-12850HX  x24
+  load average    : 5.67 3.65 3.52   <- timings below are load-sensitive
+  solver_timeout  : 10000 ms
+  repeats per cell: 3
+
+MECHANISM COLUMN (needs jax, needs NO solver, machine-independent)
+
+ #  row                                page frag  measured   inputs  terms
+------------------------------------------------------------------------------------
+ 1  scalar, linear                     QF_LRA     QF_LRA          1      4
+ 2  64-element array, linear           QF_LRA     QF_LRA         64    258
+ 3  8-element array, linear, false     QF_LRA     QF_LRA          8     34
+ 4  2 vars, degree 2 (AM–GM)           QF_NRA     QF_NRA          2      8
+ 5  2 vars, degree 6 (Motzkin)         QF_NRA     QF_NRA          2     14
+ 6  1 var, degree 3, false             QF_NRA     QF_NRA          1      4
+ 7  32 vars, 16 elementwise products   QF_NRA     QF_NRA         32     83
+ 8  64 vars, 32 elementwise products   QF_NRA     QF_NRA         64    163
+ 9  10-factor product chain            QF_NRA     QF_NRA         10     21
+10  12-factor product chain            QF_NRA     QF_NRA         12     25
+
+MEASURED HERE (this battery's harnesses, not the page's)
+
+ #  row                                frag    both                   z3 alone               cvc5 alone            
+----------------------------------------------------------------------------------------------------
+ 1  scalar, linear                     QF_LRA  unsat, 70–91 ms        unsat, 5–6 ms          unsat, 64 ms          
+ 2  64-element array, linear           QF_LRA  unsat, 75–83 ms        unsat, 8–10 ms         unsat, 68–72 ms       
+ 3  8-element array, linear, false     QF_LRA  sat, 73–75 ms          sat, 9–12 ms           sat, 62–64 ms         
+ 4  2 vars, degree 2 (AM–GM)           QF_NRA  unsat, 68–75 ms        unsat, 7–8 ms          unsat, 66–71 ms       
+ 5  2 vars, degree 6 (Motzkin)         QF_NRA  unsat, 81–85 ms        unsat, 8–9 ms          unsat, 66–69 ms       
+ 6  1 var, degree 3, false             QF_NRA  sat, 68–74 ms          sat, 6–8 ms            sat, 63–74 ms         
+ 7  32 vars, 16 elementwise products   QF_NRA  unsat, 20.0–20.0 s     unsat, 4.0–4.1 s       UNKNOWN, 16.0–16.0 s   ‡
+ 8  64 vars, 32 elementwise products   QF_NRA  UNKNOWN, 26.1–26.2 s   UNKNOWN, 10.1–10.1 s   UNKNOWN, 16.0–16.0 s   ‡
+ 9  10-factor product chain            QF_NRA  unsat, 2.4–2.4 s       unsat, 6–7 ms          unsat, 2.4–2.5 s      
+10  12-factor product chain            QF_NRA  unsat, 16.0–16.0 s     unsat, 6–7 ms          UNKNOWN, 16.0–16.0 s  
+
+THE PAGE'S CELLS, AS PUBLISHED (2026-08 hand-check, harnesses lost)
+
+ #  row                                frag    both                   z3 alone               cvc5 alone            
+----------------------------------------------------------------------------------------------------
+ 1  scalar, linear                     QF_LRA  unsat, 78–112 ms       unsat, 8–9 ms          unsat, 71–84 ms       
+ 2  64-element array, linear           QF_LRA  unsat, 86–91 ms        unsat, 10–12 ms        unsat, 77–87 ms       
+ 3  8-element array, linear, false     QF_LRA  sat, 86–90 ms          sat, 11–13 ms          sat, 75–117 ms        
+ 4  2 vars, degree 2 (AM–GM)           QF_NRA  unsat, 80–83 ms        unsat, 9 ms            unsat, 75–87 ms       
+ 5  2 vars, degree 6 (Motzkin)         QF_NRA  unsat, 92–106 ms       unsat, 12–13 ms        unsat, 81–83 ms       
+ 6  1 var, degree 3, false             QF_NRA  sat, 87–88 ms          sat, 11 ms             sat, 69–71 ms         
+ 7  32 vars, 16 elementwise products   QF_NRA  unsat, ~10.3 s         **UNKNOWN** (timeout)  unsat, 166–175 ms     
+ 8  64 vars, 32 elementwise products   QF_NRA  unsat, ~11.0 s         **UNKNOWN** (timeout)  unsat, 772–792 ms     
+ 9  10-factor product chain            QF_NRA  unsat, ~8.1 s          unsat, 123–133 ms      unsat, 8.3–8.5 s      
+10  12-factor product chain            QF_NRA  unsat, ~16.7 s         unsat, 689–702 ms      **UNKNOWN** (timeout) 
+
+‡ this row's label admits readings that disagree about the direction; see --rows and --variants.
+
+ALTERNATE READINGS OF THE CONTESTED ROWS
+
+The spread IS the content. Each of these is a defensible reading of
+the same row label; where they disagree, the label does not choose,
+and no number from any of them can be filed against the page's row.
+
+row  reading          frag    both                   z3 alone               cvc5 alone            
+----------------------------------------------------------------------------------------------------
+  7  sum-of-squares   QF_NRA  unsat, 183–194 ms      unsat, 22–27 ms        unsat, 163–176 ms     
+  7  cancellation     QF_NRA  unsat, 71–77 ms        unsat, 7 ms            unsat, 70–72 ms       
+  8  sum-of-squares   QF_NRA  unsat, 1.3–1.4 s       unsat, 168–175 ms      unsat, 1.1–1.1 s      
+  8  cancellation     QF_NRA  unsat, 77–81 ms        unsat, 7–9 ms          unsat, 72–79 ms       
+  9  one-variable     QF_NRA  unsat, 72–78 ms        unsat, 6 ms            unsat, 68–80 ms       
+ 10  one-variable     QF_NRA  unsat, 77–83 ms        unsat, 7–10 ms         unsat, 71–78 ms       
+
+  row 7 [sum-of-squares]: sum(a^2 + b^2 - 2ab) >= 0 over [-1,1]^16 x [-1,1]^16
+  row 7 [cancellation]: sum(a*b) - sum(b*a) >= 0 over [-1,1]^16 x [-1,1]^16
+  row 8 [sum-of-squares]: sum(a^2 + b^2 - 2ab) >= 0 over [-1,1]^32 x [-1,1]^32
+  row 8 [cancellation]: sum(a*b) - sum(b*a) >= 0 over [-1,1]^32 x [-1,1]^32
+  row 9 [one-variable]: x^10 >= 0 over [-1, 2], the chain being one variable ten times
+  row 10 [one-variable]: x^12 >= 0 over [-1, 2], the chain being one variable twelve times
+
+FINDING 1 (QF_LRA: both backends decide everything): HELD — 3 of 3 linear rows decided by both backends alone.
+  z3 was faster than cvc5 on every linear row by 6.9x to 12.8x. THAT IS A TIMING, on one machine, and part of it is a process spawn rather than solving — see the page.
+FINDING 2 (QF_NRA: neither backend dominates): NOT DECIDABLE FROM THIS BATTERY.
+  Not because it is false — because the two row labels it rests on do not fix a harness, and the readings that fit them disagree.
+  Rows 7, 8 carry a `contested` note: their labels admit readings that disagree with each other about the direction. Run --variants to see the spread. This tool refuses to file its numbers against those rows.
+  row 9 (10-factor product chain), THIS battery's reading: z3 unsat 6–7 ms, cvc5 unsat 2.4–2.5 s.
+  row 10 (12-factor product chain), THIS battery's reading: z3 unsat 6–7 ms, cvc5 UNKNOWN 16.0–16.0 s.
+FINDING 3 (a full portfolio is not a full-portfolio answer): HELD — rows 7, 10 were decided with both backends installed and invoked, and the verdict disclosed PORTFOLIO DEGRADED because only one answered.
+
+Wall times above are THIS MACHINE'S, at this load, on this build of each backend.
+They are not a property of the solvers. The fragment column is machine-independent;
+nothing else here is.

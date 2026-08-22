@@ -255,6 +255,15 @@ EXPECTED_INVENTORY = {
     # whole of the retraction) and the `semantics="ieee"` + solver_timeout_ms
     # caller error. The page's speed table stays hand-checked and says so.
     #
+    # THAT GREP HAS HITS NOW, and the sentence above is kept as the history it
+    # is rather than repaired into the present tense. D7 added
+    # `tests/test_solver_battery.py`, which holds that page's ten-row table
+    # from outside this module: its row labels, order and published cells
+    # against `tools/solver_battery.py`'s copy of them, and -- with NO backend
+    # installed -- the fragment column and every row's declared input count
+    # re-derived from the traced jaxpr. Not one millisecond, deliberately; see
+    # this file's BLIND_SPOT entry for that page.
+    #
     # And two are a corrected
     # `proposed-*.md` header paying for itself. `proposed-int-literal-convert.md`
     # and `proposed-div-straddle-decline.md` each argued from a hand-written
@@ -1251,7 +1260,19 @@ BLIND_SPOT = {
     "README.md": (1, 1, "READER-SUPPLIES: the jax-only int8 truncation demo "
                         "and its two-line reading, which need no stelling"),
     "docs/choosing-a-solver-backend.md": (
-        0, 1, "NOT-A-TRANSCRIPT: the z3 tactic chain, written as a pipeline"),
+        0, 1, "NOT-A-TRANSCRIPT: the z3 tactic chain, written as a pipeline. "
+              "That page's TWO comparison tables are markdown tables, which "
+              "this inventory does not count and which D7 therefore decided "
+              "about explicitly rather than leaving to the gap: their row "
+              "labels, fragment cells and published cells are held by "
+              "tests/test_solver_battery.py, the fragment column and every "
+              "row's declared input count are RE-DERIVED there with no "
+              "backend, and the six cheap rows' unsat/sat is gated because it "
+              "is a fact about the obligation. Every MILLISECOND on that page "
+              "is gated NOWHERE, deliberately -- a wall time is not a property "
+              "of this tree, and rows 7-10's cells are `did this backend "
+              "finish inside ten seconds`, which is one. tools/"
+              "solver_battery.py re-measures them on demand instead"),
     "docs/norms.md": (
         0, 4, "NOT-A-TRANSCRIPT x3 (a four-line procedure, the cost table "
               "quoted from obligation.py, a subprocess sweep's output) plus "

@@ -16,30 +16,86 @@ If you can only install one, this page says what that costs, measured. It
 is not a recommendation derived from the backends' reputations; every figure
 below was taken against this tool.
 
-**How this page was measured, and what that does not cover.** All figures
-are from `stelling 0.2.0.dev0`, `jax 0.11.0`, CPU, `jax_enable_x64=True`, z3
-`5.0.0` (wheel) and cvc5 `1.3.4-modified` (wheel), Linux x86-64, Python
-3.12, `solver_timeout_ms=10000`, three repeats per cell. Single-backend
+**How this page was measured, and what that does not cover.** This paragraph
+is the provenance of the ORIGINAL figures — the ten-row table below and the
+quoted declines. The re-measured table beside it carries its own, taken on a
+different day and naming the CPU and the load average, neither of which this
+paragraph ever did. All the original figures are from `stelling 0.2.0.dev0`,
+`jax 0.11.0`, CPU, `jax_enable_x64=True`, z3 `5.0.0` (wheel) and cvc5
+`1.3.4-modified` (wheel), Linux x86-64, Python 3.12,
+`solver_timeout_ms=10000`, three repeats per cell. Single-backend
 configurations were produced by restricting the portfolio and by hiding a
 backend from `stelling._optional.available` — nothing was uninstalled, and
 both routes produce the same degraded-portfolio disclosure (below). Wall
 times are one machine's; the *decided / timed-out* column is the part that
 carries the argument, and even that is a timeout budget away from moving.
 
-**THE HARNESSES BEHIND THE TEN-ROW TABLE ARE NOT IN THIS TREE, and a reader
-cannot re-derive it.** `grep` for `Motzkin`, `AM–GM`, `product chain` or
-`elementwise products` across the whole repository returns this file and
-nothing else. So the table is a hand-check taken on one machine at one
-version, and it stays one. Read the ten rows for their *direction*, not their
-milliseconds.
+**THE HARNESSES BEHIND THE TEN-ROW TABLE WERE NEVER COMMITTED, AND TEN ROW
+LABELS DO NOT PIN TEN HARNESSES.** `grep` for `Motzkin`, `AM–GM`, `product
+chain` or `elementwise products` across the whole repository still returns
+this file and nothing else, and that half of the old admission here is not
+repairable by editing: not one of these labels fixes a declared box, a
+predicate or a threshold, and *"scalar, linear"* is satisfied by an infinity
+of obligations that do not take the same time. Read the ten rows for their
+*direction*, not their milliseconds — that instruction stands, and what
+follows makes it sharper rather than retiring it.
 
-**Exactly two blocks on this page ARE gated**, and they are the two that make
-claims about mechanism rather than speed: the `x**(1/80)` degree-cap decline
-and the `semantics="ieee"` caller error. Both are `python` blocks whose output
-`tests/test_doc_examples.py` compares byte for byte. Everything else here —
-the ten-row table, the routing figures, the quoted declines — is hand-checked
-and will go stale the way hand-checks do. The section this page most needed
-gating is the one that had gone stalest: see the retraction below.
+**What HAS changed is that there is now a battery you can run.**
+`tools/solver_battery.py` ships in the sdist (`/tools` is in the allowlist),
+drives ten harnesses BUILT TO those labels, and prints — for every row — the
+parameters the label leaves open and the ones it therefore had to choose:
+
+- `python tools/solver_battery.py --rows` is the inventory: per row, what the
+  label fixes and what this battery picked. It needs neither jax nor a solver,
+  because it is data.
+- `python tools/solver_battery.py --fragments` re-derives the `fragment`
+  column. It needs jax and **no backend** — the fragment is decided by
+  `stelling.obligation`'s slicer off the traced jaxpr, before `escalate`
+  discovers anything — so it is the one column below that reproduces on any
+  machine, including in the zero-solver lane.
+- `python tools/solver_battery.py` drives the whole battery against whatever
+  is installed, and says cell by cell what it could not measure and why. With
+  no backend at all it still prints the mechanism column and exits 0.
+- `python tools/solver_battery.py --variants` drives the *alternate readings*
+  of the rows whose labels admit more than one. Read that before trusting the
+  nonlinear direction below; it is where this page's headline nonlinear
+  finding stopped being reproducible.
+
+**It is deliberately NOT a re-derivation of the table below, and it says so on
+every run.** The two tables are printed side by side and the tool never edits
+its numbers into the page's, because they came from different harnesses.
+Making one look like the other would be the worse defect: an unreproducible
+table is at least honest about being unreproducible, while an invented harness
+*looks* reproducible.
+
+**WHAT IS GATED ON THIS PAGE, AND WHAT IS DELIBERATELY NOT.** Two `python`
+blocks are executed and their output compared byte for byte by
+`tests/test_doc_examples.py`: the `x**(1/80)` degree-cap decline and the
+`semantics="ieee"` caller error. They are the two blocks that make claims
+about mechanism rather than speed.
+
+More of the ten-row table is now held, by `tests/test_solver_battery.py`,
+and the cut it makes is the same one — mechanism yes, clock no:
+
+| held | by | needs |
+|---|---|---|
+| the table's ten row labels, their order, their `fragment` cells and all three of their published cells, against `tools/solver_battery.py`'s copy of them | `test_the_battery_is_the_page_s_table_row_for_row` | nothing |
+| every row of the battery still declaring which parameters the label left open — a row that stopped would be claiming a reconstruction nobody performed | `test_every_row_says_what_the_page_left_open` | nothing |
+| the `fragment` column, re-derived from the traced jaxpr | `test_the_fragment_column_is_what_the_page_publishes` | jax, **no backend** |
+| *"32 vars"*, *"64-element array"*, *"2 vars"* — every row's declared input count, read off the emitted slice rather than off its own label | `test_each_row_declares_the_variables_its_label_names` | jax, **no backend** |
+| that every harness still ESCALATES — an obligation interval propagation decides never reaches a backend, so it cannot be a row of a solver comparison at all | `test_no_row_is_decided_before_a_backend_is_asked` | jax, **no backend** |
+| the six cheap rows' `unsat`/`sat` — a fact about the obligation, not about a backend's speed | `test_the_cheap_rows_answer_what_their_obligation_forces` | jax and a backend |
+
+**Not one millisecond on this page is gated, and that is a decision rather
+than an omission.** A wall time is not a property of this tree; a gate on one
+would go red when the box is busy and green when the claim is wrong. Rows 7
+to 10's published cells are *"did this backend finish inside ten seconds"*,
+which is a millisecond wearing a hat, so they are not gated either — they are
+re-measured on demand by the battery instead, and the reason is recorded in
+`tests/test_doc_examples.py`'s `BLIND_SPOT` entry for this page. The routing
+figures and the quoted declines below remain hand-checked and will go stale
+the way hand-checks do. The section this page most needed gating is the one
+that had gone stalest: see the retraction below.
 
 *How to restrict the portfolio yourself, since this page's own method needs
 it:* `check(harness, …, solver="z3")` or `solver="cvc5"`. That is the
@@ -131,6 +187,16 @@ variables — were decided by z3 in tenths of a second and *timed cvc5 out*.
 Neither backend dominates the other on the nonlinear fragment. There is no
 "install this one" answer that survives both rows.
 
+> **THIS IS THE ONE THAT DID NOT REPRODUCE, AND IT IS THE FINDING OF THE
+> RE-MEASUREMENT.** The deep-and-narrow half held, harder than it says here.
+> The wide-and-shallow half did not: on the most literal reading of *"32 vars,
+> 16 elementwise products"* — two declared arrays of sixteen, sixteen
+> elementwise products between them — the split ran the **other way**, z3
+> discharging in about four seconds while cvc5 hit its wall guard. Two other
+> readings of the same label showed **no split at all**. The label does not
+> choose between them. See *"The same ten labels, re-measured here"* below;
+> nothing there refutes this row, and that is exactly the problem — it cannot.
+
 **3. A full portfolio is not the same as a full-portfolio answer.** On the
 16-products row, both backends were installed, invoked, and stamped; only
 cvc5 answered. The verdict was `VERIFIED` and said so itself:
@@ -139,12 +205,135 @@ cvc5 answered. The verdict was `VERIFIED` and said so itself:
   PORTFOLIO DEGRADED — assert #0 was decided by ONE solver backend (cvc5 (wheel)), not the two the portfolio is designed around; the notes say which backend was lost and why
 ```
 
+*(This one reproduced, as a mechanism. On the battery's reading of that row it
+was **z3** that answered and cvc5 that did not, so the same disclosure comes
+out with the two names swapped. WHICH backend gets lost is the part the row
+label does not fix; that a lost backend is disclosed at all is the part that
+does not depend on a harness, and that is what held.)*
+
 **Not measured:** anything above 10 s, anything at `float32` or under
 `semantics="ieee"` (which declines escalation wholly), the affine
 refinement path (`refine="affine"`, which reduces what reaches a solver at
 all), an external cvc5 binary via `STELLING_CVC5`, and any backend other
 than the two wheels. The battery is ten small hand-written obligations
 plus the declines listed below, not a corpus.
+
+### The same ten labels, re-measured here, and what moved
+
+`python tools/solver_battery.py --variants --repeats 3`, run in this tree on
+**2026-08-22** at `stelling 0.2.0.dev0`, `jax 0.11.0`, `jax_enable_x64=True`,
+z3 `5.0.0` (wheel), cvc5 `1.3.4` (wheel), CPU, Python 3.12, Linux x86-64, a
+12th-gen i7-12850HX — **and a load average of 4.0**, because other work was
+running on the box. These are not quiet-box seconds. The tool prints the load
+average above its own table for exactly that reason, and every direction below
+was reproduced by a second full run immediately before it at load 5.7 — the
+seconds moved by up to 10% between the two, the answers by nothing. `solver_timeout_ms=10000`, three repeats per cell: the same
+budget and the same repeat count as the table above.
+
+**These are not the cells above, re-taken.** They are a different battery's
+cells, on harnesses this page can point at. They are printed beside the table
+above rather than substituted into it, because substituting them would file a
+harness choice as a re-measurement of somebody else's harness — and the
+`chose here` lines that `--rows` prints under every row are the reason that
+would be a lie. `tools/solver_battery.py` is where these are maintained; this
+is the reader's copy of them, and it will go stale the way a copy does.
+
+| row (same label) | fragment | both | z3 alone | cvc5 alone |
+|---|---|---|---|---|
+| scalar, linear | `QF_LRA` | unsat, 73–80 ms | unsat, 6–9 ms | unsat, 71–78 ms |
+| 64-element array, linear | `QF_LRA` | unsat, 81–91 ms | unsat, 9–13 ms | unsat, 74–88 ms |
+| 8-element array, linear, false | `QF_LRA` | sat, 75–81 ms | sat, 8–10 ms | sat, 64–73 ms |
+| 2 vars, degree 2 (AM–GM) | `QF_NRA` | unsat, 75–77 ms | unsat, 8–9 ms | unsat, 64–72 ms |
+| 2 vars, degree 6 (Motzkin) | `QF_NRA` | unsat, 75–85 ms | unsat, 9–14 ms | unsat, 70–79 ms |
+| 1 var, degree 3, false | `QF_NRA` | sat, 78–83 ms | sat, 7–8 ms | sat, 67–71 ms |
+| 32 vars, 16 elementwise products ‡ | `QF_NRA` | unsat, 20.2–20.6 s | unsat, 4.4–4.6 s | **UNKNOWN** (16.0 s wall) |
+| 64 vars, 32 elementwise products ‡ | `QF_NRA` | **UNKNOWN**, 26.1–26.2 s | **UNKNOWN**, 10.1–10.2 s | **UNKNOWN** (16.0 s wall) |
+| 10-factor product chain | `QF_NRA` | unsat, 2.3–2.5 s | unsat, 6 ms | unsat, 2.3 s |
+| 12-factor product chain | `QF_NRA` | unsat, 16.0 s | unsat, 6 ms | **UNKNOWN** (16.0 s wall) |
+
+‡ **no cell in these two rows may be read against the row above it.** Their
+labels admit readings that disagree about which backend finishes; the numbers
+here are one reading's and the battery marks them rather than publishing them
+as the row.
+
+**What held.**
+
+- **The `fragment` column: all ten, exactly.** It is the one column of that
+  table that is a property of this tree rather than of a machine, and it now
+  has a gate that runs with no backend installed.
+- Every row's declared input count, too: *32 vars* is 32 declared inputs in
+  the emitted slice, *64-element array* is 64, and so on for all ten.
+- **Finding 1** — on `QF_LRA` both backends decided everything, and z3 was
+  faster on every linear row, by 8.0x to 11.8x. The order-of-magnitude claim
+  holds, with the same caveat the page already makes about the subprocess
+  spawn in cvc5's floor.
+- **Finding 3** — a full portfolio is not a full-portfolio answer. Rows 7 and 10
+  were decided with both backends installed, invoked and stamped and only one
+  answering, and the verdict said `PORTFOLIO DEGRADED` itself.
+- **The deep-and-narrow half of finding 2**, and more sharply than the table
+  above puts it: on this battery's reading of the chain rows, z3 discharged
+  both in single-digit milliseconds while cvc5 took seconds at ten factors and
+  did not finish at twelve.
+
+**WHAT DID NOT HOLD: the wide-and-shallow half of finding 2 — and the reason
+matters more than the result.** Three defensible readings of *"32 vars, 16
+elementwise products"* were built and driven (`--variants`), three repeats
+each:
+
+| reading of the label | z3 alone | cvc5 alone |
+|---|---|---|
+| `sum(a*b) <= sum(a)`, `a,b ∈ [0,1]¹⁶` — the literal one: sixteen products, thirty-two variables | unsat, 4.4–4.6 s | **UNKNOWN** (16.0 s wall) |
+| `sum(a² + b² − 2ab) >= 0`, `a,b ∈ [−1,1]¹⁶` | unsat, 22 ms | unsat, 169–182 ms |
+| `sum(a*b) − sum(b*a) >= 0`, `a,b ∈ [−1,1]¹⁶` | unsat, 6–9 ms | unsat, 69–81 ms |
+| **the row above, as published** | **UNKNOWN** (timeout) | unsat, 166–175 ms |
+
+The first **reverses** this page's direction. The second reproduces the
+page's cvc5 cell to within a few milliseconds and still does not reproduce its
+z3 cell — which is the cleanest statement of the problem there is: **matching
+one cell is not identifying a harness.** The third shows no split either.
+
+So the honest reading is not *"the page's row 7 is wrong"*. It is that **row 7
+is not reconstructible**, and no number produced by any of these three
+harnesses may be filed against it. The battery marks rows 7 and 8 `‡`, prints
+what its own reading measured, and refuses to file any of it against the
+published row — that refusal is the finding, not the four seconds.
+
+The chain rows are underdetermined in the same way, though less violently. A
+*"10-factor product chain"* can be ten variables or one variable ten times,
+and `x¹⁰ >= 0` shows no split at all: z3 6–7 ms against cvc5 71–73 ms. The
+direction above survived one reading and vanished under another; it did not
+reverse under either, which is why rows 9 and 10 carry no `‡`.
+
+**One thing the re-measurement recovered rather than chose.** The page never
+says *what* it timed, and that was the one open parameter that did not have to
+be picked — it can be read back out of the page's own arithmetic. Its `both`
+cells are the **sum** of its own two single-backend cells:
+
+- row 10 — cvc5's wall guard (16.0 s, measured here) plus z3's 689–702 ms is
+  **16.69–16.70 s**, against a published `~16.7 s`;
+- row 7 — z3's timeout (10.0–10.1 s) plus cvc5's 166–175 ms is **10.2–10.3 s**,
+  against a published `~10.3 s`;
+- row 8 — the same timeout plus 772–792 ms is **10.8–10.9 s**, against a
+  published `~11.0 s`;
+- row 9 is the one that does not fit: 123–133 ms plus 8.3–8.5 s is
+  **8.4–8.6 s**, against a published `~8.1 s`.
+
+Three of four land inside 0.2 s and one is 0.3–0.5 s out, which is enough to
+fix the definition and not enough to pretend it is certain. So the battery
+sums the per-invocation milliseconds stelling publishes in the verdict's notes
+— *not* the `check()` wall, which on a discharged row also pays the vacuity
+widen re-check and would double every one of them.
+
+**And one thing neither table says out loud: `solver_timeout_ms=10000` is not
+a ten-second wall.** z3's `:timeout` is its own and lands near it — 10.1 s
+measured. The cvc5 wheel is driven through a wall-guarded child process
+because its `tlimit` does not reliably preempt the coverings solver, and that
+guard is `timeout * 1.5 + 1 s`: **16.0 s for a ten-second budget**, measured
+here on three rows. A two-backend obligation on which both backends time out
+therefore costs about **26 s**, not 20 — which is what row 8 cost above. If
+you are sizing a CI budget from the ten seconds in this page's provenance
+paragraph, you are out by more than half. The battery prints every cell that
+ran past its budget, with the backend named.
 
 ## What one backend alone costs you
 
@@ -196,7 +385,9 @@ note: no SMT solver is installed — pip install "stelling[solvers]" (or set STE
 
 ## If you are installing exactly one
 
-Pick by the shape of your obligations, then re-measure on your own:
+Pick by the shape of your obligations, then re-measure on your own —
+`python tools/solver_battery.py` is where to start, and its `--rows` output
+is a demonstration of how much of a row a shape description leaves open:
 
 - **Mostly linear** — sums, scalings by constants, moving averages,
   concatenations, comparisons against thresholds: `[z3]`. It is the
@@ -205,7 +396,11 @@ Pick by the shape of your obligations, then re-measure on your own:
 - **Mostly polynomial** — products of two declared arrays, squares,
   `integer_pow`, division by a declared value: `[cvc5]`. It is the
   `QF_NRA` primary, and the wide nonlinear rows above are the ones z3
-  could not finish.
+  could not finish. **This is the weakest bullet on the page, and the
+  re-measurement is why**: those two rows are the ones a reader cannot
+  reconstruct, and on the most literal reading of their labels the split ran
+  the other way — z3 discharged and cvc5 did not finish. Read this as an
+  argument for measuring your own obligations, not as one for uninstalling z3.
 - **You do not know, or it is CI**: `[solvers]`. Both nonlinear failure
   directions are real, and CI is exactly where you cannot afford to
   discover which one you have.
