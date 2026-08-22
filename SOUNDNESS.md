@@ -7187,11 +7187,11 @@ and a count over entries that happened to say something is not a count.
   missed; that is why it is fixed and this one is not.
 
   **THE DEFERRAL STANDS, AND THE 0.2.0 D5 ACCURACY PASS MEASURED WHY RATHER
-  THAN REPEATING IT.** D5 set out to pay this debt — it was already amending
-  the manifest for two other routed findings, so a `dest_sha256` update and
-  a `not_carried` entry were sunk cost. **The cost is not confined to the
-  manifest, and that is the fact this note was missing.** Driven in a
-  worktree, on `SF-0.2.0-64` and reverted afterwards:
+  THAN REPEATING IT.** D5 set out to pay this debt: two other routed lines
+  needed amending in the same pass, so a `dest_sha256` update and a
+  `not_carried` entry looked like sunk cost. **The cost is not confined to
+  the manifest, and that is the fact this note was missing.** Driven in a
+  worktree, on `SF-0.2.0-64`, and reverted afterwards:
 
   ```
   edit one line inside a routed block, manifest untouched
@@ -7228,8 +7228,10 @@ and a count over entries that happened to say something is not a count.
     accepted, 47 refused, 0 faces split**. The partition claim — the part
     that carries soundness — is the half that reproduces; the population
     grew when `_lying_iter_candidates` and `_claiming_candidates` were
-    added, which is drift and not a bad original: the `321209d` version of
-    `_population()` against today's `stelling` still gives exactly 51. And
+    added, which is drift and not a bad original — driven: the `321209d`
+    version of `_population()` run against today's `stelling` still gives
+    exactly **51 objects, 8 accepted, 43 refused**, the figures as written.
+    And
     the sentence credits the pin with measuring the figures, which it does
     not — `test_the_measured_partition_IS_the_documented_rule` asserts
     floors (`>= 15` refused, `>= 4` accepted, `>= 2` unreadable) and never
@@ -7249,9 +7251,9 @@ and a count over entries that happened to say something is not a count.
     all, has already been updated to the five, and requires only that the
     two surviving `off_ir` names appear ANYWHERE in the entry text — so it
     stays green while the entry says six and three. This is precisely the
-    shape SF-0.2.0-14 warns about 800 lines earlier: *"a line that still
-    exists and has become something else is exactly the claim nothing
-    checks."*
+    shape `SF-0.2.0-14` warns about in the same routed section: *"Cited by
+    SYMBOL and not by line on purpose … a line that still exists and has
+    become something else is exactly the claim nothing checks."*
 
   **Whoever pays this debt pays it once for all three**, since the
   `**N blocks were edited in transit**` sentence has to move only once
