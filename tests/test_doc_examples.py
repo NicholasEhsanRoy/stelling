@@ -19,16 +19,16 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                51
+    ```python blocks                                53
       marked illustrative — not run                 19
-      EXECUTED (exit 0 required)                    32
+      EXECUTED (exit 0 required)                    34
         marked run-only — output not compared        3
-        OUTPUT COMPARED against a fence             29
-    plain ``` fences                                72
-      consumed as an example's claimed output       29
+        OUTPUT COMPARED against a fence             31
+    plain ``` fences                                74
+      consumed as an example's claimed output       31
       HAND-WRITTEN, compared to nothing             43
-So the claim this file earns is: *every runnable example runs, and 29 of
-the 32 have their stdout compared byte for byte after a narrow
+So the claim this file earns is: *every runnable example runs, and 31 of
+the 34 have their stdout compared byte for byte after a narrow
 normalisation.* The 43 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
@@ -161,7 +161,17 @@ EXPECTED_INVENTORY = {
     # the eager detector armed it raises by design, and with it off it prints
     # nothing, so there is no output to compare either way; it is a record of
     # what jax does, which is what `illustrative` means.
-    # B19 added two, both executed and compared, and both are a corrected
+    # B19 added four. Two are on `docs/choosing-a-solver-backend.md`, which
+    # had NO gate at all -- `grep -rn choosing-a-solver-backend tests/
+    # .github/` had no hits -- and which had a whole section arguing from a
+    # case the emission cannot produce, retracted in `solvers.py` on
+    # 2026-08-20 and not on the page. Its two new blocks are the two claims
+    # on it that are about MECHANISM rather than wall-clock: the `x**(1/80)`
+    # degree-cap decline (which prints that ZERO backends were invoked, the
+    # whole of the retraction) and the `semantics="ieee"` + solver_timeout_ms
+    # caller error. The page's speed table stays hand-checked and says so.
+    #
+    # And two are a corrected
     # `proposed-*.md` header paying for itself. `proposed-int-literal-convert.md`
     # and `proposed-div-straddle-decline.md` each argued from a hand-written
     # fence that had gone false under the commit that BUILT the thing they
@@ -171,11 +181,11 @@ EXPECTED_INVENTORY = {
     # booleans, not a render, because the normaliser only rewrites a source-info
     # line that begins the line and a fence carrying an inline temp path could
     # not be byte-compared.
-    "python_blocks": 51,
+    "python_blocks": 53,
     "illustrative": 19,
-    "executed": 32,
+    "executed": 34,
     "run_only": 3,
-    "compared": 29,
+    "compared": 31,
     # B15 added two: `docs/overflow-tripwire.md` now quotes the trace gate's
     # narrowed refusal and its NOT-FULLY-OBSERVED refusal side by side, which
     # is the whole point of that section — the two sentences have to be
@@ -198,7 +208,7 @@ EXPECTED_INVENTORY = {
     # which is the gap that program has in jax's DEFAULT configuration.
     # Measured, hand-written, attached to nothing;
     # `tests/test_tripwire_eager.py` re-drives every line of it.
-    "plain_fences": 72,
+    "plain_fences": 74,
     "plain_unattached": 43,
 }
 

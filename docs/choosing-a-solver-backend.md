@@ -13,22 +13,41 @@ weaker in what they *claim* — a one-backend `VERIFIED` is still a
 stelling says so in the verdict rather than letting you find out later.
 
 If you can only install one, this page says what that costs, measured. It
-is not a recommendation derived from the backends' reputations; every
-figure below came out of this tree.
+is not a recommendation derived from the backends' reputations; every figure
+below was taken against this tool.
 
 **How this page was measured, and what that does not cover.** All figures
 are from `stelling 0.2.0.dev0`, `jax 0.11.0`, CPU, `jax_enable_x64=True`, z3
 `5.0.0` (wheel) and cvc5 `1.3.4-modified` (wheel), Linux x86-64, Python
 3.12, `solver_timeout_ms=10000`, three repeats per cell. Single-backend
-configurations were produced with `SolverConfig(only=…)` and by hiding a
+configurations were produced by restricting the portfolio and by hiding a
 backend from `stelling._optional.available` — nothing was uninstalled, and
 both routes produce the same degraded-portfolio disclosure (below). Wall
 times are one machine's; the *decided / timed-out* column is the part that
 carries the argument, and even that is a timeout budget away from moving.
-Unlike the code blocks in [quickstart](quickstart.md) and
-[harness API](harness-api.md), **nothing on this page is re-run by
-`tests/test_doc_examples.py`** — it is a hand-check, and it will go stale
-the way hand-checks do.
+
+**THE HARNESSES BEHIND THE TEN-ROW TABLE ARE NOT IN THIS TREE, and a reader
+cannot re-derive it.** `grep` for `Motzkin`, `AM–GM`, `product chain` or
+`elementwise products` across the whole repository returns this file and
+nothing else. So the table is a hand-check taken on one machine at one
+version, and it stays one. Read the ten rows for their *direction*, not their
+milliseconds.
+
+**Exactly two blocks on this page ARE gated**, and they are the two that make
+claims about mechanism rather than speed: the `x**(1/80)` degree-cap decline
+and the `semantics="ieee"` caller error. Both are `python` blocks whose output
+`tests/test_doc_examples.py` compares byte for byte. Everything else here —
+the ten-row table, the routing figures, the quoted declines — is hand-checked
+and will go stale the way hand-checks do. The section this page most needed
+gating is the one that had gone stalest: see the retraction below.
+
+*How to restrict the portfolio yourself, since this page's own method needs
+it:* `check(harness, …, solver="z3")` or `solver="cvc5"`. That is the
+supported route and it is validated eagerly — anything other than `None`,
+`"z3"` or `"cvc5"` raises `ValueError` at the call. The internal
+`SolverConfig(only=…)` object is **not** accepted there (passing one raises
+that same `ValueError`); `check()` builds it for you, which is what the
+`SolverConfig.only=('z3',)` in the disclosure below is reporting.
 
 ## How an obligation reaches a backend
 
@@ -191,6 +210,15 @@ Pick by the shape of your obligations, then re-measure on your own:
   directions are real, and CI is exactly where you cannot afford to
   discover which one you have.
 
+**There is a fourth option this page used to omit, and it is usually the
+right one: install both and RESTRICT.** `check(harness, …, solver="z3")`
+gives you a single-backend run out of a two-backend install, per call — so
+you can take z3's speed on a linear obligation and still have cvc5 there for
+the nonlinear one, without a second environment. The verdict says which
+backend was excluded and why, so a restricted run is never confused with a
+missing install. Uninstalling is the irreversible version of the same
+decision, taken once for every obligation you will ever write.
+
 ## What no backend can reach
 
 Some obligations never reach a solver at all, and *which* backend you
@@ -207,7 +235,42 @@ of these were measured; the text is what the tool printed:
 | an obligation over the emission budget (512 element terms) | `obligation not attempted: it needs 1024 element terms and 256 root conjuncts, and its element terms put it over the per-obligation emission budget of 512` |
 | an `assert_` written inside a `jax.jit` helper, a `cond` branch, or a `scan`/`while_loop` body | `the assert this obligation was recorded from is not a top-level equation of the query (it sits inside a sub-jaxpr — a transparent call body, a cond branch, or an undescended scan/while body), and escalation slices top-level asserts only` |
 | a `dot_general` whose operands' contracted (or batch) extents disagree — loadable through `from_dict`, never traceable, since jax refuses it | `'dot_general' declined: dot_general contracted dims disagree: lhs[0]=2 vs rhs[0]=4` |
-| any propagation under `semantics="ieee"`, or one that constrained an assume | escalation is refused wholly, before backend discovery |
+| a propagation that constrained an assume | escalation is refused wholly, before backend discovery |
+
+**And one case that is NOT in that table, because it is not a decline.**
+`semantics="ieee"` together with `solver_timeout_ms` is a **caller error**: it
+raises at `check()` and there is no verdict to quote a reason from.
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp
+from stelling.harness import any_array, assert_
+from stelling.preconditions import check
+
+
+def square_under_bound():
+    x = any_array((), jnp.float64, (1.0, 2.0))
+    return assert_(x * x <= 4.0)
+
+
+try:
+    check(square_under_bound, vacuity_mode="inputs-only",
+          semantics="ieee", solver_timeout_ms=5_000)
+    print("returned a verdict")
+except ValueError as e:
+    print("ValueError:", e)
+```
+
+```
+ValueError: solver_timeout_ms and semantics='ieee' are contradictory: the SMT backends emit over the reals (QF_LRA/QF_NRA) and cannot model format-specific rounding or overflow. Remove solver_timeout_ms for ieee mode, or use semantics='real' for solver escalation.
+```
+
+It used to share the last row above with the constrained-assume case, under a
+caption promising a verdict line for every entry. The two behave categorically
+differently — one is a decline inside a verdict, the other never reaches one —
+so they are separated here.
 
 Installing the other backend does not move any of these. If your
 `UNKNOWN`s look like this, a solver extra is not what you are missing.
@@ -248,27 +311,117 @@ licensing, not probed here. Only a source build with `./configure.sh --gpl
 None of the nonlinear rows in the table above were re-run against a GPL
 build, so nothing here says what those components would be worth.
 
-## z3 and high-degree rational pow (automatic workaround)
+## z3 and high-numerator rational pow (automatic workaround)
 
-When a rational exponent like `x**(1/80)` is emitted, the auxiliary-variable
-encoding produces a degree-80 polynomial (`y^80 = x`). z3's default solver
-times out on this class of problem (measured: >10s at degree 80 with
-perfect-square bounds `[1, 100]`). Since 0.2.0, stelling automatically
-detects rational-pow auxiliary variables in the emitted script and switches
-z3 to a custom tactic chain:
+Since 0.2.0, stelling detects rational-pow auxiliary variables in the emitted
+script and switches z3 to a custom tactic chain:
 
 ```
 simplify -> solve-eqs -> factor(num_primes=4) -> purify-arith -> tseitin-cnf -> nlsat
 ```
 
-This restores the z3 cross-check (measured: 0.35-0.6s at degree 80). cvc5
-handles these polynomials natively and requires no workaround. The tactic is
-transparent to the user: no configuration is needed, the portfolio runs at
-full redundancy, and the verdict discloses no difference.
+It fires only when the script contains `(declare-const aux_...)` declarations
+— the marker for rational-pow auxiliary variables. All other scripts use z3's
+default `Solver()` unchanged, and the tactic needs no configuration.
 
-The workaround fires only when the script contains `(declare-const aux_...)`
-declarations (the marker for rational-pow auxiliary variables). All other
-scripts use z3's default `Solver()` unchanged.
+**RETRACTION, 2026-08-20.** Until that date this section argued from
+`x**(1/80)` and a *"degree-80 factoring pathology"*, with two figures —
+*"measured: >10s at degree 80"* and *"measured: 0.35-0.6s at degree 80"*.
+**The emission cannot produce degree 80**, so neither figure can have been
+taken there. A binary64 exponent's exact value is dyadic, so
+`stelling.obligation.pow_exponent_rational` returns `p/q` in lowest terms with
+`q` a power of two; under `RATIONAL_POW_DEGREE_CAP = 128` the admitted degrees
+are the odd values below 128 together with 2, 4, 8, 16, 32, 64 and 128, and 80
+is in none of them. The worked case declines before any solver sees it, and — unlike everything
+above it on this page — that is re-derived on every test run rather than
+quoted:
+
+```python
+from fractions import Fraction
+
+import jax
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp
+from stelling.harness import any_array, assert_
+from stelling.obligation import RATIONAL_POW_DEGREE_CAP
+from stelling.preconditions import check
+
+
+def eightieth_root():
+    x = any_array((), jnp.float64, (1.0, 100.0))
+    return assert_(x ** (1 / 80) >= 1.0)
+
+
+print("exact value of the exponent :", Fraction(1 / 80))
+print("emission cap                :", RATIONAL_POW_DEGREE_CAP)
+
+verdict = check(eightieth_root, vacuity_mode="inputs-only",
+                solver_timeout_ms=10_000)
+reason = next(n for n in verdict.notes if "escalation declined" in n)
+print("status                      :", verdict.status)
+print("declined over the cap       :",
+      f"over the emission cap {RATIONAL_POW_DEGREE_CAP}" in reason)
+print("degree it would have needed :",
+      reason.split("would be degree ")[1].split(",")[0])
+print("backends invoked            :", len(verdict.solver_redundancy))
+```
+
+```
+exact value of the exponent : 3602879701896397/288230376151711744
+emission cap                : 128
+status                      : UNKNOWN
+declined over the cap       : True
+degree it would have needed : 288230376151711744
+backends invoked            : 0
+```
+
+`288230376151711744` is `2**58` — the exponent's exact denominator — and
+**zero backends were invoked**, which is the whole of the retraction: no
+figure can be measured at a degree the emission declines to produce.
+
+The integer branch cannot reach it either: it expands inline, declares no
+`aux_`, and 80 is over `INTEGER_POW_EXPANSION_CAP = 64` regardless.
+
+**What the tactic actually buys, and what it costs.** The family it reaches is
+the high-numerator `q=128` one. Re-measured 2026-08-20 on z3 5.0.0 over the
+five pairs `obligation.py`'s cost table names, all five `unsat` in both modes
+at a 120 s script timeout — default → tactic:
+
+| pair | default | tactic |
+|---|---|---|
+| `1/128` | 0.31 s | 0.38 s |
+| `127/2` | 0.04 s | 0.04 s |
+| `127/128` | 50.03 s | **21.39 s** |
+| `113/128` | 50.01 s | **18.23 s** |
+| `105/128` (worst of the 448) | 50.01 s | **69.80 s** |
+| **total** | 150.39 s | **109.84 s** |
+
+**It is kept for the NET, not for any one row.** It roughly halves the two
+expensive `q=128` rows and **loses about 20 s on `105/128`**, and a string
+sniff on `aux_` cannot tell those rows apart. Seconds are machine-specific and
+were taken on a loaded box, so the ORDERING is the content, not the digits.
+The same figures and the same reasoning are at `src/stelling/solvers.py`'s
+`_run_z3`, which is where they are maintained; this section is the reader's
+copy of them.
+
+**It does NOT restore full redundancy on the worst reachable cases.** At this
+page's own 10 s budget, `x**(105/128)` and `x**(127/128)` both still time z3
+out. Driven here, `x ∈ [1, 100]`, `solver_timeout_ms=10000`: z3 timed out at
+10.0 s on both, and on this machine cvc5 timed out too, so both obligations
+came back UNKNOWN with no backend deciding. A longer budget is what decides
+them, and depending on which backend answers first you get either a full
+cross-check or a `PORTFOLIO DEGRADED` single-backend discharge — not the "full
+redundancy, and the verdict discloses no difference" this section used to
+promise.
+
+**The tactic is not gated on the z3 version, deliberately.** z3 5.1 fixes the
+degree-80 factoring pathology upstream — the case that cannot be reached — and
+does not touch the `q=128` family, so switching it off on 5.1 would be a
+regression. z3 5.1 is not installed here; that column is cited from the
+campaign measurement of 2026-08-18, not re-measured. Neither the version nor
+the mode has moved an ANSWER on this family in any measured cell — only a
+time.
 
 ## Related
 
