@@ -451,7 +451,12 @@ def test_incompatible_shapes_raise_interval_error():
 # outward reddens; an operation whose tightness is loosened OR tightened
 # reddens; and the docstring is then checked for what it CLAIMS about the
 # operations that are not correctly directed-rounded, not for which digits
-# it contains. The four reddenings were watched, one mutation at a time.
+# it contains. Nine mutations were watched go red for it, one at a time and
+# each from green: an inward-rounding `half()` both unclassified and
+# classified, the false universal in two spellings, the scope prose gutted
+# twice, `mul` loosened, `sqrt` tightened, and `add` no longer rounding
+# outward at all. The commit that added this table lists every one of them
+# with the message it produced.
 
 CORRECTLY_ROUNDED = "correctly directed-rounded"
 ONE_ULP_BUMPED = "unconditional one-ulp bump"
@@ -1094,10 +1099,14 @@ def test_every_declared_discipline_is_driven_against_the_running_code():
     and seeing the whole set that shifted is what tells a reader whether
     they changed a rule or broke one.
 
-    What each discipline is checked FOR is written beside its constant, and
-    every one of them is two-sided -- tightening an operation reddens
-    exactly as loosening it does, because the claim being pinned is the
-    RULE, not an upper bound on the width.
+    What each discipline is checked FOR is written beside its constant.
+    Every discipline that says anything about TIGHTNESS is checked
+    two-sidedly -- tightening an operation reddens exactly as loosening it
+    does, because the claim being pinned is the RULE and not an upper bound
+    on the width. ``NOT_OUTWARD`` is the exception and makes no tightness
+    claim at all: what it pins is that the bracket misses a real, so an
+    operation that BECOMES outward reddens and one that widens further does
+    not.
     """
     bad: list[str] = []
     for name in sorted(DISCIPLINE):
@@ -1324,10 +1333,19 @@ def test_the_docstring_makes_no_universal_tightness_claim():
     A quoted, attributed history of a wording IS allowed -- this docstring
     keeps both retracted sentences on purpose, because a correction with no
     record of what was corrected is how the same claim gets made a third
-    time. What is not allowed is one MADE. The quotes carry their
-    retraction in the same sentence; the patterns below are matched against
-    the whole text, so a history that stops saying "it read" and starts
-    saying "it reads" reddens.
+    time. What is not allowed is one MADE, so the QUOTATION MARK is the cut:
+    :func:`_doc_prose` drops what is between a pair of them and the patterns
+    are matched against what is left.
+
+    **AND THAT IS A LIMIT, STATED RATHER THAN IMPLIED.** A false universal
+    written inside quotation marks would not redden here, and neither would
+    a rewording this pattern list does not anticipate -- no string check
+    can promise otherwise, and the guards this replaces promised it by
+    accident. What makes the claim expensive to re-introduce anyway is
+    :func:`test_the_docstring_names_every_operation_a_reader_would_guess_wrong`:
+    a universal that is false about the operations in
+    :func:`_counter_examples` has to sit in a docstring that names every one
+    of them beside the discipline contradicting it.
     """
     hits = [p for p in _UNIVERSAL_TIGHTNESS
             if re.search(p, _doc_prose(), re.I)]
