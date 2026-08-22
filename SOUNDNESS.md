@@ -189,8 +189,8 @@ Every verdict object stamps, at minimum:
   withdraws it here. The *derivation* claim — which is what the repair
   actually bought, and which holds — is what stands.
 
-  Neither defect was
-  reachable by the tests that shipped with the tell: they contained no
+  Neither defect was reachable by the tests that shipped with the tell: they
+  contained no
   float16, no bfloat16 and no mixed-dtype comparison, so a mutant for the
   band TEXT was guarding a layer below the claim being made. The suite now
   carries all three axes, each red on a mutant.
@@ -247,9 +247,12 @@ Every verdict object stamps, at minimum:
   beside it.
 
   **THIS SENTENCE STOOD IN THE PRESENT TENSE FOR TWENTY-FIVE DAYS AND
-  NOTHING IN THE TREE COULD SEE IT.** It was written at 19:51 on 2026-07-28;
-  the withholding fix landed at 20:03 the same day, twelve minutes later, on
-  a branch that is not an ancestor of the sentence's commit. Every citation,
+  NOTHING IN THE TREE COULD SEE IT.** It was written at 19:51 on 2026-07-28
+  in `c0b34bf`; the withholding fix landed at 20:03 the same day in
+  `03a1bfa`, twelve minutes later — and `git merge-base --is-ancestor` says
+  `c0b34bf` is an ancestor of `03a1bfa`, so the fix was built directly on
+  top of the commit that wrote the sentence and the sentence still was not
+  touched. Every citation,
   identifier and path in it resolved throughout — what was false was the
   verb, and a measured claim in the present tense is the one shape this
   document's instruments do not reach. It is the `:6962` shape, in the
@@ -286,8 +289,9 @@ Every verdict object stamps, at minimum:
 
   **The tense in that heading is load-bearing, and it has been wrong in both
   directions.** The heading first read *"and the only one that mints a
-  REFUTED"*, which was false when written: way #2 minted one too, and the
-  measurement was twenty lines above it. A **Correction** paragraph was
+  REFUTED"*, which was false when written: way #2 minted one too, and at
+  the time the measurement stood twenty lines above it. A **Correction**
+  paragraph was
   added here on 2026-07-29 saying so — and it restated way #2's REFUTED as a
   live fact **a day after the withholding fix had already removed it**, so
   the repair carried the same defect it was repairing, one day newer. Both
@@ -308,9 +312,12 @@ Every verdict object stamps, at minimum:
     clause is independent of which of them mints what, and it is the half
     of the Correction worth keeping.
 
-  Found by a blinded audit reading the claim, not by anything running — and
-  the correction of the correction was found the same way, by a sweep that
-  re-drove the harness rather than re-reading the sentence.
+  The original defect was found by a blinded audit reading the claim, not
+  by anything running. **The correction of the correction was found the
+  other way round** — by a sweep that re-drove the harness the sentence
+  describes instead of re-reading the sentence, which is the only method
+  that could have caught it, because everything about the sentence except
+  its verb was still true.
 
   **The surface was a majority of the transfer set, not one entry point.**
   Driving that same box through every integer-accepting transfer, **the six
@@ -348,11 +355,10 @@ Every verdict object stamps, at minimum:
   prints **112** on this tree, and its census re-derived over `corpus/` as it
   stood at `89413c2` — the commit that wrote the sentence, where the
   instrument did not yet exist — gives **104**. The numeral reproduced at
-  neither revision, and
-  `docs/norms.md`'s *"A figure in a norm states the UNIT it counts"* — cited
-  by heading and not by line, for the reason SF-0.2.0-14 gives — records
-  *this exact figure* as the campaign's
-  own worked example of a mis-populated weld, in which *"105 float64
+  neither revision. And `docs/norms.md`'s *"A figure in a norm states the
+  UNIT it counts"* — cited by heading and not by line, for the reason
+  SF-0.2.0-14 gives — records *this exact figure* as the campaign's own
+  worked example of a mis-populated weld, in which *"105 float64
   declarations"* and a literal-declaration total were the same number drawn
   from **different populations**. That section then says *"the figures
   themselves are not restated here, and that is this norm applied to
@@ -367,13 +373,12 @@ Every verdict object stamps, at minimum:
   reports.
 
   **And the transfers close — the numeral that used to stand here did not
-  survive its own paragraph.** This read *"all 13 entry points close"*, and
-  both halves of that were already withdrawn in the paragraph it sits in:
-  that paragraph says *"the exact count depends on an operand convention that
-  was never stated, and neither number is robust"*, and it had been
-  rewritten to say *"the surface was a majority of the transfer set, not
-  one entry point"* — precisely to stop calling these transfers entry
-  points. The sentence was the originating commit message's wording
+  survive its own entry.** This read *"all 13 entry points close"*, and both
+  halves of it had already been withdrawn earlier in this same bullet: it
+  says *"the exact count depends on an operand convention that was never
+  stated, and neither number is robust"*, and it had been rewritten to open
+  *"the surface was a majority of the transfer set, not one entry point"* —
+  precisely to stop calling these transfers entry points. The sentence was the originating commit message's wording
   (`89413c2`: *"All 13 entry points close, and the other entry point closes
   too"*), left standing when the paragraph above it was corrected. **What
   closes them is not a count**: the box is refused at declaration time, so
