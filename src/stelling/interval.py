@@ -16,16 +16,21 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   **ℝ-mode is the scoping word and it is load-bearing.** The ``ieee_*``
   kernels, ``ieee_fma_hull`` and ``subnormal_haze``/``subnormal_haze_fmt``
   serve ``semantics="ieee"``, where the thing being bracketed is the FLOAT
-  the compiled program computes and not a real, so they do not round
-  outward and this claim is not about them — driven:
+  the compiled program computes and not a real. They are **outside the
+  outward-ℝ claim** — they do not round outward and it is not about them —
+  driven:
   ``ieee_add([0.1], [0.2])`` returns a bracket that EXCLUDES the exact real
   ``0.1 + 0.2``, and ``ieee_sqrt([2])`` one that excludes √2. ``meet`` is
   outside it for a different reason — it is an intersection, so it drops
-  points on purpose, and its own docstring opens *"No outward rounding,
-  deliberately."* The carve-out used to appear only in the ``ieee_*``
+  points on purpose — **outside the outward-ℝ claim** for that reason —
+  and its own docstring opens *"No outward rounding, deliberately."* The carve-out used to appear only in the ``ieee_*``
   paragraph at the end of this docstring, which is a long way after the
-  word *always*. ``tests/test_interval.py``'s discipline table drives one
-  excluded value for every one of these.
+  word *always*. ``tests/test_interval.py``'s ``DISCIPLINE`` table drives
+  a real that the returned bracket EXCLUDES for every ``ieee_*`` kernel and
+  for ``meet``; the two ``subnormal_haze`` helpers are in the same carve-out
+  for the same reason — they are ieee-mode band machinery, not ℝ arithmetic
+  — but they only ever WIDEN (they hull with 0), so no such witness exists
+  and the table drives that instead.
 
   **How TIGHT the bracket is is per-operation and is NOT universal**, so
   the scope below travels with any claim about tightness.
@@ -116,6 +121,19 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   that was added with the correction could not have caught it: it drove
   four operations named in this text and asked only that their endpoint
   reprs appear here, so it measured the digits and not the scope.
+
+  **What reads this text now is an instrument, not a string check.**
+  ``tests/test_interval.py``'s ``DISCIPLINE`` table enumerates this
+  module's public operations FROM THE MODULE, requires every one of them to
+  declare an endpoint discipline, and drives each declaration against the
+  running code. So a new operation forces a classification, an operation
+  that stops rounding outward reddens, an operation whose tightness is
+  loosened *or tightened* reddens, and this text is checked for what it
+  CLAIMS about the operations that are not correctly directed-rounded —
+  each of them has to be named in a block of this text that also says what
+  the discipline IS — rather than for which digits it contains. Every one of
+  those directions was watched go red, one mutation at a time, before the
+  table was believed.
 
   The stamp still reads ``interval/f64/outward-1ulp``. That string is a
   published surface and is not changed here; it names the guarantee's
