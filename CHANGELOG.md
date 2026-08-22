@@ -511,7 +511,13 @@ is 0.2.0 development work throughout.
   144 and **DIFFERS**; both are in the table, the `loc(` counts are pinned,
   and the three lowerings are taken from **one source line**, because that
   text records the caller's line number and comparing two call sites
-  "differs" with nothing armed.
+  "differs" with nothing armed. (6) A sixth, found in this fixup's own work
+  and the same class as the other five: the silent half's failure message was
+  **referenced and not defined**, and every test stayed green, because an
+  `assert` message and an unreached `pytest.fail` argument are evaluated only
+  on the failing path — so the sentence a maintainer needs at the moment the
+  disclosure has become wrong was a `NameError`. It is rendered on the
+  PASSING path now, with both call shapes.
 
 - **A test that arms the tripwire no longer detaches the session's hold.**
   `_tripwire.arm()`/`disarm()` carry no owner, so an unconditional `disarm()`
