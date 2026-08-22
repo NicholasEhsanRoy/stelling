@@ -34,6 +34,39 @@ acquiring one for a fence (``tests/test_release_gates.py`` reads
 workflow is more comment than code, deliberately — and what is left is scanned
 for job headers, ``uv pip install`` lines and ``pytest`` invocations.
 
+**AND A TEXT READER HAS TO SAY WHAT IT CANNOT SEE, WHICH IS WHAT THE NIGHTLY
+CANARY'S READER LEARNED THE EXPENSIVE WAY.** `tests/test_tripwire_record.py`
+read `.github/workflows/nightly-jax-canary.yml` with line-anchored patterns
+and went past NINE legal spellings, measured: a quoted key, a flow mapping
+and an alias — three ways of writing one ``env:`` mapping, each of which it
+reported as *"no setting"* — plus ``matrix.exclude``, ``runs-on:`` written
+before ``name:``, a job-level ``if:``, a ``defaults:`` block, ``set -a`` with
+a sourced file, and ``continue-on-error: true``. It parses with ``yaml``
+where PyYAML is importable and falls back to a TOTAL LINE GRAMMAR where it
+is not, which is what lets it say *"there is no setting"* rather than only
+*"I did not find one"*.
+
+**THIS MODULE IS STILL A TEXT READER OVER A DIFFERENT FILE, and this
+paragraph is not a claim that it is safe from the same thing.** What it has
+that the nightly reader did not is :func:`_agreed` and the four-link
+``${EXTRAS}`` chain, which produce a NAMED can't-tell rather than a
+permissive default — so what is exposed here is the FIND layer, not the
+value layer. Measured at this commit, off PyYAML's own event stream rather
+than off a regex for `&` and `*`: `ci.yml` carries no anchor, no alias and
+no merge key, and :data:`_JOB` finds all ten jobs a real parse finds (and
+`push:` from under `on:`, which :func:`_classify` drops for having no
+``python -m pytest`` line). That gap is written down in
+`SWEEP-CARRY-FORWARD.md` rather than closed here.
+
+**AND THE MEASUREMENT NAMED TWO FILES AND COVERED ONE.** The paragraph
+above names ``release.yml`` as read the same way for the same reason, and
+the anchor/alias/merge-key figure was taken on `ci.yml` alone — a narrower
+measurement than the exposure it was disclosing. Taken now, the same way:
+``release.yml`` carries **0 anchors, 0 aliases and 0 merge keys**, and its
+three jobs are ``build``, ``publish`` and ``test``. So nothing is wrong in
+either file today; what was wrong was a figure standing for a file it had
+not been taken on.
+
 **COMMENTS ARE STRIPPED IN ONE PLACE, :func:`_strip_comment`, AND THAT IS THE
 POINT.** This module used to drop *whole-line* comments only, and a comment is
 the cheapest thing there is to add to this file. Three readings were defeated
@@ -202,6 +235,25 @@ class Lane:
 
     job: str
     #: ``"absent"``, ``"floating"``, ``"matrix"``, or a series like ``"0.10"``.
+    #:
+    #: **THE CAN'T-TELL IS A TRUTHY STRING IN A FIELD WHOSE "NO" IS ALSO A
+    #: STRING, AND THAT FAILS OPEN.** ``"matrix"`` means *ci.yml expands this
+    #: job and its entries do not agree on a series*; read through the obvious
+    #: ``lane.jax != "absent"`` it silently means *this job has jax*, which is
+    #: the permissive answer to a question the workflow has not answered.
+    #: There is no cheap spelling of the VALUE that fails safe: ``None`` reads
+    #: the same way (``None != "absent"`` is True), and a sentinel whose
+    #: comparisons raise would break ``==``, ``in`` and ``repr`` for the four
+    #: consumers that legitimately ask ``lane.jax == "matrix"``. So the value
+    #: still fails open, and that is stated rather than fixed.
+    #:
+    #: What is closed is the SPELLING. :func:`has_jax` is the way to ask, it
+    #: raises on the can't-tell, and
+    #: ``test_no_reader_asks_whether_a_lane_HAS_JAX_by_comparing_the_STRING``
+    #: refuses the bare comparison anywhere under ``tests/`` — so a consumer
+    #: added tomorrow cannot reach the permissive answer without deleting a
+    #: test. Nine consumers refused ``"matrix"`` by name before that check
+    #: existed, correctly and by hand, and nothing made the tenth.
     jax: str
     #: Whether the job installs a solver extra — or ``None``, the named
     #: can't-tell, when the workflow does not say with one voice. A matrix job
@@ -260,6 +312,23 @@ def _code_lines(text: str) -> list[str]:
     ``test_a_comment_is_stripped_the_same_way_everywhere`` pins it: dropping
     the emptied lines instead leaves every reader in this module green, which
     makes it exactly the stated-but-unheld shape this file is a fence against.
+
+    **AND "LINE" IS ``str.splitlines()``'s, WHICH IS WHY THIS READER IS NOT
+    EXPOSED TO THE THING THE NIGHTLY READER WAS.**
+    `tests/test_tripwire_record.py` met the same question three times --
+    ``^---``, ``^\\s*needs:`` and the shell reader's line -- and each time the
+    check was `^`-anchored under ``re.M``, where Python's ``^`` matches after
+    a newline and NOT after a carriage return. Every pattern in this module
+    is matched against ONE LINE of this list instead, and ``splitlines()``
+    breaks on CR, CRLF, U+0085, U+2028 and U+2029 as well as on LF. Measured
+    on this repository's own ``ci.yml``, re-rendered with each of those in
+    place of every newline: 11 job blocks and 8 pytest lanes, identical
+    tuples, in all four renderings. So the ``read_text()`` above does not
+    have to translate anything for this reader to be right, which is exactly
+    what could not be said of the nightly reader's scans;
+    ``test_the_lane_reader_reads_ONE_FILE_however_its_lines_end`` holds it,
+    because ``split("\\n")`` here would be green until the day a workflow
+    arrived over a wire.
     """
     return [_strip_comment(line) for line in text.splitlines()]
 
@@ -311,6 +380,23 @@ def _matrix_include(body: list[str]) -> list[dict[str, str]]:
     symptom of it; ``ci.yml``'s own two entries are flat at one column and
     read unchanged.
 
+    **AND THE ``- `` COLUMN, NOT ONLY THE KEY'S, because "ALL NESTING" was
+    not true of a nested SEQUENCE.** A nested list of mappings puts a ``- ``
+    at a deeper column, and a ``- `` line matched :data:`_MATRIX_ITEM`'s first
+    group at ANY column — so it started a phantom entry and reset ``column``
+    to its own, rather than ending the read. That violates this function's own
+    *"never an entry list that happens to be short"*: the result was an entry
+    list with members ci.yml does not have. Driven in four shapes; each reads
+    ``[]`` now, ``EXPECTED_LANES`` recomputes equal, and the lane suite stays
+    green.
+
+    **NOT A HOLE BEFORE THE FIX**, which is why this is a claim repaired
+    rather than a defect closed: :func:`_matrix_values` returns ``None``
+    unless EVERY entry (real and phantom) carries the key, and a phantom's
+    value is one that stands inside the nesting, so any definite answer was
+    one the real entries already agreed on. ``.solvers`` read ``None`` in all
+    four driven shapes. The sentence was wrong; the answer was not.
+
     The repeated-key check stays in front of the value all the same: a key
     repeated at the SAME column is a duplicate key in one mapping, which the
     column rule cannot reach and which is unreadable for its own reasons.
@@ -322,6 +408,7 @@ def _matrix_include(body: list[str]) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     depth: int | None = None
     column: int | None = None
+    dash: int | None = None
     for line in body:
         if depth is None:
             m = _INCLUDE.match(line)
@@ -333,9 +420,22 @@ def _matrix_include(body: list[str]) -> list[dict[str, str]]:
         if len(line) - len(line.lstrip()) <= depth:
             break  # dedented out of the include block
         item = _MATRIX_ITEM.match(line)
+        # THE SECOND DISJUNCT IS DEFENCE IN DEPTH AND IS REDUNDANT IN EFFECT,
+        # said here because the previous version of this comment did not say
+        # it. `not entries` is true exactly when no `- ` line has been seen,
+        # i.e. when `column is None`; a key-only line then falls to the
+        # `elif` below, where `item.start(2) != None` is True and the read
+        # ends at `[]` anyway. Driven: replacing the whole condition with
+        # `if not item:` leaves the lane suite green and a differential over
+        # 18 shapes distinguishes the two on 0 of 18. It stays because a
+        # cheap guard in front of an `entries[-1]` is worth its line, not
+        # because anything reaches it.
         if not item or (item.group(1) is None and not entries):
             return []  # a shape this cannot read
         if item.group(1) is not None:
+            if dash is not None and item.start(1) != dash:
+                return []  # a nested SEQUENCE: a `- ` at another column
+            dash = item.start(1)
             entries.append({})
             column = item.start(2)  # this entry's own keys live here
         elif item.start(2) != column:
@@ -533,6 +633,26 @@ def _newest(series: tuple[str, ...]) -> str:
     return max(series, key=lambda s: tuple(int(p) for p in s.split(".")))
 
 
+def has_jax(lane: "Lane") -> bool:
+    """Whether this job installs jax at all — and it RAISES on the can't-tell.
+
+    The one question :attr:`Lane.jax` cannot be asked with ``!=``. See the
+    field's own comment for why the value fails open and why no cheap
+    spelling of it does not; this is the accessor that does, and the check
+    named there is what keeps the bare comparison out of the tree.
+    """
+    if lane.jax == "matrix":
+        raise ValueError(
+            f"{lane.job} is expanded from a matrix whose entries this module "
+            f"cannot reduce to one series, so whether it installs jax is a "
+            f"CAN'T-TELL — `matrix` is Lane.jax's spelling of one. Ask "
+            f"`lane.jax == 'matrix'` first and decide what a can't-tell means "
+            f"for your claim; `lane.jax != 'absent'` answers YES here, which "
+            f"is the permissive answer to a question ci.yml has not answered."
+        )
+    return lane.jax != "absent"
+
+
 def lane_series() -> tuple[str, ...]:
     """The jax series the merge-bearing lanes actually resolve.
 
@@ -552,7 +672,7 @@ def lane_series() -> tuple[str, ...]:
     found = set()
     for job in SERIES_BEARING:
         lane = by_job.get(job)
-        if lane is None or lane.jax == "absent":
+        if lane is None:
             continue
         if lane.jax == "matrix":
             raise ValueError(
@@ -563,5 +683,7 @@ def lane_series() -> tuple[str, ...]:
                 f"may not rest on a lane whose series the workflow does not "
                 f"state."
             )
+        if not has_jax(lane):
+            continue
         found.add(_newest(TESTED_JAX_SERIES) if lane.jax == "floating" else lane.jax)
     return tuple(sorted(found, key=lambda s: tuple(int(p) for p in s.split("."))))

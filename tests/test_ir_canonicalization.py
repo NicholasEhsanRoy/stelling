@@ -50,9 +50,12 @@ import array as _arraymod
 import base64
 import binascii
 import dataclasses
+import collections
+import hashlib
 import pathlib
 import re
 import struct
+import typing
 from fractions import Fraction
 
 import pytest
@@ -1225,6 +1228,349 @@ def test_the_canonicalization_list_is_written_once_and_the_prose_points_at_it():
         )
 
 
+# The prose this rule is about, and until 2026-08-22 it was five markdown
+# files and nothing else. `src/` SHIPS PROSE TOO — this repository's modules
+# are more comment than code by design — and a 16-hex literal planted in
+# `src/stelling/ir.py`, in the very paragraph explaining an earlier literal's
+# removal, left the whole suite green while the same literal planted in
+# `SOUNDNESS.md` reddened. That is how a pair of `content_hash` literals came
+# to stand in `ir.py` for a day inside the paragraph whose entire subject is
+# that a figure nobody can re-derive is not a measurement. A rule applied
+# where somebody was told and nowhere else is a rule with a hole in the shape
+# of wherever nobody looked.
+_HASH_LITERAL_RECORDS = ("CHANGELOG.md", "SOUNDNESS.md", "README.md",
+                         "ARCHITECTURE.md", "DOCUMENTATION_ARCHITECTURE.md")
+
+# THE TRUNCATED LITERALS THIS TREE CARRIES, FROZEN — AND FROZEN WITH THE
+# SENTENCE EACH ONE STANDS IN, which is the half that was missing. The
+# exact-length rule below (16 or 64 hex) matches NOTHING anywhere in this
+# repository — measured — and the form that actually lands is eight hex
+# digits and a cut mark, which is this tree's own spelling for a hash prefix
+# and is unrecomputable BY CONSTRUCTION: a reader cannot check digits that
+# have been cut off. So the truncated form is scanned too, and because these
+# tokens predate the rule it is a RATCHET rather than a ban: the inventory
+# found must equal this one exactly, so a new literal anywhere in scope reds,
+# and removing one reds until it is struck from here.
+#
+# **THE KEY IS `(file, digits, SENTENCE)` AND IT USED TO BE `(file, digits)`,
+# WHICH IS BLIND TO REPURPOSE-IN-PLACE.** Nothing keyed on WHERE a literal
+# stood or on what the sentence around it said, so the same digits could be
+# turned from a retraction into an assertion underneath the ratchet without
+# moving it. Two measured, both at `107 passed`:
+#
+#   * `src/stelling/ir.py`'s ``and it is not ``64a0ce8d…``` reworded to
+#     ``and it IS ``64a0ce8d…``` — the sentence that exists to withdraw the
+#     figure now pins it, and the inventory still read `("ir.py",
+#     "64a0ce8d"): 3`;
+#   * one of `SOUNDNESS.md`'s two occurrences relocated out of its retraction
+#     into a fresh claim elsewhere in the file. Count unchanged, meaning
+#     reversed.
+#
+# A retraction that can become an unreproducible assertion without the guard
+# moving is the guard measuring the wrong thing, and the fix is the same one
+# `tests/_soundness_routing_manifest.py` makes with `not_carried`: write the
+# lines out, in this file, where a reviewer meets them.
+#
+# Each entry, and why it is here rather than fixed:
+#
+#   `64a0ce8d…` x2 in `SOUNDNESS.md`, x3 in `src/stelling/ir.py` — the
+#     RETRACTION of that literal, in both places that retract it. A
+#     retraction has to be able to name what it retracts, and every one of
+#     those sentences exists to say the figure was unreproducible. (One of
+#     the three is `` ``content_hash 64a0ce8d…`` ``, and a pattern anchored
+#     on the backtick could not see it — see `_BACKTICKED`.)
+#   `3c15c4f5…`, `4dc49e99…` (`SOUNDNESS.md`) — query hashes pinned as
+#     "byte-identical at base and tip on both series" in the 0.11-bump entry.
+#     These ARE the defect this rule names: no document is published with
+#     them. Owed, not exempted.
+#   `628a25ef…`, `f32f4860…` (`SOUNDNESS.md`) — the quickstart's query hash
+#     on the two series. `tests/test_doc_examples.py` runs that block, so
+#     unlike the two above there IS a document; the prose does not say so.
+#   `2896a0f2…` x2 in `SOUNDNESS.md`, x2 in `src/stelling/smt.py`, x2 in
+#     `src/stelling/verdict.py`, with `2de5e041…` and `2f2e0ed8…` once each
+#     in `SOUNDNESS.md` — EIGHT that were inside this scan's own scope and
+#     that its grammar could not see, four of them under `src/`. They are
+#     the emitted-script shas of the scatter SET collision table, and they
+#     are the same class as the `3c15c4f5…` / `4dc49e99…` pair above:
+#     measured figures with a verdict attached and no published script to
+#     check them against — owed rather than merely uncited, which is what
+#     separates them from the quickstart pair. What
+#     the table CLAIMS a reader can re-derive — that a scatter-bearing slice
+#     and a scatter-free slice emit byte for byte the same script — is the
+#     equality of two of them and not any one digit, which is why the rows
+#     read `collides` / `no collision` rather than reading as four values.
+#     Owed, not exempted, and now visible.
+#
+# THE INVENTORY IS ALSO THE REACH CONTROL. SEVEN of its seventeen entries
+# come from `src/`, so a scan that stopped seeing `src/` could not match it —
+# the widening cannot silently un-widen, which is the failure the five
+# hand-listed files had no guard against.
+#
+# **AND THE THIRD FIELD WAS A LINE, WHICH IS SMALLER THAN A CLAIM.** It was
+# `" ".join(line.split())` — the ONE line the digits stand on — and a
+# sentence does not end where a line does. THIRD DEFEAT, measured at
+# `4a13824`: the line of `src/stelling/ir.py` that reads *"return the
+# identical hash, and it is not ``64a0ce8d…``. What a"* left BYTE-IDENTICAL
+# and the three lines after it
+# rewritten from *"what a reader can re-derive is the PROPERTY … the hash is
+# not needed"* into *"what a reader CAN re-derive is that very hash … it is a
+# measurement and is retained deliberately"*. Whole zero-dep suite
+# `2175 passed, 149 skipped`, identical to clean; ratchet unmoved. The
+# retraction had become an assertion with the literal's own line untouched.
+#
+# The same defeat inside `SOUNDNESS.md` IS caught — by
+# `tests/test_soundness_routing.py`, which hashes whole ROUTED BLOCKS — so
+# the exposure is exactly where a literal's surrounding lines are outside a
+# routed block, and shipped `src/` comments are the main such place. So the
+# fix is the routed-block one, applied here: the entry now carries the
+# sha256 of the whole PROSE BLOCK the literal stands in — the paragraph, in
+# markdown; the run of comment lines between two `#`-only separators, in
+# python — and a rewording anywhere in it moves the entry. The readable
+# `sentence` stays, because a sha nobody can read is a diff nobody can
+# review, and `_prose_block_text` prints the block beside any entry that
+# moved.
+#
+# **AND THE BLOCK'S BOUNDARY HAS A CONSEQUENCE, WRITTEN DOWN HERE RATHER
+# THAN WIDENED AWAY.** A block ends at a `#`-only separator on purpose:
+# `test_the_ratchets_MEMORY_is_the_BLOCK_and_not_the_LINE` asserts that a
+# rewrite on the far side of one does NOT move an entry, because otherwise
+# every entry would be a claim about its whole file. So a FOURTH repurpose
+# exists, is permitted by construction, and is not a hole to be closed by
+# enlarging the unit. Two variants, both driven, both green at
+# `2190 passed, 149 skipped` with the inventory unmoved:
+#
+#   * a NEW comment paragraph one separator BELOW the tracked block --
+#     naming no digits, so nothing new enters the scan -- saying the
+#     withdrawn figure *"is reproducible after all and is retained as a
+#     measurement"*. The retraction stands untouched and is overturned by
+#     prose the ratchet's memory does not reach.
+#   * editing the harness the retraction POINTS AT, so its own
+#     justification -- *"the document is above, so the hash is not
+#     needed"* -- no longer names the document it claims. The document is
+#     in a different block; the sentence that leans on it is in this one.
+#
+# **THE CONSEQUENCE, STATED: a tracked retraction can be overturned by
+# prose one separator away, and EVERY CROSS-BLOCK REFERENCE A TRACKED
+# BLOCK MAKES IS OUTSIDE ITS OWN MEMORY.** A block sha is a claim about one
+# paragraph and about nothing that paragraph refers to. What this ratchet
+# delivers, exactly: a literal's own sentence and its own paragraph cannot
+# be repurposed without the entry moving. What it does not and by
+# construction cannot deliver: that the paragraph is still true. A
+# retraction that has to stand alone should carry inside its own block
+# everything it rests on, and one that points elsewhere is pointing at
+# unwatched ground -- which is a fact about this instrument, said here,
+# and not a defect to be fixed by making it measure a whole file.
+class _Truncated(typing.NamedTuple):
+    """One truncated hash literal: where it is, what it is, what the line it
+    stands in SAYS about it, and the sha256 of the whole prose BLOCK that
+    line belongs to. The last two fields are the ratchet's memory — see the
+    block above for the three repurposes that moved nothing without them,
+    the third of which the `sentence` field alone could not see."""
+
+    path: str
+    digits: str
+    sentence: str
+    block: str
+
+
+_TRUNCATED_HASH_LITERALS = (
+    _Truncated('SOUNDNESS.md', '2896a0f2',
+               "slice of `s[1] - x[1] <= 0` barred ('scatter',) sha 2896a0f2…",
+               'fc065777de332d4aa90406dfff86d7929541518c5a6975f7f5937a4a4f478cbd'),
+    _Truncated('SOUNDNESS.md', '2896a0f2',
+               'slice of `x[1] - x[1] <= 0` barred () sha 2896a0f2… collides',
+               'fc065777de332d4aa90406dfff86d7929541518c5a6975f7f5937a4a4f478cbd'),
+    _Truncated('SOUNDNESS.md', '2de5e041',
+               "slice of `s[0] - x[0] >= 0` barred ('scatter',) sha 2de5e041…",
+               'fc065777de332d4aa90406dfff86d7929541518c5a6975f7f5937a4a4f478cbd'),
+    _Truncated('SOUNDNESS.md', '2f2e0ed8',
+               'slice of `x[0] - x[0] >= 0` barred () sha 2f2e0ed8… no collision',
+               'fc065777de332d4aa90406dfff86d7929541518c5a6975f7f5937a4a4f478cbd'),
+    _Truncated('SOUNDNESS.md', '3c15c4f5',
+               '(`3c15c4f5…` / `4dc49e99…`), the 0.11 arm behaviourally the old code over',
+               'b82ce3569d1174a56257835c0896b985d30bedc711e302e9f4d6a54bf5a927ac'),
+    _Truncated('SOUNDNESS.md', '4dc49e99',
+               '(`3c15c4f5…` / `4dc49e99…`), the 0.11 arm behaviourally the old code over',
+               'b82ce3569d1174a56257835c0896b985d30bedc711e302e9f4d6a54bf5a927ac'),
+    _Truncated('SOUNDNESS.md', '628a25ef',
+               "0.11 query hash (proved — the rewrite turns the quickstart's `628a25ef…`",
+               'b82ce3569d1174a56257835c0896b985d30bedc711e302e9f4d6a54bf5a927ac'),
+    _Truncated('SOUNDNESS.md', 'f32f4860',
+               'into exactly the 0.10 `f32f4860…`), and `Inline` has 5 members of which 4',
+               'b82ce3569d1174a56257835c0896b985d30bedc711e302e9f4d6a54bf5a927ac'),
+    _Truncated('SOUNDNESS.md', '64a0ce8d',
+               'pinned a hash literal (`64a0ce8d…`) instead, and a hash literal is',
+               'd5e6502f637daeb2132a4aedc71afc98ed240813cf876c9345808b556c287a46'),
+    _Truncated('SOUNDNESS.md', '64a0ce8d',
+               'driven at `198a2b5` and none reproduces `64a0ce8d…`. The refusal is right —',
+               'd5e6502f637daeb2132a4aedc71afc98ed240813cf876c9345808b556c287a46'),
+    _Truncated('src/stelling/ir.py', '64a0ce8d',
+               '# ``64a0ce8d…``: the document is above, and the hash is not needed.',
+               'f8f92f5e1bcedfba11cdb76fd1dc3396892ddb23e422e35e59d281e33abf1eb6'),
+    _Truncated('src/stelling/ir.py', '64a0ce8d',
+               '# comment read ``content_hash 64a0ce8d…`` until 2026-08-21, and',
+               '18e2edea332c631147fbce621dfd91aeb9c4e7663b9425b4d4d740aa713025b1'),
+    _Truncated('src/stelling/ir.py', '64a0ce8d',
+               '# return the identical hash, and it is not ``64a0ce8d…``. What a',
+               '18e2edea332c631147fbce621dfd91aeb9c4e7663b9425b4d4d740aa713025b1'),
+    _Truncated('src/stelling/smt.py', '2896a0f2',
+               "assert s[1] - x[1] <= 0 slice barred ('scatter',) sha 2896a0f2…",
+               'f4dbb4fb877043dcd58ec2486197435db638bab37ebfd69934269e54b1b24bee'),
+    _Truncated('src/stelling/smt.py', '2896a0f2',
+               'assert x[1] - x[1] <= 0 slice barred () sha 2896a0f2…',
+               'f4dbb4fb877043dcd58ec2486197435db638bab37ebfd69934269e54b1b24bee'),
+    _Truncated('src/stelling/verdict.py', '2896a0f2',
+               "assert s[1] - x[1] <= 0 slice barred ('scatter',) sha 2896a0f2…",
+               'f375a95b358f3a6a7fda74cd6240afbee94d8b1319ff391bff4bc109094abe22'),
+    _Truncated('src/stelling/verdict.py', '2896a0f2',
+               'assert x[1] - x[1] <= 0 slice barred () sha 2896a0f2…',
+               'f375a95b358f3a6a7fda74cd6240afbee94d8b1319ff391bff4bc109094abe22'),
+)
+
+#: A backticked span, RST's double form first so ``x`` is one span and not
+#: two empty ones. THE HEX NEED NOT TOUCH THE BACKTICK, and requiring it to
+#: was a hole the plant test below found in this very commit: the literals
+#: that landed in `src/stelling/ir.py` were written ``content_hash a037be6d…``
+#: — the digits are a word inside the span, not the whole of it, and a
+#: pattern anchored on the delimiter walks straight past the only spelling
+#: the defect has ever actually taken.
+_BACKTICKED = re.compile(r"``([^`]+)``|`([^`\n]+)`")
+
+#: Exactly 16 or 64 hex characters, as a word. A git SHA is 7 or 40 and does
+#: not match; a longer hex run does not match a 16-character window inside
+#: itself; the decimal digit runs these files are full of
+#: (`4028234663852886e38`) are 19 and do not match either.
+#:
+#: **THE `.` IN THE LOOKBEHIND IS A DOUBLE'S FRACTION, AND IT WAS A LATENT
+#: FALSE POSITIVE.** `2.220446049250313e-16` carries a 16-character run of
+#: `[0-9a-f]` with a letter in it — `220446049250313e` — and the rule fired
+#: on it, so any backticked 17-significant-digit double would have been
+#: reported as *"the record pins a content-hash literal in prose"*. The tree
+#: was safe only because those floats happen not to be backticked. Measured:
+#: with the guard, that float yields nothing; without it, `['220446049250313e']`.
+_HASH_LITERAL_EXACT = re.compile(
+    r"(?<![0-9A-Za-z.])([0-9a-fA-F]{16}|[0-9a-fA-F]{64})(?![0-9A-Za-z])"
+)
+
+#: ...and a hash PREFIX: eight or more hex digits WITH THE CUT MARKED. The
+#: cut mark is what makes this unrecomputable by construction and it is also
+#: what keeps a git short sha out without asking git: `dff95fc` and
+#: `a1521744` are written whole because they ARE whole. A hash prefix with no
+#: cut mark is outside this rule and is said so rather than silently missed.
+#:
+#: TWO MORE SPELLINGS OF THE CUT THAT THE `…`/`...` ALTERNATION COULD NOT
+#: SEE, and one of them is in this repository: a PYTHON SOURCE ESCAPE. The
+#: FOURTH `64a0ce8d` prefix in the tree stands in
+#: `tests/_soundness_routing_manifest.py`, and its cut is spelled as the
+#: six characters `\` `u` `2` `0` `2` `6`, because that file quotes a routed
+#: line as a Python string literal. A scan reading the SOURCE sees the escape
+#: and not the character. (That file is outside this scan's scope, which is
+#: the shipped record and the shipped modules — but the escape is not: a
+#: docstring under `src/` may be written the same way.) An UPPERCASE prefix
+#: and a space before the cut were invisible for the same reason: the
+#: grammar named one spelling of a thing that has several.
+_HASH_LITERAL_TRUNCATED = re.compile(
+    r"(?<![0-9A-Za-z.])([0-9a-fA-F]{8,})[ \t]?"
+    r"(?:\.\.\.|…|\\u2026|\\N\{HORIZONTAL ELLIPSIS\})"
+)
+
+#: `(pattern, must it stand inside a backticked span)`. THE SPAN FILTER IS
+#: NOT THE SAME BARGAIN FOR THE TWO RULES, and applying it to both is what
+#: hid eight literals inside this scan's own scope. For the EXACT rule the
+#: span is the only thing separating a digest from any hex-looking word in a
+#: sentence, so it stays. For the TRUNCATED rule the CUT MARK already does
+#: that work — nobody writes `2896a0f2…` about anything but a digest — and
+#: requiring backticks as well meant the scan could not see a measured
+#: figure sitting in a plain-text table, which is exactly where measured
+#: figures sit. Driven: the eight in `SOUNDNESS.md`, `src/stelling/smt.py`
+#: and `src/stelling/verdict.py` are invisible with the filter and inventoried
+#: without it.
+_HASH_LITERAL_RULES = {
+    "exact": (_HASH_LITERAL_EXACT, True),
+    "truncated": (_HASH_LITERAL_TRUNCATED, False),
+}
+
+
+def _hash_literals(rule, text):
+    """Every match of ``rule``'s pattern in ``text``.
+
+    Two filters, and each has been the difference between a hit and a miss.
+    The span filter — for the exact rule only, see `_HASH_LITERAL_RULES` —
+    is what makes that rule about typeset figures rather than about any
+    hex-looking word in a sentence. The letter test is what keeps a decimal
+    run out: a token of pure digits is a number somebody wrote, not a
+    digest.
+    """
+    pattern, inside_a_span = _HASH_LITERAL_RULES[rule]
+    regions = []
+    if inside_a_span:
+        for span in _BACKTICKED.finditer(text):
+            regions.append(span.group(1) or span.group(2))
+    else:
+        regions.append(text)
+    found = []
+    for region in regions:
+        found += [
+            m.group(1) for m in pattern.finditer(region)
+            if any(c in "abcdefABCDEF" for c in m.group(1))
+        ]
+    return found
+
+
+def _hash_literal_scan_paths(root):
+    """The five record files and every shipped module, in that order."""
+    return [root / name for name in _HASH_LITERAL_RECORDS] + sorted(
+        root.glob("src/**/*.py")
+    )
+
+
+def _prose_line(line: str, python: bool) -> str:
+    """One line, stripped of its indentation and of a python comment marker.
+
+    A ``#`` is a comment marker in a `.py` file and a heading in markdown, so
+    which files it is stripped from is decided by the caller and not guessed
+    at from the character.
+    """
+    body = line.strip()
+    if python and body.startswith("#"):
+        body = body[1:].strip()
+    return " ".join(body.split())
+
+
+def _prose_block_text(lines, index: int, python: bool) -> str:
+    """The BLOCK of prose the line at ``index`` belongs to, normalised.
+
+    THE UNIT IS THE PARAGRAPH, and it is the paragraph because a SENTENCE is
+    not big enough. The third defeat of this ratchet left the literal's own
+    line byte-identical and rewrote the three lines AFTER it — which are the
+    next sentences of the same paragraph — turning a retraction into an
+    assertion. A grammatical sentence would not have caught that; the block
+    it sits in does.
+
+    One rule serves markdown and python because after `_prose_line` they are
+    the same shape: a run of non-empty lines, bounded by a blank line, by a
+    `#`-only comment separator, or by the code around the comment. That is
+    the paragraph in a `.md` file and the comment paragraph in a `.py` one,
+    which is the unit each is actually written and reviewed in.
+    """
+    lo = hi = index
+    while lo > 0 and _prose_line(lines[lo - 1], python):
+        lo -= 1
+    while hi + 1 < len(lines) and _prose_line(lines[hi + 1], python):
+        hi += 1
+    return " ".join(
+        text for text in (_prose_line(line, python) for line in lines[lo:hi + 1])
+        if text
+    )
+
+
+def _prose_block(lines, index: int, python: bool) -> str:
+    """:func:`_prose_block_text`, as the sha256 the inventory freezes."""
+    return hashlib.sha256(
+        _prose_block_text(lines, index, python).encode("utf-8")
+    ).hexdigest()
+
+
 def test_the_record_does_not_pin_a_hash_LITERAL_in_prose():
     """AUDIT 0.2.0 B6 AUDIT 6, F5. `CHANGELOG.md` pinned a 16-character
     `content_hash()` literal for "the canonical `shape=(2,)` declaration",
@@ -1236,16 +1582,14 @@ def test_the_record_does_not_pin_a_hash_LITERAL_in_prose():
     A hash in PROSE is a figure no reader can recompute and no test holds.
     A hash inside an executed doc example is a different thing entirely —
     `tests/test_doc_examples.py` runs the block and compares the output —
-    so this scan is over the record files only, and it is exact about what
-    it looks for: a backticked token that is 16 or 64 lowercase-hex
-    characters with at least one letter in it. A git SHA is 7 or 40 and
-    does not match; the decimal digit runs these files are full of
-    (`4028234663852886e38`) do not either."""
+    so this scan is over the shipped record and the shipped modules, and it
+    is exact about what it looks for. See `_HASH_LITERAL_RECORDS` for the
+    scope this had until 2026-08-22 and what a plant in `src/` measured, and
+    `_TRUNCATED_HASH_LITERALS` for the eight-hex-and-a-cut form the
+    exact-length rule alone never could have caught — and for the SENTENCE
+    each one is frozen with, which is what stops a retraction being reworded
+    into an assertion underneath the count."""
     root = pathlib.Path(__file__).resolve().parent.parent
-    tok = re.compile(r"`([0-9a-f]{16}|[0-9a-f]{64})[.…]*`")
-    found = []
-    records = ("CHANGELOG.md", "SOUNDNESS.md", "README.md",
-               "ARCHITECTURE.md", "DOCUMENTATION_ARCHITECTURE.md")
     # ABSENCE IS NOT COMPLIANCE, and this guard used to `continue` past a
     # missing file. Driven: move `CHANGELOG.md`, `SOUNDNESS.md` and
     # `README.md` out of the tree and it reported `1 passed` — a scan over
@@ -1253,7 +1597,9 @@ def test_the_record_does_not_pin_a_hash_LITERAL_in_prose():
     # B8c declared (`SF-0.2.0-59`: an unreproducible hash literal removed
     # from the record), so "the files are not here" has to be the loudest
     # thing it can say and not the quietest.
-    missing = [name for name in records if not (root / name).is_file()]
+    missing = [
+        name for name in _HASH_LITERAL_RECORDS if not (root / name).is_file()
+    ]
     assert not missing, (
         f"the record files {missing} are not in this tree, so this scan "
         f"read no prose at all. A hash-literal check that passes because "
@@ -1261,15 +1607,180 @@ def test_the_record_does_not_pin_a_hash_LITERAL_in_prose():
         f"closing: it would go green on a tree that had deleted the record "
         f"the literal was removed from."
     )
-    for name in records:
-        path = root / name
-        for i, line in enumerate(path.read_text().splitlines(), 1):
-            for m in tok.finditer(line):
-                if any(c in "abcdef" for c in m.group(1)):
-                    found.append(f"{name}:{i}: {m.group(0)}")
+    paths = _hash_literal_scan_paths(root)
+    modules = [p for p in paths if p.suffix == ".py"]
+    assert modules, (
+        "this scan found no module under `src/` to read, so its widening to "
+        "shipped code is doing nothing — which is the state it was in when a "
+        "pair of `content_hash` literals stood in `src/stelling/ir.py` for a "
+        "day with the whole suite green"
+    )
+
+    found = []
+    inventory = collections.Counter()
+    blocks: dict = {}
+    for path in paths:
+        name = path.relative_to(root).as_posix()
+        python = path.suffix == ".py"
+        lines = path.read_text().splitlines()
+        for i, line in enumerate(lines, 1):
+            for digits in _hash_literals("exact", line):
+                found.append(f"{name}:{i}: `{digits}`")
+            for digits in _hash_literals("truncated", line):
+                # THE BLOCK, NOT THE LINE. See `_prose_block_text` and the
+                # third defeat above `_Truncated`: the literal's own line
+                # stayed byte-identical while the sentences after it turned
+                # its retraction into an assertion.
+                entry = _Truncated(name, digits, " ".join(line.split()),
+                                   _prose_block(lines, i - 1, python))
+                inventory[entry] += 1
+                blocks[entry] = _prose_block_text(lines, i - 1, python)
     assert not found, (
         "the record pins a content-hash literal in prose, which no reader "
         "can recompute and no test holds:\n  " + "\n  ".join(found)
+    )
+    frozen = collections.Counter(_TRUNCATED_HASH_LITERALS)
+    added = sorted(set(inventory) - set(frozen))
+    gone = sorted(set(frozen) - set(inventory))
+    moved = sorted(
+        k for k in set(inventory) & set(frozen) if inventory[k] != frozen[k]
+    )
+    assert inventory == frozen, (
+        f"the truncated hash literals in the shipped record and modules are "
+        f"no longer the frozen inventory. Added: {added}; gone: {gone}; "
+        f"counts that moved: {moved}. The prose block each ADDED entry now "
+        f"stands in, which is what its `block` sha is over: "
+        + "; ".join(f"{e.path}: {blocks[e]!r}" for e in added) + ". "
+        f"A hash prefix is a figure a reader cannot even partly check; if a "
+        f"new one is right, publish the document beside it and strike the "
+        f"digits, and if an old one has gone, take it out of the inventory "
+        f"in the same commit. **AND THE SENTENCE IS PART OF THE ENTRY**: a "
+        f"literal whose line has been reworded shows up as one gone and one "
+        f"added, deliberately, because that is how a retraction turns into "
+        f"an assertion without the count moving. **AND SO IS THE WHOLE PROSE "
+        f"BLOCK**, by its sha: the third defeat left the literal's own line "
+        f"byte-identical and reworded the three lines after it, which is the "
+        f"same repurpose one sentence further out. Re-word the entry here in "
+        f"the same commit and say which of the two it now is."
+    )
+
+
+def test_the_hash_literal_scan_SEES_A_PLANT_IN_EVERY_FORM_IT_CLAIMS():
+    """The scan above is an absence claim, and an absence claim needs a plant.
+
+    Every form is driven against the finder rather than asserted about it:
+    the two lengths the exact rule names, the truncated form that landed in
+    `src/stelling/ir.py`, the two escape spellings of the cut, the space
+    before it and the UPPERCASE prefix — all invisible until 2026-08-23 —
+    the plain-text table row
+    that no backtick reaches — and the four things that must NOT match: a
+    git short sha, a git long sha, a decimal run, and a 17-significant-digit
+    double, which the exact rule really did fire on.
+    """
+    for text, exact, trunc in [
+        ("`a037be6dfc050ff5`", ["a037be6dfc050ff5"], []),
+        ("`" + "a" * 64 + "`", ["a" * 64], []),
+        ("`a037be6dfc050ff5…`", ["a037be6dfc050ff5"], ["a037be6dfc050ff5"]),
+        ("`a037be6d…`", [], ["a037be6d"]),
+        ("`a037be6d...`", [], ["a037be6d"]),
+        ("``content_hash a037be6d…``", [], ["a037be6d"]),
+        # NO BACKTICK AT ALL. This is the shape of the eight the scan could
+        # not see: a measured figure in a plain-text table.
+        ("    slice of s[1] barred ('scatter',) sha 2896a0f2…", [], ["2896a0f2"]),
+        # ...THE CUT, SPELLED TWO MORE WAYS AND SET OFF BY A SPACE.
+        # `\\u2026` is how a Python source file that quotes a routed line
+        # writes it, and there is one in this tree.
+        ("`64a0ce8d\\u2026`", [], ["64a0ce8d"]),
+        ("`64a0ce8d\\N{HORIZONTAL ELLIPSIS}`", [], ["64a0ce8d"]),
+        ("`a037be6d …`", [], ["a037be6d"]),
+        # ...AND THE DIGITS IN UPPERCASE.
+        ("`A037BE6D…`", [], ["A037BE6D"]),
+        ("`A037BE6DFC050FF5`", ["A037BE6DFC050FF5"], []),
+        ("`dff95fc`", [], []),                      # a git short sha
+        ("`a1521744c6dc074443fe549f19f48d7197abf759`", [], []),   # 40, a sha
+        ("`4028234663852886e38`", [], []),          # a decimal run
+        ("`0123456789012345`", [], []),             # 16, but no letter
+        # A DOUBLE'S FRACTION IS NOT A DIGEST. `220446049250313e` is 16
+        # characters of `[0-9a-f]` with a letter in it and this rule fired
+        # on it until 2026-08-23.
+        ("`2.220446049250313e-16`", [], []),
+        ("`1.1102230246251565e-16`", [], []),
+    ]:
+        assert _hash_literals("exact", text) == exact, text
+        assert _hash_literals("truncated", text) == trunc, text
+
+def test_the_ratchets_MEMORY_is_the_BLOCK_and_not_the_LINE():
+    """Third defeat of this ratchet, driven against the finder that fixes it.
+
+    The measured defeat, at `4a13824`: the line of `src/stelling/ir.py` that
+    reads *"return the identical hash, and it is not ``64a0ce8d…``. What a"*
+    left BYTE-IDENTICAL while
+    the three lines after it were rewritten from a withdrawal — *"what a
+    reader can re-derive is the PROPERTY … the hash is not needed"* — into an
+    assertion — *"a reader CAN re-derive that very hash … it is a measurement
+    and is retained deliberately"*. Whole zero-dep suite `2175 passed, 149
+    skipped`, identical to clean, ratchet unmoved. The `sentence` field could
+    not see it because a sentence does not end where a line does.
+
+    So the unit is the prose BLOCK, and both halves of that are driven here:
+    the sha moves when a NEIGHBOURING line of the same block is reworded, and
+    it does NOT move for a rewrite on the far side of a block boundary —
+    which is what keeps the entry a claim about one paragraph rather than
+    about a whole file.
+
+    THE SECOND HALF IS A BOUNDARY AND A BOUNDARY HAS A FAR SIDE. A fourth
+    repurpose lives there, permitted by construction and measured: see the
+    paragraph above `_Truncated` for the two variants and for the
+    consequence they carry — a tracked retraction can be overturned by
+    prose one separator away, and every cross-block reference a tracked
+    block makes is outside its own memory. Do not widen this test to catch
+    them; the assertion below is what stops every entry from becoming a
+    claim about its whole file.
+    """
+    withdrawn = [
+        "        # return the identical hash, and it is not ``64a0ce8d…``. What a",
+        "        # reader can re-derive is the PROPERTY — accepted on both, to one",
+        "        # hash, refused here — and that is what this says now.",
+        "        #",
+        "        # THE REFUSAL IS RIGHT: an absent `dtype` param is a declaration",
+    ]
+    asserted = list(withdrawn)
+    asserted[1] = "        # reader CAN re-derive is that very hash — both trees produce it,"
+    asserted[2] = "        # it is a measurement and is retained deliberately."
+    assert asserted[0] == withdrawn[0], "the literal's own line must not move"
+
+    before = _prose_block(withdrawn, 0, python=True)
+    assert _prose_block(asserted, 0, python=True) != before, (
+        "the three lines after the literal turned its retraction into an "
+        "assertion and the ratchet's memory did not move. That is the third "
+        "defeat this field exists to catch"
+    )
+
+    # ...AND THE BLOCK ENDS WHERE THE PARAGRAPH DOES. The `#`-only line is
+    # the boundary, so the sentence beyond it is somebody else's claim and
+    # rewording it must NOT move this entry.
+    beyond = list(withdrawn)
+    beyond[4] = "        # THE REFUSAL IS WRONG, and this is a different paragraph."
+    assert _prose_block(beyond, 0, python=True) == before, (
+        "a rewrite on the far side of a `#`-only separator moved this entry's "
+        "block sha, which would make every entry a claim about its whole file"
+    )
+
+    # THE LINE ITSELF STILL COUNTS, which is the first two defeats: the
+    # `sentence` field is not replaced by the block, it is joined by it.
+    reworded = list(withdrawn)
+    reworded[0] = reworded[0].replace("it is not", "it IS")
+    assert " ".join(reworded[0].split()) != " ".join(withdrawn[0].split())
+
+    # MARKDOWN GETS THE SAME RULE WITHOUT THE COMMENT STRIP: a `#` there is a
+    # heading and not a marker, which is why `python` is a parameter and not
+    # sniffed from the character.
+    assert _prose_line("# Heading", python=False) == "# Heading"
+    assert _prose_line("# Heading", python=True) == "Heading"
+    markdown = ["a claim about `64a0ce8d…`,", "continued on the next line.",
+                "", "a different paragraph."]
+    assert _prose_block_text(markdown, 0, python=False) == (
+        "a claim about `64a0ce8d…`, continued on the next line."
     )
 
 

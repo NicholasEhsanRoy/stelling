@@ -1204,11 +1204,35 @@ def test_the_origin_filter_keeps_JAX_S_OWN_constants_out_of_the_alarm(armed, jit
                     f"to {exc.file}:{exc.line}, which is not a line that wrote it"
                 )
     assert eager.CONVERSIONS > 0, "the hook saw nothing at all, so this proves nothing"
-    if not jit_on:
+    if not jit_on and jax.config.jax_enable_x64:
+        # AND THE COMPLEMENTARY FACT AT ``jax_enable_x64=1``, asserted rather
+        # than skipped -- the same choice, for the same reason, as
+        # `test_arming_REFUSES_when_the_jax_leg_of_that_control_stops_holding`
+        # below. With x64 on jax's threefry mask widens to ``int64``, which
+        # holds it, so there is no narrowing of jax's for the filter to
+        # suppress: the sentence under the `if` is written for the cell where
+        # the subject EXISTS, and at `844ba48` this test simply FAILED here,
+        # in a supported cell, on a subject that cannot be present. A suite
+        # that is red in a cell CI runs teaches a reader to ignore red.
+        #
+        # What is pinned instead is that the silence is the RIGHT silence: the
+        # hook saw jax's PRNG (the assertion above), nothing narrowed, and
+        # nothing was suppressed -- which is a different state from a filter
+        # that swallowed a real narrowing, and only the counters separate them.
+        snap = eager.snapshot()
+        assert (eager.SUPPRESSED_JAX, snap["truncations"]) == (0, 0), (
+            "with x64 on jax's mask is supposed to fit in int64, so nothing "
+            f"of jax's narrows and nothing is suppressed: {snap}"
+        )
+        assert not snap["suppressed"], (
+            f"nothing narrowed and yet a suppression was sited: {snap}"
+        )
+    elif not jit_on:
         assert eager.SUPPRESSED_JAX > 0, (
-            "with jit off jax narrows its own threefry mask eagerly and this "
-            "hook must SEE it -- 0 suppressions here means the measurement "
-            "stopped happening, not that the problem went away"
+            "with jit off and x64 off jax narrows its own threefry mask "
+            "eagerly and this hook must SEE it -- 0 suppressions in THIS cell "
+            "means the measurement stopped happening, not that the problem "
+            "went away"
         )
         assert eager.snapshot()["suppressed"], "suppressed but not sited"
         lines = " ".join(
@@ -1577,7 +1601,21 @@ def _jit_equality_basis():
         ("random.PRNGKey(2**32 - 1)", "no alarm",
          lambda: jax.random.PRNGKey(2 ** 32 - 1)),
         # --- narrowings reached by their own routes ---
-        ("arange(2**40, 2**40+3)", "raised 1099511627776 -> 0",
+        #
+        # THE FIRST OF THESE IS x64-DEPENDENT AND ITS EXPECTATION IS DERIVED,
+        # not skipped. `2**40` is narrowed by x64 CANONICALISATION -- jax
+        # canonicalises the int64 literal to int32 with x64 off -- and not by
+        # a dtype the caller named, so with x64 ON there is no narrowing to
+        # observe and the right verdict is "no alarm". At `844ba48` this test
+        # FAILED at `JAX_ENABLE_X64=1`, on exactly this one entry of the
+        # nineteen, in a supported cell. The property the test is about --
+        # that the verdict does not depend on whether a trace is in progress
+        # -- holds in BOTH cells and is what the equality above measures; only
+        # the population of narrowings moves with x64, which is the same
+        # distinction the docstring already draws about `jit`.
+        ("arange(2**40, 2**40+3)",
+         "no alarm" if jax.config.jax_enable_x64
+         else "raised 1099511627776 -> 0",
          lambda: jnp.arange(2 ** 40, 2 ** 40 + 3)),
         ("at[9].get(fill_value=-1) uint8", "raised -1 -> 255",
          lambda: jnp.arange(4, dtype=u8).at[9].get(mode="fill", fill_value=-1)),
@@ -1759,11 +1797,32 @@ _JIT_QUALIFIED_PAGES = (
 
 #: The claims that are true of `jit` ON and false of `jit` off. Written as
 #: fragments because every page wraps them differently.
+#:
+#: WHITESPACE-TOLERANT AT EVERY JOINT, and it was not until 2026-08-22. The
+#: scan below used `text.find(claim)`, a LITERAL substring over file text, so
+#: a page that wrapped the sentence between two of its words was invisible to
+#: it. These files wrap at ~76 columns and a rewrap is routine maintenance,
+#: not an attack. Driven: `This detector does not reach eager execution.`
+#: planted unqualified in `docs/quickstart.md` reds; the same sentence with a
+#: newline between `eager` and `execution` runs `1 passed`.
+#:
+#: The commit that wrote this check made `_FALSE_SENTENCE` in
+#: `tests/test_canonicalization_routes.py` whitespace-tolerant for exactly
+#: this reason, in the same diff, and did not apply it here.
 _JIT_DEPENDENT_CLAIM = (
     "does not reach eager execution",
     "not touch the INLINE door",
     "not reach the inline door",
     "sees 0 conversions",
+)
+
+#: Each fragment above, with every run of whitespace allowed to be any run of
+#: whitespace -- which is what a wrap is. Derived from the tuple rather than
+#: written out, so a fragment added there cannot be added here in the narrow
+#: form by accident.
+_JIT_CLAIM_RE = tuple(
+    (claim, re.compile(r"\s+".join(re.escape(w) for w in claim.split())))
+    for claim in _JIT_DEPENDENT_CLAIM
 )
 
 
@@ -1849,6 +1908,16 @@ def test_every_claim_about_what_this_does_not_reach_names_its_jit_mode():
     and is not in :data:`_JIT_QUALIFIED_PAGES` fails, because a page list
     is only as wide as its list; a listed file that has stopped making the
     claim fails too, because that is how a disclosure goes quiet.
+
+    AND THE CLAIM IS MATCHED ACROSS A WRAP. This was a literal substring
+    search until 2026-08-22, so a page that broke the sentence over two lines
+    -- which these files do at ~76 columns, as maintenance -- made it and was
+    never examined. See :data:`_JIT_CLAIM_RE`.
+
+    THE SCOPE IS THE WRAPPED ONE TOO: `_claim_scope` reads the physical LINE
+    for a table row and the paragraph otherwise, so a claim wrapped inside a
+    paragraph gets the paragraph (correct), and a table row cannot wrap in
+    markdown without ceasing to be one.
     """
     here = pathlib.Path(__file__).resolve().relative_to(_REPO).as_posix()
     found: dict[str, list] = {}
@@ -1857,11 +1926,9 @@ def test_every_claim_about_what_this_does_not_reach_names_its_jit_mode():
         # construction and says nothing about the project's prose.
         if rel == here:
             continue
-        for claim in _JIT_DEPENDENT_CLAIM:
-            start = 0
-            while (i := text.find(claim, start)) >= 0:
-                start = i + 1
-                scope = _claim_scope(text, i)
+        for claim, pattern in _JIT_CLAIM_RE:
+            for m in pattern.finditer(text):
+                scope = _claim_scope(text, m.start())
                 found.setdefault(rel, []).append(
                     (claim, bool(_JIT_CONFIG.search(scope)), scope[:200])
                 )
@@ -1895,13 +1962,23 @@ def test_every_claim_about_what_this_does_not_reach_names_its_jit_mode():
 #: canonicalisation rather than by a dtype the caller named. They are here as
 #: the positive control on the origin filter -- a filter that suppressed these
 #: would be a filter that had turned the detector off.
+#:
+#: THE THIRD COLUMN IS WHETHER x64 TAKES THE NARROWING AWAY, and it is
+#: DERIVED from what narrows the value rather than declared beside it: the two
+#: huge-integer rows narrow because jax canonicalises an `int64` literal to
+#: `int32` with x64 OFF, so with x64 ON `2**40` fits and there is nothing to
+#: fire on. The other two name a dtype (`uint32`, `uint8`) the caller wrote,
+#: which x64 does not touch.
 TRUE_POSITIVES = {
-    "jnp.full((2,), 2**40)": (lambda: jnp.full((2,), 2**40), 2**40),
-    "jnp.arange(2**40, 2**40 + 3)": (lambda: jnp.arange(2**40, 2**40 + 3), 2**40),
-    "jnp.full((3,), -1, uint32)": (lambda: jnp.full((3,), -1, jnp.uint32), -1),
+    "jnp.full((2,), 2**40)": (lambda: jnp.full((2,), 2**40), 2**40, True),
+    "jnp.arange(2**40, 2**40 + 3)": (
+        lambda: jnp.arange(2**40, 2**40 + 3), 2**40, True),
+    "jnp.full((3,), -1, uint32)": (
+        lambda: jnp.full((3,), -1, jnp.uint32), -1, False),
     "x.at[9].get(fill_value=-1) on uint8": (
         lambda: jnp.arange(10, dtype=jnp.uint8).at[9].get(mode="fill", fill_value=-1),
         -1,
+        False,
     ),
 }
 
@@ -1909,8 +1986,33 @@ TRUE_POSITIVES = {
 @pytest.mark.parametrize("name", sorted(TRUE_POSITIVES))
 @pytest.mark.parametrize("jit_on", [True, False], ids=["jit-on", "disable_jit"])
 def test_a_constant_the_user_really_wrote_fires_with_jit_ON_or_OFF(armed, name, jit_on):
-    """The origin filter must not have been bought with a missed narrowing."""
-    body, written = TRUE_POSITIVES[name]
+    """The origin filter must not have been bought with a missed narrowing.
+
+    AND THE COMPLEMENTARY FACT AT ``jax_enable_x64=1`` FOR THE TWO ROWS x64
+    REACHES, asserted rather than skipped. `2**40` fits in `int64`, so with
+    x64 on there is no narrowing and no alarm -- and the assertion worth
+    making there is the one that separates "nothing narrowed" from "something
+    narrowed and the filter ate it": the value SURVIVES, exactly, which a
+    suppressed truncation would not let it do. At `844ba48` these four cells
+    simply FAILED with `DID NOT RAISE`, in a supported cell, on a subject that
+    cannot be present in it.
+    """
+    body, written, x64_takes_it_away = TRUE_POSITIVES[name]
+    if x64_takes_it_away and jax.config.jax_enable_x64:
+        with contextlib.nullcontext() if jit_on else jax.disable_jit():
+            eager.reset_counters()
+            built = np.asarray(body()).ravel().tolist()
+        assert written in built, (
+            f"with x64 on, {name} should hold {written} exactly and holds "
+            f"{built}, so something narrowed it and no alarm was raised"
+        )
+        snap = eager.snapshot()
+        assert snap["conversions"] > 0, (
+            f"the hook saw nothing of {name}, so 'nothing narrowed' is "
+            f"indistinguishable from a hook that never ran: {snap}"
+        )
+        assert (snap["truncations"], snap["suppressed_jax"]) == (0, 0), snap
+        return
     with contextlib.nullcontext() if jit_on else jax.disable_jit():
         with pytest.raises(stelling.EagerTruncationError) as caught:
             body()
@@ -2003,10 +2105,38 @@ def test_an_UNENUMERATED_constant_of_jax_s_own_RAISES_rather_than_hiding(armed):
 
     Driven by taking the one row away, which is exactly what a release that
     moved the site would do.
+
+    AND THE COMPLEMENTARY FACT AT ``jax_enable_x64=1``, asserted rather than
+    skipped. With x64 on jax's mask widens to ``int64``, which holds it, so
+    the ONE row this map has describes a narrowing that does not happen in
+    this cell -- there is no residue to be loud about, because there is no
+    truncation of jax's at all. At `844ba48` this test FAILED here with
+    ``DID NOT RAISE``, in a supported cell, on a subject that cannot be
+    present in it. What is pinned instead is the denominator: jax's own PRNG
+    really did run through the live hook and really did narrow nothing, which
+    is what separates this from a hook that was never called.
     """
     assert _tripwire.evict_trace_caches() == "evicted"
     saved = dict(eager._JAX_CONSTANTS)
     eager._JAX_CONSTANTS.clear()
+    if jax.config.jax_enable_x64:
+        eager.reset_counters()
+        try:
+            with jax.disable_jit():
+                jax.random.key(0)
+        finally:
+            eager._JAX_CONSTANTS.update(saved)
+        snap = eager.snapshot()
+        assert snap["conversions"] > 0, (
+            "the hook saw nothing of jax's own PRNG, so 'no residue' is "
+            f"indistinguishable from a hook that never ran: {snap}"
+        )
+        assert (snap["truncations"], snap["suppressed_jax"]) == (0, 0), (
+            "with x64 on jax's mask is supposed to fit in int64; it narrowed "
+            f"anyway, with the map emptied, so the residue IS reachable here "
+            f"and this branch is wrong: {snap}"
+        )
+        return
     try:
         with jax.disable_jit():
             with pytest.raises(stelling.EagerTruncationError) as caught:
@@ -2240,15 +2370,45 @@ def test_the_const_fold_tripwire_still_needs_ITS_origin_filter(armed):
     try:
         assert _tripwire.evict_trace_caches() == "evicted"
         before = recorder.suppressed_jax
+        # `int_narrowings` is the const-fold rule's INSPECTED DENOMINATOR --
+        # "folded, integer source, integer target: the population that is
+        # range-checked" (`record.py`) -- and not a count of findings. The
+        # local was called `narrowings`, which made the comment beside the
+        # assertion below read as its own contradiction; the name says which
+        # of the two it is now.
+        inspected = recorder.int_narrowings
         jax.random.key(0)
-        assert recorder.suppressed_jax > before, (
-            "the const-fold tripwire no longer fires on jax's own PRNG mask, "
-            "so the contrast this test is about has gone away and the "
-            "attribution machinery it justifies should be re-examined"
-        )
-        suppressed = recorder.sorted_suppressed()[0]
-        assert suppressed.origin == _record.ORIGIN_JAX
-        assert (suppressed.written, suppressed.became) == (4294967295, -1)
+        if jax.config.jax_enable_x64:
+            # AND THE COMPLEMENTARY FACT AT ``jax_enable_x64=1``, asserted
+            # rather than skipped. The contrast this test draws is between two
+            # instruments meeting the SAME narrowing; with x64 on jax's mask
+            # widens to `int64` and there is no narrowing for either of them
+            # to attribute, so the contrast has no subject in this cell rather
+            # than having gone away. At `844ba48` this test FAILED here, in a
+            # supported cell, reporting that "the contrast has gone away".
+            #
+            # The denominator is what is pinned: the const-fold rule really
+            # did meet jax's PRNG and really did decide it was not a
+            # truncation, which is a different state from a rule that was
+            # never reached.
+            assert recorder.int_narrowings > inspected, (
+                "the const-fold rule saw no integer narrowing at all in jax's "
+                "own PRNG, so 'nothing to attribute' is indistinguishable "
+                "from a rule that was never reached"
+            )
+            assert recorder.suppressed_jax == before, (
+                "with x64 on jax's mask fits in int64, so there is nothing "
+                "for the ORIGIN_JAX bucket to hold and it moved anyway"
+            )
+        else:
+            assert recorder.suppressed_jax > before, (
+                "the const-fold tripwire no longer fires on jax's own PRNG "
+                "mask, so the contrast this test is about has gone away and "
+                "the attribution machinery it justifies should be re-examined"
+            )
+            suppressed = recorder.sorted_suppressed()[0]
+            assert suppressed.origin == _record.ORIGIN_JAX
+            assert (suppressed.written, suppressed.became) == (4294967295, -1)
     finally:
         if not was_armed:
             _tripwire.disarm()
@@ -2344,8 +2504,9 @@ def test_arming_twice_hands_back_the_recorder_that_is_ACTUALLY_recording(armed):
 def test_the_route_list_the_selfcheck_drives_covers_the_routes_this_file_drives():
     """The self-check's claim and the test's claim are the same claim.
 
-    A self-check that drove one route while the tool advertised six would be
-    exactly the "attached but blind" failure it exists to catch, one level up.
+    A self-check that drove one route while the tool claimed all seven
+    construction routes would be exactly the "attached but blind" failure it
+    exists to catch, one level up.
     """
     driven = {name for name, _ in adapter._eager_routes()}
     assert {"jnp.full", "jnp.full_like", "lax.full", "lax.full_like",
@@ -2384,9 +2545,9 @@ def test_a_route_going_blind_refuses_to_attach_and_names_the_route(unarmed):
     """The failure this design turns on, and the only one that is silent.
 
     A jax release that stopped routing one construction spelling through the
-    site leaves the attribute there and the wrapper installed. Keeping five
-    routes and losing one quietly is not a trade this tool makes on a user's
-    behalf.
+    site leaves the attribute there and the wrapper installed. Losing one of
+    the seven construction routes quietly is not a trade this tool makes on a
+    user's behalf.
     """
     status = _tripwire.arm_eager()
     if not status.armed:  # pragma: no cover - environment

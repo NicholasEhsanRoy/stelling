@@ -583,9 +583,25 @@ def test_the_one_forgery_CPython_permits_is_stored_as_the_int_it_carries():
 #: paragraph and `tests/test_aval_lie_both_faces.py`'s -- wrap between "the"
 #: and "frozen" and were never examined at all, so the shape check below was
 #: policing a third of what it named.
+#:
+#: AND TOLERANT OF THE QUOTING AND OF THE ARTICLE, from 2026-08-22. Whitespace
+#: was the joint that had bitten; it was not the only one. `` `? `` admits ONE
+#: backtick, so this repository's own RST DOUBLE-backtick convention walked
+#: through it -- and `tests/test_aval_lie_both_faces.py`, one of the three
+#: pages this reads, is a `.py` file whose docstrings use exactly that. So did
+#: dropping the article, and so did quoting the identifier with `"` or `'`.
+#: Four evading spellings, all planted UNQUOTED and all passing:
+#: ``object.__setattr__``, no article, `a` for `an`, and the `"`-quoted form.
+#: `test_the_false_sentence_pattern_catches_the_spellings_that_EVADED_it` is
+#: the corpus that stops this narrowing back to the one spelling it was
+#: written from.
+#:
+#: The identifier itself is NOT made optional and the sentence's words are not
+#: loosened further: this is a check on ONE retracted sentence, and a pattern
+#: that matched a paraphrase would start forbidding sentences nobody wrote.
 _FALSE_SENTENCE = re.compile(
-    r"only\s+an\s+`?object\.__setattr__`?\s+past\s+the\s+frozen\s+"
-    r"dataclass\s+reaches\s+it",
+    r"only\s+(?:an?\s+)?[`'\"]{0,2}object\.__setattr__[`'\"]{0,2}\s+past"
+    r"\s+the\s+frozen\s+dataclass\s+reaches\s+it",
     re.S,
 )
 
@@ -621,7 +637,8 @@ _DISCLOSURE_PAGES = (
 #: 1. the occurrence is inside `*"..."*`, and
 #: 2. the paragraph states how many routes there really are.
 _QUOTED_FALSE = re.compile(
-    r"\*\"[^\"]*only\s+an\s+`?object\.__setattr__`?[^\"]*\"\*", re.S
+    r"\*\"[^\"]*only\s+(?:an?\s+)?[`']{0,2}object\.__setattr__[^\"]*\"\*",
+    re.S,
 )
 #: The count, DERIVED: `len(ROUTES)` as a word or a digit, with markdown
 #: emphasis allowed between it and the noun. A literal `three` here would be
@@ -645,6 +662,60 @@ def _enclosing_block(text: str, index: int) -> str:
     start = 0 if start < 0 else start + 2
     end = text.find("\n\n", index)
     return text[start:len(text) if end < 0 else end]
+
+
+#: The spellings of the retracted sentence that `_FALSE_SENTENCE` did NOT
+#: see, held as TEMPLATES with the identifier substituted at runtime, because
+#: the pattern reads this file too and a verbatim example here would be a
+#: self-inflicted hit. Every entry was planted UNQUOTED in a disclosure page
+#: and passed at `844ba48`. The last two rows are the shape the pattern must
+#: still REFUSE: it polices one sentence, not a topic.
+_SETATTR = "object.__setattr__"
+_EVADING_SPELLINGS = (
+    "only an ``{name}`` past the frozen dataclass reaches it",
+    "only `{name}` past the frozen dataclass reaches it",
+    "only a `{name}` past the frozen dataclass reaches it",
+    'only an "{name}" past the frozen dataclass reaches it',
+    # ... and the two the pattern already saw, so the corpus cannot narrow
+    "only an `{name}` past the frozen dataclass reaches it",
+    "only an {name} past the frozen\ndataclass reaches it",
+)
+_MUST_NOT_MATCH = (
+    "only an `{name}` past the frozen dataclass reaches them",
+    "an `{name}` past the frozen dataclass is one of three routes",
+)
+
+
+def test_the_false_sentence_pattern_catches_the_spellings_that_EVADED_it():
+    """ANTI-VACUITY for `_FALSE_SENTENCE`, and it is where the pattern failed.
+
+    A shape check is only as wide as the shapes it admits, and this one
+    admitted one backtick and required the article `an`. So the sentence audit
+    8 falsified could come back in this repository's OWN RST double-backtick
+    convention -- in `tests/test_aval_lie_both_faces.py`, which is one of the
+    three pages the check reads -- and in three more spellings besides, all
+    planted unquoted, all `14 passed`.
+
+    BOTH DIRECTIONS. The last two entries must NOT match: this polices one
+    retracted sentence, and a pattern that spread to a paraphrase would start
+    forbidding sentences nobody wrote, which is how a prose check becomes
+    something people delete.
+    """
+    for template in _EVADING_SPELLINGS:
+        filled = template.format(name=_SETATTR)
+        assert _FALSE_SENTENCE.search(filled), (
+            f"the retracted sentence is invisible to `_FALSE_SENTENCE` when "
+            f"it is spelled {filled!r}"
+        )
+        assert not _FALSE_SENTENCE.search(template), (
+            f"the corpus TEMPLATE {template!r} matches as written, so this "
+            f"file's own text is a hit -- substitute the identifier at runtime"
+        )
+    for template in _MUST_NOT_MATCH:
+        assert not _FALSE_SENTENCE.search(template.format(name=_SETATTR)), (
+            f"`_FALSE_SENTENCE` has spread past the sentence it polices and "
+            f"now matches {template!r}"
+        )
 
 
 def test_the_DISCLOSURES_name_exactly_these_routes():

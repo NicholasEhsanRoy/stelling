@@ -72,11 +72,20 @@ quiet.
 * **NOT checked outside git, and this is the sharpest limit here.** The
   general statement, which is what a reader needs, is about COLUMNS and
   not about a list of scenarios: **every SOURCE-SIDE column of the
-  manifest is unverified outside git** — `src_span`, `src_lines`,
-  `src_sha256`, `src_lines_not_carried`, `not_carried`, and each section's
-  `source_commit` and `source_span`. A mutation confined to those columns
-  survives an sdist **whether or not it also touches a shipped file**. The
-  git leg is the SOLE guard over all of it.
+  manifest that names the SOURCE TEXT is unverified outside git** —
+  `src_span`, `src_sha256`, `src_lines_not_carried`, `not_carried`, and
+  each section's `source_commit` and `source_span`. A mutation confined to
+  those columns survives an sdist **whether or not it also touches a
+  shipped file**. The git leg is the SOLE guard over all of it.
+
+  **`src_lines` CAME OFF THAT LIST ON 2026-08-22, and it is the only one
+  that ever could.** Six columns now, and the change is a check rather
+  than a rewording: `src_lines` is arithmetic on `src_span`, both ends of
+  which are in the file, so
+  `test_every_block_declares_the_number_of_source_lines_its_span_holds`
+  measures it here, git or no git. It does not make `src_span` verified —
+  a span shrunk at BOTH ends with `src_lines` shrunk to match is still an
+  sdist-invisible mutation, and that is the residue this list is about.
 
   **NOT, HOWEVER, "BECAUSE NOTHING IN THE DESTINATION READS THEM", WHICH
   IS WHAT THIS SAID AND IS REFUTED BY ITS OWN NEXT PARAGRAPH.** The
@@ -101,12 +110,15 @@ quiet.
   `test_nothing_was_dropped_and_every_edit_is_declared` and
   `test_the_record_says_how_many_blocks_were_edited_in_transit`. A
   mutation that leaves that partition alone is not — the same corruption
-  applied to an *edited* block's `src_sha256` is `19 passed, 8 skipped`,
-  the whole git-less tally.
+  applied to an *edited* block's `src_sha256` is the whole git-less tally,
+  green (`19 passed, 8 skipped` when measured; `21 passed, 8 skipped`
+  re-driven on 2026-08-22).
 
   Four mutations of ONE file, `tests/_soundness_routing_manifest.py`, all
-  **`19 passed, 8 skipped`** git-less — this file's entire git-less tally,
-  so nothing at all goes red — and driven:
+  git-less-green and driven. **The tallies below were taken before this
+  file grew two git-less checks on 2026-08-22**; re-driven at that commit
+  the tally is `21 passed, 8 skipped` and all four still go green, so the
+  residue is unchanged and only the denominator moved:
 
   * `SF-0.2.0-51`'s three quoted `not_carried` lines replaced by three
     inventions with the count preserved — **`1 failed, 26 passed`** with
@@ -116,7 +128,14 @@ quiet.
     reader will meet them."* In an sdist the reader meets three lines that
     never stood in `CHANGELOG.md`, no material is missing from either
     shipped file, and `CHANGELOG.md` is untouched.
-  * `src_span` shrunk by a line — **`1 failed, 26 passed`** with git.
+  * `src_span` shrunk by a line, `src_lines` shrunk with it — **`1 failed,
+    26 passed`** with git. **`src_lines` LEFT ALONE IS CAUGHT GIT-LESS
+    NOW**, and it is the one member of this list that changed:
+    `test_every_block_declares_the_number_of_source_lines_its_span_holds`
+    measures `src_lines` against the span, so a span shrunk on its own is
+    `1 failed, 20 passed, 8 skipped` with no git at all. An editor who
+    shrinks both is still invisible here, which is why `src_span` stays on
+    the unverified list and `src_lines` came off it.
   * an *edited* block's `src_sha256` corrupted — `1 failed, 26 passed`
     with git.
   * a section's `source_commit` zeroed — **`4 failed, 23 passed`** with
@@ -175,32 +194,54 @@ quiet.
   `.git` removed on `SF-0.2.0-59`'s 367-line body, **`19 passed, 8
   skipped`**, and **`1 failed, 26 passed`** where git is present).
 
-  `src_lines` is in that list and is a WORSE case than any of these, which
-  is why it is named rather than dropped from a list that claims to be the
-  general statement: it is declared 72 times and READ NOWHERE. Measured,
+  `src_lines` WAS IN THAT LIST AND WAS A WORSE CASE THAN ANY OF THESE:
+  declared 72 times and READ NOWHERE. Measured at `844ba48`,
   `grep -rEn 'src_lines([^_]|$)'` over the whole checkout, `*.py` and
   `*.md`: 74 hits in `_soundness_routing_manifest.py` — the 72 values, the
   field's own declaration on `Block`, and one mention in that file's
-  docstring — and 6 in this file, of which 4 are in this docstring and 2
-  in the skip message below. No reader anywhere, in either file. So it is
-  unverified with git present as well as
-  without, and it is the one source-side column that COULD be checked
-  without git, against `src_span`. Recorded for the campaign's final sweep
-  and deliberately not fixed here.
+  docstring — and 6 in this file, none of them a reader. Driven the only
+  way an unread column can be: one `src_lines=7` changed to `999` ran
+  **`27 passed`, with git present**. All 72 values were correct, which is
+  the argument for measuring them rather than against it — a column
+  nothing reads is correct until the first edit, and nothing finds out
+  after that. It is measured now, in the file whose entire thesis is that
+  a declaration nothing measures is not a declaration.
 
-  The skip messages carry the general statement too, so a reader who
-  meets one there learns which columns are unverified and not merely that
-  something is.
+  The skip WARNINGS carry the general statement too, so a reader who meets
+  one there learns which columns are unverified and not merely that
+  something is. **THEY WERE THE SKIP REASONS UNTIL 2026-08-22, AND THAT IS
+  WHY A GIT-LESS TREE EXITED 1 REGARDLESS.** A reason built from an f-string
+  carrying the section key, the ref and git's stderr can never be an exact
+  string typed in `tests/test_skip_inventory.py`, and exact is the only kind
+  that file excuses — so all eight of this file's git-less skips were
+  undisclosed, `test_no_session_skip_is_undisclosed` failed, and the lane
+  whose whole point is that an sdist is a supported way to consume this
+  project could not come back green. Driven at `844ba48`: `1 failed, 2106
+  passed, 159 skipped` in the zero-dep lane with `.git` removed, naming NINE
+  — the eight here and one in `tests/test_reuse_pins.py`. The reason is the
+  constant `_GIT_LESS_SKIP` now and the detail is a warning, which is where
+  a reader was going to meet it anyway: `-rs` truncates a skip reason to the
+  terminal width. **THOSE WARNINGS ARE LATENT UNDER `-W error`, said here
+  rather than found later.** `pyproject.toml` configures no
+  `filterwarnings` and no workflow passes `-W`, so this is inert today; if
+  warnings are ever promoted, all nine disclosed skips become errors —
+  driven in a `.git`-less zero-dep tree, `-W error::UserWarning` over this
+  file and `tests/test_reuse_pins.py` gives `9 failed, 23 passed` where the
+  same two files give `23 passed, 9 skipped` without it. The sdist lane
+  would be red for a disclosure doing its job, and the answer that day is a
+  `filterwarnings` entry naming these, not a quieter skip. `stacklevel=2` is
+  right for the two here, which warn from a HELPER the test calls; the one
+  in `tests/test_reuse_pins.py` warns from the test body and takes the
+  default, because one frame out of a test body is pytest's own caller.
 
-  **AND UNTIL 2026-08-21 THEY CARRIED A DIFFERENT ONE.** This list names
-  SEVEN columns. `_LOST`, the string both skip messages are built from,
-  named SIX — and the one it left out was `src_lines`, the column this
-  list singles out as *"a WORSE case than any of these"*, in the same
-  paragraph as the claim that the skip messages carry the general
-  statement. Two statements of one general statement that differ by a
-  member are not one statement in two places, and the sdist reader, who
-  is the only reader either was written for, met the shorter one. Seven
-  and seven now.
+  **AND UNTIL 2026-08-21 THEY CARRIED A DIFFERENT ONE.** This list named
+  SEVEN columns; `_LOST`, the string both skip messages are built from,
+  named SIX, and the one it left out was `src_lines`. Two statements of
+  one general statement that differ by a member are not one statement in
+  two places, and the sdist reader, who is the only reader either was
+  written for, met the shorter one. They agreed at seven from 2026-08-21,
+  and they agree at SIX now that `src_lines` is measured — the same
+  member, leaving by the other door.
 * NOT checked: whether a one-liner's sentence is a *good* summary of its
   detail. It is not a summary — it is the block's own headline, moved,
   or a sentence written to stand alone in its place — but nothing here
@@ -216,6 +257,7 @@ import hashlib
 import pathlib
 import re
 import subprocess
+import warnings
 
 import pytest
 
@@ -261,15 +303,22 @@ SOUNDNESS = REPO / "SOUNDNESS.md"
 #: A history rewrite that replaces the root — `filter-repo`, a squash of
 #: everything, a graft — leaves a repository this probe does not recognise,
 #: so the four git-gated tests SKIP in what is otherwise this project's own
-#: checkout rather than run. That is the safe direction and it is not
-#: silent: the eight skips carry a reason no `Rule` in
-#: `tests/test_skip_inventory.py` matches, so
-#: `test_no_session_skip_is_undisclosed` reds. Driven in exactly that
-#: shape — this tree committed into a fresh repository, which is what a
-#: rewrite leaves behind — this file is `19 passed, 8 skipped` and the
-#: session is `1 failed, 4284 passed, 17 skipped`, exit 1 —
-#: the ONE failure being `test_no_session_skip_is_undisclosed` and the
-#: eight ids it names being exactly these four tests over two sections.
+#: checkout rather than run. That is the safe direction.
+#:
+#: **AND IT USED TO BE ARGUED AS LOUD, WHICH WAS THE DEFECT ONE FILE OVER.**
+#: This paragraph read *"it is not silent: the eight skips carry a reason no
+#: `Rule` in `tests/test_skip_inventory.py` matches, so
+#: `test_no_session_skip_is_undisclosed` reds"* — and what that describes is
+#: an UNDISCLOSED skip being sold as an alarm. It reds identically in an
+#: unpacked sdist and in a shallow CI clone, which are supported ways to
+#: consume this project and are not a rewritten history; measured at
+#: `844ba48`, the zero-dep lane with `.git` removed is `1 failed, 2106
+#: passed, 159 skipped`, and the one failure names NINE undisclosed skips.
+#: An exit code that cannot tell a rewritten root from an sdist is not a
+#: signal about the root. The skips are disclosed now, by `_GIT_LESS_SKIP`
+#: and the `Rule` that names it, so all three of those environments come
+#: back green — and what still tells a maintainer which one they are in is
+#: the WARNING each skip emits, which names the cause git reported.
 #:
 #: AND THIS CONSTANT IS READ ONLY ON THE `git show` FAILURE PATH, so a
 #: wrong value here is invisible until the day it is needed, and then it
@@ -306,11 +355,52 @@ _ONE_LINER_MAX_LINES = 5
 #: says what the section is and points at the ledger. It is prose on
 #: purpose, so it is not held to `_ONE_LINER_MAX_LINES`; but "not a
 #: one-liner" is not "unbounded", because an unbounded preamble is a place
-#: an entry can be re-grown where no per-entry check looks. Sixty lines,
-#: measured against both ends: today's preambles are 29 and 16 non-blank
-#: lines, and the average routed soundness block is 45 (2989 source lines
-#: over 66 blocks), so this admits an explanation and refuses an entry.
-_PREAMBLE_MAX_LINES = 60
+#: an entry can be re-grown where no per-entry check looks.
+#:
+#: **SIXTY DID NOT SATISFY ITS OWN ARGUMENT, AND NOTHING CHECKED IT.** The
+#: number was validated only by plants derived FROM it — driven, `60 -> 6000`
+#: left this file and `tests/test_soundness_log_reach.py` at **38 passed**
+#: together — and the sentence it carried was measured on one of its two
+#: sections. Re-derived 2026-08-22, both sections, through this file's own
+#: `SECTIONS` and `_paragraphs`:
+#:
+#:     section      preamble   blocks   src lines   average block
+#:     soundness          29       66        2922           44.3
+#:     mode2              16        6         234           39.0
+#:
+#: "Admits an explanation and refuses an entry" is arithmetic: the HEADROOM
+#: above a section's preamble must be smaller than a block of it. That binds
+#: at `mode2` — `16 + 39.0` — so the ceiling has to be under **55**, and at
+#: 60 the `mode2` preamble had 44 lines of headroom for a 39-line block. The
+#: old sentence's `2989 source lines` and `average 45` were the `soundness`
+#: section's and have drifted to 2922 and 44.3 besides. Fifty is under the
+#: bound and still leaves the larger preamble 21 lines to grow in;
+#: `test_the_section_holds_only_one_liners_and_context_blocks` asserts both
+#: halves, per section, so this comment cannot go stale again without a red.
+_PREAMBLE_MAX_LINES = 50
+
+#: THE REASON BOTH GIT-LESS SKIPS IN THIS FILE CARRY, AND IT IS A CONSTANT.
+#: `tests/test_skip_inventory.py` excuses a skip only by an EXACT string typed
+#: on its own disclosure surface — no patterns, because every bound on a
+#: pattern turned out to be a list of the ways somebody had already been
+#: broad. These reasons were f-strings carrying the section key, the ref and
+#: GIT'S STDERR, so no rule could ever have named them, and a git-less tree
+#: therefore exited 1 on `test_no_session_skip_is_undisclosed` no matter what:
+#: driven at `844ba48`, `1 failed, 2106 passed, 159 skipped` in the zero-dep
+#: lane with `.git` removed, naming NINE undisclosed skips — the eight here
+#: and one in `tests/test_reuse_pins.py`. **The sdist lane's own skip
+#: disclosure was inconsistent with its rule table**, in the two files whose
+#: subject is that a checkout without git cannot verify the routing.
+#:
+#: WHAT THE REASON CANNOT CARRY TRAVELS AS A WARNING, one per skip: the ref,
+#: which of the five causes `_why_the_history_is_out_of_reach` measured, the
+#: `_LOST` general statement and git's own words. `pytest -rs` truncates a
+#: skip reason to the terminal width anyway, so a 1,500-character reason was
+#: never the place a reader met that text.
+_GIT_LESS_SKIP = (
+    "git cannot read this tree's own history, so the routing manifest's "
+    "source-side columns are unverified here"
+)
 
 #: `**N blocks were edited in transit**` — the count beside the data, in
 #: the paragraph whose subject is that nothing was lost. The digit is
@@ -420,9 +510,38 @@ def _lines_not_carried(src_text: str, dest_text: str) -> list[str]:
     Verbatim and line-for-line, leading whitespace included: a block that
     arrived re-wrapped or re-indented did not arrive, it was retyped, and
     this is the number `Block.src_lines_not_carried` is measured against.
+
+    IN ORDER, AND ONCE EACH. This was `ln not in set(dest.split())` until
+    2026-08-22 — set membership, so it was blind to ORDER and to
+    MULTIPLICITY. Driven at `de80ad8`: `SF-0.2.0-60`'s 124 destination lines
+    completely shuffled into nonsense, `dest_sha256` regenerated,
+    `src_lines_not_carried=0` and the edit count bumped, ran **`25 passed`**.
+    A destination holding the same 124 lines in a scrambled order is not the
+    block that left; every argument the source made in sequence is gone and
+    the check that exists to refuse a summarisation read it as a verbatim
+    arrival.
+
+    So the source's carried lines must appear in the destination as a
+    SUBSEQUENCE — a two-pointer scan, each destination line consumed at most
+    once, so a source line quoted twice needs the destination to carry it
+    twice. Driven, on `alpha/beta/gamma/delta` against the same four
+    reversed: `[]` under set membership, `['beta', 'gamma', 'delta']` here;
+    and `a/b/a` against `a/b`, `[]` under set membership and `['a']` here.
+    `test_the_lines_not_carried_scan_reads_ORDER_and_MULTIPLICITY` is the pin.
+
+    The real tree is unaffected: all 72 blocks arrived in order, so every
+    declared `src_lines_not_carried` reads the same under both.
     """
-    dest = set(dest_text.split("\n"))
-    return [ln for ln in src_text.split("\n") if ln.strip() and ln not in dest]
+    dest = dest_text.split("\n")
+    at, missing = 0, []
+    for ln in src_text.split("\n"):
+        if not ln.strip():
+            continue
+        try:
+            at = dest.index(ln, at) + 1
+        except ValueError:
+            missing.append(ln)
+    return missing
 
 
 def _detail_sections(soundness: str) -> dict[str, str]:
@@ -678,16 +797,17 @@ def _source_changelog(section: Section) -> str:
     `.git` removed against `1 failed, 26 passed` with git.
     """
     _LOST = (
-        "src_span, src_lines, src_sha256, src_lines_not_carried, "
-        "not_carried and the section's source_commit/source_span -- SEVEN "
-        "columns, the same seven this file's docstring lists, and "
-        "src_lines is one of them because a list that claims to be the "
-        "general statement may not omit a member of itself -- are ALL "
+        "src_span, src_sha256, src_lines_not_carried, "
+        "not_carried and the section's source_commit/source_span -- SIX "
+        "columns, the same six this file's docstring lists, and src_lines "
+        "is not one of them because it is arithmetic on src_span and is "
+        "measured with or without git -- are ALL "
         "unverified here, so "
         "any mutation confined to those columns survives -- one file or "
         "three, and whether or not a shipped file is touched. Measured, "
-        "one file and 19 passed, 8 skipped -- the whole of this file's "
-        "git-less tally, so nothing at all went red: fabricated "
+        "one file and the whole of this file's git-less tally green -- "
+        "19 passed, 8 skipped when measured, 21 passed, 8 skipped "
+        "re-driven on 2026-08-22 -- so nothing at all went red: fabricated "
         "`not_carried` quotes with the count preserved; a shrunk "
         "`src_span`; a corrupted `src_sha256` on a block already declared "
         "edited; and this section's own source_commit zeroed. Each of the "
@@ -707,13 +827,51 @@ def _source_changelog(section: Section) -> str:
             cwd=REPO, capture_output=True, text=True, timeout=60,
         )
     except (OSError, subprocess.SubprocessError) as e:  # pragma: no cover
-        pytest.skip(
-            f"git unavailable, so `{section.key}`'s source cannot be read: "
-            f"{_LOST}: {e}"
+        warnings.warn(
+            f"{section.key}: git is unavailable, so its source cannot be "
+            f"read at all. {_LOST}: {e}",
+            stacklevel=2,
         )
+        pytest.skip(_GIT_LESS_SKIP)
     if r.returncode != 0:
         why = _why_the_history_is_out_of_reach()
         if why is None:
+            # WHICH OF TWO THINGS IS MISSING, and it is the same idiom the
+            # anchor probe uses one function up. The three probes above
+            # establish that this tree is this repository, in full; they say
+            # nothing about whether the OBJECT STORE is complete. A
+            # `--filter=blob:none` / `--filter=tree:0` clone whose promisor
+            # remote has moved away holds the COMMIT and the TREE and not the
+            # BLOB, so `git show <commit>:CHANGELOG.md` fails there while the
+            # manifest is correct and every probe answers correctly. Driven:
+            # such a clone at `844ba48` gave `8 failed, 19 passed` under a
+            # message asserting the manifest names a commit that is not
+            # there, which is false there -- `git cat-file -e <commit>^{commit}`
+            # answers rc=0 in it. Pre-existing and identical at `a7fe65f`.
+            #
+            # IT STAYS A FAILURE EITHER WAY, and that is deliberate: an
+            # incomplete object store is a broken checkout somebody can repair
+            # with one `git fetch`, not a supported consumption mode like an
+            # sdist or a shallow CI clone, so it does not join the skip
+            # disclosure. What changes is which of the two it names.
+            probe = subprocess.run(
+                ["git", "cat-file", "-e", f"{section.source_commit}^{{commit}}"],
+                cwd=REPO, capture_output=True, text=True, timeout=60,
+            )
+            if probe.returncode == 0:
+                pytest.fail(
+                    f"`{section.key}` names {section.source_commit}, and this "
+                    f"tree HAS that commit object -- `git cat-file -e "
+                    f"{section.source_commit}^{{commit}}` answers yes -- while "
+                    f"`git show {ref}` cannot read the file out of it. The "
+                    f"MANIFEST IS NOT WHAT IS WRONG: this is an incomplete "
+                    f"OBJECT STORE, which is what a `--filter=blob:none` or "
+                    f"`--filter=tree:0` partial clone becomes when its "
+                    f"promisor remote is unreachable -- the commit and the "
+                    f"tree are local and the blob was never fetched. Restore "
+                    f"the remote and `git fetch`, or re-clone without a "
+                    f"filter. git said: {r.stderr[:200]}"
+                )
             pytest.fail(
                 f"`{section.key}` names {section.source_commit} as the "
                 f"commit its source-side columns were measured from, and "
@@ -721,18 +879,22 @@ def _source_changelog(section: Section) -> str:
                 f"own full, non-shallow checkout -- all THREE conditions "
                 f"tested here, just now, rather than assumed: a git work "
                 f"tree rooted at this directory, not shallow, and holding "
-                f"{_ANCHOR[:12]}, this project's root commit. So this is "
-                f"neither the sdist nor the shallow clone nor the foreign "
-                f"repository this check skips for: the "
-                f"commit is unresolvable in a tree that can resolve "
-                f"commits, and what is wrong is the MANIFEST naming a "
-                f"commit that is not there, not the CI configuration's "
-                f"fetch depth. git said: {r.stderr[:200]}"
+                f"{_ANCHOR[:12]}, this project's root commit. The commit "
+                f"OBJECT is absent too -- `git cat-file -e "
+                f"{section.source_commit}^{{commit}}` says so, which is what "
+                f"separates this from a partial clone whose blobs are gone. "
+                f"So this is neither the sdist nor the shallow clone nor the "
+                f"foreign repository this check skips for, and not an "
+                f"incomplete object store either: what is wrong is the "
+                f"MANIFEST naming a commit that is not there, not the CI "
+                f"configuration's fetch depth. git said: {r.stderr[:200]}"
             )
-        pytest.skip(
-            f"cannot read {ref} ({why}), so `{section.key}`'s {_LOST}: "
-            f"{r.stderr[:200]}"
+        warnings.warn(
+            f"{section.key}: cannot read {ref} ({why}), so {_LOST}: "
+            f"{r.stderr[:200]}",
+            stacklevel=2,
         )
+        pytest.skip(_GIT_LESS_SKIP)
     return r.stdout
 
 
@@ -932,6 +1094,21 @@ def test_the_section_holds_only_one_liners_and_context_blocks(files, section):
         f"place in the section prose can grow without any other check here "
         f"seeing it."
     )
+    # AND THE CEILING SATISFIES ITS OWN ARGUMENT, WHICH IT DID NOT AND
+    # NOTHING ASKED. See `_PREAMBLE_MAX_LINES`: the number was checked only
+    # by plants derived from it, so `60 -> 6000` was green, and at 60 the
+    # `mode2` preamble had more headroom than a `mode2` block is long. Both
+    # halves, per section, from the document:
+    average = sum(b.src_lines for b in section.blocks) / len(section.blocks)
+    headroom = _PREAMBLE_MAX_LINES - preamble
+    assert headroom < average, (
+        f"`{section.heading}`'s preamble ceiling leaves {headroom} lines of "
+        f"headroom above its {preamble}-line preamble, and its average "
+        f"routed block is {average:.1f} lines — so a block of this section "
+        f"FITS above the first one-liner, where no per-entry check looks. "
+        f"That is the whole argument for {_PREAMBLE_MAX_LINES}; it has to be "
+        f"under {preamble + average:.0f} for this section"
+    )
     stray = []
     for para in paras[first:]:
         ids = sorted(set(_ID.findall("\n".join(para))))
@@ -1016,6 +1193,76 @@ def test_nothing_was_dropped_and_every_edit_is_declared():
             assert block.src_lines_not_carried == 0
             assert not block.not_carried
             assert not block.edit_note
+
+
+def test_every_block_declares_the_number_of_source_lines_its_span_holds():
+    """`src_lines`, MEASURED — and it is the one source-side column that can
+    be, without git.
+
+    THE COLUMN WAS DECLARED 72 TIMES AND READ NOWHERE. Measured at
+    `844ba48`, `grep -rEn 'src_lines([^_]|$)'` over the whole checkout found
+    the 72 values, the field's declaration on `Block` and prose — and no
+    reader anywhere, in any file. Driven the way an unread column has to be
+    driven: one `src_lines=7` changed to `999` and the routing file ran
+    **`27 passed`**, WITH GIT PRESENT. Every other source-side column is
+    unverifiable without `git show`; this one is arithmetic on `src_span`,
+    which is right here, so it was the only member of that list that did not
+    have to be on it.
+
+    All 72 values were correct when this was written, which is the reason to
+    write it rather than a reason not to: a column nothing reads is correct
+    until the first time somebody edits it, and there is no later moment at
+    which anyone finds out.
+
+    `src_span` ITSELF IS NOT TAKEN ON TRUST EITHER, and this test is not
+    where that happens: `test_the_source_span_is_derived_and_not_trusted`
+    recomputes the section's span from the source, and
+    `test_the_splitter_partitions_the_source` holds every block's span to
+    where the splitter actually finds it. This is the arithmetic between the
+    two ends, which is the part that needs no history.
+    """
+    wrong = [
+        (block.id, block.src_lines, block.src_span)
+        for block in ROUTED
+        if block.src_lines != block.src_span[1] - block.src_span[0] + 1
+    ]
+    assert not wrong, (
+        f"block(s) whose `src_lines` is not the number of lines their "
+        f"`src_span` covers: {wrong}. The two are one measurement written "
+        f"twice — `hi - lo + 1` — and a column nothing reads is a column "
+        f"the next edit is free to invent."
+    )
+    # ... and it is not vacuous: the spans really do carry a range each, so
+    # the equality above is arithmetic and not `0 == 0` seventy-two times.
+    assert ROUTED and all(
+        b.src_span[1] >= b.src_span[0] >= 1 for b in ROUTED
+    ), "a routed block declares an empty or negative source span"
+
+
+def test_the_lines_not_carried_scan_reads_ORDER_and_MULTIPLICITY():
+    """`_lines_not_carried` directly, on the two blindnesses it had.
+
+    Set membership answers "does the destination contain this line
+    anywhere", which is not what "carried" means: a destination holding the
+    block's own lines shuffled into nonsense answered `not carried: 0`, and
+    a source line quoted twice was satisfied by one copy. Driven at
+    `de80ad8` through the manifest — `SF-0.2.0-60`'s 124 destination lines
+    shuffled, `dest_sha256` regenerated, `src_lines_not_carried=0` — for
+    `25 passed`.
+    """
+    src = "alpha\nbeta\n\ngamma\ndelta"
+    assert _lines_not_carried(src, src) == []
+    assert _lines_not_carried(src, "delta\ngamma\nbeta\nalpha") == [
+        "beta", "gamma", "delta"
+    ], "the destination holds every line, in reverse, and this reads clean"
+    assert _lines_not_carried(src, "alpha\nbeta\ndelta") == ["gamma"]
+    assert _lines_not_carried("a\nb\na", "a\nb") == ["a"], (
+        "a line the source carries twice is satisfied by one copy in the "
+        "destination, so half of a repeated argument can be dropped for free"
+    )
+    # and blank lines are not counted, which is what makes the declared
+    # counts comparable with `src_lines_not_carried`
+    assert _lines_not_carried("\n\n", "") == []
 
 
 @_SECTION

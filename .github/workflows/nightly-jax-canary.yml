@@ -42,7 +42,14 @@
 #      0.11.0: 729 conversion(s) / 0 truncation(s) / 0 row(s) at x64=1
 #      against 675 / 13 / 1 at x64=0. For one commit both legs ran only at
 #      x64=1 while the documentation said the canary runs the sweep, which
-#      is an alarm wired to a condition that cannot occur.
+#      is an alarm wired to a condition that cannot occur. THE SAME RULE
+#      BINDS THE TRIPWIRE'S OWN TESTS on the `nightly` leg, and for one
+#      commit it did not: `tests/test_tripwire_eager.py` is `115 passed` in
+#      both cells, which says it is GREEN in both and not that it WATCHES in
+#      both — its suppression-siting assertions sit behind an x64 branch and
+#      run at x64 OFF only. Measured with the detector's siting neutered:
+#      `2 failed, 113 passed` at x64=0, `115 passed` at x64=1. So that step
+#      runs in both cells too, and a test reads both cells off it.
 #   4. INFRASTRUCTURE FAILURE MUST NOT PAGE. The nightly index URL below is
 #      NOT verified current; jax's nightly hosting has moved before and may
 #      move again. An install that cannot reach it is infra, not signal, and
@@ -193,6 +200,38 @@ jobs:
       # thing, still suppresses jax's own PRNG mask, and still reports
       # where/clip as UNCOVERED — which is the assertion most likely to go
       # stale in the SAFE direction and go unnoticed.
+      #
+      # `test_tripwire_eager.py` IS IN THE LIST, AND UNTIL 2026-08-22 IT WAS
+      # NOT — the one instrument here whose hook attaches to a jax PRIVATE
+      # function (`jax._src.lax.lax._convert_element_type`) rather than to a
+      # private REGISTRY, which makes it the thing a nightly is most likely
+      # to break, and it was the only one of the three not run against the
+      # nightly. `arm_eager()` plus the two-cell sweep above still page if
+      # the hook DETACHES; what nothing covered is the hook attaching and
+      # then finding, attributing or suppressing differently.
+      #
+      # IT COULD NOT BE ADDED BEFORE THE CELL WAS GREEN. This step runs at
+      # `JAX_ENABLE_X64: "1"` and that file had EIGHT failures there at
+      # `844ba48` — all of them subject-absent in that cell, none of them a
+      # defect — so adding it would have made this leg permanently red and
+      # taught whoever reads the nightly to ignore it. The eight carry the
+      # complementary fact for x64 on now, and the file is `115 passed` in
+      # both cells.
+      #
+      # PROPERTY 3 APPLIES TO THIS STEP TOO, AND FOR ONE COMMIT IT DID NOT.
+      # `115 passed in both cells` says the file is GREEN in both; it does not
+      # say the file WATCHES in both, and it does not. The eight converted
+      # tests assert the substantive fact at x64 OFF and a denominator at x64
+      # on, so the eager detector's suppression SITING is only checked in the
+      # off cell — measured, with `observe()` still counting `SUPPRESSED_JAX`
+      # but never writing the `SUPPRESSED` row: `2 failed, 113 passed` at
+      # x64=0 and `115 passed` at x64=1. Run at x64=1 alone, this step is the
+      # shape the paragraph two steps above names — an alarm wired to a
+      # condition that cannot occur — inside the step added to close one.
+      # A TEST READS BOTH CELLS off this step, the same way
+      # `test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN`
+      # reads them off the canary steps; flipping either `JAX_ENABLE_X64`
+      # below reddens it.
       - name: the tripwire's own tests, against the nightly
         if: steps.install.outcome == 'success'
         env:
@@ -201,4 +240,19 @@ jobs:
         run: |
           .venv/bin/python -m pytest -q -ra \
             tests/test_tripwire_arm.py tests/test_tripwire_record.py \
-            tests/test_tripwire_plugin.py
+            tests/test_tripwire_plugin.py tests/test_tripwire_eager.py
+
+      # ...and the same four files at x64 OFF, which is the cell the eager
+      # hook's FINDING, ATTRIBUTING and SUPPRESSING are asserted in. Same
+      # argument as the canary steps above and the same two cells; this is
+      # the one that goes red when the nightly's jax changes what the hook
+      # sees while leaving it attached.
+      - name: ...and the same tests at x64 OFF, where the siting is watched
+        if: steps.install.outcome == 'success'
+        env:
+          JAX_ENABLE_X64: "0"
+          JAX_PLATFORMS: cpu
+        run: |
+          .venv/bin/python -m pytest -q -ra \
+            tests/test_tripwire_arm.py tests/test_tripwire_record.py \
+            tests/test_tripwire_plugin.py tests/test_tripwire_eager.py

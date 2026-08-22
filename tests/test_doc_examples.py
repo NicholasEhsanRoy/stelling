@@ -992,14 +992,33 @@ def test_every_documented_stamp_names_a_tested_series():
     that skips (no solver installed) must not carry its stamp out of
     range, and an illustrative fence still makes a claim to a reader.
     """
-    offenders = []
+    offenders, stamps = [], []
     for path in _doc_files():
         for n, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(), start=1
         ):
             m = _STAMP_JAX.match(line.strip())
-            if m and not jax_series_tested(m.group(2)):
+            if not m:
+                continue
+            stamps.append(f"{path.name}:{n}")
+            if not jax_series_tested(m.group(2)):
                 offenders.append(f"{path.name}:{n} stamps jax {m.group(2)}")
+    # ANTI-VACUITY, AND THIS GUARD HAD NONE. "no offender" is also what a
+    # scan that matched no stamp at all reports, and the two are the same
+    # green. Driven at `844ba48` by narrowing `_STAMP_JAX` so that it matches
+    # nothing -- which is what a doc changing the separator in that line, or a
+    # render growing a field, would do to it: `1 passed`, over zero stamps.
+    # The floor is ONE because ONE is what the tree holds -- measured,
+    # `quickstart.md:65` and nothing else, so a higher floor would be a claim
+    # about the docs rather than about the scan. What it buys is the whole of
+    # what an absence-only guard is missing: the difference between "no doc
+    # stamps an untested series" and "no doc was read".
+    assert len(stamps) >= 1, (
+        f"only {len(stamps)} documented stamp(s) matched `_STAMP_JAX` "
+        f"({stamps}), so this check's green says nothing about which series "
+        f"the docs claim -- it is the same green a pattern that has stopped "
+        f"matching produces"
+    )
     assert not offenders, (
         "a documented verdict stamps a jax series with no CI lane, so its "
         "query hash is compared on no lane at all — re-record the block on "

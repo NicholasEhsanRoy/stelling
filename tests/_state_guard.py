@@ -161,7 +161,14 @@ against what this suite actually mutates:
   plants exactly that shape and pins it: the module's separate leak is named,
   the xfailing test's is not. Not a regression — the entry-name version
   absorbed it too, and worse, since the absorbed report still blinded the
-  outer guard.
+  outer guard. **UNCONDITIONALLY, and it was conditional until 2026-08-22**:
+  that control's module fixture acts at SETUP, before the xfailing test runs,
+  so it never exercised the case where the module's own out-of-test move comes
+  AFTER the absorbed leak — where the whole-reading fold carried the leak into
+  the outer report.
+  ``test_an_XFAILING_polluters_leak_is_named_NOWHERE_even_if_the_module_moves``
+  is the same plant with the module's act moved to teardown, and it is what
+  holds this entry to being a measurement now.
 
   HARMLESS IN THIS TREE TODAY, AND MEASURED RATHER THAN HOPED. Grepped, one
   collected test carries the marker —
@@ -284,12 +291,12 @@ def _read_const_fold_rule() -> object:
     if not _optional.available("jax"):
         return ABSENT
     adapter = _adapter()
-    return (
-        adapter.rule_name(),
-        adapter.rule_hash(),
-        adapter.registry_size(),
-        adapter.is_armed(),
-    )
+    return {
+        "rule_name": adapter.rule_name(),
+        "rule_hash": adapter.rule_hash(),
+        "registry_size": adapter.registry_size(),
+        "is_armed": adapter.is_armed(),
+    }
 
 
 def _read_tripwire_installation() -> object:
@@ -313,13 +320,13 @@ def _read_tripwire_installation() -> object:
     # detachment nobody undid, and it is invisible in every other reading
     # here, `is_armed()` included.
     detached = adapter._detached
-    return (
-        tuple(sorted(installed)),
-        id(installed.get("wrapper")),
-        id(installed.get("original")),
-        tuple(sorted(detached)),
-        id(detached.get("entry")),
-    )
+    return {
+        "installed_keys": tuple(sorted(installed)),
+        "wrapper_id": id(installed.get("wrapper")),
+        "original_id": id(installed.get("original")),
+        "detached_keys": tuple(sorted(detached)),
+        "detached_entry_id": id(detached.get("entry")),
+    }
 
 
 def _binding(owner_type, slot, original, wrapper) -> str:
@@ -420,10 +427,10 @@ def _read_perimeter() -> object:
                 for slot, (original, wrapper) in sorted(entry["slots"].items())
             ),
         ))
-    return (
-        tuple(faces),
-        tuple(id(held) for held in perimeter._owners),
-        tuple(
+    return {
+        "faces": tuple(faces),
+        "owners": tuple(id(held) for held in perimeter._owners),
+        "foreign_module_caches": tuple(
             name
             for name, cached, module in (
                 ("_JNP", prop_guard._JNP, "jax.numpy"),
@@ -432,9 +439,11 @@ def _read_perimeter() -> object:
             )
             if cached is not None and cached is not sys.modules.get(module)
         ),
-        tuple(sorted(k for k, v in prop_guard._TARGET_CACHE.items() if v is None)),
-        tuple(sorted(prop_guard.UNKNOWN_SLOTS)),
-    )
+        "target_cache_memoised_None": tuple(
+            sorted(k for k, v in prop_guard._TARGET_CACHE.items() if v is None)
+        ),
+        "unknown_slots": tuple(sorted(prop_guard.UNKNOWN_SLOTS)),
+    }
 
 
 def _read_jax_enable_x64() -> object:
@@ -444,7 +453,7 @@ def _read_jax_enable_x64() -> object:
         return ABSENT
     import jax
 
-    return bool(jax.config.jax_enable_x64)
+    return {"jax_enable_x64": bool(jax.config.jax_enable_x64)}
 
 
 #: The two prefixes. See the docstring: a rule, not a list.
@@ -452,11 +461,11 @@ ENV_PREFIXES = ("STELLING_", "JAX_")
 
 
 def _read_env() -> object:
-    return tuple(
-        sorted(
-            (k, v) for k, v in os.environ.items() if k.startswith(ENV_PREFIXES)
-        )
-    )
+    """Every prefixed key, AS A MAPPING — see :func:`_carry` for why the shape
+    of a reading is load-bearing and not a presentation choice."""
+    return {
+        k: v for k, v in sorted(os.environ.items()) if k.startswith(ENV_PREFIXES)
+    }
 
 
 def _guarded(read: Callable[[], object]) -> Callable[[], object]:
@@ -516,9 +525,23 @@ class Exemption:
     why: str
 
 
-#: Tests permitted to leave a watched global changed, matched on the nodeid
-#: with any ``[parametrisation]`` suffix removed so that a new parameter does
-#: not silently inherit somebody else's licence.
+#: Tests permitted to leave a watched global changed. **THE LICENCE IS AS WIDE
+#: AS THE NODEID SOMEBODY WROTE, and no wider** — an entry naming
+#: ``test_x[a]`` licenses ``test_x[a]`` and nothing else, and an entry naming
+#: the bare ``test_x`` licenses every parametrisation of it, which is a choice
+#: its author makes by how the entry is spelled.
+#:
+#: THE STRIPPING USED TO BE UNCONDITIONAL AND ITS REASON WAS INVERTED. This
+#: comment read *"matched on the nodeid with any ``[parametrisation]`` suffix
+#: removed so that a new parameter does not silently inherit somebody else's
+#: licence"* — and removing the suffix is precisely how a new parameter DID
+#: inherit it: driven, an exemption written for ``test_x[a]`` licensed
+#: ``test_x[b]``, ``EXIT 0`` with both keys leaked. It was a documented
+#: behaviour with the opposite justification written over it, in a file whose
+#: own argument against the version before this one is that *"a suppression
+#: keyed on something coarser than the offence always is"* a way to switch the
+#: instrument off. The code is what changed, because the sentence was the
+#: right rule: a licence may not travel to a case nobody reviewed.
 #:
 #: EMPTY, and measured empty rather than assumed so: with the guard installed,
 #: the whole suite runs clean in all three supported environments (the two jax
@@ -534,10 +557,22 @@ def _bare(nodeid: str) -> str:
     return nodeid.split("[", 1)[0]
 
 
+def _licenses(exemption: str, nodeid: str) -> bool:
+    """Does an exemption written as ``exemption`` cover ``nodeid``?
+
+    Exactly, unless the exemption names no parametrisation at all — in which
+    case it covers the whole family, because that is what its author wrote.
+    Both directions are driven in
+    ``test_an_exemption_licenses_exactly_its_own_test_and_entry``.
+    """
+    if "[" in exemption:
+        return exemption == nodeid
+    return _bare(nodeid) == exemption
+
+
 def exempt(nodeid: str, entry: str) -> Exemption | None:
-    bare = _bare(nodeid)
     for e in PINNED_EXEMPTIONS:
-        if _bare(e.nodeid) == bare and e.entry == entry:
+        if e.entry == entry and _licenses(e.nodeid, nodeid):
             return e
     return None
 
@@ -580,6 +615,15 @@ def render(nodeid: str, found: list[str], subject: str = "test") -> str:
     measured different things and a module has no nodeid for
     :data:`PINNED_EXEMPTIONS` to license.
 
+    **OUTSIDE, NOT "BETWEEN", and the difference is the commonest case.** This
+    headline said *"BETWEEN its tests"* until 2026-08-22. The trajectory is
+    read at every window boundary the module has, and the first of those is
+    module setup — so the ordinary offence, a module fixture that sets
+    something up at SETUP and never tears it down, is a move BEFORE the first
+    test rather than between two of them. The sentence under it was exact
+    ("outside every test of this module"), so no reader was sent to the wrong
+    place; the headline was simply narrower than the instrument.
+
     **THE MODULE MAY NOT BE TOLD IT "DID NOT PUT IT BACK", BECAUSE SOMETIMES
     IT DID.** The function guard reads before and after one test, so that
     sentence is literally what it measured. The module guard reads a
@@ -596,8 +640,8 @@ def render(nodeid: str, found: list[str], subject: str = "test") -> str:
     headline = (
         f"{nodeid} changed process-global state and did not put it back."
         if subject == "test"
-        else f"{nodeid} changed process-global state BETWEEN its tests, and "
-        f"nothing between them put it back."
+        else f"{nodeid} changed process-global state OUTSIDE its tests, and "
+        f"nothing outside them put it back."
     )
     measured = (
         f"This is measured before and after THIS {subject}, so this {subject} "
@@ -617,8 +661,8 @@ def render(nodeid: str, found: list[str], subject: str = "test") -> str:
         "and the entry in tests/_state_guard.py's PINNED_EXEMPTIONS with a "
         "reason."
         if subject == "test"
-        else "This moved BETWEEN the tests of this module, so no test did it "
-        "— a module- or class-scoped fixture that set something up and did "
+        else "This moved OUTSIDE every test of this module, so no test did "
+        "it — a module- or class-scoped fixture that set something up and did "
         "not tear it down. Put it back at the same scope (`yield` then "
         "restore, in the fixture that changed it). NOT a module-level "
         "statement at import: those run during collection, before this "
@@ -716,14 +760,108 @@ def _trajectory(config) -> dict[str, dict[str, object]]:
     )
 
 
+#: A part of a reading that the move being folded did not have. Distinct from
+#: ``None``, which a reader may legitimately produce for a part.
+_GONE = object()
+
+
+def _carry(previous: object, moved_from: object, moved_to: object) -> object:
+    """``previous``, carried along the move ``moved_from -> moved_to``.
+
+    PART-WISE WHEN THE READING IS A MAPPING, AND THAT IS THE WHOLE OF THE
+    ATTRIBUTION. An entry's value is one reading of one piece of global state,
+    but the pieces inside it move independently: ``env:STELLING_*/JAX_*`` is a
+    prefix rule covering every prefixed variable, so a module setting ONE key
+    and a test leaking ANOTHER are two different acts inside one entry. Carry
+    the whole reading and the module's move drags the test's leak into
+    ``shadow`` with it, and the module is then reported for a key a test set —
+    which is the same coarseness that made the first, entry-NAME version of
+    this guard licence a wider leak than the one being licensed. So the fold
+    is per KEY: only the keys this move actually changed are written through,
+    and a key the move left where it found it is left where ``previous`` had
+    it, whoever put it there.
+
+    Anything that is not a mapping is one opaque part and carries whole, which
+    is the exact previous behaviour: :data:`ABSENT` and :class:`Unreadable`
+    are values like any other and stay values like any other.
+
+    IT DOES NOT MAKE THIS A TRACE. A part whose reading is the same on both
+    sides of a gap records no move, exactly as a whole reading did — a module
+    that writes a part the value a test had already written it is invisible
+    here, for the same reason a test that changes something back within its own
+    body is. Finer granularity, same rule.
+    """
+    if not (
+        isinstance(previous, dict)
+        and isinstance(moved_from, dict)
+        and isinstance(moved_to, dict)
+    ):
+        return moved_to
+    carried = dict(previous)
+    for key in set(moved_from) | set(moved_to):
+        was = moved_from.get(key, _GONE)
+        now = moved_to.get(key, _GONE)
+        if was == now:
+            continue  # this move did not touch this part
+        if now is _GONE:
+            carried.pop(key, None)
+        else:
+            carried[key] = now
+    return carried
+
+
 def _outside_a_test(
     traj: dict[str, dict[str, object]], reading: dict[str, object]
 ) -> None:
-    """Fold a reading taken outside any test into ``traj``."""
+    """Fold a reading taken outside any test into ``traj``, part by part.
+
+    **THE `!=` IN FRONT OF THE FOLD IS A PREDECESSOR GUARD AND IS REDUNDANT
+    IN EFFECT FOR EVERY READING IN THIS TREE**, said here because the
+    previous version of this docstring did not say it and because
+    ``_matrix_include`` in ``tests/_lanes.py`` sets the precedent for saying
+    it. It was the whole of the fold before :func:`_carry` became part-wise:
+    a reading that had not moved was skipped, and one that had was written
+    through whole. Now that the fold is per KEY, an unmoved MAPPING carries
+    to a copy of what ``shadow`` already held — ``_carry`` ``continue``s on
+    every key whose two sides agree — so the guard decides nothing there.
+
+    **WHICH LANE THAT IS TRUE IN IS PART OF IT.** This paragraph said "all
+    five :data:`ENTRIES` read as mappings today" and named no lane, in a
+    batch about claims that name no cell. Measured 2026-08-22, at
+    ``JAX_ENABLE_X64`` unset, ``0`` and ``1`` alike:
+
+        /home/nick/venvs/stelling-jax     5 of 5 read as mappings
+        /home/nick/venvs/stelling-nojax   4 of 5 read as :data:`ABSENT`
+
+    :data:`ABSENT` is a ``str``, so in the zero-dep lane the NON-mapping arm
+    below is not the exotic case this paragraph used to call "reachable only
+    when a test moves such an entry and is exempted" — it is the ORDINARY
+    reading of four of the five entries, every time.
+
+    THE CONCLUSION SURVIVES THE CORRECTION, and it is driven in both lanes
+    rather than argued in one: replacing the condition with ``if True:``
+    leaves ``tests/test_state_guard.py`` at **29 passed** under
+    ``stelling-jax`` and at **23 passed, 6 skipped** under
+    ``stelling-nojax`` — the figures the file sits at unmutated in each. It
+    decides nothing in the zero-dep lane either, because nothing MOVES those
+    four there, so ``_carry`` is never asked about them.
+
+    IT STAYS, AND NOT ONLY AS A CHEAP GUARD IN FRONT OF A LOOP. A reading
+    that is NOT a mapping — an :class:`Unreadable` from a reader that raised,
+    or :data:`ABSENT` — is one opaque part and carries WHOLE, so for those
+    ``_carry`` would return the unmoved value and overwrite the predecessor
+    ``shadow`` is holding on the module's behalf. What makes that unreachable
+    is that nothing moves them, not that they are rare: a test that DID move
+    one and was exempted from the function-scope guard for it would reach it,
+    and :data:`PINNED_EXEMPTIONS` is empty today, which is why no test
+    distinguishes the two. Redundant in effect, not redundant in argument —
+    and in the zero-dep lane the argument is carrying four entries, not the
+    hypothetical one.
+    """
     last, shadow = traj["last"], traj["shadow"]
     for name, value in reading.items():
         if last.get(name) != value:
-            shadow[name] = value
+            shadow[name] = _carry(shadow.get(name), last.get(name), value)
     last.clear()
     last.update(reading)
 

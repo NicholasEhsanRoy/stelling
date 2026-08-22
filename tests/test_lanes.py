@@ -22,6 +22,9 @@ None of these needs the workflow to be RUN. They need it to be READ.
 
 from __future__ import annotations
 
+import dataclasses
+import pathlib
+
 import pytest
 
 import _lanes
@@ -184,6 +187,19 @@ def test_every_link_of_the_matrix_CHAIN_fails_closed_when_it_is_broken():
         "solver extra by a structure this parser does not model"
     )
     assert _lanes._classify(_NESTED_KEY_SUPPLIES_A_NEW_ONE).solvers is None
+    # ... and a nested SEQUENCE, which "ALL NESTING IS REFUSED, BY COLUMN" was
+    # not true of: the column rule read the KEY's column and not the `- `'s,
+    # so a deeper `- ` started a PHANTOM entry instead of ending the read.
+    # Measured at `844ba48`: three entries for the first body and two for the
+    # second, against the one and two their files really have.
+    assert _lanes._matrix_include(_NESTED_SEQUENCE_OF_MAPPINGS) == [], (
+        "a nested LIST of mappings flattens into extra entries: a `- ` at a "
+        "deeper column started a phantom entry rather than ending the read, "
+        "so this returned an entry list with a member ci.yml does not have"
+    )
+    assert _lanes._classify(_NESTED_SEQUENCE_OF_MAPPINGS).solvers is None
+    assert _lanes._matrix_include(_NESTED_SEQUENCE_OF_A_DIFFERENT_KEY) == []
+    assert _lanes._classify(_NESTED_SEQUENCE_OF_A_DIFFERENT_KEY).solvers is None
     # and the repeated-key check is still the one refusing a duplicate key at
     # the entry's OWN column, which no column rule can reach
     assert _lanes._matrix_include(_KEY_REPEATED_AT_THE_ENTRYS_OWN_COLUMN) == []
@@ -225,6 +241,51 @@ def test_a_comment_is_stripped_the_same_way_everywhere():
     assert _lanes._code_lines("a: 1\n# whole-line\nb: 2  # tail\n") == [
         "a: 1", "", "b: 2",
     ], "a comment line vanished instead of becoming an empty one"
+
+
+def test_the_lane_reader_reads_ONE_FILE_however_its_lines_end():
+    """:func:`_lanes._code_lines` splits on every break, and that is checked.
+
+    THE SHAPE THIS IS A FENCE AGAINST is the one
+    `tests/test_tripwire_record.py` met three times: a check written
+    `^`-anchored under ``re.M``, where Python's ``^`` matches after a newline
+    and NOT after a carriage return, whose correctness then rests on
+    ``read_text()`` having translated the file's line breaks on the way in.
+    That is a property of how the file was OPENED, not of the check.
+
+    This module is not exposed to it, and this test is why that is a
+    measurement rather than a hope: every pattern here is matched against one
+    line of ``_code_lines``, and ``str.splitlines()`` breaks on CR, CRLF,
+    U+0085, U+2028 and U+2029 as well as on LF. Re-render `ci.yml` with each
+    of those in place of every newline and the same eleven blocks and eight
+    lanes come back. ``split("\\n")`` would pass every other test in this
+    file and fail this one.
+    """
+    text = _lanes.CI.read_text(encoding="utf-8")
+    assert "\r" not in text, "this test re-renders the breaks and needs LF in"
+
+    def read(rendered: str):
+        blocks = _lanes._blocks(_lanes._code_lines(rendered))
+        return blocks.keys(), tuple(sorted(
+            (job, dataclasses.astuple(lane))
+            for job, lane in ((job, _lanes._classify(body))
+                              for job, body in blocks.items())
+            if lane is not None
+        ))
+
+    jobs, lanes = read(text)
+    assert len(jobs) > 1 and len(lanes) > 1, (
+        f"this test watches nothing unless the clean file reads as several "
+        f"jobs and several lanes: {sorted(jobs)}, {len(lanes)} lanes"
+    )
+    for label, brk in (("CRLF", "\r\n"), ("CR", "\r"), ("U+0085", "\u0085"),
+                       ("U+2028", "\u2028"), ("U+2029", "\u2029")):
+        assert read(text.replace("\n", brk)) == (jobs, lanes), (
+            f"`ci.yml` re-rendered with {label} in place of every newline "
+            f"does not read as the same jobs and the same lanes, so what "
+            f"this repository believes CI runs depends on how the file's "
+            f"lines happen to end"
+        )
 
 
 def test_a_COMMENT_cannot_change_what_a_LANE_INSTALLS():
@@ -432,6 +493,32 @@ _NESTED_KEY_SUPPLIES_A_NEW_ONE = _MATRIX_JOB.format(
     entries=(
         '          - series: "0.10"\n            with:\n              extras: solvers\n'
         '          - series: floating\n            with:\n              extras: solvers\n'
+    )
+).splitlines()
+
+#: A nested SEQUENCE of mappings — the shape *"ALL NESTING IS REFUSED, BY
+#: COLUMN"* was not true of. A ``- `` line matched :data:`_lanes._MATRIX_ITEM`
+#: at any column, so a deeper one started a PHANTOM entry and reset the
+#: entry's key column to its own rather than ending the read. Measured at
+#: `844ba48`, on this exact body: three entries, where ``ci.yml``'s shape has
+#: two — an entry list with a member the file does not have, which is what
+#: :func:`_lanes._matrix_include`'s own *"never an entry list that happens to
+#: be short"* forbids in the other direction.
+_NESTED_SEQUENCE_OF_MAPPINGS = _MATRIX_JOB.format(
+    entries=(
+        '          - extras: jax\n            variants:\n'
+        '              - extras: solvers\n                pin: ""\n'
+        '          - extras: solvers\n            pin: "0.10"\n'
+    )
+).splitlines()
+
+#: The same shape with the nesting carrying a key the real entries do not, so
+#: that the phantom is the only entry that could supply one. Two entries at
+#: `844ba48`, one of them invented.
+_NESTED_SEQUENCE_OF_A_DIFFERENT_KEY = _MATRIX_JOB.format(
+    entries=(
+        '          - extras: solvers\n            variants:\n'
+        '              - name: a\n'
     )
 ).splitlines()
 
@@ -746,10 +833,127 @@ def test_every_supported_configuration_has_a_whole_suite_lane(config, job):
         f"a matrix whose entries this module cannot reduce to one series; "
         f"`matrix` is Lane.jax's can't-tell, not a reading"
     )
-    assert (lane.jax != "absent") == (config[0] == "jax"), (
+    assert _lanes.has_jax(lane) == (config[0] == "jax"), (
         f"{job} is meant to be the {config[0]} lane and ci.yml provisions it "
         f"the other way"
     )
+
+
+def test_no_reader_asks_whether_a_lane_HAS_JAX_by_comparing_the_STRING():
+    """`Lane.jax`'s can't-tell fails OPEN, so the spelling is what is closed.
+
+    ``"matrix"`` is a TRUTHY STRING in a field whose no-jax sentinel is also a
+    string, so ``lane.jax != "absent"`` answers YES for a job ci.yml has not
+    answered for. The declined alternative does not help — ``None !=
+    "absent"`` is True too — and a sentinel whose comparisons raise would
+    break ``==``, ``in`` and ``repr`` for the four consumers that
+    legitimately ask ``lane.jax == "matrix"``. **So the VALUE still fails
+    open. That is stated in the field's own comment rather than fixed.**
+
+    What can be closed is that nothing FORCED a consumer to refuse the
+    can't-tell. Nine did, by hand, correctly; the tenth would not have to.
+    :func:`_lanes.has_jax` raises on ``"matrix"`` and this refuses the bare
+    comparison anywhere under ``tests/``, so reaching the permissive answer
+    now costs deleting a test rather than forgetting a line.
+
+    AST, not grep: a comparison is a shape, and `# lane.jax != "absent"` in a
+    comment is prose about the rule rather than a use of it — which this
+    file's own docstrings are full of.
+
+    **THE EXEMPTION IS KEYED TO ONE PATH AND NOT TO A NAME**, and it took
+    two goes to get there because the first go replaced one typeable name
+    with another. It collected `FunctionDef`s called `has_jax` PER FILE, so
+    any file under `tests/` licensed the bare comparison inside a function it
+    chose to call that: appending
+    `def has_jax(lane): return lane.jax != "absent"` to this very file gave
+    **`1 passed`**, while the identical body in a function called anything
+    else is **`1 failed`**. That was repaired to `path.name == "_lanes.py"`
+    on 2026-08-22 — WHICH IS THE SAME DEFECT WITH A LONGER NAME, because the
+    scan is an `rglob` and a basename is as typeable as a function name.
+    Driven: `tests/helpers/_lanes.py` carrying that exact body is
+    **`1 passed`**, and the same body in `tests/helpers/_other.py` is
+    **`1 failed`**. It is `path == tests_dir / "_lanes.py"` now — the ONE
+    file, not any file wearing its name. Still named rather than line-ranged
+    INSIDE that file, so moving the accessor up `_lanes.py` changes nothing
+    here; what may not move is which file it is in.
+
+    **AND THE THIRD GO WAS THE NESTING.** `ast.walk` descends, so the
+    exemption was every `has_jax` anywhere in `_lanes.py` and not the
+    accessor: driven at `1f55eef`, `def _outer(): def has_jax(lane): return
+    lane.jax != "absent"` appended to `tests/_lanes.py` is **`1 passed`**,
+    and so is the same body as a method on a class there — while the
+    identical body under a different module-level NAME is **`1 failed`**.
+    It is `tree.body` now, so the exemption is the module-level definition
+    and a nested one is an ordinary offender.
+
+    **AND THE COMPARISON IS READ FROM EITHER SIDE.** `"absent" != lane.jax`
+    reaches the same permissive answer and was invisible — the scan looked at
+    `node.left` alone, so the reversed spelling passed anywhere in the tree
+    (driven: `1 passed`). Both operand orders are now the same shape to this.
+    **What it still cannot see, said rather than left to be found:** a local
+    binding (`j = lane.jax` and then `j != "absent"`), the comparison built
+    through `getattr(lane, "jax")`, and `"absent"` reached through a name
+    rather than written as a literal. None is in the tree today; an AST shape
+    scan is incomplete by nature and this is which incompleteness it has.
+    """
+    import ast
+
+    tests_dir = pathlib.Path(__file__).resolve().parent
+    offenders = []
+    for path in sorted(tests_dir.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover
+            continue
+        # The accessor's own body is the one place the comparison belongs,
+        # and that body is THE MODULE-LEVEL `def has_jax` of `_lanes.py` —
+        # see the docstring for the two plants that made a name-keyed and
+        # then a basename-keyed exemption travel, and for the third, which
+        # is that `ast.walk` reaches every nesting level: a `has_jax`
+        # defined INSIDE another function, or inside a class body, is not
+        # the accessor and is as typeable as the other two were.
+        exempt = {
+            (n.lineno, n.end_lineno)
+            for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "has_jax"
+        } if path == tests_dir / "_lanes.py" else set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            if any(lo <= node.lineno <= hi for lo, hi in exempt):
+                continue
+            # EITHER OPERAND ORDER. `lane.jax != "absent"` and
+            # `"absent" != lane.jax` are one shape with the sides swapped and
+            # answer the same forbidden question.
+            operands = [node.left, *node.comparators]
+            reads_jax = any(
+                isinstance(n, ast.Attribute) and n.attr == "jax"
+                for n in operands
+            )
+            names_absent = any(
+                isinstance(n, ast.Constant) and n.value == "absent"
+                for n in operands
+            )
+            if reads_jax and names_absent:
+                offenders.append(
+                    f"{path.relative_to(tests_dir.parent)}:{node.lineno}"
+                )
+    assert offenders == [], (
+        f"these ask whether a lane has jax by comparing `Lane.jax` with "
+        f"`'absent'`: {offenders}. `matrix` is a truthy string in that field, "
+        f"so the comparison answers YES for a job whose provisioning ci.yml "
+        f"does not state. Use `_lanes.has_jax(lane)`, which raises on the "
+        f"can't-tell instead of guessing past it."
+    )
+    # ... and the accessor really does refuse it, rather than being a name
+    # for the same comparison.
+    absent = _lanes.Lane(job="j", jax="absent", solvers=None,
+                         whole_suite=False, random_order=False,
+                         verdict_channel=False)
+    assert _lanes.has_jax(absent) is False
+    assert _lanes.has_jax(dataclasses.replace(absent, jax="0.11")) is True
+    with pytest.raises(ValueError, match="CAN'T-TELL"):
+        _lanes.has_jax(dataclasses.replace(absent, jax="matrix"))
 
 
 def test_exactly_one_lane_runs_in_randomised_order():

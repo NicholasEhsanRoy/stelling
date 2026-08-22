@@ -48,11 +48,13 @@ It is measured now, twice over. Each edited block records
 `source_commit:CHANGELOG.md` and asserts EQUALITY — not a bound. Quoting
 the lines is what makes an edit reviewable: a summarisation with a note
 attached would have to write every line it summarised away into this file,
-where a reader will meet them. Two, three, three and eleven lines, in the
+where a reader will meet them. Four, three, three and eleven lines, in the
 order the four are named above; the rest of all four blocks moved
-untouched. Those numerals are restated here for a reader and are held to
-nothing — each block's row carries its own, and the row is what the test
-measures.
+untouched. (`SF-0.2.0-59` was two until 2026-08-23, when its destination
+stopped calling ONE document two — *"a hand-built document"* in one
+sentence and *"a traced … persisted through JSON"* in the next.) Those
+numerals are restated here for a reader and are held to nothing — each
+block's row carries its own, and the row is what the test measures.
 
 **Nothing was dropped.** `DROPPED` is empty and the test requires each
 section's blocks to partition its span exactly, so a block that went
@@ -60,10 +62,16 @@ missing could not be silently absent from this file either — it would have
 to be listed with a reason, and there is nothing to list.
 
 **The limit, stated because it is real.** `src_sha256`, `src_span`,
-`src_lines`, `src_lines_not_carried` and `not_carried` are all claims about
-a file this tree no longer contains, and so are each section's
-`source_commit` and `source_span` — SEVEN columns, which is the unit the
-statement has to be in, because a list of scenarios is not the class.
+`src_lines_not_carried` and `not_carried` are all claims about a file this
+tree no longer contains, and so are each section's `source_commit` and
+`source_span` — SIX columns, which is the unit the statement has to be in,
+because a list of scenarios is not the class. `src_lines` was the seventh
+until 2026-08-22 and is not a claim about the source text at all: it is
+`src_span[1] - src_span[0] + 1`, both ends of which are in this file, and
+`test_every_block_declares_the_number_of_source_lines_its_span_holds`
+measures it with or without git. It was declared 72 times and read nowhere
+until then — driven, one value changed from `7` to `999` for `27 passed`
+with git present.
 They are verifiable — each section is re-derivable from
 `git show <source_commit>:CHANGELOG.md` with the same splitter the routing
 used — but only where git and that commit are present. In an sdist the
@@ -832,13 +840,15 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(2596, 2962),
         src_lines=367,
         src_sha256="d3581e50075343e79b60c8f20f4337f69e6bbae7ee912c42ccce895f040d3ef9",
-        dest_sha256="d80f028b90596ef175aacb7e1b561b4d664305ac5a46432b83bb5cca2ac2bfb9",
-        src_lines_not_carried=2,
+        dest_sha256="8d606ece8b93fdb3bcbf34eeca671c258a7e005d4963981f38a35320780add9e",
+        src_lines_not_carried=4,
         not_carried=(
+            "  change and not only a type check. A hand-built document carrying",
+            "  `[\"dtype\", null]` under a `float64` outvar aval was ACCEPTED at",
             "  `dff95fc` and on `main` at `198a2b5` (both hashing to `64a0ce8d\u2026`) and",
             "  is a `TranscriptionError` here. The refusal is right \u2014",
         ),
-        edit_note="replaces an unreproducible hash literal with the property it was standing for, re-derived across the two trees. No behaviour change.",
+        edit_note="replaces an unreproducible hash literal with the property it was standing for, re-derived across the two trees; states the CELL and the `return` the recipe omitted; and says WHICH DOCUMENT, because the source called one document two -- `a hand-built document` in one sentence and `a traced ... persisted through JSON` in the next. It is the traced document, persisted. No behaviour change.",
     ),
     Block(
         id="SF-0.2.0-60",

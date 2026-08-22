@@ -3378,14 +3378,177 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
         # to ``"dtype" in params`` is therefore a BRANCH-SELECTION change
         # and not only a type check, and the enumeration in the paragraph
         # above — ``b'float64'``, ``0``, ``('float64',)`` — does not
-        # contain the document it moved. Measured, on a document whose
-        # declaration carries ``["dtype", null]`` under a ``float64``
-        # outvar aval — a traced ``any_array((2,), float64, (0.0, 1.0))``
-        # with ``assert_(x >= 0.0)``, round-tripped through ``to_dict()``
-        # with that one param set to ``null``:
+        # contain the document it moved. Measured at ``JAX_ENABLE_X64=1``,
+        # on a document whose declaration carries ``["dtype", null]``, from
+        # this harness — round-tripped through ``to_dict()`` with that one
+        # param set to ``null``:
         #
-        #     dff95fc, main (198a2b5)   ACCEPTED, both to the SAME hash
+        #     def h():
+        #         x = any_array((2,), "float64", (0.0, 1.0))
+        #         return assert_(x >= 0.0)
+        #
+        # TWO DOCUMENTS COME OUT OF THAT HARNESS AND THIS BLOCK IS ABOUT
+        # BOTH, WHICH IT DID NOT SAY UNTIL 2026-08-23. Name them:
+        #
+        #     the TRACED document   what tracing the harness produces
+        #     the NULLED document   that document round-tripped through
+        #                           ``to_dict()`` with the declaration's
+        #                           ``dtype`` param set to ``null``
+        #
+        # The ACCEPT/REFUSE property this whole block exists for is about
+        # the NULLED one — it is the document ``_validate_decl_eqn``'s
+        # branch-SELECTION change moved. Every ``content_hash`` figure
+        # below that is a figure of THIS TREE'S is about the TRACED one,
+        # and has to be: this tree produces no hash for the nulled document
+        # at all, because this tree refuses it.
+        #
+        # THAT JUSTIFICATION DOES NOT REACH EVERY FIGURE BELOW, AND THE
+        # SENTENCE ABOVE CLAIMED IT DID UNTIL 2026-08-24. It covers hashes
+        # produced by THIS tree. The one figure the block below DENIES is
+        # denied in a sentence about how ``dff95fc`` and ``198a2b5`` hash
+        # the NULLED document — and those two DO produce one for it.
+        # Re-driven at both commits, at ``JAX_ENABLE_X64=1``, on the
+        # document this recipe names: both ACCEPT it and both return one and
+        # the same hash, where this commit raises ``TranscriptionError``.
+        # The table below that reads ``dff95fc, 198a2b5 -> ACCEPTED, both to
+        # the SAME hash`` says exactly that and has all along, which makes
+        # this an internal contradiction and not a new measurement. (It is
+        # named by what it says rather than by how far down it sits, for the
+        # reason the parenthetical about "twelve lines below" gives.)
+        #
+        # So the rule is narrower than it read: a figure of THIS tree's is a
+        # figure of the traced document; a figure of another tree's may be
+        # either, and which it is has to be read off the sentence carrying
+        # it.
+        #
+        # The sentence that introduces the harness — *"on a document whose
+        # declaration carries ``["dtype", null]``"* — names the NULLED
+        # document and the arithmetic below counts hashes of the
+        # TRACED one, so as written the recipe named FOUR documents where
+        # it meant two — the ``return`` ambiguity below, times which of
+        # these two is meant. (That four is not the four VALUES the
+        # spelling sweep below collapses to. The sweep is over the traced
+        # document alone.)
+        #
+        # THE ``return`` IS PART OF THE RECIPE AND THIS SENTENCE OMITTED IT
+        # UNTIL 2026-08-22, which is a bigger hole than the cell was and the
+        # cause of the whole disagreement recorded below. It read "a traced
+        # ``any_array((2,), float64, (0.0, 1.0))`` with ``assert_(x >= 0.0)``
+        # ... under a ``float64`` outvar aval", and BOTH of the obvious
+        # harnesses satisfy that sentence: the declaration's outvar aval is
+        # ``float64`` whichever is returned and in either cell, so the clause
+        # meant to pin the document does not discriminate at all.
+        #
+        # THE CELL IS PART OF THE RECIPE AND THIS SENTENCE OMITTED IT UNTIL
+        # 2026-08-22. Without ``JAX_ENABLE_X64=1`` jax warns that the
+        # requested dtype "is not available, and will be truncated to dtype
+        # float32", and a reader following the recipe traces a DIFFERENT
+        # document — a fourth equation, an inserted ``convert_element_type``
+        # to ``float32``, with the ``ge`` comparison then taking ``float32``
+        # operands where the x64=1 one takes ``float64`` and the ``0.0``
+        # literal stored as ``<f4`` rather than ``<f8``. Which cell it was
+        # traced in is therefore part of the recipe and not a detail of it.
+        #
+        # THAT SENTENCE SAID SOMETHING ELSE UNTIL 2026-08-22 AND IT WAS
+        # WRONG TWICE, both in the direction of putting the difference where
+        # it is easiest to look. It read "the outvar aval is not ``float64``
+        # at all" and "``float32`` in the declaration where the x64=1 one
+        # carries ``float64`` only". Measured here on this commit and on
+        # ``844ba48``: the DECLARATION equation is IDENTICAL in the two
+        # cells with ``source_info`` stripped — params ``["dtype",
+        # "float64"]``, outvar aval ``float64`` — and the jaxpr's own
+        # ``outvars[0]`` aval is the same in both cells too, whichever
+        # reading of the recipe is taken (``bool`` returning the
+        # ``assert_``, ``float64`` returning ``x``). The float32 is
+        # downstream of the declaration, not in it. The claim the cell
+        # matters survives; the two facts offered for it did not.
+        #
+        # NO HASH IS QUOTED FOR EITHER CELL, and the reason is not the one
+        # this paragraph gave for one day. A pair of literals stood here,
+        # inside the paragraph that exists to explain why an earlier literal
+        # was deleted, under the heading ``THEY ARE NOT WRONG`` and the claim
+        # that an independent re-derivation landing on a DIFFERENT pair was
+        # an unexplained "three contexts, three pairs, one recipe". BOTH
+        # PAIRS RE-DERIVE, and what separates them is that the recipe above
+        # does not say what the harness RETURNS:
+        #
+        #     return assert_(x >= 0.0)     outvars[0] bool
+        #     assert_(x >= 0.0); return x  outvars[0] float64
+        #
+        # Both documents carry the same declaration, the same comparison and
+        # the same ``stelling_assert``; both ARE "a traced
+        # ``any_array((2,), float64, (0.0, 1.0))`` with ``assert_(x >= 0.0)``"
+        # as the recipe words it. They differ in the jaxpr's OUTVARS and
+        # nowhere else, and each returns its own pair of values, identical on
+        # this commit and on ``844ba48``, in both cells. The pair that stood
+        # here is what returning the ``assert_`` gives; the pair the audit
+        # measured is what returning ``x`` gives. Nothing was wrong with
+        # either measurement and the recipe was wrong with both.
+        #
+        # THAT ACCOUNTS FOR TWO OF THE THREE PAIRS THIS CAMPAIGN RECORDED,
+        # AND "THE WHOLE OF THE DISAGREEMENT" WAS TOO STRONG FOR IT —
+        # withdrawn 2026-08-23. A THIRD pair was written down for this same
+        # recipe in a sweep, and it is not what either reading above
+        # produces in either cell. It is withdrawn there and nothing in this
+        # tree asserts it, so there is no figure here to correct; what is
+        # corrected is the claim to have accounted for every recorded pair,
+        # which had accounted for two. **Two is what is demonstrable**, and
+        # why the third is not is this block's own subject: no document was
+        # published beside it, so nobody can now say what was traced. That
+        # is the argument for deleting digits, made against a sentence of
+        # this comment's own.
+        #
+        # THE HASH DOES NOT MOVE FOR ANYTHING, WHICH IS WORSE. The earlier
+        # version of this paragraph said it did, and that overstates the
+        # instability in the direction that makes the recipe look unfixable.
+        # Driven here, 120 spellings of the harness above per cell — the
+        # dtype as ``"float64"``, ``np.float64``, ``jnp.float64`` and
+        # ``np.dtype("float64")``, the bounds as ints, floats and mixed, the
+        # comparison's right-hand side as ``0`` and ``0.0``, and five things
+        # to return — collapse to FOUR distinct values in each cell, and the
+        # partition is exactly by what is returned. Dtype spelling, bounds
+        # typing and rhs typing all normalise away. So one written recipe
+        # names four documents per cell because of one thing it does not say,
+        # and a reader with a digit and no document cannot tell "the guard
+        # changed" from "I typed a different harness". Four values for one
+        # recipe is three too many, and that is why the digits go.
+        #
+        # AND THE VARIATIONS ARE REAL AND WERE MISCOUNTED. SIX one-line
+        # variations of the harness — dropping the ``return``, a scalar
+        # shape, ``(3,)``, bounds ``(-1.0, 1.0)``, the other comparator, a
+        # ``float32`` declaration — give six more values in each cell. With
+        # the recipe's own two readings that is EIGHT values in each cell,
+        # all eight distinct, of which exactly TWO per cell are literals some
+        # context has recorded for "this recipe" — the two readings. (The
+        # ``float32`` variation is the one that reads the SAME in both cells,
+        # which says it again: the document decides, and the cell decides the
+        # document.) The commit that dropped the digits said SEVEN variations
+        # were really six "because the seventh value is the recipe's own, and
+        # it IS two of the six literals". Re-derived: the recipe's own is two
+        # values per cell, not one, and both are recorded literals — so the
+        # premise was half right, the arithmetic was not, and neither
+        # collapses a variation. Six variations, two readings, eight values.
+        #
+        # So this paragraph is held to the rule the block below states about
+        # ``64a0ce8d…``: the document is above, and the hash is not needed.
+        # (That rule was "twelve lines below" when this sentence was written,
+        # then "the rule this comment block ends on" — which was false as
+        # written, the block runs well past it. A rule is named by what it
+        # says, not by where it sits.)
+        #
+        # The PROPERTY below holds either way — driven at both commits, in
+        # both cells, under BOTH readings of the recipe, four documents and
+        # one verdict each side — while the document and its hash do not, and
+        # a recipe a reader cannot re-trace is how a measurement turns into a
+        # claim:
+        #
+        #     dff95fc, 198a2b5          ACCEPTED, both to the SAME hash
         #     this commit               TranscriptionError
+        #
+        # (``198a2b5`` was labelled "main" here when it was the tip. It is an
+        # ancestor of main and not main — ``9cb2c0f`` as this is written, and
+        # something else by the time it is read, which is the whole reason
+        # the sha is what is pinned and the label is what drifted.)
         #
         # THE PROPERTY IS THE MEASUREMENT AND THE LITERAL WAS NOT. This
         # comment read ``content_hash 64a0ce8d…`` until 2026-08-21, and

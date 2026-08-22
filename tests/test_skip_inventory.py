@@ -230,6 +230,51 @@ def _wheel(name: str) -> bool:
     return _optional.available(name)
 
 
+def _git_cannot_read_the_routing_source() -> bool:
+    """Whether git can read the history the routing manifest names.
+
+    TWO CONDITIONS, AND THE SECOND IS WHY THIS IS NOT JUST A `git show`.
+    `tests/test_soundness_routing.py` skips its git-gated legs when the source
+    is unreadable AND the environment is one of the five that legitimately
+    cannot answer — an unpacked sdist, an export, a shallow clone that does
+    not reach the commit, a tree unpacked inside somebody else's repository,
+    or a linked worktree whose parent has moved. When the source is
+    unreadable and NONE of those holds, the manifest names a commit that is
+    not there and that file FAILS instead: a defect, not an environment.
+
+    So this asks both, and the second comes from
+    `_why_the_history_is_out_of_reach` rather than from three probes copied
+    here — a PREDICATE borrowed, which is not the thing `RULES` may not do.
+    What a rule may not take from another module is its REASONS, because a
+    rule that computed those excused everything that module skipped with;
+    the reason below is typed here, in the diff a reviewer reads.
+
+    ANY section, not every: a skip carrying that reason means at least one
+    section could not be read. Answers False if the import or the probe
+    cannot run at all, which is the safe direction — the skip is then
+    reported as contradicted rather than quietly excused.
+    """
+    try:
+        from _soundness_routing_manifest import SECTIONS
+        from test_soundness_routing import _why_the_history_is_out_of_reach
+    except Exception:  # noqa: BLE001 - a predicate may not raise
+        return False
+    unreadable = False
+    for section in SECTIONS:
+        try:
+            probe = subprocess.run(
+                ["git", "show", f"{section.source_commit}:CHANGELOG.md"],
+                cwd=REPO, capture_output=True, text=True, timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError):
+            unreadable = True
+            break
+        if probe.returncode != 0:
+            unreadable = True
+            break
+    return unreadable and _why_the_history_is_out_of_reach() is not None
+
+
 def _jax_x64_is_on() -> bool:
     """Whether this session runs with 64-bit dtypes enabled.
 
@@ -519,6 +564,35 @@ RULES = (
         when="this tree is not a git checkout — an unpacked sdist, say",
         reasons=frozenset({"not a git checkout (an unpacked sdist, say)"}),
         legitimate=lambda: not (REPO / ".git").exists(),
+    ),
+    Rule(
+        when=(
+            "git cannot read THIS TREE'S OWN HISTORY at the commit the "
+            "routing manifest names — an unpacked sdist, an export, a "
+            "shallow CI clone that does not reach it, a tree unpacked "
+            "inside somebody else's repository, or a linked worktree whose "
+            "parent has moved. Five causes and one condition, and the "
+            "condition IS computable here: `git show <commit>:CHANGELOG.md` "
+            "at the commits the manifest names, AND the environment being one "
+            "of those five rather than a manifest naming a commit that is "
+            "not there -- which is a defect and FAILS over there rather than "
+            "skipping, so this rule can never excuse one. "
+            "`.git` absence is only ONE of the five causes, so the "
+            "predicate asks git the same question the test does rather than "
+            "testing for a directory. What the skip cannot say in "
+            "its reason it says in a WARNING: which cause was measured, "
+            "git's own words, and which manifest columns go unverified. "
+            "UNTIL 2026-08-22 THE REASON WAS AN f-STRING CARRYING GIT'S "
+            "STDERR, so no rule could name it and a git-less tree exited 1 "
+            "on the completeness half no matter what — nine undisclosed "
+            "skips, in the two files whose subject is that a checkout "
+            "without git cannot verify the routing"
+        ),
+        reasons=frozenset({
+            "git cannot read this tree's own history, so the routing "
+            "manifest's source-side columns are unverified here",
+        }),
+        legitimate=_git_cannot_read_the_routing_source,
     ),
     Rule(
         when=(
