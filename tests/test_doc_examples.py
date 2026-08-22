@@ -1172,6 +1172,20 @@ def test_the_stamp_fence_rejects_an_untested_series():
 #   NOT-A-TRANSCRIPT     prose, a shell session, a table, a quote from source
 #   EXCERPT              a real render, elided or reflowed for reading
 #   RAISES-BY-DESIGN     running it is an error the page is demonstrating
+#
+# And one that is NOT a reason the content is ungated:
+#   OWED                 the page belongs to another batch and its blocks
+#                        have not been classified at all. A declared debt,
+#                        naming who owes it. It used to be an unnamed
+#                        allowlist inside the closed-set test, which let ANY
+#                        reason through on the pages it covered -- `"legacy,
+#                        whatever"` was green on `quickstart.md` and red on
+#                        `norms.md`, and the test's own docstring said flatly
+#                        that each entry names which of the six cases it is.
+#                        Every OWED page must be in `_OWED_PAGES` below, so
+#                        adding one is an edit in the open, and the share of
+#                        the blind spot it leaves undecided is bounded and
+#                        derived rather than described.
 BLIND_SPOT = {
     "README.md": (1, 1, "READER-SUPPLIES: the jax-only int8 truncation demo "
                         "and its two-line reading, which need no stelling"),
@@ -1183,8 +1197,10 @@ BLIND_SPOT = {
               "one numpy-vs-lax sign reading that tests/test_tripwire_eager "
               "and the norm's own instance re-drive"),
     "docs/overflow-tripwire.md": (
-        5, 10, "B17's page. Its own module comment above EXPECTED_INVENTORY "
-               "records each of these; not re-decided here"),
+        5, 10, "OWED by B17, which owns this page. Its fifteen blocks have "
+               "NOT been classified: the comment above EXPECTED_INVENTORY "
+               "accounts for the three ADDITIONS B16 and B17 made, not for "
+               "the page's inventory. Declared in _OWED_PAGES"),
     "docs/preconditions.md": (
         1, 0, "READER-SUPPLIES: the LibmBudget example takes the reader's own "
               "profile name and measurement"),
@@ -1208,7 +1224,10 @@ BLIND_SPOT = {
     "docs/proposed-unit-mechanism.md": (
         0, 1, "NOT-A-TRANSCRIPT: a table from a study over a corpus that is "
               "not in this tree"),
-    "docs/quickstart.md": (0, 1, "B17's page"),
+    "docs/quickstart.md": (
+        0, 1, "EXCERPT: three rows of the membership table, lifted from the "
+              "RUNNABLE version in harness-api.md -- which is a compared "
+              "block -- and the sentence above the fence says so"),
     "docs/reading-a-verdict.md": (
         0, 4, "EXCERPT x3 and one byte-exact render. The page now says which "
               "is which, in as many words, above its own status table"),
@@ -1279,19 +1298,63 @@ def test_every_page_outside_the_gate_has_been_decided_about():
     )
 
 
+# Pages whose blind-spot classification is OWED by the batch that owns them.
+# THIS IS AN EXEMPTION FROM THE CLOSED SET and it is declared here, in the
+# open, rather than living as a name list inside the test below. It used to
+# be `deferred = {"overflow-tripwire.md", "quickstart.md"}` there, and it let
+# any reason at all through on those two pages -- measured: `"legacy,
+# whatever"` was GREEN on `quickstart.md` and RED on `norms.md` -- while the
+# test's docstring said each entry names which of the six cases it is.
+# `quickstart.md` has since been classified (EXCERPT, and its page says so),
+# which leaves one.
+_OWED_PAGES = {"docs/overflow-tripwire.md"}
+
+
 def test_every_blind_spot_entry_carries_a_reason_from_the_closed_set():
-    """A reason like "legacy" would satisfy the test above and nothing
-    else. Each entry names which of the six cases it is."""
+    """A reason like "legacy" would satisfy the test above and nothing else.
+
+    Each entry names which of the six legitimate cases it is, OR says the
+    classification is ``OWED`` and by whom -- and an ``OWED`` page must be
+    declared in ``_OWED_PAGES``, so the exemption is a visible edit and not a
+    silent bypass. ``OWED`` is not a seventh way for a block to be
+    legitimately ungated; it is a debt, and the assertion below bounds how
+    much of the blind spot may sit in one.
+    """
     cases = (
         "NEEDS-A-DEPENDENCY", "READER-SUPPLIES", "HISTORICAL",
         "NOT-A-TRANSCRIPT", "EXCERPT", "RAISES-BY-DESIGN",
     )
-    # two pages belong to another batch and defer to its own record
-    deferred = {"docs/overflow-tripwire.md", "docs/quickstart.md"}
     bad = {
         name: why for name, (_i, _u, why) in BLIND_SPOT.items()
-        if name not in deferred and not any(c in why for c in cases)
+        if "OWED" not in why and not any(c in why for c in cases)
     }
     assert not bad, (
-        f"these BLIND_SPOT reasons name none of {cases}: {bad}"
+        f"these BLIND_SPOT reasons name none of {cases}, and do not declare "
+        f"the classification OWED: {bad}"
+    )
+
+    owed = {name for name, (_i, _u, why) in BLIND_SPOT.items() if "OWED" in why}
+    assert owed == _OWED_PAGES, (
+        f"the OWED set moved. Declared {sorted(_OWED_PAGES)}, in the dict "
+        f"{sorted(owed)}. An exemption from the closed set is declared in "
+        f"_OWED_PAGES or it is not taken."
+    )
+    unnamed = {
+        name for name in owed
+        if not re.search(r"\bOWED by \S", BLIND_SPOT[name][2])
+    }
+    assert not unnamed, (
+        f"these say OWED and do not say by whom: {sorted(unnamed)}. A debt "
+        f"with no owner is the allowlist this replaced."
+    )
+
+    # Derived, not described: how much of the blind spot is undecided.
+    owed_items = sum(i + u for name, (i, u, _w) in BLIND_SPOT.items()
+                     if name in _OWED_PAGES)
+    total_items = sum(i + u for i, u, _w in BLIND_SPOT.values())
+    assert owed_items * 2 <= total_items, (
+        f"{owed_items} of {total_items} blind-spot items are OWED rather "
+        f"than classified, which is most of what this gate is supposed to "
+        f"cover. Classify a page or shrink _OWED_PAGES; do not raise this "
+        f"bound."
     )
