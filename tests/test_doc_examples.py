@@ -20,15 +20,15 @@ Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
     ```python blocks                                53
-      marked illustrative — not run                 19
-      EXECUTED (exit 0 required)                    34
+      marked illustrative — not run                 15
+      EXECUTED (exit 0 required)                    38
         marked run-only — output not compared        3
-        OUTPUT COMPARED against a fence             31
-    plain ``` fences                                74
-      consumed as an example's claimed output       31
+        OUTPUT COMPARED against a fence             35
+    plain ``` fences                                78
+      consumed as an example's claimed output       35
       HAND-WRITTEN, compared to nothing             43
-So the claim this file earns is: *every runnable example runs, and 31 of
-the 34 have their stdout compared byte for byte after a narrow
+So the claim this file earns is: *every runnable example runs, and 35 of
+the 38 have their stdout compared byte for byte after a narrow
 normalisation.* The 43 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
@@ -161,7 +161,20 @@ EXPECTED_INVENTORY = {
     # the eager detector armed it raises by design, and with it off it prints
     # nothing, so there is no output to compare either way; it is a record of
     # what jax does, which is what `illustrative` means.
-    # B19 added four. Two are on `docs/choosing-a-solver-backend.md`, which
+    # B19: `docs/inductive-step.md` went from FOUR illustrative blocks and no
+    # gate at all to four executed-and-compared ones. It was the page whose
+    # running example was REFUTED by the solver the page recommends, with the
+    # 0.0495 escape (`10 + 5 x 0.99 x 0.01`) diagnosed in prose as 1-ULP
+    # outward rounding -- so the page taught a reader to dismiss a real escape
+    # as a rounding artefact, and nothing in the suite ran a line of it. The
+    # four now are: a body that genuinely preserves its invariant (so the
+    # page's "If VERIFIED" is demonstrable), the array-valued state shape, the
+    # ONE-ULP PAIR (`x/3*3` VERIFIED against `x*0.1*10` REFUTED, identical
+    # 2.2e-16 miss, opposite answers), and the escaping body kept as an
+    # explicit refutation.
+    #
+    # B19 also added four elsewhere. Two are on
+    # `docs/choosing-a-solver-backend.md`, which
     # had NO gate at all -- `grep -rn choosing-a-solver-backend tests/
     # .github/` had no hits -- and which had a whole section arguing from a
     # case the emission cannot produce, retracted in `solvers.py` on
@@ -182,10 +195,10 @@ EXPECTED_INVENTORY = {
     # line that begins the line and a fence carrying an inline temp path could
     # not be byte-compared.
     "python_blocks": 53,
-    "illustrative": 19,
-    "executed": 34,
+    "illustrative": 15,
+    "executed": 38,
     "run_only": 3,
-    "compared": 31,
+    "compared": 35,
     # B15 added two: `docs/overflow-tripwire.md` now quotes the trace gate's
     # narrowed refusal and its NOT-FULLY-OBSERVED refusal side by side, which
     # is the whole point of that section — the two sentences have to be
@@ -208,7 +221,7 @@ EXPECTED_INVENTORY = {
     # which is the gap that program has in jax's DEFAULT configuration.
     # Measured, hand-written, attached to nothing;
     # `tests/test_tripwire_eager.py` re-drives every line of it.
-    "plain_fences": 74,
+    "plain_fences": 78,
     "plain_unattached": 43,
 }
 
