@@ -388,14 +388,17 @@ query was bounded.
 
 It is a separate line rather than an addition to `coverage:` because that
 string is trend data: `stamp.coverage.split(" eqns")[0]` is parsed by
-`reproduce.py:757` and by `Verdict.render` (`verdict.py:437`), and the
-disclosure must not move it a byte.
+`reproduce.py` and by `Verdict.render` (`verdict.py`), and the disclosure must
+not move it a byte.
 
 *This said "and by the sweep scripts". No sweep script, present or historical,
 parses it — `git log --all -S 'split(" eqns")'` returns four commits and none
 touches one — while the consumer that does matter, the renderer, was not
 named. `src/stelling/verdict.py`'s comment at the site carries the same
-unsupported claim.*
+unsupported claim. Written without line numbers, per
+[proposed-solver-selection.md](proposed-solver-selection.md)'s finding that
+five of sixteen such references had drifted off their targets: a symbol moves
+loudly, a line number silently.*
 
 ## `PORTFOLIO DEGRADED` — when a verdict rests on one solver
 

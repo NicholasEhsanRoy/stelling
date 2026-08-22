@@ -436,8 +436,10 @@ the stamp's options.
 
 *This sentence used to read "384 *nonlinear* terms cost 237". That pair is a
 hundredfold above the bracketing measurements at the definition site, and
-`grep -rn '237'` across `src/`, `tests/`, `docs/`, `design/` and `SOUNDNESS.md`
-finds no row it could have come from. Neither confirmed nor refuted — it could
+`grep -rn '\b237\b'` across `src/`, `tests/`, `docs/`, `design/` and
+`SOUNDNESS.md` returns only occurrences inside `2,237,668,967` — the float32
+`exp` argument count, a different quantity entirely — and no timing row at
+all. Neither confirmed nor refuted — it could
 not be located, so it is replaced by figures that are in the tree and make the
 same point.*
 
