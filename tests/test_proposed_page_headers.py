@@ -31,22 +31,36 @@ is checked here:
   cannot invent an unreadable one or drop the status altogether;
 * every commit a status names **resolves and is an ancestor of HEAD**, so
   "shipped in ``<sha>``" cannot name a commit this tree does not have;
-* every ``tests/*.py`` a status or an **Applied** note names **exists**,
-  so a page cannot claim a pin that was deleted;
-* a page whose status says BUILT or APPLIED **must name at least one
-  pinning test**, which is the whole difference between a corrected
-  header and an asserted one;
+* every ``tests/*.py`` a page names, anywhere on it, **exists**, so a page
+  cannot claim a pin that was deleted;
+* a page whose status says BUILT or APPLIED **names at least one existing
+  ``tests/…py`` in its STATUS BLOCK**, which is the whole difference
+  between a corrected header and an asserted one;
 * ``docs/README.md``'s sentence about these pages names the token set
   actually in use, so the index cannot describe a vocabulary the pages
   stopped speaking.
 
 WHAT THIS DOES NOT CATCH, stated because a gate whose scope is guessed at
-is worse than none: a page that says ``PROPOSED, NOT BUILT`` about
-behaviour that IS built passes here. That direction needs somebody to
-notice the code, and it is exactly the direction that failed five times.
+is worse than none:
+
+* a page that says ``PROPOSED, NOT BUILT`` about behaviour that IS built
+  passes here. That direction needs somebody to notice the code, and it is
+  exactly the direction that failed five times.
+* **the pin is checked for PRESENCE and EXISTENCE, never for relevance.**
+  "Names a pinning test" means "the status block names a ``tests/…py``
+  that is in this tree" and nothing more. Measured: replacing
+  ``proposed-tier-clause.md``'s ``tests/test_tier_clause.py`` with the
+  unrelated ``tests/test_doc_examples.py`` leaves this file green, and
+  reciprocity would not catch it either -- ``test_doc_examples.py`` names
+  that page back, in a ``BLIND_SPOT`` entry. Whether the named test
+  actually holds the page's claim down is a reading, and no assertion here
+  makes it. The search WAS over the whole page, so a ``tests/…py``
+  mentioned four hundred lines below the header satisfied it; that half is
+  fixed, and the remaining half is stated rather than implied.
+
 What the gate buys is the other half -- once somebody corrects a header,
 the correction is load-bearing and cannot rot silently, and a BUILT claim
-must carry a resolvable commit and a live test rather than a word.
+must carry a resolvable commit and a live, named test rather than a word.
 """
 
 from __future__ import annotations
@@ -86,6 +100,24 @@ _TITLE = re.compile(r"^#\s+(?P<title>.+?)\s*$", re.M)
 _SHA = re.compile(r"`([0-9a-f]{7,40})`")
 _TESTFILE = re.compile(r"`(tests/[A-Za-z0-9_./-]+\.py)")
 _STATUS_LINE = re.compile(r"^\*\*Status:\s*(?P<status>[^.*]+)", re.M)
+_HEADING = re.compile(r"^#{1,6} ", re.M)
+
+
+def _status_block(text: str) -> str | None:
+    """The status block: the **Status:** line to the next heading.
+
+    Wider than the sha gate's single paragraph, because every shipped page
+    in this tree puts the status in one paragraph and the pin that supports
+    it in the next; narrower than the page, because a ``tests/…py``
+    mentioned in an argument four hundred lines down is not a header making
+    a claim. Measured over `docs/proposed-*.md`: the block is 13-68 lines,
+    and each of the five shipped pages names its pin inside its own.
+    """
+    m = _STATUS_LINE.search(text)
+    if not m:
+        return None
+    h = _HEADING.search(text, m.end())
+    return text[m.start(): h.start() if h else len(text)]
 
 
 def _pages() -> list[pathlib.Path]:
@@ -169,6 +201,14 @@ def test_a_page_that_says_it_shipped_names_a_test_that_pins_it():
     have shipped produce no skip: a per-page skip would put five entries
     into ``tests/test_skip_inventory.py`` that say nothing but "this page
     is still a proposal".
+
+    **SCOPE, and it is narrower than the sentence above.** This searches
+    the STATUS BLOCK -- the ``**Status:**`` line to the next heading --
+    and asks only whether it names a ``tests/…py``. It used to search the
+    whole page, so a test named anywhere on it satisfied a header at the
+    top. It still cannot tell whether the named test pins THIS page: the
+    module docstring's "WHAT THIS DOES NOT CATCH" records the measurement,
+    including why reciprocity would not have caught it either.
     """
     shipped = {
         p.name: _status_of(_title_of(p)) for p in PAGES
@@ -180,12 +220,16 @@ def test_a_page_that_says_it_shipped_names_a_test_that_pins_it():
     )
     unpinned = {
         name: status for name, status in shipped.items()
-        if not _TESTFILE.findall((DOCS / name).read_text(encoding="utf-8"))
+        if not _TESTFILE.findall(
+            _status_block((DOCS / name).read_text(encoding="utf-8")) or ""
+        )
     }
     assert not unpinned, (
         f"these pages declare a shipped status and name no `tests/...py` "
-        f"that pins it: {unpinned}. A status that shipped is a claim about "
-        f"running code; name what holds it down."
+        f"in their STATUS BLOCK: {unpinned}. A status that shipped is a "
+        f"claim about running code; name what holds it down where the "
+        f"claim is made. (`test_every_test_file_a_proposed_page_names_exists`"
+        f" is what checks the file is really there.)"
     )
 
 
@@ -283,7 +327,15 @@ def test_the_index_describes_the_vocabulary_the_pages_actually_speak():
     # break is mentioned, and a check that says otherwise is measuring the
     # line width
     sentence = re.sub(r"\s+", " ", m.group(0))
-    in_use = {_status_of(_title_of(p)) for p in PAGES}
+    # `None` for a title whose status is not in the closed set. Dropped
+    # rather than compared: `test_the_title_declares_a_status_from_the_
+    # closed_set` is the gate that reports an invented token, and it names
+    # the page and the token. Letting the None through put a
+    # `TypeError: 'in <string>' requires string as left operand` beside it
+    # -- a second red line that says nothing the first did not, from the
+    # test that is supposed to be about the INDEX SENTENCE. Measured by
+    # retitling `proposed-unit-mechanism.md` `— SPECULATED`.
+    in_use = {s for s in (_status_of(_title_of(p)) for p in PAGES) if s}
     unmentioned = sorted(t for t in in_use if t not in sentence)
     assert not unmentioned, (
         f"docs/README.md's `proposed-*.md` sentence tells a reader to read "
