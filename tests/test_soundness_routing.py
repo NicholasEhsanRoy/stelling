@@ -355,11 +355,29 @@ _ONE_LINER_MAX_LINES = 5
 #: says what the section is and points at the ledger. It is prose on
 #: purpose, so it is not held to `_ONE_LINER_MAX_LINES`; but "not a
 #: one-liner" is not "unbounded", because an unbounded preamble is a place
-#: an entry can be re-grown where no per-entry check looks. Sixty lines,
-#: measured against both ends: today's preambles are 29 and 16 non-blank
-#: lines, and the average routed soundness block is 45 (2989 source lines
-#: over 66 blocks), so this admits an explanation and refuses an entry.
-_PREAMBLE_MAX_LINES = 60
+#: an entry can be re-grown where no per-entry check looks.
+#:
+#: **SIXTY DID NOT SATISFY ITS OWN ARGUMENT, AND NOTHING CHECKED IT.** The
+#: number was validated only by plants derived FROM it — driven, `60 -> 6000`
+#: left this file and `tests/test_soundness_log_reach.py` at **38 passed**
+#: together — and the sentence it carried was measured on one of its two
+#: sections. Re-derived 2026-08-22, both sections, through this file's own
+#: `SECTIONS` and `_paragraphs`:
+#:
+#:     section      preamble   blocks   src lines   average block
+#:     soundness          29       66        2922           44.3
+#:     mode2              16        6         234           39.0
+#:
+#: "Admits an explanation and refuses an entry" is arithmetic: the HEADROOM
+#: above a section's preamble must be smaller than a block of it. That binds
+#: at `mode2` — `16 + 39.0` — so the ceiling has to be under **55**, and at
+#: 60 the `mode2` preamble had 44 lines of headroom for a 39-line block. The
+#: old sentence's `2989 source lines` and `average 45` were the `soundness`
+#: section's and have drifted to 2922 and 44.3 besides. Fifty is under the
+#: bound and still leaves the larger preamble 21 lines to grow in;
+#: `test_the_section_holds_only_one_liners_and_context_blocks` asserts both
+#: halves, per section, so this comment cannot go stale again without a red.
+_PREAMBLE_MAX_LINES = 50
 
 #: THE REASON BOTH GIT-LESS SKIPS IN THIS FILE CARRY, AND IT IS A CONSTANT.
 #: `tests/test_skip_inventory.py` excuses a skip only by an EXACT string typed
@@ -1075,6 +1093,21 @@ def test_the_section_holds_only_one_liners_and_context_blocks(files, section):
         f"one-liner is exempt from the per-entry ceiling, so it is the one "
         f"place in the section prose can grow without any other check here "
         f"seeing it."
+    )
+    # AND THE CEILING SATISFIES ITS OWN ARGUMENT, WHICH IT DID NOT AND
+    # NOTHING ASKED. See `_PREAMBLE_MAX_LINES`: the number was checked only
+    # by plants derived from it, so `60 -> 6000` was green, and at 60 the
+    # `mode2` preamble had more headroom than a `mode2` block is long. Both
+    # halves, per section, from the document:
+    average = sum(b.src_lines for b in section.blocks) / len(section.blocks)
+    headroom = _PREAMBLE_MAX_LINES - preamble
+    assert headroom < average, (
+        f"`{section.heading}`'s preamble ceiling leaves {headroom} lines of "
+        f"headroom above its {preamble}-line preamble, and its average "
+        f"routed block is {average:.1f} lines — so a block of this section "
+        f"FITS above the first one-liner, where no per-entry check looks. "
+        f"That is the whole argument for {_PREAMBLE_MAX_LINES}; it has to be "
+        f"under {preamble + average:.0f} for this section"
     )
     stray = []
     for para in paras[first:]:

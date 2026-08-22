@@ -823,19 +823,40 @@ def _outside_a_test(
     a reading that had not moved was skipped, and one that had was written
     through whole. Now that the fold is per KEY, an unmoved MAPPING carries
     to a copy of what ``shadow`` already held — ``_carry`` ``continue``s on
-    every key whose two sides agree — so the guard decides nothing. All five
-    :data:`ENTRIES` read as mappings today. Driven: replacing the condition
-    with ``if True:`` leaves ``tests/test_state_guard.py`` at **29 passed**.
+    every key whose two sides agree — so the guard decides nothing there.
+
+    **WHICH LANE THAT IS TRUE IN IS PART OF IT.** This paragraph said "all
+    five :data:`ENTRIES` read as mappings today" and named no lane, in a
+    batch about claims that name no cell. Measured 2026-08-22, at
+    ``JAX_ENABLE_X64`` unset, ``0`` and ``1`` alike:
+
+        /home/nick/venvs/stelling-jax     5 of 5 read as mappings
+        /home/nick/venvs/stelling-nojax   4 of 5 read as :data:`ABSENT`
+
+    :data:`ABSENT` is a ``str``, so in the zero-dep lane the NON-mapping arm
+    below is not the exotic case this paragraph used to call "reachable only
+    when a test moves such an entry and is exempted" — it is the ORDINARY
+    reading of four of the five entries, every time.
+
+    THE CONCLUSION SURVIVES THE CORRECTION, and it is driven in both lanes
+    rather than argued in one: replacing the condition with ``if True:``
+    leaves ``tests/test_state_guard.py`` at **29 passed** under
+    ``stelling-jax`` and at **23 passed, 6 skipped** under
+    ``stelling-nojax`` — the figures the file sits at unmutated in each. It
+    decides nothing in the zero-dep lane either, because nothing MOVES those
+    four there, so ``_carry`` is never asked about them.
 
     IT STAYS, AND NOT ONLY AS A CHEAP GUARD IN FRONT OF A LOOP. A reading
     that is NOT a mapping — an :class:`Unreadable` from a reader that raised,
     or :data:`ABSENT` — is one opaque part and carries WHOLE, so for those
     ``_carry`` would return the unmoved value and overwrite the predecessor
-    ``shadow`` is holding on the module's behalf. That is reachable only when
-    a test moves such an entry and is exempted from the function-scope guard
-    for it, and :data:`PINNED_EXEMPTIONS` is empty today, which is why no
-    test distinguishes the two. Redundant in effect, not redundant in
-    argument.
+    ``shadow`` is holding on the module's behalf. What makes that unreachable
+    is that nothing moves them, not that they are rare: a test that DID move
+    one and was exempted from the function-scope guard for it would reach it,
+    and :data:`PINNED_EXEMPTIONS` is empty today, which is why no test
+    distinguishes the two. Redundant in effect, not redundant in argument —
+    and in the zero-dep lane the argument is carrying four entries, not the
+    hypothetical one.
     """
     last, shadow = traj["last"], traj["shadow"]
     for name, value in reading.items():

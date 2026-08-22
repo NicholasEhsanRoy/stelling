@@ -117,13 +117,29 @@ _TEST_REF_WRAPPED = re.compile(
 #: `path::name` citation in between — which is the shape both real ones have
 #: (*"…`tests/test_verified_bar.py::test_x`. **[CLOSED …; that test is now
 #: `::test_y`.]**"*) and is what "the citation it annotates" means when the
-#: only thing a checker can read is position. The residue that remains is one
-#: citation wide and stated: a supersession still licenses the whole span
-#: back to the previous citation — 307 characters of that same paragraph,
-#: down from 1382 — so an annotation and the sentence it corrects may still
-#: be a clause apart, and the licence still requires only that the
-#: replacement RESOLVE IN THE CITED FILE, not that it be related to the name
-#: it replaces.
+#: only thing a checker can read is position.
+#:
+#: **THE RESIDUE THAT REMAINS, AT THE SUPERSESSION THAT IS ACTUALLY
+#: CONSULTED.** This sentence read *"307 characters of that same paragraph,
+#: down from 1382"* until 2026-08-22, and both figures reproduce — of the
+#: `FOUR arguments, not one` paragraph, the one whose licence is NEVER
+#: consulted, and 307 is not the residue there either but the gap from its
+#: citation to its bare `::name`. Measured on this tree, at the live
+#: supersession (`SOUNDNESS.md:1080`, `tests/test_verified_bar.py`):
+#:
+#:     paragraph                                    5945 chars
+#:     forward window — the span still licensed     4507 chars
+#:     citation to the annotation that licenses it   153 chars
+#:
+#: So the licence went from 5945 characters to 4507 there, not from 1382 to
+#: 307; the paragraph-wide version licensed the 1438 characters BEFORE the
+#: citation as well, and those are what the keying took away. (The
+#: `FOUR arguments` paragraph is 1382 with a 535-character window and its
+#: `::name` 307 in — a licence nothing needs, over a span nothing reads.)
+#: The residue is real and stated: an annotation and the sentence it corrects
+#: may still be thousands of characters apart, and the licence still requires
+#: only that the replacement RESOLVE IN THE CITED FILE, not that it be
+#: related to the name it replaces.
 _SUPERSEDED_BY = re.compile(r"(?<!\w)::(test_[A-Za-z0-9_]+)")
 
 #: Where a `path::name` citation is checked. Shipped prose and the scripts

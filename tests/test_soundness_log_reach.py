@@ -108,8 +108,15 @@ def _numeral(word: str) -> int | None:
 #: not UNBOUNDED either: an unbounded preamble is a place an entry can be
 #: grown where no per-entry check looks. Sixty non-blank lines, the same
 #: ceiling and the same argument as `tests/test_soundness_routing.py`'s
-#: `_PREAMBLE_MAX_LINES` on the changelog side; today's is 20, so this admits
-#: an explanation and refuses an entry.
+#: `_PREAMBLE_MAX_LINES` on the changelog side.
+#:
+#: **THE NUMBER IS PINNED BY THE DOCUMENT AND NOT BY THIS COMMENT**, in
+#: `test_an_ENTRY_CANNOT_BE_HIDDEN_IN_THE_LOGS_PREAMBLE` — every other leg
+#: down there derives its plant FROM this constant, so until 2026-08-22 the
+#: constant checked itself and `60 -> 6000` was green. Today's preamble is 21
+#: non-blank lines, not the 20 this comment claimed, and the median `## Log`
+#: entry is 135 — so the 39 lines of headroom admit an explanation and refuse
+#: an entry, which is the argument, measured, at both ends.
 _PREAMBLE_MAX_LINES = 60
 
 #: A list item at column 0. `- ` is an entry; `* ` and `+ ` are the other two
@@ -166,8 +173,11 @@ def log_bullets(text: str | None = None) -> list[tuple[int, str]]:
     starts = [i for i in range(lo + 1, hi) if lines[i - 1].startswith("- ")]
     assert starts, "SOUNDNESS.md's `## Log` holds no top-level bullet"
     preamble = lines[lo:starts[0] - 1]
-    text = "\n".join(preamble)
-    declared = [field for field in REACH_FIELDS if field in text]
+    # NOT `text`. This rebound the PARAMETER, so from here down the name no
+    # longer meant the document the caller passed — harmless while nothing
+    # below reads it, and a trap the first time something does.
+    preamble_text = "\n".join(preamble)
+    declared = [field for field in REACH_FIELDS if field in preamble_text]
     assert not declared, (
         f"`## Log`'s preamble (lines {lo + 1}-{starts[0] - 1}) carries a "
         f"reach field, {declared}. Everything above the first column-0 `- ` "
@@ -298,6 +308,56 @@ def test_an_ENTRY_CANNOT_BE_HIDDEN_IN_THE_LOGS_PREAMBLE():
         "* **a planted entry.** body.\n"
         f"  {REACHES_V010}"
     ), "a `*` bullet carrying a reach field in the preamble is accepted"
+
+    # AND THE CEILING ITSELF IS PINNED, WHICH IT WAS NOT. Every leg above
+    # derives its plant FROM `_PREAMBLE_MAX_LINES`, so the constant validated
+    # itself: driven, `60 -> 6000` left this file and
+    # `tests/test_soundness_routing.py` at **38 passed** together, with a
+    # ceiling six thousand lines above a twenty-one-line preamble. A number
+    # that only ever appears on both sides of the comparison is not a bound.
+    #
+    # So it is pinned against the DOCUMENT, in the arithmetic its own comment
+    # states: the ceiling "admits an explanation and refuses an entry" means
+    # the HEADROOM above today's preamble is smaller than an entry, and both
+    # of those are measured here rather than written down.
+    lines = SOUNDNESS.read_text(encoding="utf-8").split("\n")
+    lo = next(i for i, line in enumerate(lines, 1) if line.rstrip() == "## Log")
+    first = next(
+        i for i in range(lo + 1, len(lines) + 1)
+        if lines[i - 1].startswith("- ")
+    )
+    today = len([line for line in lines[lo:first - 1] if line.strip()])
+    sizes = sorted(
+        len([line for line in body.split("\n") if line.strip()])
+        for _, body in log_bullets()
+    )
+    median = sizes[len(sizes) // 2]
+    assert today < _PREAMBLE_MAX_LINES, (
+        f"`## Log`'s preamble is {today} non-blank lines and the ceiling is "
+        f"{_PREAMBLE_MAX_LINES}: there is no headroom, so the ceiling refuses "
+        f"the document as it stands"
+    )
+    headroom = _PREAMBLE_MAX_LINES - today
+    assert headroom < median, (
+        f"the preamble ceiling leaves {headroom} lines of headroom above "
+        f"today's {today}-line preamble, and the median `## Log` entry is "
+        f"{median} non-blank lines — so a typical entry FITS in the headroom "
+        f"and the ceiling no longer refuses one. That is the whole argument "
+        f"for the number; raise the ceiling and this is what stops being true"
+    )
+    # ...and said rather than left to be found: the SHORTEST entry in the log
+    # is six non-blank lines and DOES fit in the headroom. The ceiling bounds
+    # unbounded growth of the preamble; the reach-field and column-0-marker
+    # legs above are what catch a small entry hidden in it, and neither
+    # depends on this number. The assertion below is that measurement, so
+    # the day it stops being true the comment gets rewritten rather than
+    # quietly overstating what the ceiling does.
+    assert sizes[0] < headroom, (
+        "the shortest `## Log` entry no longer fits in the preamble's "
+        "headroom, so the comment above overstates what the other two legs "
+        "are needed for — which is now the safe direction, and worth "
+        "rewriting the comment for rather than leaving it wrong"
+    )
 
     # ... and the real preamble passes all three, which is what makes the
     # rule a rule rather than a thing that would have to be relaxed at once.

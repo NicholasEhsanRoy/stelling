@@ -815,16 +815,22 @@ def test_no_reader_asks_whether_a_lane_HAS_JAX_by_comparing_the_STRING():
     comment is prose about the rule rather than a use of it — which this
     file's own docstrings are full of.
 
-    **THE EXEMPTION IS KEYED TO `_lanes.py` AND NOT TO THE NAME**, from
-    2026-08-22, and the difference was driven. It collected `FunctionDef`s
-    called `has_jax` PER FILE, so any file under `tests/` licensed the bare
-    comparison inside a function it chose to call that: appending
+    **THE EXEMPTION IS KEYED TO ONE PATH AND NOT TO A NAME**, and it took
+    two goes to get there because the first go replaced one typeable name
+    with another. It collected `FunctionDef`s called `has_jax` PER FILE, so
+    any file under `tests/` licensed the bare comparison inside a function it
+    chose to call that: appending
     `def has_jax(lane): return lane.jax != "absent"` to this very file gave
     **`1 passed`**, while the identical body in a function called anything
-    else is **`1 failed`**. A licence that travels with a NAME anyone can
-    type is not a licence; the accessor lives in one module and the exemption
-    now says so. Named rather than line-ranged inside that module, so moving
-    it up `_lanes.py` still changes nothing here.
+    else is **`1 failed`**. That was repaired to `path.name == "_lanes.py"`
+    on 2026-08-22 — WHICH IS THE SAME DEFECT WITH A LONGER NAME, because the
+    scan is an `rglob` and a basename is as typeable as a function name.
+    Driven: `tests/helpers/_lanes.py` carrying that exact body is
+    **`1 passed`**, and the same body in `tests/helpers/_other.py` is
+    **`1 failed`**. It is `path == tests_dir / "_lanes.py"` now — the ONE
+    file, not any file wearing its name. Still named rather than line-ranged
+    INSIDE that file, so moving the accessor up `_lanes.py` changes nothing
+    here; what may not move is which file it is in.
 
     **AND THE COMPARISON IS READ FROM EITHER SIDE.** `"absent" != lane.jax`
     reaches the same permissive answer and was invisible — the scan looked at
@@ -852,7 +858,7 @@ def test_no_reader_asks_whether_a_lane_HAS_JAX_by_comparing_the_STRING():
             (n.lineno, n.end_lineno)
             for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef) and n.name == "has_jax"
-        } if path.name == "_lanes.py" else set()
+        } if path == tests_dir / "_lanes.py" else set()
         for node in ast.walk(tree):
             if not isinstance(node, ast.Compare):
                 continue
