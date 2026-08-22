@@ -77,14 +77,18 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
     ``[0, 16]`` update into a ``[0, 0]`` operand gives
     ``(-5e-324, 16.000000000000004)`` where ``reduce_sum`` of the same
     contributions floors at ``0.0``. **So the M16 divergence the next
-    paragraph records as fixed reproduces one operation over**:
-    ``jnp.sum(x*x)`` keeps its nonnegative floor and
-    ``zeros.at[i].add(x*x)`` does not, so a ``boundary_div`` fed the
-    scatter form DECLINES on a straddle where the ``reduce_sum`` form
-    verifies. The fix is the exact-``Fraction`` route ``mul`` and ``add``
-    already take and it is dispatched on its own, because it is a numeric
-    change in the soundness-critical module and this is a documentation
-    change. **When it lands, delete this entry**; the bullets around it are
+    paragraph records as fixed reproduces one operation over, and it costs
+    a verdict.** Driven end to end in
+    ``tests/test_scatter_add_row_gates.py``'s
+    ``test_the_scatter_add_rows_bump_costs_a_verdict_and_this_is_the_debt``,
+    over ``x`` declared in ``[0, 2]``: ``jnp.sum(x*x) >= 0`` is **VERIFIED**
+    and ``zeros.at[0].add(jnp.sum(x*x)) >= 0`` is **UNKNOWN**, declining on
+    a lower endpoint of ``-5e-324`` — one real property, two spellings jax
+    lowers differently, two verdicts. The fix is the exact-``Fraction``
+    route ``mul`` and ``add`` already take and it is dispatched on its own,
+    because it is a numeric change in the soundness-critical module and this
+    is a documentation change. **When it lands, delete this entry** and flip
+    that test to VERIFIED on both spellings; the bullets around this one are
     true either way.
 
   So: *outward* is a claim about the module; *tight* is a claim about one
