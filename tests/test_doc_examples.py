@@ -113,6 +113,18 @@ one, so the day ``test-jax`` floated past the version the doc stamps,
 nothing compared that hash anywhere. See the block comment above
 ``_STAMP_JAX`` for the mutation that measures it.
 
+**AND WHAT IS NOT UNDER THE GATE IS DECIDED ABOUT, PER PAGE.** The
+inventory above counts the blind spot; it never said whether anybody had
+looked at it, and a documentation-accuracy sweep of this tree put 60 of
+its 68 findings inside that blind spot with every total correct.
+:data:`BLIND_SPOT` records, for each page, how many illustrative blocks
+and hand-written fences it carries and WHICH of six legitimate reasons
+they are (needs-a-dependency, reader-supplies, historical,
+not-a-transcript, excerpt, raises-by-design).
+:func:`test_every_page_outside_the_gate_has_been_decided_about` holds the
+per-page counts to it, so a page cannot gain an ungated claim without
+somebody writing down which case it is.
+
 Blocks that opt into a solver (they pass ``solver_timeout_ms``) are
 skipped when no backend is installed, since their output is about an
 escalation that cannot happen. Those examples are unverified in a
@@ -1101,3 +1113,153 @@ def test_the_stamp_fence_rejects_an_untested_series():
     assert all(jax_series_tested(f"{s}.0") for s in TESTED_JAX_SERIES)
     # and the regex it leans on finds the version it is given
     assert _STAMP_JAX.match("stelling 0.1.0 | jax 0.7.3").group(2) == "0.7.3"
+
+
+# --- what is NOT under the gate, decided about page by page -----------------
+#
+# THE INVENTORY ABOVE COUNTS THE BLIND SPOT. It does not say whether anybody
+# ever looked at it, and that difference is what a documentation-accuracy
+# sweep of this tree measured: 60 of its 68 findings were in blocks and
+# fences this module does not reach, and every one of them had been sitting
+# in a total that was correct. A number nobody has to justify is a number
+# nobody reads.
+#
+# So each entry below is a DECISION, per page, about the blocks this module
+# leaves alone: `(illustrative, unattached_fences)` and why. Keyed by file
+# and not by line, so ordinary editing does not churn it; a page that gains
+# an unrunnable block or a hand-written fence goes red until somebody writes
+# down which case it is.
+#
+# The legitimate cases, and they are the whole list:
+#   NEEDS-A-DEPENDENCY   the block imports something this repo does not
+#                        depend on (jax_md, maddening), so it cannot run here
+#   READER-SUPPLIES      a fragment the reader completes -- a file they are
+#                        told to create, a call with their own object in it
+#   HISTORICAL           a measurement that has since MOVED, kept as measured.
+#                        Gating it would assert the old answer.
+#   NOT-A-TRANSCRIPT     prose, a shell session, a table, a quote from source
+#   EXCERPT              a real render, elided or reflowed for reading
+#   RAISES-BY-DESIGN     running it is an error the page is demonstrating
+BLIND_SPOT = {
+    "README.md": (1, 1, "READER-SUPPLIES: the jax-only int8 truncation demo "
+                        "and its two-line reading, which need no stelling"),
+    "choosing-a-solver-backend.md": (
+        0, 1, "NOT-A-TRANSCRIPT: the z3 tactic chain, written as a pipeline"),
+    "norms.md": (
+        0, 4, "NOT-A-TRANSCRIPT x3 (a four-line procedure, the cost table "
+              "quoted from obligation.py, a subprocess sweep's output) plus "
+              "one numpy-vs-lax sign reading that tests/test_tripwire_eager "
+              "and the norm's own instance re-drive"),
+    "overflow-tripwire.md": (
+        4, 9, "B17's page. Its own module comment above EXPECTED_INVENTORY "
+              "records each of these; not re-decided here"),
+    "preconditions.md": (
+        1, 0, "READER-SUPPLIES: the LibmBudget example takes the reader's own "
+              "profile name and measurement"),
+    "proposed-declaration-dtype-check.md": (
+        1, 0, "RAISES-BY-DESIGN: the refused declaration is the point"),
+    "proposed-decline-messages.md": (
+        0, 10, "HISTORICAL: five Today/Proposed pairs. They are the argument, "
+               "and both halves are pre-change by construction -- the shipped "
+               "text is pinned by the tests each section names"),
+    "proposed-div-straddle-decline.md": (
+        0, 4, "HISTORICAL: measurements from before 32c6c56, kept as measured "
+              "and marked. The LIVE reading is a compared block on the same "
+              "page"),
+    "proposed-int-literal-convert.md": (
+        2, 1, "READER-SUPPLIES x2 (jax_md's safe_mask body, a propagate.py "
+              "excerpt) and HISTORICAL x1 (the pre-cbb1d60 fence). The live "
+              "reading is a compared block on the same page"),
+    "proposed-tier-clause.md": (
+        0, 2, "NOT-A-TRANSCRIPT: two gauge tables, laid out in columns. "
+              "tests/test_tier_clause.py is what holds the rows down"),
+    "proposed-unit-mechanism.md": (
+        0, 1, "NOT-A-TRANSCRIPT: a table from a study over a corpus that is "
+              "not in this tree"),
+    "quickstart.md": (0, 1, "B17's page"),
+    "reading-a-verdict.md": (
+        0, 4, "EXCERPT x3 and one byte-exact render. The page now says which "
+              "is which, in as many words, above its own status table"),
+    "reproducing-a-witness.md": (
+        4, 4, "NEEDS-A-DEPENDENCY x2 (maddening) and READER-SUPPLIES x2 (the "
+              "two files the page tells you to write); the four fences are "
+              "SHELL SESSIONS. The reader's path through them is executed by "
+              "tests/test_reproduce_acceptance.py instead"),
+    "state-0.1.0.md": (
+        1, 2, "NEEDS-A-DEPENDENCY x1 (jax_md) and HISTORICAL x2 (a stub run "
+              "over a corpus that is not here, and the pre-cbb1d60 jnp.where "
+              "reading whose live counterpart IS gated, on "
+              "proposed-int-literal-convert.md)"),
+    "verdict-ledger.md": (
+        0, 1, "NOT-A-TRANSCRIPT: the witness laid out for reading. Every "
+              "value in it is asserted by tests/test_reproduce_acceptance.py"),
+}
+
+
+def _blind_spot_now() -> dict[str, tuple[int, int]]:
+    out: dict[str, tuple[int, int]] = {}
+    for path in _doc_files():
+        blocks = list(_fences(path.read_text(encoding="utf-8")))
+        consumed = set()
+        illustrative = 0
+        for n, (lang, _body, _line, marker) in enumerate(blocks):
+            if lang != "python":
+                continue
+            if marker == "illustrative":
+                illustrative += 1
+                continue
+            if marker == "run-only":
+                continue
+            if n + 1 < len(blocks) and blocks[n + 1][0] == "":
+                consumed.add(n + 1)
+        unattached = sum(
+            1 for n, (lang, _b, _l, _m) in enumerate(blocks)
+            if lang == "" and n not in consumed
+        )
+        if illustrative or unattached:
+            out[path.name] = (illustrative, unattached)
+    return out
+
+
+def test_every_page_outside_the_gate_has_been_decided_about():
+    """The blind spot is not allowed to grow without somebody saying why.
+
+    ``test_inventory_is_what_the_docstring_says`` already pins the TOTALS,
+    and totals were exactly what a 68-finding accuracy sweep found sitting
+    correct on top of the problem. This pins the totals PER PAGE against a
+    written reason, so the cheapest way to add an ungated claim is to say
+    which of six legitimate cases it is — and there is no way to add one
+    silently.
+    """
+    now = _blind_spot_now()
+    recorded = {k: v[:2] for k, v in BLIND_SPOT.items()}
+    assert now == recorded, (
+        "the per-page blind spot moved.\n"
+        + "\n".join(
+            f"  {name}: recorded {recorded.get(name, '(none)')} "
+            f"actual {now.get(name, '(none)')}"
+            for name in sorted(set(now) | set(recorded))
+            if now.get(name) != recorded.get(name)
+        )
+        + "\n\nUpdate BLIND_SPOT with the new counts AND the reason. If the "
+        "block can run and its output can be compared, attach it instead: "
+        "that is a finding that cannot recur."
+    )
+
+
+def test_every_blind_spot_entry_carries_a_reason_from_the_closed_set():
+    """A reason like "legacy" would satisfy the test above and nothing
+    else. Each entry names which of the six cases it is."""
+    cases = (
+        "NEEDS-A-DEPENDENCY", "READER-SUPPLIES", "HISTORICAL",
+        "NOT-A-TRANSCRIPT", "EXCERPT", "RAISES-BY-DESIGN",
+    )
+    # two pages belong to another batch and defer to its own record
+    deferred = {"overflow-tripwire.md", "quickstart.md"}
+    bad = {
+        name: why for name, (_i, _u, why) in BLIND_SPOT.items()
+        if name not in deferred and not any(c in why for c in cases)
+    }
+    assert not bad, (
+        f"these BLIND_SPOT reasons name none of {cases}: {bad}"
+    )
