@@ -16,21 +16,21 @@ in the suite read a fenced block.
 **EXACTLY WHAT IS AND IS NOT CHECKED.** Stated with numbers because the
 first version of this file claimed "every documented example runs, and
 prints what the doc says it prints", which was wider than the mechanism.
-Measured over ``README.md`` + ``docs/*.md``, and pinned by
+Measured over ``README.md`` + ``docs/**/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                50
-      marked illustrative — not run                 20
-      EXECUTED (exit 0 required)                    30
+    ```python blocks                                58
+      marked illustrative — not run                 15
+      EXECUTED (exit 0 required)                    43
         marked run-only — output not compared        3
-        OUTPUT COMPARED against a fence             27
-    plain ``` fences                                71
-      consumed as an example's claimed output       27
-      HAND-WRITTEN, compared to nothing             44
+        OUTPUT COMPARED against a fence             40
+    plain ``` fences                                86
+      consumed as an example's claimed output       40
+      HAND-WRITTEN, compared to nothing             46
 
-So the claim this file earns is: *every runnable example runs, and 27 of
-the 30 have their stdout compared byte for byte after a narrow
-normalisation.* The 44 unattached fences — a render pasted into prose, a
+So the claim this file earns is: *every runnable example runs, and 40 of
+the 43 have their stdout compared byte for byte after a narrow
+normalisation.* The 46 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
 
@@ -114,6 +114,18 @@ one, so the day ``test-jax`` floated past the version the doc stamps,
 nothing compared that hash anywhere. See the block comment above
 ``_STAMP_JAX`` for the mutation that measures it.
 
+**AND WHAT IS NOT UNDER THE GATE IS DECIDED ABOUT, PER PAGE.** The
+inventory above counts the blind spot; it never said whether anybody had
+looked at it, and a documentation-accuracy sweep of this tree put 60 of
+its 68 findings inside that blind spot with every total correct.
+:data:`BLIND_SPOT` records, for each page, how many illustrative blocks
+and hand-written fences it carries and WHICH of six legitimate reasons
+they are (needs-a-dependency, reader-supplies, historical,
+not-a-transcript, excerpt, raises-by-design).
+:func:`test_every_page_outside_the_gate_has_been_decided_about` holds the
+per-page counts to it, so a page cannot gain an ungated claim without
+somebody writing down which case it is.
+
 Blocks that opt into a solver (they pass ``solver_timeout_ms``) are
 skipped when no backend is installed, since their output is about an
 escalation that cannot happen. Those examples are unverified in a
@@ -168,11 +180,96 @@ EXPECTED_INVENTORY = {
     # does not exist in the program jax runs. With the perimeter armed it
     # raises by design and with it off it prints nothing, so there is no
     # output to compare in either direction.
-    "python_blocks": 50,
-    "illustrative": 20,
-    "executed": 30,
+    #
+    # B19 on `docs/preconditions.md`: THREE more, and two of them exist
+    # because a whole shipped layer had no route from the docs. That page's
+    # out-of-scope list welded a built layer to an unbuilt one --
+    # "conditioning over the envelope, residual-implies-error ... are a
+    # different, PLANNED layer" -- while `stelling.contracts` ships
+    # `conditioning_2x2` and `conditioning_2x2_field`, and `docs/README.md`
+    # had no index row for the module at all. The new section prints the
+    # contracts surface FROM the object; drafting it against the page's own
+    # description produced four wrong signatures, which is the argument for
+    # printing rather than typing. The third block pins the substitution
+    # behind "the same VERIFIED-against-executed-zero appears for
+    # `jnp.sum(k * x)`" -- the naive reading of that sentence gives REFUTED.
+    #
+    # THREE FENCES ARE ADDED UNATTACHED, DELIBERATELY, and named here so the
+    # decision is on the record rather than absorbed into the total:
+    # `norms.md`'s cost table (quoted from `obligation.py`, whose comment is
+    # the maintained copy), `norms.md`'s corpus-sweep output (a subprocess
+    # this module does not run), and `state-0.1.0.md`'s pre-change `jnp.where`
+    # reading (a HISTORICAL measurement -- gating it would assert the old
+    # answer). The live reading of that last one IS gated, on
+    # `proposed-int-literal-convert.md`.
+    #
+    # B19 on `docs/reading-a-verdict.md`: ROW 1 of the status table -- the
+    # first thing a reader of that page reads -- said VERIFIED means "true at
+    # every point of the declared box", and under a narrowing `assume` it does
+    # not. The page said the qualified thing correctly eight hundred lines
+    # lower down. The new block DEMONSTRATES the counter-example rather than
+    # asserting the qualifier: VERIFIED, with `0.2` in the declared box and
+    # `0.2 > 0.5` False, and the stamp's `constrained assume` line naming the
+    # narrowing.
+    #
+    # B19 on `docs/harness-api.md`: the page opened "Every code block on this
+    # page was executed verbatim ... and the outputs are what it printed",
+    # which one block on the page contradicted -- it was marked illustrative,
+    # and it could not have been executed verbatim because it uses `lax` and
+    # nothing on the page imports it. It also carried `# VERIFIED` on a
+    # harness that is UNKNOWN under the call the page documents. Now executed
+    # and compared, with a third harness added so the withholding it is about
+    # is visible: `no_assume` REFUTED against `not_honoured` UNKNOWN is what
+    # makes the first row evidence rather than a comment. And a second block
+    # PRINTS `check`'s signature from the object, because the typed one had
+    # gone four parameters out of date. Written against the object at
+    # 343ebe6 (2026-08-03), it listed `harness`, `vacuity_mode`,
+    # `solver_timeout_ms`, `refine` and `strict`; `solver`, `semantics`,
+    # `libm_budget` and `falsify` landed under it between 08-12 and 08-19,
+    # and the page went on using one of them, `semantics="ieee"`, further
+    # down. (This comment said the typed one "had published four of its nine
+    # parameters". It published five. Four were MISSING, which is the
+    # opposite reading of the same arithmetic, and the block below prints
+    # the list so neither number has to be typed again.)
+    #
+    # B19: `docs/inductive-step.md` went from FOUR illustrative blocks and no
+    # gate at all to four executed-and-compared ones. It was the page whose
+    # running example was REFUTED by the solver the page recommends, with the
+    # 0.0495 escape (`10 + 5 x 0.99 x 0.01`) diagnosed in prose as 1-ULP
+    # outward rounding -- so the page taught a reader to dismiss a real escape
+    # as a rounding artefact, and nothing in the suite ran a line of it. The
+    # four now are: a body that genuinely preserves its invariant (so the
+    # page's "If VERIFIED" is demonstrable), the array-valued state shape, the
+    # ONE-ULP PAIR (`x/3*3` VERIFIED against `x*0.1*10` REFUTED, identical
+    # 2.2e-16 miss, opposite answers), and the escaping body kept as an
+    # explicit refutation.
+    #
+    # B19 also added four elsewhere. Two are on
+    # `docs/choosing-a-solver-backend.md`, which
+    # had NO gate at all -- `grep -rn choosing-a-solver-backend tests/
+    # .github/` had no hits -- and which had a whole section arguing from a
+    # case the emission cannot produce, retracted in `solvers.py` on
+    # 2026-08-20 and not on the page. Its two new blocks are the two claims
+    # on it that are about MECHANISM rather than wall-clock: the `x**(1/80)`
+    # degree-cap decline (which prints that ZERO backends were invoked, the
+    # whole of the retraction) and the `semantics="ieee"` + solver_timeout_ms
+    # caller error. The page's speed table stays hand-checked and says so.
+    #
+    # And two are a corrected
+    # `proposed-*.md` header paying for itself. `proposed-int-literal-convert.md`
+    # and `proposed-div-straddle-decline.md` each argued from a hand-written
+    # fence that had gone false under the commit that BUILT the thing they
+    # proposed (`cbb1d60`, `32c6c56`) — so each keeps its pre-change fence,
+    # marked as pre-change, and gains a block that prints the current reading
+    # here. Both are chosen to be path-free: they print interval endpoints and
+    # booleans, not a render, because the normaliser only rewrites a source-info
+    # line that begins the line and a fence carrying an inline temp path could
+    # not be byte-compared.
+    "python_blocks": 58,
+    "illustrative": 15,
+    "executed": 43,
     "run_only": 3,
-    "compared": 27,
+    "compared": 40,
     # B15 added two: `docs/overflow-tripwire.md` now quotes the trace gate's
     # narrowed refusal and its NOT-FULLY-OBSERVED refusal side by side, which
     # is the whole point of that section — the two sentences have to be
@@ -202,8 +299,8 @@ EXPECTED_INVENTORY = {
     # the pass line. Hand-written from a measured run and attached to
     # nothing; `tests/test_narrowing_perimeter.py` and the whole-suite drive
     # in the commit message are what hold the figures down.
-    "plain_fences": 71,
-    "plain_unattached": 44,
+    "plain_fences": 86,
+    "plain_unattached": 46,
 }
 
 _MARKER = re.compile(r"<!--\s*doc-example:\s*(illustrative|run-only)\s*-->")
@@ -267,7 +364,43 @@ def _docstring_inventory() -> dict[str, int]:
 
 
 def _doc_files() -> list[pathlib.Path]:
-    return [REPO / "README.md", *sorted((REPO / "docs").glob("*.md"))]
+    """The population: the root README and every ``.md`` under ``docs/``.
+
+    ``rglob``, not ``glob``. The non-recursive form was a ceiling on
+    everything in this module -- the keying by ``path.relative_to(REPO)``
+    was verified across sdist, symlink and checkout, so the key was never
+    the limit, the POPULATION was. Measured on ``6387a34``: a page at
+    ``docs/nested/page.md`` carrying one unmarked ``python`` block and one
+    unattached fence left this entire module green at ``14 passed, 43
+    skipped``, gated by nothing and counted by nothing.
+
+    There are no subdirectories under ``docs/`` today, so this changes no
+    figure in ``EXPECTED_INVENTORY`` -- which is exactly when widening a
+    population is cheap.
+
+    **AND THE QUALIFIER, BECAUSE THE POPULATION IS STILL A CHOICE.** Every
+    other ``.md`` in the tree is outside it, and a new TOP-LEVEL directory
+    of pages would be outside it too. Their fences are executed by NOBODY,
+    and that gap has already been paid for once: ``SOUNDNESS.md``'s
+    integer-wrap reproducer sat at the repository root, outside this
+    population, run by nothing, until
+    ``tests/test_soundness_wrap_reproducer.py`` was written for it alone.
+    Widening here does not close that; it closes one direction of it, and
+    the other is written down rather than implied.
+
+    **AND THE PROSE SWEEP IS NOT A CEILING EITHER, WHICH THIS SENTENCE USED
+    TO SAY IT WAS.** It read *"Those files are swept for prose defects by
+    ``tests/test_prose_hygiene.py``, which walks the shipped roots
+    recursively"* -- the recursion is true, the universality is not.
+    That sweep's population is ``_shipped_roots()``, DERIVED from the sdist
+    allowlist in ``pyproject.toml``, so it covers the SHIPPED tree and not
+    the tree: anything outside the allowlist -- this repository's
+    ``scratchpad/`` pages, for instance -- is outside that sweep as well,
+    and is therefore read by neither module. The exclusion is deliberate
+    and is documented where the allowlist is; the defect was this sentence,
+    in the commit whose whole subject is this qualifier.
+    """
+    return [REPO / "README.md", *sorted((REPO / "docs").rglob("*.md"))]
 
 
 def _fences(text: str):
@@ -1039,3 +1172,285 @@ def test_the_stamp_fence_rejects_an_untested_series():
     assert all(jax_series_tested(f"{s}.0") for s in TESTED_JAX_SERIES)
     # and the regex it leans on finds the version it is given
     assert _STAMP_JAX.match("stelling 0.1.0 | jax 0.7.3").group(2) == "0.7.3"
+
+
+# --- what is NOT under the gate, decided about page by page -----------------
+#
+# THE INVENTORY ABOVE COUNTS THE BLIND SPOT. It does not say whether anybody
+# ever looked at it, and that difference is what a documentation-accuracy
+# sweep of this tree measured: 60 of its 68 findings were in blocks and
+# fences this module does not reach, and every one of them had been sitting
+# in a total that was correct. A number nobody has to justify is a number
+# nobody reads.
+#
+# So each entry below is a DECISION, per page, about the blocks this module
+# leaves alone: `(illustrative, unattached_fences)` and why. Keyed by the
+# page's REPO-RELATIVE PATH and not by line, so ordinary editing does not
+# churn it; a page that gains an unrunnable block or a hand-written fence
+# goes red until somebody writes down which case it is.
+#
+# The path, not `path.name`: `_doc_files()` is the root `README.md` plus
+# every `.md` under `docs/`, and `docs/README.md` EXISTS. Keyed by basename the two
+# collided, and the collision was silent in the direction that matters.
+# Measured on 5bbf52a, in this file's own population:
+#   * a pure addition to `docs/README.md` -- one illustrative block and one
+#     unattached fence -- reddened the TOTALS gate and left
+#     `test_every_page_outside_the_gate_has_been_decided_about` GREEN: the
+#     second `(1, 1)` overwrote the first and matched the record;
+#   * MOVING that same block and fence out of the root `README.md` into
+#     `docs/README.md` left all four inventory gates green AND the whole
+#     module green, while a page gained ungated content with no decision
+#     recorded and this dict's reason for `README.md` described content no
+#     longer in that file.
+# Both are red now, and both were re-driven after the change.
+#
+# The legitimate cases, and they are the whole list:
+#   NEEDS-A-DEPENDENCY   the block imports something this repo does not
+#                        depend on (jax_md, maddening), so it cannot run here
+#   READER-SUPPLIES      a fragment the reader completes -- a file they are
+#                        told to create, a call with their own object in it
+#   HISTORICAL           a measurement that has since MOVED, kept as measured.
+#                        Gating it would assert the old answer.
+#   NOT-A-TRANSCRIPT     prose, a shell session, a table, a quote from source
+#   EXCERPT              a real render, elided or reflowed for reading
+#   RAISES-BY-DESIGN     running it is an error the page is demonstrating
+#
+# And one that is NOT a reason the content is ungated:
+#   OWED                 the page belongs to another batch and its blocks
+#                        have not been classified at all. A declared debt,
+#                        naming who owes it. It used to be an unnamed
+#                        allowlist inside the closed-set test, which let ANY
+#                        reason through on the pages it covered -- `"legacy,
+#                        whatever"` was green on `quickstart.md` and red on
+#                        `norms.md`, and the test's own docstring said flatly
+#                        that each entry names which of the six cases it is.
+#                        Every OWED page must be in `_OWED_PAGES` below, so
+#                        adding one is an edit in the open, and the share of
+#                        the blind spot it leaves undecided is bounded and
+#                        derived rather than described.
+BLIND_SPOT = {
+    "README.md": (1, 1, "READER-SUPPLIES: the jax-only int8 truncation demo "
+                        "and its two-line reading, which need no stelling"),
+    "docs/choosing-a-solver-backend.md": (
+        0, 1, "NOT-A-TRANSCRIPT: the z3 tactic chain, written as a pipeline"),
+    "docs/norms.md": (
+        0, 4, "NOT-A-TRANSCRIPT x3 (a four-line procedure, the cost table "
+              "quoted from obligation.py, a subprocess sweep's output) plus "
+              "one numpy-vs-lax sign reading that tests/test_tripwire_eager "
+              "and the norm's own instance re-drive"),
+    "docs/overflow-tripwire.md": (
+        5, 10, "OWED by B17, which owns this page. Its fifteen blocks have "
+               "NOT been classified: the comment above EXPECTED_INVENTORY "
+               "accounts for the three ADDITIONS B16 and B17 made, not for "
+               "the page's inventory. Declared in _OWED_PAGES"),
+    "docs/preconditions.md": (
+        1, 0, "READER-SUPPLIES: the LibmBudget example takes the reader's own "
+              "profile name and measurement"),
+    "docs/proposed-declaration-dtype-check.md": (
+        1, 0, "RAISES-BY-DESIGN: the refused declaration is the point"),
+    "docs/proposed-decline-messages.md": (
+        0, 10, "HISTORICAL: five Today/Proposed pairs. They are the argument, "
+               "and both halves are pre-change by construction -- the shipped "
+               "text is pinned by the tests each section names"),
+    "docs/proposed-div-straddle-decline.md": (
+        0, 4, "HISTORICAL: measurements from before 32c6c56, kept as measured "
+              "and marked. The LIVE reading is a compared block on the same "
+              "page"),
+    "docs/proposed-int-literal-convert.md": (
+        2, 1, "READER-SUPPLIES x2 (jax_md's safe_mask body, a propagate.py "
+              "excerpt) and HISTORICAL x1 (the pre-cbb1d60 fence). The live "
+              "reading is a compared block on the same page"),
+    "docs/proposed-tier-clause.md": (
+        0, 2, "NOT-A-TRANSCRIPT: two gauge tables, laid out in columns. "
+              "tests/test_tier_clause.py is what holds the rows down"),
+    "docs/proposed-unit-mechanism.md": (
+        0, 1, "NOT-A-TRANSCRIPT: a table from a study over a corpus that is "
+              "not in this tree"),
+    "docs/quickstart.md": (
+        0, 1, "EXCERPT: three rows of the membership table, lifted from the "
+              "RUNNABLE version in harness-api.md -- which is a compared "
+              "block -- and the sentence above the fence says so"),
+    "docs/reading-a-verdict.md": (
+        0, 4, "EXCERPT x3 and one byte-exact render. The page now says which "
+              "is which, in as many words, above its own status table"),
+    "docs/reproducing-a-witness.md": (
+        4, 4, "NEEDS-A-DEPENDENCY x2 (maddening) and READER-SUPPLIES x2 (the "
+              "two files the page tells you to write); the four fences are "
+              "SHELL SESSIONS. The reader's path through them is executed by "
+              "tests/test_reproduce_acceptance.py instead"),
+    "docs/state-0.1.0.md": (
+        1, 2, "NEEDS-A-DEPENDENCY x1 (jax_md) and HISTORICAL x2 (a stub run "
+              "over a corpus that is not here, and the pre-cbb1d60 jnp.where "
+              "reading whose live counterpart IS gated, on "
+              "proposed-int-literal-convert.md)"),
+    "docs/verdict-ledger.md": (
+        0, 1, "NOT-A-TRANSCRIPT: the witness laid out for reading. Every "
+              "value in it is asserted by tests/test_reproduce_acceptance.py"),
+}
+
+
+def _blind_spot_now() -> dict[str, tuple[int, int]]:
+    out: dict[str, tuple[int, int]] = {}
+    for path in _doc_files():
+        blocks = list(_fences(path.read_text(encoding="utf-8")))
+        consumed = set()
+        illustrative = 0
+        for n, (lang, _body, _line, marker) in enumerate(blocks):
+            if lang != "python":
+                continue
+            if marker == "illustrative":
+                illustrative += 1
+                continue
+            if marker == "run-only":
+                continue
+            if n + 1 < len(blocks) and blocks[n + 1][0] == "":
+                consumed.add(n + 1)
+        unattached = sum(
+            1 for n, (lang, _b, _l, _m) in enumerate(blocks)
+            if lang == "" and n not in consumed
+        )
+        if illustrative or unattached:
+            out[str(path.relative_to(REPO))] = (illustrative, unattached)
+    return out
+
+
+def test_every_page_outside_the_gate_has_been_decided_about():
+    """The blind spot is not allowed to grow without somebody saying why.
+
+    ``test_inventory_is_what_the_docstring_says`` already pins the TOTALS,
+    and totals were exactly what a 68-finding accuracy sweep found sitting
+    correct on top of the problem. This pins the totals PER PAGE against a
+    written reason, so the cheapest way to add an ungated claim is to say
+    which of six legitimate cases it is — and there is no way to add one
+    silently.
+    """
+    now = _blind_spot_now()
+    recorded = {k: v[:2] for k, v in BLIND_SPOT.items()}
+    assert now == recorded, (
+        "the per-page blind spot moved.\n"
+        + "\n".join(
+            f"  {name}: recorded {recorded.get(name, '(none)')} "
+            f"actual {now.get(name, '(none)')}"
+            for name in sorted(set(now) | set(recorded))
+            if now.get(name) != recorded.get(name)
+        )
+        + "\n\nUpdate BLIND_SPOT with the new counts AND the reason. If the "
+        "block can run and its output can be compared, attach it instead: "
+        "that is a finding that cannot recur."
+    )
+
+
+# Pages whose blind-spot classification is OWED by the batch that owns them.
+# THIS IS AN EXEMPTION FROM THE CLOSED SET and it is declared here, in the
+# open, rather than living as a name list inside the test below. It used to
+# be `deferred = {"overflow-tripwire.md", "quickstart.md"}` there, and it let
+# any reason at all through on those two pages -- measured: `"legacy,
+# whatever"` was GREEN on `quickstart.md` and RED on `norms.md` -- while the
+# test's docstring said each entry names which of the six cases it is.
+# `quickstart.md` has since been classified (EXCERPT, and its page says so),
+# which leaves one.
+_OWED_PAGES = {"docs/overflow-tripwire.md"}
+
+# How big the debt is, and it RATCHETS DOWN. Derived and re-measured on
+# every run below; recorded here so that GROWING it is an edit somebody has
+# to make on purpose, in a line that says growing it is not allowed.
+#
+# THE BOUND THIS REPLACES COULD NOT BITE. It read
+# `owed_items * 2 <= total_items` with `total_items` INCLUDING `owed_items`
+# -- which says `owed <= classified`, and an ungated block added to an OWED
+# page raises the numerator only, against a denominator that does not move.
+# Measured on `6387a34`: appending fifteen ungated fences to
+# `docs/overflow-tripwire.md` and bumping its recorded pair from (5, 10) to
+# (5, 25) left BOTH blind-spot gates green while the undecided share went
+# 15/61 = 24.6% to 30/76 = 39.5%, doubling the debt; the bound first bites
+# at 47 owed items, more than three times today's. Nothing ratcheted, so the
+# drift was silent, and the assertion's "most of what this gate is supposed
+# to cover" named a trip point the arithmetic did not deliver.
+#
+# WHAT THE RATCHET IS AND IS NOT. It is an EQUALITY over a derived number,
+# so the debt cannot grow silently and cannot shrink silently either: either
+# direction is an edit somebody makes here on purpose. That is the whole of
+# it. It does NOT check that a reason is true, and there is no way for it
+# to: `HISTORICAL` and `OWED` are claims about the world, and this file can
+# read the counts but not the pages. Measured, so the limit is not implied:
+# relabelling `docs/overflow-tripwire.md`'s SAME fifteen unclassified blocks
+# as `"HISTORICAL: fifteen measurements that have since moved, kept as
+# measured"`, emptying `_OWED_PAGES` and setting `_OWED_DEBT = 0` gives
+# `14 passed, 43 skipped` -- the debt discharged by retyping it, with no
+# block classified and none of these gates disturbed. So the assertion below
+# says what it can see; what it cannot see is stated there rather than
+# implied, because the message it replaced read as though a smaller number
+# were evidence somebody had done the work.
+_OWED_DEBT = 15
+
+
+def test_every_blind_spot_entry_carries_a_reason_from_the_closed_set():
+    """A reason like "legacy" would satisfy the test above and nothing else.
+
+    Each entry names which of the six legitimate cases it is, OR says the
+    classification is ``OWED`` and by whom -- and an ``OWED`` page must be
+    declared in ``_OWED_PAGES``, so the exemption is a visible edit and not a
+    silent bypass. ``OWED`` is not a seventh way for a block to be
+    legitimately ungated; it is a debt, and the assertion below pins how
+    much of the blind spot sits in one.
+
+    **WHAT IS CHECKED IS THE SHAPE OF THE REASON, NOT ITS TRUTH, AND THAT
+    IS A CEILING ON EVERY LINE BELOW.** This gate reads three things: that
+    each reason names one of the six cases or declares ``OWED``, that the
+    ``OWED`` set is the one declared in ``_OWED_PAGES``, and that the DERIVED
+    item counts still add up to ``_OWED_DEBT``. It cannot read a page, so it
+    cannot tell a block that was classified from a reason that was retyped
+    -- measured, in the comment that declares ``_OWED_DEBT``. What the
+    equality does buy is that neither direction is silent: growing or
+    shrinking the debt is an edit in this file, in the open, next to the
+    sentence saying which one you are making.
+    """
+    cases = (
+        "NEEDS-A-DEPENDENCY", "READER-SUPPLIES", "HISTORICAL",
+        "NOT-A-TRANSCRIPT", "EXCERPT", "RAISES-BY-DESIGN",
+    )
+    bad = {
+        name: why for name, (_i, _u, why) in BLIND_SPOT.items()
+        if "OWED" not in why and not any(c in why for c in cases)
+    }
+    assert not bad, (
+        f"these BLIND_SPOT reasons name none of {cases}, and do not declare "
+        f"the classification OWED: {bad}"
+    )
+
+    owed = {name for name, (_i, _u, why) in BLIND_SPOT.items() if "OWED" in why}
+    assert owed == _OWED_PAGES, (
+        f"the OWED set moved. Declared {sorted(_OWED_PAGES)}, in the dict "
+        f"{sorted(owed)}. An exemption from the closed set is declared in "
+        f"_OWED_PAGES or it is not taken."
+    )
+    unnamed = {
+        name for name in owed
+        if not re.search(r"\bOWED by \S", BLIND_SPOT[name][2])
+    }
+    assert not unnamed, (
+        f"these say OWED and do not say by whom: {sorted(unnamed)}. A debt "
+        f"with no owner is the allowlist this replaced."
+    )
+
+    # Derived, not described: how much of the blind spot is undecided, and
+    # it may only ever go DOWN.
+    owed_items = sum(i + u for name, (i, u, _w) in BLIND_SPOT.items()
+                     if name in _OWED_PAGES)
+    total_items = sum(i + u for i, u, _w in BLIND_SPOT.values())
+    assert owed_items == _OWED_DEBT, (
+        f"the OWED debt moved: {owed_items} of {total_items} blind-spot "
+        f"items ({100.0 * owed_items / total_items:.1f}%) are declared OWED "
+        f"rather than classified, and _OWED_DEBT records {_OWED_DEBT}.\n"
+        f"THIS NUMBER DOES NOT MOVE BY ITSELF. If it GREW, an ungated block "
+        f"was added to a page whose blocks nobody has classified: classify "
+        f"it, or put it on a page that is gated -- do not raise this "
+        f"number, which is what the bound it replaced silently allowed "
+        f"three times over.\n"
+        f"If it SHRANK, lower _OWED_DEBT here and say in the commit which "
+        f"blocks moved and where they went. THIS GATE CANNOT TELL YOU THAT "
+        f"THEY DID: it reads the counts in BLIND_SPOT and the case names in "
+        f"the reasons, never the pages, so a block classified and a reason "
+        f"retyped look identical from here. A smaller number is an edit "
+        f"somebody made, not evidence somebody did the work."
+    )

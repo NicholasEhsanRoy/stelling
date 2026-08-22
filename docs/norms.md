@@ -166,9 +166,14 @@ nothing.
 
 ## A measurement whose result is an ABSENCE needs a positive control
 
-**The general rule the next four sections are special cases of.** If a measurement
-can only report "nothing here", it must be paired with a control showing the
-instrument detects the thing when it *is* here. Otherwise "nothing here" and "this
+**The general rule that *Guard coverage is proven by mutation, not by
+construction*, *A battery that stops measuring reports a perfect score* and *A
+probe reading a final verdict must assert something non-trivial* are special
+cases of.** (It said "the next four sections", which a reordered file cannot
+keep true: two of those three are now fourteen and twelve sections below, and
+one of the four that *do* follow opens by saying it is not a special case.) If
+a measurement can only report "nothing here", it must be paired with a control
+showing the instrument detects the thing when it *is* here. Otherwise "nothing here" and "this
 instrument cannot see" produce identical output, and the reassuring one gets
 believed.
 
@@ -195,10 +200,13 @@ instrument's reach, not by the world.**
 
 So state, for any absence claim: *what would this have looked like if the thing
 were present?* If the answer is "the same", the measurement is not evidence. The
-specific forms below — a mutation must change behaviour somewhere, a battery must
-reject at least one point, a probe must assert something the cheap layers cannot
-decide — are kept because they are more actionable than this rule; use them first
-and fall back to this when the situation fits none of them.
+three specific forms named above — a mutation must change behaviour somewhere
+(*Guard coverage is proven by mutation, not by construction*), a battery must
+reject at least one point (*A battery that stops measuring reports a perfect
+score*), a probe must assert something the cheap layers cannot decide (*A probe
+reading a final verdict must assert something non-trivial*) — are kept because
+they are more actionable than this rule; use them first and fall back to this
+when the situation fits none of them.
 
 ## Evidence of non-occurrence licenses "unreached", never "unreachable"
 
@@ -250,29 +258,66 @@ Two measured instances, and the difference between them is the whole norm.
   test asserting those numbers (`101.0` against `100.0`, elements 1 and 2)
   `importorskip`s `maddening`. But the loss is **disclosed and asserted**.
   `tests/test_doc_examples.py` marks the blocks illustrative and counts the
-  fence among the *31 plain fences, "HAND-WRITTEN, compared to nothing"*, out
-  of 57 plain fences over the population `README.md` + `docs/*.md`; it then
-  reads that figure back out of its own docstring and compares. So the page is
-  weakly guarded and says so, everywhere, whatever is installed.
+  fence among the *plain fences, "HAND-WRITTEN, compared to nothing"*, over
+  the population `README.md` + every `.md` under `docs/`; it then reads that
+  figure back out of its own docstring and compares. **No digit is written
+  here**, because that module recomputes both on every run and a copy of a
+  derived number is the defect this very page legislates against. The
+  sentence has now put two pairs of digits here and both went stale — the
+  second pair was exact at
+  `f15c487` and already wrong at `a64dedc`, that commit's **immediate**
+  first-parent child. *(This read "not four commits later". It was one, so a
+  paragraph whose whole subject is stale numerals had understated its own
+  evidence by a factor of four — and six digits had accumulated under a
+  sentence that says none is written here, two of them added by the round
+  that wrote this correction. They are gone; the sentence is the claim, and
+  the figures are read where they are derived.)* Those figures are
+  `plain_unattached` and `plain_fences` in that module's
+  `EXPECTED_INVENTORY`; read them there. So the page is weakly guarded and
+  says so, everywhere, whatever is installed.
 - **`tests/test_any_pytree.py`'s two acceptance tests.** They hold the bar their
   own docstring sets — content-hash equality between an `any_pytree` sugar
   declaration and the hand-written original, against a real third-party
   library's pytrees, *"the acceptance bar for 'faithful sugar'"* — and they
-  `importorskip("blackjax")`. `blackjax` is declared **nowhere**: not in
-  `[dependency-groups] dev` (pre-commit, pytest, reuse), not in either CI job
-  (`.[solvers]` and `.[solvers,jax]`, plus pytest); its only other mention in
-  the tree is a pre-commit hook BANNING the name in `src/stelling` for
-  library-neutrality. **So they have never run in CI.** Under CI's own
-  install set (`.[solvers,jax]`) the suite reports **six** skips, of which
-  these two are the `blackjax` pair; the other four are
-  `importorskip("maddening")`, which CI does not install either
-  (`test_dot_general_interval.py`, `test_reproduce_acceptance.py` twice,
-  `test_verified_bar.py`). With `maddening` also installed, the suite reports
-  two — these. Nothing anywhere says the sugar's acceptance bar is
-  unmeasured.
+  `importorskip("blackjax")`, and `blackjax` is not a declared dependency of
+  this project: not in `[dependency-groups] dev`, and not in the extras the
+  general CI jobs install. **So on those jobs they do not run.**
 
-  *(That sentence has now been wrong in both directions, which is why it
-  names its install set. It first carried an absolute test count, exact when
+  **They DO run in CI, in a job that exists for it, and that is the shape
+  this norm is asking for.** `.github/workflows/ci.yml`'s
+  `acceptance-any-pytree` — *"any_pytree acceptance (pinned blackjax +
+  diffrax)"* — installs `blackjax` and `diffrax` at pinned versions, runs
+  exactly these two node ids, and fails the job with
+  `::error title=the acceptance tests skipped::This job installs blackjax so
+  that these two RUN. They skipped, so the bar was not measured` if they
+  skip. `acceptance-reproducer` does the same for `maddening`
+  (`uv pip install --no-deps "maddening==0.3.1"`) and asserts six named nodes
+  must RUN. So the loss is disclosed, asserted, and *recovered* by a
+  dedicated lane rather than merely admitted.
+
+  **Do not restate a skip count here.** `tests/test_skip_inventory.py`
+  evaluates every skip predicate in the running environment and pins each
+  condition in BOTH directions; it is the answer to "which skips does this
+  install set produce", it moves with the tree, and a numeral copied here
+  cannot. It is also what answers the last sentence this paragraph used to
+  carry — *"Nothing anywhere says the sugar's acceptance bar is unmeasured"* —
+  which that file has said, in the past tense, since it was written.
+
+  *(This paragraph is corrected, not rewritten, because the correction is the
+  instance. Every clause after the first went false when `05c43ea` added the
+  blackjax job: "not in either CI job" — there are eight pytest-running jobs,
+  not two; "its only other mention in the tree is a pre-commit hook" —
+  `grep -rn blackjax` also hits `tests/test_skip_inventory.py`,
+  `tests/test_prose_hygiene.py`, `tests/test_transcribe.py`,
+  `src/stelling/_jax_compat.py` and four `design/*.md`; "So they have never
+  run in CI"; and "`importorskip("maddening")`, which CI does not install
+  either". **And it is not a race**: `05c43ea` is commit #350, and the last
+  commit to touch this text — `e35de13`, "Correct the false sentences…" — is
+  #368. The paragraph was edited eighteen commits after the job existed, and
+  the edit did not look at it.)*
+
+  *(The skip count has now been wrong in three directions, which is why no
+  digit is written above. It first carried an absolute test count, exact when
   written at `caac1ee` — whose own message records 2003 passed + 2 skipped =
   2005 collected — and stale by `eb1ff86`. The replacement dropped the count
   and asserted "the ONLY skips the suite reports under jax and both solvers —
@@ -283,7 +328,32 @@ Two measured instances, and the difference between them is the whole norm.
   `2031 passed, 6 skipped under CI's install set` four files away. A
   stale-but-once-true number had been replaced by a false claim, in the file
   whose subject is stale claims. A statement that names the install set it
-  was measured under can be re-run; one that does not cannot.)*
+  was measured under can be re-run; one that does not cannot. And then the
+  six went stale as well: measured on this tree with jax and both solvers the
+  suite reports ten skips, and with CI `test-jax`'s absent libraries hidden it
+  reports nineteen — of which the largest single block, the `hypothesis`
+  gate, no version of this sentence ever mentioned. It does not all sit in
+  one directory: the property modules under `tests/property/` each carry a
+  module-level gate, which
+  `tests/property/test_suite_disclosure.py::test_every_property_module_carries_the_hypothesis_gate`
+  requires of them, and one more gate is ITEM-level, inside
+  `tests/test_tripwire_gate.py`'s
+  `test_verified_with_tripwire_armed_implies_no_narrowing`. (This read
+  *"seven `hypothesis` gates over `tests/property/`"*. The total was right
+  and the ATTRIBUTION was not: they are not all in that directory, because
+  the item-level one is outside it. Its replacement then carried two fresh
+  hand-maintained constants of its own — a split of that total, and a
+  pointer to the item-level gate BY LINE NUMBER — and neither was pinned:
+  `test_no_shipped_page_cites_a_line_its_own_tree_does_not_have` checks a
+  citation past END OF FILE and nothing else, so a line inserted anywhere
+  above the cited one would have rotted the pointer in silence. Both are
+  gone. *"Cite the SYMBOL, not the line"* is that test's own failure
+  message, and a test name is greppable and moves with the code.
+  `CONTRIBUTING.md`, describing the same set, disagreed with the count this
+  page carried — which is what a `grep` settles and a page should not be
+  asserting at all.)
+  A number that has been wrong three times, beside a test that computes it on
+  every run, is the argument for the pointer.)*
 
 "Weaker guarantee" and "no guarantee" are different facts and must not read the
 same. The first has a fallback; the second has nothing where the claim is made.
@@ -346,7 +416,8 @@ but it has to know it is a departure.
 
 ## State which query a measurement actually ran
 
-Norm D catches an instrument that cannot detect the thing. This catches one that
+*A measurement whose result is an ABSENCE needs a positive control* catches an
+instrument that cannot detect the thing. This catches one that
 **answers a different, easier question than the one reported** — and it passes every
 check aimed at it, because the check is aimed at the question you meant to ask.
 
@@ -376,15 +447,35 @@ about interval propagation and must not be reported as being about the solver.
 **And name the FRAGMENT, not just the query.** A fourth instance had
 `obl-solves = 2` on every row — the obligation genuinely reached the solver — and
 was still measuring the wrong thing, because every one was `QF_LRA` while the
-constant under test is set by `QF_NRA`. Those two differ by three orders of
-magnitude: 8192 linear terms cost under half a second, and 384 *nonlinear* terms
-cost 237. A measurement that does not say which logic it ran in is not a
-measurement of solver cost. `set-logic` is in the stamp's options.
+constant under test is set by `QF_NRA`. The two fragments differ by orders of
+magnitude, and the definition site the constant lives at
+(`src/stelling/obligation.py`, the table above `ELEMENT_BUDGET`) is where the
+figures are:
+
+```
+terms:            256     512     1024     2048
+cvc5 nl-cov unsat 0.32 s  2.2 s   18.5 s   timeout (> 120 s)
+QF_LRA (both)     ≤ 0.4 s out to 8192 terms
+```
+
+**8192 linear terms cost under half a second; 1024 nonlinear terms cost 18.5,
+and one more doubling hangs the primary.** A measurement that does not say
+which logic it ran in is not a measurement of solver cost. `set-logic` is in
+the stamp's options.
+
+*This sentence used to read "384 *nonlinear* terms cost 237". That pair is a
+hundredfold above the bracketing measurements at the definition site, and
+`grep -rn '\b237\b'` across `src/`, `tests/`, `docs/`, `design/` and
+`SOUNDNESS.md` returns only occurrences inside `2,237,668,967` — the float32
+`exp` argument count, a different quantity entirely — and no timing row at
+all. Neither confirmed nor refuted — it could
+not be located, so it is replaced by figures that are in the tree and make the
+same point.*
 
 ## An instrument must declare its SCOPE, and an acceptance criterion must check that the scope covers the claim
 
-Norm E's sibling. **E says state which query you ran; this says state what your
-instrument reaches.** The failure it catches is not a wrong number — it is a
+*State which query a measurement actually ran*'s sibling. **That one says state
+which query you ran; this says state what your instrument reaches.** The failure it catches is not a wrong number — it is a
 correct number about a smaller thing than the claim it was used to license.
 
 Five instances, each caught by a check aimed at exactly it:
@@ -475,8 +566,15 @@ than an error** — which is why it keeps landing. Four instances, with numbers:
   rather than an obvious constant.
 
 A lazy cache does not help: **it delays when code enters a region, it does not
-move it out.** The fixture must be warmed before tracing, and `frontier.warm()`
-is idempotent and runs at import for exactly this reason.
+move it out.** The fixture must be warmed before tracing.
+
+*This sentence used to end "and `frontier.warm()` is idempotent and runs at
+import for exactly this reason". There is no `frontier` module and no `warm()`
+in this tree or anywhere in its history — `git log --all -S 'frontier.warm'`
+returns only the two commits that wrote this text. The instrument it means is
+`stelling-sweeps/frontier.py`, in the campaign repo, which is not here; the
+clause before it already carries the norm, so the missing half is dropped
+rather than relocated.*
 
 ## Guard coverage is proven by mutation, not by construction
 
@@ -640,10 +738,25 @@ quietly accept everything.
 
 When sweeping for this, the question is not "which tests use raw objects" but
 "which gated params have a transcribed form that differs". A param the gate never
-reads cannot diverge: the scatter rows carry `mode` as their only `EnumParam` and
-**deliberately do not constrain it** (all `GatherScatterMode`s agree on
-definitely-in-range indices, which the transfer already requires), so their
-raw-object tests are sound.
+reads cannot diverge — but the scatter rows are no longer an instance of that.
+`mode` is still their only `EnumParam`, and it **is** constrained: the emission
+declines any mode whose string does not contain `FILL_OR_DROP`, because *"CLIP
+rewrites an out-of-range index to an in-range one and PROMISE_IN_BOUNDS is
+undefined out of range, so neither is substitution at the written index — the
+mode is never guessed"*. Driven through the public face, all three modes
+transcribe to an `EnumParam` and `mode` is the only one on the equation.
+
+**The licence still holds, and it holds by accident, which is the reason to
+say so.** `str()` of the raw `GatherScatterMode.FILL_OR_DROP` and of the
+transcribed `EnumParam(cls='GatherScatterMode', member='FILL_OR_DROP')` both
+contain the substring the gate looks for, so a raw-object test and a
+transcribed one agree — on a substring match, not on the reason this sentence
+used to give. A transcribed-form test is what this section demands everywhere
+else, and it is what should hold this row.
+
+*When it went stale: the sentence landed at `78d45a3`, the `FILL_OR_DROP` gate
+at `ce41af3`, 22 commits later. It is a licence granted on a premise that
+stopped being true.*
 
 ## Claim divergence: the code is narrower or wider than what it says
 
@@ -693,17 +806,28 @@ proposal document is part of the change.
 **AND THE CLASS IS NOT ENDEMIC — measured, because two wins in a row made it
 look that way.** Both claim-lens wins came from reading a comment that already
 stated the invariant the code violated, so the codebase was swept for the shape
-deliberately: 21 source files, 488 candidate invariant-assertions
+deliberately, **at `2b16ede`**: 21 source files, 488 candidate
+invariant-assertions
 (`guarantee`/`cannot`/`never`/`impossible`/`unreachable`/`by construction`/
 `always`/`ensures`), of which 26 sit in the sharpest shapes. **Every one
-examined — all 17 `guarantee` claims plus the 9 sharpest others — is the good
-form**, and three are exemplary: `affine.py`'s *"unreachable: literal/const
+examined at that commit — all 17 `guarantee` claims plus the 9 sharpest
+others — was the good form**, and three are exemplary: `affine.py`'s *"unreachable: literal/const
 operands decode to err-0 point forms"* **raises anyway**; `obligation.py`'s
 *"Unreachable today (the emission declines such a slice before replay sees it),
 which is precisely why it could sit here unnoticed"* **raises anyway** and names
 the unreachability as the reason the bug survived; `solvers.py`'s *"Callers
 guarantee at least one declared input element was actually supplied"* has its
-enforcement one screen above the call. Zero findings.
+enforcement one screen above the call. Zero findings **over what was
+examined**.
+
+*The sha is load-bearing and was not there. `src/` was 21 files and carried 17
+`guarantee` lines at `2b16ede`, both of which re-derive exactly; at `4e17d98`
+it is 33 files and 29, so the "zero findings" above rests on well under two
+thirds of the `guarantee` claims that now exist and the rest were never in the
+swept set. (The `488` does not re-derive by any of three natural counting
+methods, so the method is not recorded either; the two figures that DO
+re-derive confirm the right population was counted.) The three exemplars were
+re-driven at `4e17d98` and all three hold.*
 
 **So the risk is a function of code AGE AND CHURN, not of the codebase.** Both
 wins were in the newest module's newest function, written across two
@@ -925,7 +1049,8 @@ claim** — it is the first thing to survive a context compaction and the first
 thing to be misread once it has.
 
 **The instance**, measured by a two-pass check across a compaction boundary.
-Norm J's entry read *"a blind cross-check moved node coverage 87.5% → 62.5%"*
+A norm's own entry, in the July file this one grew out of, read *"a blind
+cross-check moved node coverage 87.5% → 62.5%"*
 and never said the denominator was **MADDENING numeric NODES**. Asked
 afterwards what the figure measured, the answer came back "the fraction of
 jaxpr equations with a known interval box" — a plausible reading, a different
@@ -944,12 +1069,27 @@ the measurement does not have.
 is a stronger data point about its difficulty than the instances that earned
 it. The session that added this section reported a corpus survey as
 *"105 float64 declarations, 9 float32"*. Both numbers are real and they come
-from **different populations**: over ALL `any_array` sites the split is
-float64 105 / float32 9 (total 114); over **fully-literal** sites — the ones
-the check could actually be run over — it is float64 **99** / float32 **6**
-(total **105**). The weld survived review because *all-sites-float64* and
-*literal-total* are both 105, so the sentence was internally consistent and
-externally false. A blinded audit found it by re-deriving.
+from **different populations**: over ALL `any_array` sites and over
+**fully-literal** sites — the ones the check could actually be run over. The
+weld survived review because *all-sites-float64* and *literal-total* were the
+same number, so the sentence was internally consistent and externally false. A
+blinded audit found it by re-deriving.
+
+**The figures themselves are not restated here, and that is this norm applied
+to itself.** They named no population beyond "a corpus survey" and carried no
+sha, which is exactly what the paragraph below demands — and none of the three
+candidate populations re-derives them: `corpus/**/*.py` today gives
+170/5/188 over all sites and 76/4/87 over fully-literal ones, the same at the
+authoring commit `ee3c159`, and the whole tree gives 949/38/1123 and
+644/19/724. **The in-tree instrument is the answer**, because its population
+is in the tree and can therefore be gated rather than stamped:
+
+```
+$ JAX_PLATFORMS=cpu python corpus/declaration_emptiness_sweep.py --fuzz 83514 --seed 20260803
+== 4. CORPUS — 104 literal declaration bound PAIRS (208 endpoint values); 38 non-literal expressions skipped
+```
+
+Read it and quote what it prints.
 
 **The lesson the original instances did not carry:** two counts from adjacent
 populations will often be numerically compatible, and compatibility is not
@@ -1011,7 +1151,7 @@ shipped as one change, and the declaration check has been audited twice:
 |---|---|---|
 | the `square` row | gauge, 9,040 element-checks, clean | a **false box** on complex operands, recorded as KNOWN coverage |
 | the `sign`/`rem` rows | gauge, 1,258 element-checks, clean | the **float32 root defect** — a discharged obligation at 4/4 known coverage that execution refutes |
-| the declaration check | 49 tests green, 105 corpus declarations clean | a **VERIFIED over an empty set**, one dtype-width from the headline example |
+| the declaration check | 49 tests green, the corpus declarations clean | a **VERIFIED over an empty set**, one dtype-width from the headline example |
 | **the FIXES for that audit** | 64 tests green, corpus clean | a **crash regression the fix itself introduced**, a **false rejection**, and a message naming values that do not exist |
 | **one helper, scoped** | 79 tests green, 0 violations in the author's own sweeps | an **`OverflowError` escaping a `ValueError`-only layer**, a guard **bypassed by one numpy type**, and two helpers returning the wrong answer at infinity and at NaN |
 
@@ -1072,7 +1212,8 @@ through `_neighbours`. Saying "one small helper" made the sequence sound tighter
 than it is. And the ratio that used to sit in this sentence was re-derived as
 351 of 433 rather than 77 of 113 — over a grid that was itself not retained;
 a scripted census (stelling-sweeps/verify_9b555_replacements.py) confirms the
-majority at 69 of 94 — so the figure is gone; see the count-error norm below.
+majority at 69 of 94 — so the figure is gone; see *A figure in a norm states
+the UNIT it counts*, above.
 
 **And the fixes were audited only by accident of timing — that accident is what
 this gate exists to replace.** The file changed under one auditor mid-run, so it

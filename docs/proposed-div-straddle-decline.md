@@ -3,9 +3,23 @@ SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Real-mode `div` should DECLINE on a straddling divisor — PROPOSED, NOT APPLIED
+# Real-mode `div` should DECLINE on a straddling divisor — **APPLIED** (`32c6c56`)
 
-Published surface, so this is the argument.
+**Status: APPLIED and shipped in `32c6c56`** ("Div-straddle decline: raise
+IntervalError when float divisor straddles zero"), pinned by
+`tests/test_div_straddle_decline.py` — three faces, hand-built IR, no jax
+needed. The live decline is quoted at the end of this page, and the block that
+prints it runs under `tests/test_doc_examples.py`.
+
+This page kept a `PROPOSED, NOT APPLIED` header through the change that
+applied it, which is the defect `proposed-declaration-dtype-check.md` records
+and names: a claim divergence on a DOCUMENT. Corrected here rather than
+quietly retitled, because the divergence is the point.
+
+Published surface, so this is the argument. **Every measurement below is the
+state BEFORE `32c6c56`** — they are what the proposal was arguing from, and
+they are kept as measured rather than restated, because a proposal with its
+evidence rewritten is not a record of anything.
 
 ## The finding: proposal #1's "worst message" has a cause, and it is a missing decline
 
@@ -17,12 +31,18 @@ is where I'd have quit"*:
 assert #0: unknown — undecided for 2/2 element(s)
 ```
 
-Measured, real mode, a divisor declared over `(-1.0, 1.0)`:
+Measured **before `32c6c56`**, real mode, a divisor declared over
+`(-1.0, 1.0)`:
 
 ```
 obligation : unknown          coverage : known=5/5 unknown=0
 notes      : (NONE)           detail   : 'undecided for 1/1 element(s)'
 ```
+
+> *Every column of that reading has since moved, and the block at the end of
+> this page prints the current one on every test run. It is kept as measured
+> because it is what the argument below is about: coverage read `known=5/5`
+> and there were no notes.*
 
 **That is the same message, and here is its cause.** `iv.div` returns
 `[-inf, +inf]` for a zero-straddling divisor. That is a sound box, and it is not
@@ -89,7 +109,8 @@ so the verdicts were already `unknown`. **What changes is the bookkeeping** — 
 coverage number stops reporting 100% known for a query that knows nothing, and
 the cause becomes attributable.
 
-Per Norm I the stub is *more restrictive* than the change would be, so a zero
+Per *An over-permissive stub's ZERO is conclusive; its NONZERO is not*
+(`docs/norms.md`) the stub is *more restrictive* than the change would be, so a zero
 here is the conclusive direction: a real implementation can only break less.
 
 ## What this does NOT claim
@@ -112,8 +133,62 @@ here is the conclusive direction: a real implementation can only break less.
   strict reachability. Three instruments, three partitions — the partition is
   operationalization-dependent, so none is quoted as THE count. The earlier
   "33 both" conflated two buckets of one partition. All of these are the
-  count-error class recorded in CONTRIBUTING.md, made inside documents about
+  count-error class recorded at `docs/norms.md`'s *A figure in a norm states
+  the UNIT it counts* (CONTRIBUTING.md links that norm; it does not record
+  it), made inside documents about
   message quality.*
 - **It has not been measured on external code.** Both external agents reached
   escalation; whether a first-time user on the default path hits this is
   unmeasured, and re-running them against the fixed tool is the measurement.
+
+## What shipped, and this block prints it
+
+`32c6c56` gave real-mode `div` the decline this page proposes. The block below
+runs under `tests/test_doc_examples.py` and its output fence is compared byte
+for byte, so the three properties the argument is about — **names the
+primitive, gives the reason, prints the box** — are re-derived on every run
+rather than quoted:
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp
+from stelling.harness import any_array, assert_
+from stelling.preconditions import check
+
+
+def straddling_divisor():
+    numerator = any_array((), jnp.float64, (1.0, 2.0))
+    divisor = any_array((), jnp.float64, (-1.0, 1.0))
+    return assert_(numerator / divisor <= 1e9)
+
+
+verdict = check(straddling_divisor, vacuity_mode="inputs-only")
+decline = next(n for n in verdict.notes if "straddles zero" in n)
+
+print("status  :", verdict.status)
+print("coverage:", verdict.stamp.coverage)
+# the three properties the 9/10 message has
+print("primitive:", "'div'" in decline)
+print("reason   :", decline.split("straddles zero")[0].split("div: ")[1]
+      + "straddles zero")
+print("box      :", "spanning [-1.0, 1.0]" in decline)
+```
+
+```
+status  : UNKNOWN
+coverage: 5 eqns: 4 known (80%); 1 ⊤ across 1 primitives (div ×1)
+primitive: True
+reason   : the divisor interval [-1.0, 1.0] straddles zero
+box      : True
+```
+
+Read that against the pre-change fence near the top of this page. The
+obligation is still `unknown` — this proposal never claimed to move a verdict
+— but **coverage has stopped reading 100% known for a query that knows
+nothing**, and the cause is attributable, which is the whole of what was
+argued for. The full note also names the source line of each operand and says
+which of them is the declared input; that half carries a file path, so it is
+not byte-compared here, and `tests/test_div_straddle_decline.py` is what holds
+it down.

@@ -189,7 +189,7 @@ def test_the_bar_withholds_a_solver_path_verified_on_a_scatter_slice():
 
 
 def test_the_scatter_really_is_on_the_decided_slice():
-    """ANTI-VACUITY for the test above (Norm C). If the fixture's scatter
+    """ANTI-VACUITY for the test above (docs/norms.md, "A measurement whose result is an ABSENCE needs a positive control"). If the fixture's scatter
     drifted OFF the escalated obligation's slice, the test above would stop
     measuring the bar's scope while still looking green under a fallback.
     Assert the slice itself."""

@@ -303,20 +303,26 @@ because of it.
 
 ### **STUB-DIRECTION AUDIT: two zeros questioned — one restored, one re-run and held**
 
-Norm I says an over-permissive stub's zero is conclusive — a stub granting MORE
+*An over-permissive stub's ZERO is conclusive; its NONZERO is not*
+(`docs/norms.md`) says a stub granting MORE
 than a real implementation upper-bounds the benefit, so a zero means a real fix
 can only do worse. **That argument requires the stub to be over-permissive, and
 two of these were not.**
 
 **THE UNIT OF THE MORE/LESS COLUMN — half quoted, half supplied here, and the
 halves are marked because an earlier version of this paragraph claimed the norm
-was silent when it is not.** `CONTRIBUTING.md`'s *"An over-permissive stub's
+was silent when it is not.** `docs/norms.md`'s *"An over-permissive stub's
 ZERO is conclusive; its NONZERO is not"* **does define the direction**, in the
 sentence that opens it: *"A stub that grants **more** than a real implementation
 could deliver **upper-bounds** the benefit."* It also carries the rule *"state
 what the stub grants, before reporting what it produced"*. So MORE/LESS below —
 *what the stub grants the analysis relative to a faithful implementation* — is
-that norm's, restated, not this page's invention. **What the norm does not say
+that norm's, restated, not this page's invention. (Both quoted sentences are
+in `docs/norms.md`; `CONTRIBUTING.md` carries only the norm's TITLE, as one of
+its 26 index links. This paragraph attributed them to `CONTRIBUTING.md`, where
+a reader following the citation finds neither — which is exactly the doubt the
+paragraph was written to remove. `d7bd6ae` moved the reasoning and left the
+citation pointing at the old home.) **What the norm does not say
 is for which OUTCOME the grant is judged, and that is the part supplied here:**
 judged **for a DEFINITE verdict** — VERIFIED or REFUTED rather than a DECLINE,
 which is what every contract in this corpus seeks. Sought differently, a cell
@@ -444,10 +450,32 @@ guard frontier, measured by peeling every gap and the budget:
 
 **And that blindness is not an internal curiosity.** Measured on `jax_md`'s
 `space.distance`, `coverage.measure` reports **total=14, known=11,
-transparent=3, unknown=0** — a census reading 100% known — while the interval
-face returns **⊤** for the same jaxpr. The census counts membership; the
-decline is a registered primitive refusing on a condition. **This is the
-mechanism by which an external idiom looks fully covered and is not.**
+transparent=3, unknown=0** — a census reading 100% known. The census counts
+membership; a decline is a registered primitive refusing on a condition, and
+nothing on the coverage line moves when one fires. **That is the mechanism by
+which an external idiom can look fully covered and not be.**
+
+> **THE SPECIMEN NO LONGER EXHIBITS IT, and the mechanism is unaffected.**
+> This paragraph said the interval face "returns **⊤** for the same jaxpr". It
+> does not any more. Re-driven at `4e17d98`, jax 0.11.0, jax-md 0.2.29, x64
+> on: **all six census figures on this page survive exactly**, and the
+> interval face returns
+> `IntervalArray(shape=(), los=(0.0,), his=(1.7320508075688774,))` — which is
+> `sqrt(3)`, the exact diameter of the unit cube, and the tight answer.
+>
+> What closed it is `cbb1d60`'s `int64→float64` point rule: the ⊤ came from
+> `safe_mask`'s Python-int placeholder promoting through a declining
+> `convert_element_type`, and that convert no longer declines on a point
+> operand. See [proposed-int-literal-convert.md](proposed-int-literal-convert.md),
+> whose final block prints the four interval reads under
+> `tests/test_doc_examples.py` on every run.
+>
+> **The mechanism claim is still true and now has no specimen on this page.**
+> A decline still leaves the census reading 100% known — that is what
+> `coverage-not-established` exists for, and
+> `tests/test_top_despite_coverage.py` holds it down in tree. If the claim is
+> wanted about an EXTERNAL idiom specifically, it needs a new specimen and a
+> new measurement, and this page cannot gate either.
 
 **THE CONSTRUCTION, because these four figures are construction-dependent and
 without it they read as wrong.** The jaxpr is the **stelling harness**
@@ -526,6 +554,21 @@ Measured, same box, same shape of `_where` jaxpr:
 ```
 jnp.where(x > 1.0, x, 0)      ->  TOP        jnp.where(x > 1.0, x, 0.0)  ->  [0, 12]
 ```
+
+> **As at `0c4cead`, and closed since by `cbb1d60`.** Re-driven at `4e17d98`,
+> both spellings give `IntervalArray(shape=(1,), los=(0.0,), his=(12.0,))` —
+> neither is ⊤, and the one character no longer makes a difference. The fence
+> is kept as measured because it is what the site-2 argument was built on.
+>
+> **What that costs the sentence below.** "every one of the 41 **stops at the
+> convert first**" names a mechanism that no longer fires on this page's own
+> isolated reduction. Whether the 41 real `safe_mask` sites now clear is
+> **unmeasured** — it needs the `jax_md` sweep this page says is not
+> re-derivable here. The 21-of-41 arithmetic is unaffected (the six-row table
+> sums 18+3+14+3+2+1 = 41, in-scope 18+3 = 21); only the mechanism claim is.
+> The live reading is printed on every run by
+> [proposed-int-literal-convert.md](proposed-int-literal-convert.md)'s final
+> block.
 
 MADDENING's Aitken survives the identical `_where` structure only because its
 placeholder is already `float64`, so its convert is `float64 -> float64` and

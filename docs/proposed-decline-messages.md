@@ -3,7 +3,57 @@ SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Proposed decline messages — PROPOSED, NOT APPLIED
+# Proposed decline messages — **APPLIED** (all five sections)
+
+**Status: APPLIED.** All five numbered sections below shipped, and each carries
+an **Applied** line naming the test that pins it —
+`tests/test_div_straddle_decline.py` (§1 and §2),
+`tests/test_unsupported_emission_message.py` (§3),
+`tests/test_budget_message.py` (§4) and
+`tests/test_constrained_refusal_message.py` (§5).
+
+**What holds that down is narrower than the paragraph above, so it is written
+out rather than left to be assumed.**
+`tests/test_proposed_page_headers.py::test_every_test_file_a_proposed_page_names_exists`
+requires every `tests/…py` this page names to be in the tree, so a pin that is
+deleted reddens; and
+`tests/test_proposed_page_headers.py::test_a_page_that_says_it_shipped_names_a_test_that_pins_it`
+requires this status block to name at least one. **Nothing checks more than
+that.** No test reads the numbered sections, so a section CAN lose its
+**Applied** line with nothing going red — measured, §4's block deleted, whole
+zero-dep suite `2180 passed, 164 skipped`. And nothing checks that a named
+test names this page back: that gate's own docstring records reciprocity as
+considered and NOT built, with the measurement showing it would not have
+caught the case it was considered for.
+
+*This header used to claim otherwise, and it claimed it by citing a test that
+does not exist.* It named a test called
+`test_this_page_s_numbered_sections_each_name_a_live_pinning_test`, said to
+live in `tests/test_doc_examples.py`, and said that test *"requires every one
+of those tests to exist and to name this page back — so a section cannot lose
+its pin without going red"*. **No such test has ever existed** — not in that
+file, not anywhere in the tree, on this branch or on `main` — and neither of
+the two things it was said to do is done by anything. The citation survived
+because the gate that reads this page extracts the `tests/…py` FILE from a
+citation and never the test id, and that file is real. A citation to a test
+that does not exist is a header outrunning the code one level down, on the
+page whose header was corrected for exactly that.
+
+The dead name is deliberately NOT rejoined to its file with `::` above: the
+citation checker reads that spelling as a live pointer, and a pointer to
+nothing should not be written in the syntax for one. It is kept, unjoined,
+because deleting it would leave the correction with nothing to correct.
+
+This page kept a `PROPOSED, NOT APPLIED` header through the changes that
+applied it, which is the defect `proposed-declaration-dtype-check.md` records
+and names: a claim divergence on a DOCUMENT. Corrected here rather than
+quietly retitled, because the divergence is the point.
+
+**Every "Today" block below is kept as it was measured**, and every "Proposed"
+block as it was drafted. They are the argument — a message-design proposal
+with its before/after pairs rewritten to the shipped text records nothing —
+and where the shipped text departs from the draft, the section says so rather
+than editing the draft to match.
 
 Evidence: two independently-blinded agents wrote contracts against `jax_md` and
 `jaxfluids`, neither told anything about this project's conclusions. **They named
@@ -60,6 +110,18 @@ assert #0: unknown — undecided for 2/2 element(s).
 already knows. One agent: *"printing the final interval would have taken me from
 40 minutes to 40 seconds."*
 
+> **Applied.** The undecided line now carries the operand's span, the asserted
+> bound, and — the §2 rule below — where the box came from. Pinned by
+> `tests/test_div_straddle_decline.py`. Measured, on a divisor declared over
+> `(-1.0, 1.0)`:
+>
+> ```
+> assert #0: unknown — undecided for 1/1 element(s); the operand spans [-inf, inf]
+> and the asserted bound is operand <= 1000000000.0 — lhs is stelling's own ⊤ from
+> 'div' at <path>:10 (h) (its interval transfer declined this form), not a
+> declaration-derived range
+> ```
+
 ---
 
 ## 2. The most misleading message — `sqrt` blaming the user
@@ -95,6 +157,12 @@ equation produced it, and whether it originated in the user's declaration or in
 upstream propagation. **Cut the design-posture prose**; it is the ratio both
 agents objected to.
 
+> **Applied.** The rule shipped and is what the §1 line above quotes: the
+> decline distinguishes *"stelling's own ⊤ from 'div' … (its interval transfer
+> declined this form)"* from *"the declared input itself (declared at …),
+> spanning [1.0, 2.0]"*, and names the equation and source line for each.
+> Pinned by `tests/test_div_straddle_decline.py`.
+
 ---
 
 ## 3. The unsupported-primitive message
@@ -129,6 +197,13 @@ that the proposed text's parenthesis, *"it also has no interval transfer"*, was
 never true of `square`: it had a `sound` interval row the whole time, which is
 exactly the contradiction the evaluator could not reconcile.
 
+> **Applied.** Pinned by `tests/test_unsupported_emission_message.py`, whose
+> own docstring opens by naming this section and which asserts the shipped
+> phrase *"an unbuilt row, not a policy refusal of the form"*. That test
+> derives the interval-row fact and its tier from the LIVE registry rather
+> than restating it, so the parenthesis that was never true of `square`
+> cannot be reintroduced for another primitive.
+
 ---
 
 ## 4. The element-budget message
@@ -153,6 +228,10 @@ raising the budget — a tighter interval transfer, a smaller declared array, or
 a per-element rather than whole-array property.
 ```
 
+> **Applied verbatim**, opening clause included. `tests/test_budget_message.py`
+> asserts `"obligation not attempted:" in reason`, and the composed sentence is
+> at `src/stelling/obligation.py`'s `obligation not attempted: it needs …`.
+
 ---
 
 ## 5. The relational-`assume` refusal
@@ -174,3 +253,19 @@ unconditional result, removing the precondition restores it.
 ```
 That last line matters: **a user who adds a hypothesis and loses the solver
 should be told the trade explicitly.**
+
+> **Applied, with one clause of the draft DROPPED — and the drop is the useful
+> part.** `tests/test_constrained_refusal_message.py` pins each shipped
+> sentence against the mechanism it describes, and asserts
+> `"removing the assume removes it" in CONSTRAINED_ASSUME_REFUSAL`: the trade
+> is stated.
+>
+> The draft's *"WHAT WORKS TODAY: a precondition that bounds a SINGLE declared
+> input … does not disable escalation"* was **false in this tree** — a
+> constraining assume is exactly what fires this refusal, whether it bounds one
+> input or relates two — and it is not in the shipped text. The same test
+> asserts `"does not disable escalation" not in CONSTRAINED_ASSUME_REFUSAL`, so
+> the false clause cannot come back. What shipped in its place is the form that
+> does work: state the bound in the declaration's own envelope, which narrows
+> the identical box without a constraining assume. The draft above is left as
+> drafted; this note is the delta.

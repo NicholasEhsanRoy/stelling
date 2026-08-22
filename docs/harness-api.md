@@ -52,14 +52,20 @@ run: pip install "stelling[jax]"`. `stelling.preconditions` does not need
 JAX to import (its harness imports happen inside the functions), but
 calling `check` in a JAX-less environment raises the same error.
 
-Every code block on this page was executed verbatim against this tree
-(stelling 0.2.0.dev0, jax 0.11.0, CPU, `jax_enable_x64=True`) and the outputs
-are what it printed.
+Every ```` ```python ```` block on this page is executed verbatim by
+`tests/test_doc_examples.py` and the fence under it is compared byte for byte
+against what it printed (stelling 0.2.0.dev0, jax 0.11.0, CPU,
+`jax_enable_x64=True`). That is a gate on every run, not a hand-check.
+
+*It was a hand-check, and it was already false when it said so: the
+assume-carrier example was marked `illustrative` — never run — and could not
+have been run verbatim, because it uses `lax` and nothing on this page imports
+it. It is now executed, and the sentence above is true of it.*
 
 | primitive | states | returns |
 |---|---|---|
 | `any_array(shape, dtype, (lo, hi))` | an arbitrary input array, every element in `[lo, hi]` | the traced array |
-| `any_pytree(prototype, (lo, hi))` | one `any_array` per array leaf of a prototype pytree | a pytree of the same shape |
+| `any_pytree(tree, (lo, hi))` | one `any_array` per array leaf of a prototype pytree | a pytree of the same shape |
 | `assert_(pred)` | an **obligation** — must hold for every admitted input | `pred` |
 | `assume(pred)` | an **assumption** — narrows the box where it can, is disclosed where it cannot | `pred` |
 | `nonvacuity(pred)` | a **membership condition** — "the data I run on is in the declared box" | `pred` |
@@ -268,7 +274,7 @@ over-approximation still contains every executed value.
 degenerate range, and it interacts with `vacuity_mode`; see
 [Reading a verdict](reading-a-verdict.md#the-two-vacuity-instruments).
 
-## `any_pytree(prototype, bounds)`
+## `any_pytree(tree, bounds)`
 
 Tracing-time sugar: one `any_array` per array leaf of a prototype pytree,
 each over the same bounds.
@@ -413,9 +419,15 @@ definite violation is withheld to UNKNOWN rather than reported as a
 counterexample.
 
 **That withholding costs real refutations, and the UNKNOWN cannot tell you
-which.** On a 240-harness loop-carrier corpus, 40 % of the withheld
-violations were genuine: the witness lay in the declared box, satisfied every
-assume, and falsified the assert. The withholding is still the right answer —
+which.** On a 240-harness loop-carrier corpus, **200 rows moved from REFUTED
+to UNKNOWN, and 40 % of THOSE — 80 rows — were genuine**: the witness lay in
+the declared box, satisfied every assume, and falsified the assert. (The
+denominator is the 200 moved rows, not the 240 harnesses. Recorded in
+[SOUNDNESS.md](../SOUNDNESS.md) as *"A CORRECT REFUTATION WITH A CORRECT
+WITNESS, WITHHELD 80 = 40 %"*, produced by
+`scratchpad/s13/sweep_loop_assume_wide.py` with results in
+`scratchpad/s13/RESULTS_loop_wide.txt`. Both are in the git checkout; neither
+is in the sdist.) The withholding is still the right answer —
 nothing in the run honoured your precondition, so nothing could tell that
 witness from one your precondition excludes — but an UNKNOWN here means
 *undecided*, not *your program is fine*. Lift the `assume` to the top level
@@ -431,8 +443,17 @@ about a **carry that changes from iteration to iteration**, and this release
 does not model one. If the precondition is really about the declared inputs,
 it belongs above the loop:
 
-<!-- doc-example: illustrative -->
 ```python
+import jax
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp
+from jax import lax
+
+from stelling.harness import any_array, assert_, assume
+from stelling.preconditions import check
+
+
 def not_honoured():
     x = any_array((), "float64", (-10.0, 10.0))
     y = any_array((), "float64", (-10.0, 10.0))
@@ -442,7 +463,7 @@ def not_honoured():
         return c, 0.0
 
     lax.scan(body, x, jnp.zeros((2,)))
-    return assert_(x - y <= 0.0)    # UNKNOWN — the violation is withheld
+    return assert_(x - y <= 0.0)
 
 
 def honoured():
@@ -450,15 +471,63 @@ def honoured():
     y = any_array((), "float64", (-10.0, 10.0))
     assume(x <= y)                  # relational: narrows nothing, but is
                                     # forwarded to the solver as an axiom
-    return assert_(x - y <= 0.0)    # VERIFIED
+    return assert_(x - y <= 0.0)
+
+
+def no_assume():
+    x = any_array((), "float64", (-10.0, 10.0))
+    y = any_array((), "float64", (-10.0, 10.0))
+    return assert_(x - y <= 0.0)
+
+
+for name, harness in [("not_honoured", not_honoured),
+                      ("honoured    ", honoured),
+                      ("no_assume   ", no_assume)]:
+    plain = check(harness, vacuity_mode="inputs-only")
+    solved = check(harness, vacuity_mode="inputs-only",
+                   solver_timeout_ms=10_000)
+    print(f"{name}  no solver: {plain.status:9} with solver: {solved.status}")
 ```
+
+```
+not_honoured  no solver: UNKNOWN   with solver: UNKNOWN
+honoured      no solver: UNKNOWN   with solver: VERIFIED
+no_assume     no solver: UNKNOWN   with solver: REFUTED
+```
+
+**Read the columns, not the rows.** Without a solver all three are UNKNOWN,
+and for a reason that has nothing to do with `assume`: `x - y` spans
+`[-20, 20]`, which straddles `0`, so interval arithmetic decides none of them.
+A relational `assume` narrows no box; it is an axiom the solver is given, so
+it can only change an answer a solver produces.
+
+**With a solver, the third row is what makes the first one evidence.**
+`no_assume` is REFUTED — there really is a violating point in the declared
+box. `honoured` is VERIFIED, because the forwarded axiom rules that point
+out. `not_honoured` states the same true hypothesis and gets UNKNOWN: the
+assume sits inside `scan`, is never classified, and is not forwarded — so the
+correct refutation is WITHHELD rather than the true property being proved.
+That is the withholding this section is about, and it is only visible against
+the third row.
+
+*This block was `illustrative` — never run — and carried
+`# VERIFIED` on `honoured` beside a section that tells you to omit
+`solver_timeout_ms`. Verbatim under the documented call it is UNKNOWN, and
+the block could not be executed at all: `lax` is imported nowhere on this
+page. Both are fixed by running it.*
 
 ## Membership conditions (`nonvacuity`)
 
 `nonvacuity(pred)` states that the data you actually run on lies in the
 box you declared — computed in traced code, through the same transforms
-the box is stated in. It moves the stamp's `nonvacuity` field, and
-nothing else: the verdict's status is unaffected.
+the box is stated in. It moves the stamp's `nonvacuity` field **and the notes
+that hang off it**; the verdict's **status** is unaffected.
+
+The status half is the load-bearing one and is exact: no `nonvacuity` has ever
+turned a VERIFIED into anything else. But "nothing else" was too strong, and
+this page's own fences show it — adding a `nonvacuity` moves the coverage line
+(the predicate is traced, so its equations are counted), and a VACUOUS one adds
+a `may be vacuous` note to the verdict.
 
 The field takes six values, and each corresponds to what the membership
 conditions did:
@@ -693,7 +762,14 @@ primitive is, at any size, on any spelling.
 
 ## `jnp.where` and selector decidability
 
-`jnp.where(cond, a, b)` traces to a `select_n` primitive. When the
+`jnp.where(cond, a, b)` traces to a `select_n` primitive — **inside the
+transparent `jit` wrapper jax emits for it**, not at top level. That matters
+for the inspection idiom this page teaches below: on jax 0.11.0
+`[e.primitive for e in closed.jaxpr.eqns]` over such a query reads
+`['stelling_any', 'gt', 'sub', 'jit', 'gt', 'stelling_assert']`, with no
+`select_n` in it, and the coverage line reports the wrapper as `1 transparent`.
+Everything in the rest of this section is about the `select_n` semantics and is
+correct as written. When the
 condition's interval is **provably one-sided** (`[True, True]` or
 `[False, False]` over the entire declared box), stelling uses only the
 reachable branch — the unreachable branch's interval is discarded, no
@@ -770,24 +846,65 @@ block is stable across the pair rather than lucky.
 
 ## Running a harness
 
-`stelling.preconditions.check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None, strict=False)`
-is the front door.
+`stelling.preconditions.check` is the front door. **Its signature is printed
+from the object rather than typed here**, because a typed one rotted: this page
+was written against the object at `343ebe6` (2026-08-03), and then four
+parameters landed under it — `solver` (`cbb1d60`, 08-12), `semantics`
+(`d6451cc`, 08-13), `libm_budget` (`c322cec`, 08-15) and `falsify`
+(`123ad75`, 08-19) — while this page went on using one of them,
+`semantics="ieee"`, further down. Nothing pinned the typed copy.
+
+```python
+import inspect
+
+from stelling.harness import any_array, any_pytree, assert_, assume, nonvacuity
+from stelling.preconditions import check
+
+for fn in (any_array, any_pytree, assert_, assume, nonvacuity):
+    print(f"{fn.__name__}{inspect.signature(fn)}")
+print()
+for name, param in inspect.signature(check).parameters.items():
+    default = "" if param.default is inspect.Parameter.empty else f" = {param.default!r}"
+    print(f"check.{name}{default}")
+```
+
+```
+any_array(shape, dtype, bounds)
+any_pytree(tree, bounds)
+assert_(pred)
+assume(pred)
+nonvacuity(pred)
+
+check.harness
+check.vacuity_mode
+check.semantics = 'real'
+check.solver_timeout_ms = None
+check.refine = None
+check.solver = None
+check.strict = False
+check.libm_budget = None
+check.falsify = None
+```
 
 | argument | |
 |---|---|
 | `vacuity_mode` | **required** — `"inputs-only"` or `"all"`; see [Reading a verdict](reading-a-verdict.md#choosing-vacuity_mode) |
-| `solver_timeout_ms` | no default; omit it and no solver runs |
+| `semantics` | `"real"` (default) judges in exact real arithmetic; `"ieee"` models the format's rounding and overflow — see [Checking preconditions](preconditions.md) |
+| `solver_timeout_ms` | `None` by default, which means **no solver runs**; set it in milliseconds to escalate |
 | `refine` | `None`, or `"affine"` for the zonotope refinement on interval-undecided obligations |
+| `solver` | `None` (the full portfolio), `"z3"` or `"cvc5"` to restrict it; anything else raises `ValueError` at the call. See [Choosing a solver backend](choosing-a-solver-backend.md) |
 | `strict` | `False` (default) returns `DECLINED` for a query that cannot be transcribed; `True` re-raises instead |
+| `libm_budget` | a declared accuracy profile for `exp`/`pow` under `semantics="ieee"`, which decline without one. Passing it under `"real"` raises — see [Checking preconditions](preconditions.md) |
+| `falsify` | the falsification pass; see [Reading a verdict](reading-a-verdict.md) |
 
 **`strict` decides whether an unreadable query is a status or an
 exception.** By default a query stelling cannot transcribe comes back as
 a `DECLINED` verdict, so a batch caller can record it and carry on to the
 next node; `strict=True` lets the `stelling.ir.TranscriptionError`
 propagate, which is what you want in a single-target script that should
-fail loudly. Transcription has several refusal paths (six `raise` sites
-across `stelling.ir` and the transcriber); a sharded program is the one I
-could reach from an ordinary harness, and it is what this measures:
+fail loudly. Transcription has several refusal paths across `stelling.ir` and
+the transcriber; a sharded program is the one I could reach from an ordinary
+harness, and it is what this measures:
 
 ```python
 import os

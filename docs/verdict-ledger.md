@@ -44,13 +44,15 @@ checklist that required an entry for it had nowhere to put one.
 
 | | |
 |---|---|
-| **what** | `HeatNode` discrete maximum principle at the refuting configuration — `α = 1.0`, `n_cells = 4`, `dt = 0.1`, `T ∈ [0, 100]^4` in float32, asserting the returned temperature `≤ 100.0`. Reproduce with `flagship_from_main.py` in the sweeps repository. |
+| **what** | `HeatNode` discrete maximum principle at the refuting configuration — `α = 1.0`, `n_cells = 4`, `dt = 0.1`, `T ∈ [0, 100]^4` in float32, asserting the returned temperature `≤ 100.0`. **Reproduce from what ships:** `pytest tests/test_reproduce_acceptance.py -k heat` (needs the `maddening` package and a solver extra) — `test_the_heatnode_verdict_is_the_ledgers_verdict` asserts this entry's REFUTED and its violating elements `(1, 2)`, `tests/reproduce_subjects.py` builds the node at these constants, and the exact witness string below is pinned in the same file. The campaign instrument `stelling-sweeps/flagship_from_main.py` produces the same reading and is a private, secondary pointer. |
 | **from → to** | `UNKNOWN` (emission gap: `scatter` outside the supported emission set) → **`REFUTED`**, with a witness confirmed by exact-rational replay |
 | **cause** | The static-index `scatter` / `scatter-add` emission rows were registered, so the obligation reaches the solver instead of declining. |
 | **commit** | `00333fe` |
 | **category** | **(a) benign re-baseline.** The old verdict was a decline, not a claim. Nothing that cited it is invalidated. |
 
-**The witness, because this entry is the one people will check:**
+**The witness, because this entry is the one people will check.** Laid out for
+reading, not pasted from a run — the numbers are exact and the *spacing* is
+not what any tool prints:
 
 ```
 x0_0 = 847249408/13421773   x0_1 = 0   x0_2 = 0   x0_3 = 847249408/13421773
@@ -59,6 +61,10 @@ node output = [63.125  101.0   101.0   63.125]
 max = 101.0  against the declared bound 100.0  ->  margin +1.0
 ```
 
+Every value in it is asserted by the shipped acceptance named above: the
+witness string `847249408/13421773`, `max(lhs) == 101.0`, `rhs == {100.0}`,
+and the violating elements `(1, 2)`.
+
 **What did NOT move, and it belongs in the same entry.** The "holds" side of the
 same sweep is still `UNKNOWN`. `scatter` remains in
 `VERIFIED_BARRED_PRIMITIVES`, so an obligation whose EMITTED SLICE carries it is
@@ -66,7 +72,10 @@ withheld from solver-path `VERIFIED` until the class-level audit completes. A
 reader who sees only the flip above would otherwise reasonably infer the whole
 table moved.
 
-Two things the bar's scope does **not** cover, both easy to over-read:
+Things the bar's scope does **not** cover, all easy to over-read — and the
+count is deliberately not written, because *"an enumeration of two that is at
+least five"* is a defect this repository has now recorded twice, once in this
+very file:
 
 - The membership is **exact-name**, so `scatter-add` — what `segment_sum` and
   `x.at[idx].add()` lower to — is **not** barred. `design/scatter-rows.md`
@@ -105,9 +114,23 @@ Two things the bar's scope does **not** cover, both easy to over-read:
   version of the bar looks at — and the identical false VERIFIED is reachable
   on a query with **no scatter anywhere**, on every build. So the finding is
   not a cost of scoping; it is that `make_solver_verdict` never bound its
-  three arguments to one query. It now binds two of them: `escalate` records
-  the query's content hash and assembly refuses an escalation produced on a
-  different one (`MispairedEscalationError`). `propagation` carries no such
-  hash and is not bound; what that leaves open is stated in
-  `make_solver_verdict`'s docstring and measured in the suite. `SOUNDNESS.md`
-  logs both.
+  three arguments to one query. **It now binds all three.** `escalate` records
+  the query's content hash and assembly raises `MispairedEscalationError` on an
+  escalation produced on a different one; `propagate` stamps its own
+  (`Propagation.query_sha256`), and a mispaired propagation returns
+  `unpaired_propagation_verdict`'s UNKNOWN rather than raising.
+
+  **The propagation half is not a symmetry; it is the half that was
+  load-bearing.** The escalation gate binds the leg SOLVER discharges travel
+  on, and it is exempted when the escalation carries no work — but an
+  obligation decided by intervals alone arrives already discharged and needs no
+  record at all, so binding the escalation alone left a **live false VERIFIED**
+  on `main` and on the released 0.1.0. `SOUNDNESS.md` logs it as audit 0.2.0 B6
+  re-audit UNSOUND-3; `make_solver_verdict`'s docstring states the same thing
+  at the site, and `tests/test_propagation_identity.py` measures it.
+
+  *This bullet said "It now binds two of them: … `propagation` carries no such
+  hash and is not bound" — the state before that repair — and pointed at a
+  docstring that by then said the opposite. A ledger exists so a moved
+  verdict's reason outlives the PR, and this is the paragraph a reader comes
+  to for exactly this question.*

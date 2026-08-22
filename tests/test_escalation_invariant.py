@@ -86,7 +86,7 @@ def test_verdict_does_not_move_when_escalation_decides_nothing(build, label):
 
 
 def test_the_invariant_is_actually_exercised():
-    """ANTI-VACUITY (Norm C). If no query in this module put a BARRED
+    """ANTI-VACUITY (docs/norms.md, "A measurement whose result is an ABSENCE needs a positive control"). If no query in this module put a BARRED
     primitive on an interval-decided slice, the test above would pass on any
     build — including one where the bar fires on everything.
 

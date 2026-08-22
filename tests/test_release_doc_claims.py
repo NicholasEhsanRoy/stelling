@@ -44,8 +44,11 @@ about.
 * the census population against clause 1's list of external terminals,
   under the identification clause 2 states — so dropping a member from
   ``recorded`` and editing the fence to match no longer passes;
-* every file the release page names is either in this tree or written
-  with the ``stelling-sweeps/`` prefix that says it is not;
+* every file **any page under ``docs/``** names is either in this tree,
+  or written with the ``stelling-sweeps/`` prefix that says it is not, or
+  listed in :data:`NOT_IN_THIS_TREE` as a decision — the scope was one
+  page, which is why four campaign scripts sat uncited in
+  ``gauge-coverage.md`` with this file green;
 * the quotations REGISTERED BELOW are verbatim in the file they are
   attributed to, and verbatim in the file that quotes them.
 
@@ -386,39 +389,105 @@ _LINK_REF = re.compile(r"\]\(([A-Za-z0-9_][A-Za-z0-9_./-]*\.md)\)")
 EXTERNAL_PREFIX = "stelling-sweeps/"
 
 
-def test_every_file_the_release_page_names_is_placed():
+# Directories a bare basename may legitimately be short for. A page writing
+# `obligation.py` means `src/stelling/obligation.py`, and demanding the full
+# path everywhere would make the docs worse to satisfy a scanner.
+_SHORTHAND_ROOTS = (
+    "", "src/", "src/stelling/", "src/stelling/_tripwire/",
+    "tests/", "docs/", "design/", "corpus/", "tools/",
+)
+
+# References that resolve nowhere in this tree and are NOT campaign
+# instruments. Each is a decision, made here in the open, and each says which
+# of the two legitimate cases it is. A name that is neither is a defect: it
+# reads to a reader as a file they can open, and it is not one.
+NOT_IN_THIS_TREE = {
+    # (1) files the reader is instructed to CREATE. The page is telling them
+    # what to name it, so "not in this tree" is the point of the sentence.
+    "docs/quickstart.md": {
+        "quickstart.py", "statuses.py", "witness.py", "nonvacuity_demo.py",
+    },
+    "docs/overflow-tripwire.md": {
+        # (2) another package's source, cited as the site of a jax behaviour.
+        # It is in the installed jax, not here, and rewriting it with the
+        # campaign prefix would be a lie about where it lives.
+        "jax/_src/random/prng.py",
+    },
+}
+
+
+def test_every_file_the_docs_name_is_placed():
     """An instrument named without a location reads as in-tree.
 
-    Five were: three named as *"re-measured in this tree"* while living
-    in the campaign repo. The rule this page states — a population that
-    is not in the tree gets a sha, one that is gets a gate — cannot be
-    applied by a reader who cannot tell which case a name is. So a name
-    is either resolvable here or carries the prefix that says it is not.
+    Five were, on ``docs/state-0.1.0.md``: three named as *"re-measured in
+    this tree"* while living in the campaign repo. The rule that page states
+    — a population that is not in the tree gets a sha, one that is gets a
+    gate — cannot be applied by a reader who cannot tell which case a name
+    is. So a name is either resolvable here, or carries the prefix that says
+    it is not, or is listed above as a decision.
 
-    *Scope:* bare ``‘name.ext’`` references and markdown links, in
-    ``docs/state-0.1.0.md``. A reference written with a line number
-    (``gnn.py:312``) is outside it."""
-    text = STATE.read_text(encoding="utf-8")
-    refs = sorted(set(_FILE_REF.findall(text)) | set(_LINK_REF.findall(text)))
-    # both branches of the check must be reachable, or it cannot fail
-    assert any(r.startswith(EXTERNAL_PREFIX) for r in refs), (
+    **THE SCOPE WAS ONE PAGE, AND THAT IS WHY THIS KEPT HAPPENING.** With
+    ``docs/state-0.1.0.md`` gated and nothing else, ``gauge-coverage.md``
+    rested a whole table column on four campaign scripts a reader had no way
+    to learn were not here, ``proposed-unit-mechanism.md`` cited two more,
+    and ``docs/verdict-ledger.md``'s central entry pointed at a third — all
+    with this test green, because it was not looking. Widened to every page
+    under ``docs/``.
+
+    *Scope:* bare ``name.ext`` references in backticks, and markdown links.
+    A reference written with a line number (``gnn.py:312``) is outside it,
+    and so is a symbol reference with no extension (``frontier.warm()``) —
+    the second is a real hole and is stated here rather than implied."""
+    seen_external = False
+    seen_intree = False
+    unplaced: dict[str, list[str]] = {}
+    pages = sorted((REPO / "docs").glob("*.md"))
+    assert len(pages) >= 20, f"the docs glob found only {len(pages)} pages"
+    for page in pages:
+        text = page.read_text(encoding="utf-8")
+        refs = sorted(
+            set(_FILE_REF.findall(text)) | set(_LINK_REF.findall(text))
+        )
+        allowed = NOT_IN_THIS_TREE.get(f"docs/{page.name}", set())
+        for ref in refs:
+            if ref.startswith(EXTERNAL_PREFIX):
+                seen_external = True
+                continue
+            if ref in allowed:
+                continue
+            if (REPO / ref).exists() or (page.parent / ref).exists() or any(
+                (REPO / (root + ref)).exists() for root in _SHORTHAND_ROOTS
+            ):
+                seen_intree = True
+                continue
+            unplaced.setdefault(page.name, []).append(ref)
+    # both branches must be reachable, or the check cannot fail
+    assert seen_external, (
         "the scanner found no external reference at all; it has stopped "
         "reaching the case it exists for"
     )
-    assert any(not r.startswith(EXTERNAL_PREFIX) for r in refs), (
-        "the scanner found no in-tree reference at all"
-    )
-    unplaced = [
-        r for r in refs
-        if not r.startswith(EXTERNAL_PREFIX)
-        and not (REPO / r).exists()
-        and not (STATE.parent / r).exists()
-    ]
+    assert seen_intree, "the scanner found no in-tree reference at all"
     assert not unplaced, (
-        f"{STATE.name} names files that are not in this tree and are not "
-        f"marked as living elsewhere: {unplaced}\nEither commit them, or "
-        f"write them as {EXTERNAL_PREFIX}<name> with the sha they were read "
-        "at."
+        f"docs/ names files that are not in this tree and are not marked as "
+        f"living elsewhere: {unplaced}\nEither commit them, write them as "
+        f"{EXTERNAL_PREFIX}<name> with the sha they were read at, or add "
+        f"them to NOT_IN_THIS_TREE with which case they are."
+    )
+
+
+def test_the_placement_exemptions_are_all_still_needed():
+    """An exemption for a reference a page no longer makes is a licence
+    nobody is using, and it would silently cover the next one."""
+    stale: dict[str, list[str]] = {}
+    for page_path, refs in NOT_IN_THIS_TREE.items():
+        text = (REPO / page_path).read_text(encoding="utf-8")
+        found = set(_FILE_REF.findall(text)) | set(_LINK_REF.findall(text))
+        gone = sorted(r for r in refs if r not in found)
+        if gone:
+            stale[page_path] = gone
+    assert not stale, (
+        f"NOT_IN_THIS_TREE exempts references these pages no longer make: "
+        f"{stale}. Drop them."
     )
 
 
@@ -529,3 +598,159 @@ def test_registered_quotations_are_verbatim():
             "this registry pins for it — the registry is now describing a "
             "document that has moved on"
         )
+
+
+# ------------------------------------------------- the norm count, three files
+
+# The spelled forms this project uses. A count outside this range needs an
+# entry here, which is the point: adding one is a decision, and a number this
+# table cannot spell is a number nobody can check.
+_SPELLED = {
+    20: "twenty", 21: "twenty-one", 22: "twenty-two", 23: "twenty-three",
+    24: "twenty-four", 25: "twenty-five", 26: "twenty-six",
+    27: "twenty-seven", 28: "twenty-eight", 29: "twenty-nine", 30: "thirty",
+    31: "thirty-one", 32: "thirty-two", 33: "thirty-three",
+    34: "thirty-four", 35: "thirty-five",
+}
+_NORM_COUNT_CLAIM = re.compile(
+    r"\b(?P<word>[Tt]wenty(?:-\w+)?|[Tt]hirty(?:-\w+)?)\s+rules\b"
+)
+DOCS_README = REPO / "docs" / "README.md"
+
+
+def _norm_headings() -> list[str]:
+    """Every ``## `` heading in docs/norms.md. The file has no non-rule ones,
+    which the test below asserts rather than assumes."""
+    return [
+        ln[3:].strip()
+        for ln in NORMS.read_text(encoding="utf-8").split("\n")
+        if ln.startswith("## ")
+    ]
+
+
+def test_the_norm_count_is_the_same_number_in_all_three_files():
+    """A hand-maintained numeral beside data that derives it, in the page
+    that legislates against exactly that.
+
+    Measured when this test was written: ``docs/norms.md`` said
+    *"Twenty-six rules"* and held 26; ``docs/README.md``'s index row — the
+    first number a contributor reads — said *"twenty-three rules"*, three
+    behind, and had been since ``d7bd6ae``; ``CONTRIBUTING.md`` carried 26
+    links, one per norm, and claimed in as many words that its index exists
+    "so this file and that one cannot drift apart", with no test enforcing
+    it. Two of the three were right and nothing compared them.
+
+    So: the count is computed from the headings, and all three files are
+    held to it — the two spelled numerals, and the length of
+    ``CONTRIBUTING.md``'s index.
+    """
+    headings = _norm_headings()
+    n = len(headings)
+    assert n >= 20, f"only {n} `## ` headings in {NORMS.name}"
+    spelled = _SPELLED.get(n)
+    assert spelled is not None, (
+        f"{NORMS.name} holds {n} rules, which _SPELLED cannot spell. Add it."
+    )
+
+    for path in (NORMS, DOCS_README):
+        text = path.read_text(encoding="utf-8")
+        found = _NORM_COUNT_CLAIM.findall(text)
+        assert found, (
+            f"{path.name} no longer states a spelled rule count; it is the "
+            f"claim this test holds to {NORMS.name}'s headings"
+        )
+        wrong = [w for w in found if w.lower() != spelled]
+        assert not wrong, (
+            f"{path.name} says {wrong} rules where {NORMS.name} has {n} "
+            f"({spelled}). Do not retype it in a third place — this test is "
+            f"here so the digit is derived."
+        )
+
+    # CONTRIBUTING.md's index: one link per norm, and it says so itself
+    links = re.findall(
+        r"^- \[(.+?)\]\(docs/norms\.md#", CONTRIBUTING.read_text("utf-8"), re.M
+    )
+    assert len(links) == n, (
+        f"CONTRIBUTING.md indexes {len(links)} norms and {NORMS.name} has "
+        f"{n}. That file claims its index exists 'so this file and that one "
+        f"cannot drift apart'."
+    )
+    assert links == headings, (
+        "CONTRIBUTING.md's index titles are not docs/norms.md's headings, in "
+        f"order:\n  only in the index: {sorted(set(links) - set(headings))}\n"
+        f"  only in norms.md:  {sorted(set(headings) - set(links))}"
+    )
+
+
+_NORM_LETTER = re.compile(r"\bNorm [A-Z]\b")
+# `src/stelling/propagate.py` carries one more ("Norm G"). It was owned by a
+# sibling batch when this gate was written, which is why it went in as a
+# NAMED debt rather than a silent exemption. That batch has since landed
+# (B18, merged at `9cb2c0f`), so the reason for the exemption has expired and
+# the entry is now a one-line cleanup owed by whoever next opens that file:
+# replace it with "An instrument must declare its SCOPE, and an acceptance
+# criterion must check that the scope covers the claim". Left here rather
+# than taken, because this branch is a documentation batch and that file was
+# out of its scope; `test_the_norm_letter_debt_is_still_real` will fail the
+# day it is fixed, which is how the entry gets removed.
+_LETTER_DEBT = {"src/stelling/propagate.py"}
+# This file names the letters in order to forbid them, so it cannot scan
+# itself. Excluded by path rather than by a marker, because a marker in a
+# docstring is the shape this gate exists to refuse.
+_LETTER_SELF = "tests/test_release_doc_claims.py"
+
+
+def test_no_norm_is_cited_by_a_letter_it_does_not_have():
+    """``docs/norms.md`` carries no letters, and never did in this form.
+
+    Citations of *Norm C*, *D*, *E*, *G*, *I*, *J* stood in that file
+    itself, elsewhere in ``docs/``, and across ``tests/`` and ``src/``. The
+    scheme was positional in the July file this one grew out of; the
+    sections have since been reordered and grown from 13 to 26, so every
+    letter resolves to nothing and a reader following one lands nowhere.
+
+    **No count of them is written here**, and the reason is that this
+    docstring carried three that disagreed with each other and with the
+    tree: *"Five references — three in the file itself, six more in
+    ``tests/`` and ``src/``"*, where 3 + 6 is 9 and not 5, while the commit
+    that added this gate said eleven. The clause also missed the citations
+    in ``docs/`` outside ``norms.md`` entirely. The only number this file
+    states about them is the one it ASSERTS, below, and it is zero — the one
+    figure that cannot go stale while the assertion passes.
+
+    A title moves loudly — ``grep`` comes back empty — which is why the
+    convention everywhere else in this file is the title.
+    """
+    assert not _NORM_LETTER.search(NORMS.read_text(encoding="utf-8")), (
+        f"{NORMS.name} has no lettered sections, no legend and no numbering, "
+        f"so a 'Norm X' reference in it resolves to nothing. Use the norm's "
+        f"title, which is this file's own convention everywhere else."
+    )
+    offenders: dict[str, list[str]] = {}
+    for sub in ("docs", "tests", "src"):
+        for path in sorted((REPO / sub).rglob("*.py")) + sorted(
+            (REPO / sub).rglob("*.md")
+        ):
+            rel = str(path.relative_to(REPO))
+            if rel in _LETTER_DEBT or rel == _LETTER_SELF:
+                continue
+            hits = _NORM_LETTER.findall(path.read_text(encoding="utf-8"))
+            if hits:
+                offenders[rel] = sorted(set(hits))
+    assert not offenders, (
+        f"these cite a norm by a letter no norm has: {offenders}\nReplace "
+        f"each with the norm's title from docs/norms.md."
+    )
+
+
+def test_the_norm_letter_debt_is_still_real():
+    """An exemption for a file that no longer offends is a licence nobody is
+    using, and it would silently cover the next one."""
+    settled = [
+        rel for rel in sorted(_LETTER_DEBT)
+        if not _NORM_LETTER.search((REPO / rel).read_text(encoding="utf-8"))
+    ]
+    assert not settled, (
+        f"_LETTER_DEBT names files that no longer cite a norm by letter: "
+        f"{settled}. Drop them from the set."
+    )

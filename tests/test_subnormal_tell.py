@@ -536,7 +536,8 @@ def test_the_tell_is_the_only_thing_the_note_list_gained():
 
 
 def test_the_trigger_is_load_bearing(monkeypatch):
-    """Norm D: with `_subnormal_flush_tell` neutered the tell disappears, so
+    """docs/norms.md, "A measurement whose result is an ABSENCE needs a positive control":
+    with `_subnormal_flush_tell` neutered the tell disappears, so
     these tests are pinning the trigger and not some other sentence that
     happens to contain the same words."""
     assert len(tells(propagate(cmp_query("gt", SUB_LO, SUB_HI, 0.0)))) == 1

@@ -13,6 +13,11 @@ says, and a status header is the same failure with a shorter path to a reader.
 Corrected here rather than quietly retitled, because the divergence is the
 point. The argument below is unchanged; only the status was wrong.
 
+Pinned by `tests/test_declaration_dtype.py`, which drives the refusal over
+every dtype, asserts the nearest-representable values it names, and carries
+its own load-bearing control (`test_the_check_is_load_bearing`) — so this
+page's BUILT is a claim about running code, not a word.
+
 ## The hole
 
 `any_array` validates shape, bound ordering, and infinite-point emptiness. It does

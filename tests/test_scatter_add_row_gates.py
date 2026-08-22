@@ -169,3 +169,60 @@ def test_present_none_combiner_box_contains_the_executed_truth():
             f"[{box.los[i]}, {box.his[i]}] — the present-None combiner is "
             f"being modelled as addition again"
         )
+
+
+def test_the_scatter_add_rows_bump_costs_a_verdict_and_this_is_the_debt():
+    """The M16 divergence, reproduced ONE OPERATION OVER, end to end.
+
+    `stelling.interval.mul` was converted to the exact-Fraction route
+    because its unconditional bump put the exactly-zero corner of a squared
+    quantity BELOW zero, which defeated `reduce_sum`'s nonnegative clamp and
+    made `x*x` and `x**2` reach different verdicts on the same property
+    (audit 0.2.0 M16). `scatter_add_rows` still bumps unconditionally, and
+    the same defect is still reachable through it -- so one real property,
+    written two ways that jax lowers differently, gets two verdicts:
+
+        jnp.sum(x*x)                    >= 0   VERIFIED
+        zeros.at[0].add(jnp.sum(x*x))   >= 0   UNKNOWN
+
+    with the decline naming a lower endpoint of `-5e-324` -- one ulp below
+    an exact zero the `reduce_sum` form floors at `0.0`. `zeros.at[0].add`
+    lowers to a `scatter-add` equation (measured on jax 0.11.0), which
+    routes to `_t_scatter_add` at `TIER_SOUND` and to
+    `stelling.interval.scatter_add_rows`.
+
+    **THIS TEST PINS A DEBT, AND IT IS SUPPOSED TO BE DELETED.** The fix --
+    giving `scatter_add_rows` the exact-`Fraction` directed rounding `mul`
+    and `add` already use -- is a numeric change in the soundness-critical
+    module and is dispatched on its own. When it lands, this UNKNOWN becomes
+    VERIFIED and this test goes red; the right response is to assert
+    VERIFIED for both spellings and delete the debt entries from
+    `stelling.interval.__doc__`, which say so in as many words. Until then
+    the cost is measured rather than described, because a documented defect
+    nothing drives is how M16 survived its own fix the first time.
+    """
+    def h_sum():
+        x = any_array((4,), jnp.float64, (0.0, 2.0))
+        return assert_(jnp.sum(x * x) >= 0.0)
+
+    def h_scatter():
+        x = any_array((4,), jnp.float64, (0.0, 2.0))
+        s = jnp.zeros((1,)).at[0].add(jnp.sum(x * x))
+        return assert_(s >= 0.0)
+
+    v_sum = check(h_sum, vacuity_mode="inputs-only")
+    assert v_sum.status == "VERIFIED", v_sum.render()
+
+    v_scatter = check(h_scatter, vacuity_mode="inputs-only")
+    assert v_scatter.status == "UNKNOWN", (
+        "the scatter spelling now agrees with the reduce_sum one. If "
+        "`scatter_add_rows` took the exact-Fraction route, that is the "
+        "debt being PAID: assert VERIFIED here for both spellings and "
+        "delete the debt entries from `stelling.interval.__doc__`.\n"
+        + v_scatter.render()
+    )
+    text = v_scatter.render()
+    assert "-5e-324" in text, (
+        "the scatter form no longer declines at one ulp below zero; "
+        "re-measure the debt rather than retyping this digit.\n" + text
+    )

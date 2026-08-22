@@ -60,9 +60,24 @@ set.
   node was stepped with no boundary inputs, and this node echoes its own
   boundaries, so from zeros it stays zero forever.
 * ``RigidBody`` — a velocity span of ``[-1.962, 0]`` was measured over
-  200 steps and recorded as the reachable set. ``200 × 0.001 × 9.81 =
-  1.962`` exactly: a free-fall artifact of the trajectory length that was
-  chosen. At 100 000 steps the same node spans ``[-9805.9, 0]``. Velocity
+  200 steps and recorded as the reachable set. It is a free-fall artifact
+  of the trajectory length that was chosen, and driving the node says so:
+  stepped from its own ``initial_state()`` with no boundary inputs, 200
+  steps at ``dt = 0.001`` span ``[-1.9619957208633423, 0]`` and 100 000
+  steps at the same ``dt`` span ``[-981.4652709960938, 0]`` — the same
+  law, five hundred times the trajectory.
+  (This clause has now been wrong twice, in opposite ways. It read
+  ``[-9805.9, 0]``, which is a ``dt = 0.01`` figure — 100 000 steps at
+  ``dt = 0.01`` drive to ``[-9805.8662109375, 0]`` — so the larger number
+  silently changed the ``dt`` the clause before it states. It was then
+  replaced by ``[-981.0, 0]``, which is what ``100000 × 0.001 × 9.81``
+  comes to and is NOT what the node reaches: the velocity accumulates in
+  float32, and the driven span runs about half a unit past it. An
+  arithmetic answer substituted for a measured one, in the paragraph whose
+  whole subject is that substitution. Every span above is driven, not
+  computed. The point — that the span is a property of the trajectory and
+  not of the node — is unchanged, and is stronger when only one variable
+  moves.) Velocity
   there is a pure accumulator — no drag, no clamp, no collision — so
   **there is no reachable span to compare against at all**, and any finite
   envelope on it is a modelling choice rather than a discovery.
@@ -213,10 +228,20 @@ NOT_EXECUTED_EXIT = 3
 
 # ── the sidecar schema, PROVISIONAL for 0.1.0 ────────────────────────────────
 #
-# **The schema is PROVISIONAL / UNSTABLE for 0.1.0.** Fields may be added,
-# removed or renamed in 0.1.1 without a deprecation cycle. It is planned to
-# FREEZE in 0.1.1, once the external soak has parsed real emissions and the
-# fields have been exercised by a consumer that did not write them.
+# **The schema is PROVISIONAL / UNSTABLE.** Fields may be added, removed or
+# renamed in any release without a deprecation cycle. It FREEZES ON A
+# CONDITION, not on a version: once a consumer that did not write it has
+# parsed real emissions and the fields have been exercised from outside.
+#
+# THE CONDITION IS THE COMMITMENT, AND NAMING A RELEASE INSTEAD BROKE IT.
+# This said "may be added, removed or renamed in 0.1.1 ... planned to FREEZE
+# in 0.1.1". 0.1.1 came and went; the running version is 0.2.0.dev0, the
+# schema is still `1-provisional`, and the sentence had become a promise
+# about a release that is in the past — which reads to a consumer either as
+# "this froze and nobody updated the string" or as an abandoned plan, and
+# neither is true. The condition below has not been met, so nothing about
+# the guarantee has changed; only the way it is stated, so that it cannot
+# expire again.
 #
 # The withdrawal is deliberate, and the reason is that the argument for
 # declaring it stable was never an argument for declaring it stable NOW. It
@@ -240,11 +265,13 @@ NOT_EXECUTED_EXIT = 3
 SCHEMA = "stelling.reproducer/1-provisional"
 
 SCHEMA_STABILITY = (
-    "PROVISIONAL / UNSTABLE for stelling 0.1.0: fields may be added, "
-    "removed or renamed in 0.1.1 without a deprecation cycle. Planned to "
-    "freeze in 0.1.1, once the external soak has parsed real emissions and "
-    "these fields have been exercised by a consumer that did not write "
-    "them. Do not build on this without pinning the stelling version."
+    "PROVISIONAL / UNSTABLE: fields may be added, removed or renamed in any "
+    "release without a deprecation cycle. This freezes on a CONDITION and "
+    "not on a version number -- once a consumer that did not write it has "
+    "parsed real emissions and these fields have been exercised from "
+    "outside -- and until the identifier stops saying 'provisional' the "
+    "condition has not been met. Do not build on this without pinning the "
+    "stelling version."
 )
 
 # JSON HAS NO ENCODING FOR ±inf OR NaN, and Python's json module emits the
@@ -1122,8 +1149,19 @@ def _reproducer_source(verdict, subject: Subject, obligation_index) -> str:
     }
     text = string.Template(_TEMPLATE).substitute(
         banner=_banner(sidecar, witness, disclosures, sha, x64),
-        sidecar=json.dumps(sidecar, indent=2, sort_keys=True),
-        payload=json.dumps(payload, indent=2, sort_keys=True),
+        # allow_nan=False on BOTH, which is what the NONFINITE comment
+        # above claims. It was true of the runtime writer only: these two
+        # produce the blocks that land in the emitted FILE
+        # (`SIDECAR = json.loads(r"""…""")`), and a non-finite reaching
+        # here would have been written as a bare `Infinity`/`NaN` token
+        # that jq, JSON.parse, Go and serde all reject. No escape was
+        # demonstrated -- `_json_number` sanitises `envelope.lo/hi`
+        # upstream -- so this closes a claim defect rather than a shown
+        # bug, and it is the guard that makes the claim true.
+        sidecar=json.dumps(sidecar, indent=2, sort_keys=True,
+                           allow_nan=False),
+        payload=json.dumps(payload, indent=2, sort_keys=True,
+                           allow_nan=False),
         confirmed=CONFIRMED,
         diverged=DIVERGED,
         unreachable=UNREACHABLE,
@@ -1415,11 +1453,12 @@ the assertion held where it ran and the other mode raised, so DIVERGED,
 which is a claim of absence, is not available and nothing was false
 either. The sidecar's `detail` says which. Read it, not the status.
 
-THE SIDECAR SCHEMA IS PROVISIONAL. It is unstable for stelling 0.1.0 —
-fields may be added, removed or renamed in 0.1.1 without a deprecation
-cycle — and is planned to freeze in 0.1.1, once an external soak has
-parsed real emissions and the fields have been exercised by a consumer
-that did not write them. The schema identifier says so, and every sidecar
+THE SIDECAR SCHEMA IS PROVISIONAL. Fields may be added, removed or
+renamed in any release without a deprecation cycle. It freezes on a
+CONDITION rather than on a version number — once a consumer that did not
+write it has parsed real emissions and the fields have been exercised
+from outside — and until the schema identifier stops saying
+"provisional", that has not happened. The schema identifier says so, and every sidecar
 this file writes carries the same sentence in its `stability` field. Pin
 the stelling version if you build on it.
 """
@@ -1428,6 +1467,45 @@ import json
 import os
 import sys
 from fractions import Fraction
+
+# THE TARGET IS IMPORTED BY NAME, AND THIS FILE IS NOT WHERE YOU RAN FROM.
+# Python puts THIS SCRIPT'S directory on sys.path[0], not the working
+# directory -- and a reproducer is emitted into a subdirectory, one level
+# below the program it is evidence about. So the documented command, run
+# from the directory holding that program,
+#
+#     $$ python reproducers/reproduce_<name>.py
+#
+# could not import a module sitting right there, and this file reported
+# NO EXECUTION RESULT about a target it could have executed. Measured
+# before this block existed, from exactly that directory:
+# `ModuleNotFoundError: No module named 'myprogram'`, exit 3 -- a wrongly
+# silent file, which is the same family of defect as a wrong one.
+#
+# APPENDED, never prepended. sys.path[0] stays this file's own directory
+# and every other entry keeps its position, so a name that resolved to a
+# MODULE or a REGULAR PACKAGE before this line existed resolves to the same
+# one now, and the intended effect is that a name which previously resolved
+# to NOTHING can resolve in the working directory. Run from somewhere the
+# target is not and the file still stops with the same honest "could not be
+# imported" detail it stopped with before.
+#
+# It is NOT true that position on the path settles every case, and this
+# said it was. Under PEP 420 the finder scans the WHOLE path before
+# settling for a namespace package: portions accumulated from earlier
+# entries lose to a regular module or package found at any later entry.
+# Measured in one process -- a directory `zzportion/` with no `__init__.py`
+# on an earlier entry, a `zzportion.py` in the cwd -- `import zzportion`
+# gives a namespace package (`__file__` None) before the append and the
+# regular module after it. So a namespace package assembled from earlier
+# entries CAN be displaced by a same-named module in the working directory.
+# The impact here is very low: a reproducer runs one named target beside a
+# program the author is debugging. It is narrowed rather than deleted
+# because the sentence was an absolute in shipped source, and this file is
+# the one that emits evidence.
+_CWD = os.getcwd()
+if _CWD not in sys.path:
+    sys.path.append(_CWD)
 
 # the published sidecar surface, minus the execution result this run adds
 SIDECAR = json.loads(r"""

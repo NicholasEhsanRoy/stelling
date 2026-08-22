@@ -54,7 +54,8 @@ sidecar's `execution.detail` says which. **Read it, not the status.**
 
 Everything below is here. No other package, no fixture, nothing to stand in
 for — `pip install stelling[solvers]`, two files, and the output is what it
-prints. A witness only exists because a solver found one, so the
+prints, to the last line. (The one thing shown differently is the `sidecar:`
+path, which is absolute in a real run and is written relative here.) A witness only exists because a solver found one, so the
 solver extra is the part you cannot skip.
 
 Install it into the environment that already has your JAX, and do **not**
@@ -150,6 +151,12 @@ $ python reproducers/reproduce_rate_budget_assert0.py
     [0]  11.0 <= 10.0  is False   (margin +1.0)
 
 == CONFIRMED
+  The asserted comparison is FALSE at the witness under eager, jit
+  execution of your own function. This is the one check of the
+  refutation that shares no code with stelling's emission or
+  its replay.
+
+sidecar: reproducers/reproduce_rate_budget_assert0.json
 ```
 
 The witness is `2/3` — an exact rational the solver produced and `float32`
@@ -188,11 +195,22 @@ rather than anything written for the example.
 > environment you verify from. The example above needs none of this.
 
 ```bash
-pip install maddening==0.3.0
+pip install --no-deps maddening==0.3.0
 ```
 
+**`--no-deps` is the point of that line, not a flourish.** A plain
+`pip install maddening==0.3.0` resolves your jax down to the ~0.5 series to
+satisfy `maddening`'s pin, and stelling then warns
+`stelling is tested against jax 0.10, 0.11.x but is running under jax 0.5.1`
+— `pyproject.toml`'s `[jax]` floor is `jax>=0.10` precisely because stelling
+produces no useful verdicts below it. With `--no-deps`, `maddening` installs
+against the jax you already have, which is what CI does for its own
+reproducer acceptance
+(`.github/workflows/ci.yml`: *"A plain `uv pip install maddening==0.3.1` …
+DOWNGRADES jax … Hence `--no-deps`"*) and what produced the transcript below.
+
 The pin is on `maddening`'s side and is expected to go away in its 0.4, after
-which this example needs no separate environment.
+which this example needs neither the flag nor a separate environment.
 
 <!-- doc-example: illustrative -->
 ```python
@@ -257,6 +275,12 @@ emitted file:
     [2]  101.0 <= 100.0  is False   (margin +1.0)
 
 == CONFIRMED
+  The asserted comparison is FALSE at the witness under eager, jit
+  execution of your own function. This is the one check of the
+  refutation that shares no code with stelling's emission or
+  its replay.
+
+sidecar: reproducers/reproduce_heatnode_maximum_principle_assert0.json
 ```
 
 **Both modes are the program, and each gets its own inputs.** The file
@@ -282,7 +306,9 @@ target, a method bound to an instance no name holds, and a name that
 resolves to a *different* object than the one you passed do not — and
 each gets its own sentence saying which.
 
-Measured across this tree's contracts: **8 of 14 targets need fixture
+Measured across the MADDENING/MIME contract corpus, which is **not in this
+tree** — see [state-0.1.0.md](state-0.1.0.md), which records the same
+population and says the same thing about it — **8 of 14 targets need fixture
 work** — a constructor argument, a mesh, a controller instance — before
 any file can call them. That is the normal case, not the exception, and
 the answer to it is a module-level wrapper that writes the construction
@@ -317,9 +343,14 @@ read as "the node never occupies the envelope"; a *driven* trajectory
 reaches the box entirely, and the degenerate span came from stepping the
 node with no boundary inputs. `RigidBody`: a velocity span of
 `[-1.962, 0]` was measured over 200 steps and reported as the reachable
-set; `200 × 0.001 × 9.81 = 1.962` exactly, and at 100 000 steps the same
-node spans `[-9805.9, 0]`. A measured span is "reachable under the
-trajectory I ran", never "reachable in all operation".
+set; driven from the node's own `initial_state()` with no boundary inputs,
+200 steps at `dt = 0.001` span `[-1.9619957208633423, 0]` and 100 000 steps
+at the same `dt` span `[-981.4652709960938, 0]`. (`100000 × 0.001 × 9.81`
+is 981.0, and that is not the figure: the velocity accumulates in float32
+and the driven span runs past it. This sentence carried the arithmetic
+answer, which is the error the sentence is about.) A measured span is
+"reachable under the trajectory I ran", never "reachable in all
+operation".
 
 So `Subject` requires exactly one of `precondition` /
 `no_precondition_reason`, a declared precondition must carry its
@@ -336,16 +367,28 @@ judged set rather than a fact discovered afterwards.
 Running the file writes `<name>.json` beside it (or wherever
 `STELLING_REPRODUCER_JSON` points).
 
-### The schema is PROVISIONAL for 0.1.0
+### The schema is PROVISIONAL
 
 **It is unstable, and you should not build on it without pinning the
 stelling version.** Concretely: fields may be **added, removed or
-renamed** in 0.1.1, **without a deprecation cycle**, and a consumer
-written against 0.1.0 may simply stop working.
+renamed** in any release, **without a deprecation cycle**, and a consumer
+written against one may simply stop working.
 
-It is planned to **freeze in 0.1.1**, once the external soak has parsed
-real emissions and the fields have been exercised by a consumer that did
-not write them.
+**It freezes on a CONDITION, not on a version number** — once a consumer
+that did not write it has parsed real emissions and the fields have been
+exercised from outside. Until the schema identifier stops saying
+`provisional`, that has not happened, and the identifier is where to look:
+a consumer comparing `schema` against the string it was written for fails
+closed.
+
+*This section named 0.1.1 as both the release fields could move in and the
+release the schema would freeze in. 0.1.1 has been and gone, the running
+version is `0.2.0.dev0`, and the schema is still
+`stelling.reproducer/1-provisional` — so the promise had become one about a
+release in the past, which reads either as "this froze and nobody updated
+the page" or as an abandoned plan, and neither is true. Nothing about the
+guarantee has changed; only how it is stated, so that it cannot expire
+again.*
 
 The reason it is not frozen now is that the argument for freezing it was
 never an argument for freezing it *yet*. That argument ran: a CI coverage
@@ -384,6 +427,12 @@ Every numeric field is a JSON **number**, or one of the strings `"inf"`,
 `Infinity` token Python emits by default is rejected by `jq`, `JSON.parse`,
 Go and serde. Both writers set `allow_nan=False`, so a path that forgets
 this raises instead of producing something no consumer can read.
+
+*That sentence was true of the runtime writer only until it was measured:
+the emit-side writer, which produces the blocks embedded in the `.py`, had
+no guard. No escape was ever demonstrated — the endpoints are sanitised
+upstream — so it was a claim defect rather than a shown bug, and the guard
+that makes the claim true is now on both.*
 
 `execution.reachable` is `true`/`false` when a caller precondition was
 declared and ran, and `null` only when none was declared — a measured

@@ -226,10 +226,14 @@ optional components a discovered binary was built with.
   the declared set (`nonvacuity`) — all as traced primitives, so the
   query's content hash covers the declarations, not just the program.
 - **Forward interval propagation** over the jax-free IR
-  (`stelling.ir`), outward-rounded (one deliberate ulp per operation),
-  with three-valued verdicts: **VERIFIED**, **REFUTED** (set-level: the
-  stated box is not invariant — not a witness), **UNKNOWN** (our
-  imprecision, never guessed away).
+  (`stelling.ir`), **outward-rounded** — the exact real result is always
+  inside the bracket; how tight the bracket is depends on the operation,
+  and `stelling.interval`'s module docstring is the scope
+  (`mul([0.25, 0.5], [0.25, 0.5])` is exactly `[0.0625, 0.25]`, no ulp
+  spent; `exp` and `pow` do bump one ulp unconditionally, and carry a
+  stamped libm assumption for it) — with three-valued verdicts:
+  **VERIFIED**, **REFUTED** (set-level: the stated box is not invariant —
+  not a witness), **UNKNOWN** (our imprecision, never guessed away).
 - **Checks the preconditions your solver assumes** — positivity of a
   coefficient field over its envelope, a nonzero mass/shift scalar over
   its admissible config range — as reusable obligation templates
