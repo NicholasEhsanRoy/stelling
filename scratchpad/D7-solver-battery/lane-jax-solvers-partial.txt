@@ -1,0 +1,59 @@
+........................................................................................
+== fidelity gauge — measured discriminating power (L21)
+SCOPE — what these gates reach: the affine domain's own arithmetic: containment against dense sampling, exact cancellation, honest non-closure, and equivalence with the propagation pipeline. Does not drive the interval transfers, any emission plan, or the solver.
+baseline: passes every gate (containment-vs-dense-sampling, exact-cancellation, honest-nonclosure, pipeline-equivalence)
+  inward-rounding-on-a-coefficient-path  CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  uncanonicalized-product-cache          CAUGHT by exact-cancellation
+  mul-residue-dropped                    CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  err-accumulation-dropped-on-add        CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  discharge-reads-lo-strictly            CAUGHT by exact-cancellation
+  violation-claims-hi-at-zero            CAUGHT by honest-nonclosure
+  structural-routing-reversed            CAUGHT by exact-cancellation
+  concretization-inward-float-sum        CAUGHT by containment-vs-dense-sampling
+  cache-key-ignores-element              CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  err-signed-on-sub                      CAUGHT by containment-vs-dense-sampling
+  scale-branch-drops-snap-deltas         CAUGHT by containment-vs-dense-sampling
+== residual class (value-identical to the gauged stack; the explanation is the claim) ==
+  (empty: every mutation was caught)
+== face asymmetry (gates disagreeing about one subject; a survivor count cannot see a one-gate regression) ==
+  inward-rounding-on-a-coefficient-path: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  uncanonicalized-product-cache: CAUGHT by exact-cancellation — ADMITTED by containment-vs-dense-sampling, honest-nonclosure, pipeline-equivalence
+  mul-residue-dropped: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  err-accumulation-dropped-on-add: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  discharge-reads-lo-strictly: CAUGHT by exact-cancellation — ADMITTED by containment-vs-dense-sampling, honest-nonclosure, pipeline-equivalence
+  violation-claims-hi-at-zero: CAUGHT by honest-nonclosure — ADMITTED by containment-vs-dense-sampling, exact-cancellation, pipeline-equivalence
+  structural-routing-reversed: CAUGHT by exact-cancellation — ADMITTED by containment-vs-dense-sampling, honest-nonclosure, pipeline-equivalence
+  concretization-inward-float-sum: CAUGHT by containment-vs-dense-sampling — ADMITTED by exact-cancellation, honest-nonclosure, pipeline-equivalence
+  cache-key-ignores-element: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  err-signed-on-sub: CAUGHT by containment-vs-dense-sampling — ADMITTED by exact-cancellation, honest-nonclosure, pipeline-equivalence
+  scale-branch-drops-snap-deltas: CAUGHT by containment-vs-dense-sampling — ADMITTED by exact-cancellation, honest-nonclosure, pipeline-equivalence
+== every count above is scoped to: the affine domain's own arithmetic: containment against dense sampling, exact cancellation, honest non-closure, and equivalence with the propagation pipeline. Does not drive the interval transfers, any emission plan, or the solver. — a surface these gates do not drive is NOT gauged by this report ==
+.... [  2%]
+....................ss...................................................................... [  4%]
+............................................................................................ [  6%]
+............................................................................................ [  8%]
+............................................................................................ [ 10%]
+............................................................................................ [ 12%]
+............................................................................................ [ 14%]
+............................................................................................ [ 16%]
+............................................................................................ [ 18%]
+............................................................................................ [ 20%]
+............................................................................................ [ 22%]
+............................................................................................ [ 24%]
+............................................................................................ [ 26%]
+............................................................................................ [ 28%]
+............................................................................................ [ 30%]
+............................................................................................ [ 32%]
+............................................................................................ [ 34%]
+............................................................................................ [ 36%]
+............................................................................................ [ 38%]
+............................................................................................ [ 40%]
+............................................................................................ [ 42%]
+............................................................................................ [ 44%]
+............................................................................................ [ 46%]
+............................................................................................ [ 48%]
+............................................................................................ [ 50%]
+............................................................................................ [ 52%]
+............................................................................................ [ 54%]
+............................................................................................ [ 56%]
+......................................................
