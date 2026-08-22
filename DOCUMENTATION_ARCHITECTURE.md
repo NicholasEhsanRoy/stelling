@@ -533,19 +533,31 @@ useful single artifact in this document. Six readings of it:
   item.** Pin the precision (§4.2). This is worth more than it sounds: JAX ships
   *two* mechanisms and only one of them is a contract. `precision=` is a **hint** —
   `HIGH` on a GPU means tf32 *"where available, otherwise float32"*, silently. But
-  `lax.DotAlgorithmPreset` is a **contract**: a preset member IS a
-  `lax.DotAlgorithm`, and `DotAlgorithm`'s docstring says *"Support for these
-  algorithms is platform dependent, and using an unsupported algorithm will
-  **raise a Python exception when the computation is compiled**"*. `F32_F32_F32`
-  is a real member of the preset enum. *(That quotation was attributed here to
-  the preset enum's own docstring, and it is not in it, on either pinned series:
-  0.10.2 and 0.11.0 both carry it on the base class and give the preset enum a
-  docstring that points at the base class. Driven on both. The conclusion
-  survives and only the attribution was wrong, which is why this is a citation
-  repair and not a retraction.)* So the constraint of use
-  is not "prefer HIGHEST" — it is **"state the algorithm, not the preference, and
-  let it fail loudly on a device that cannot honour it."** Link 7's Planned-defence
-  cell is not *Nothing*.
+  `lax.DotAlgorithmPreset` is a **contract**, and the route from a preset member
+  to that guarantee is `DotAlgorithm`'s own docstring, which says *"Support for
+  these algorithms is platform dependent, and using an unsupported algorithm
+  will **raise a Python exception when the computation is compiled**"* and then,
+  in its very next sentence, says which algorithms it means: they *"are listed
+  in the `DotAlgorithmPreset` enum"*. `F32_F32_F32` is a real member of that
+  enum. *(TWO repairs here, and the second is the one worth reading. The
+  quotation was first attributed to the preset enum's own docstring, and it is
+  not in it on either pinned series: 0.10.2 and 0.11.0 both carry it on the base
+  class and give the preset enum a docstring that points at the base class. The
+  repair for that then asserted that a preset member **IS** a
+  `lax.DotAlgorithm`, and that is false on both series. Driven:
+  `isinstance(lax.DotAlgorithmPreset.F32_F32_F32, lax.DotAlgorithm)` is `False`,
+  `issubclass(lax.DotAlgorithmPreset, lax.DotAlgorithm)` is `False`, the preset
+  is an `enum.Enum` where `DotAlgorithm` is a `NamedTuple`, and of
+  `DotAlgorithm`'s seven fields the member exposes exactly one,
+  `accumulation_type`. jax's own text invites the error —
+  `DotAlgorithmPreset.__doc__` calls itself *"a named set of `DotAlgorithm`
+  objects"*, which is fair as description and wrong as typing — but a false
+  MECHANISM replacing a false ATTRIBUTION, in the paragraph whose whole subject
+  is getting an attribution right, is worse than what it replaced. The
+  conclusion survived both times; it now travels by the route the base class
+  states itself.)* So the constraint of use is not "prefer HIGHEST" — it is
+  **"state the algorithm, not the preference, and let it fail loudly on a device
+  that cannot honour it."** Link 7's Planned-defence cell is not *Nothing*.
 - **Three links have nothing but the fuzzer, a fourth has the fuzzer plus a
   constraint of use, and link 8 has nothing at all.** Read off the table above:
   links **4, 5 and 6** are the rows whose Planned-defence cell is
@@ -1856,8 +1868,8 @@ is wrong and must not be written. §14 is the full treatment.
 | `deprecated` | Scheduled for removal | Removed next major |
 
 Applied to: the harness API (`any_array`, `any_pytree`, `assume`, `assert_`,
-`nonvacuity`), the verdict artifact schema, `stelling.ir`, and the evidence
-schemas.
+`nonvacuity`, `trace`), the verdict artifact schema, `stelling.ir`, and the
+evidence schemas.
 
 *This list read `any_array`, `any_scalar`, `assume`, `assert_`, and it was
 wrong in both directions. It named `any_scalar`, which `design/founding.md`
@@ -1868,12 +1880,29 @@ for an inventory of the surface rather than a plan, and an inventory that names
 an absent function while missing two live ones is the wrong kind of wrong
 here.*
 
-*The two further occurrences of `any_scalar`, in §9's positive-control example,
-sit inside a sketch of a PROPOSED idiom — `@stelling.harness`,
+*And the repair for that was still an entry short. `stelling.harness.__all__`
+holds **six** names and the corrected list gave five: `trace` was missing,
+although `harness.py`'s own module docstring documents `trace(harness)` and
+says in as many words that "the six names below" are re-exported from
+`_jax_compat`. Derived from `__all__` rather than retyped from memory this
+time, which is what the standard above was asking for and did not get: an
+inventory that misses one live function is a smaller instance of the same
+wrong kind of wrong, and it was written by the sentence complaining about it.*
+
+*The two further occurrences of `any_scalar`, in §10.8's positive-control
+example, sit inside a sketch of a PROPOSED idiom — `@stelling.harness`,
 `@stelling.control`, an `assume=` keyword — none of which exists either, and
 which that section presents as a remedy to build. They are left alone: a sketch
 may name what it proposes; it is this section, the stability inventory, that may
 not.*
+
+*That read "§9's". Both occurrences are under `### 10.8 Harness authoring
+controls — the use-error class`; §9 is* Contributor standards *and merely
+cross-references §10.8 for the positive-control rule, which is where the wrong
+number came from. §15's renumbering check cannot reach this and neither can any
+gate: §9 RESOLVES against a heading, it is just not the heading the sentence
+means. A section reference that lands on the wrong section is the quieter half
+of the defect §15 records, and counting is no use against it.*
 
 **The schemas are the stable surface that matters.** A user's pipeline reads
 `verdict.json` and `soundness.yaml`; an assessor reads them years later. They get
@@ -2916,11 +2945,21 @@ what it cost was six in-document cross-references pointing at headings that did
 not exist — §16.1 at four sites, §16.2 and §16.3. The references were right and
 the headings were wrong, so the headings are renumbered here, and every §N.M in
 the file now resolves against a heading — every one that does not is a clause
-of an external standard (DO-178C §12.2 / §12.2.1, IEC 61508-3 §7.4.4 /
-§7.4.4.4, ISO 26262-8 §11.4.5 / §11.4.5.2, EN 50128 §6.7), correctly so.
-Section NUMBERS are the one identifier in
-this document that no anchor, link or test holds, which is why this had to be
-found by counting.*
+of an external standard, and there are six of them: DO-178C §12.2.1,
+IEC 61508-3 §7.4.4 / §7.4.4.4, ISO 26262-8 §11.4.5 / §11.4.5.2, EN 50128 §6.7.
+Correctly so. Section NUMBERS are the one identifier in this document that no
+anchor, link or test holds, which is why this had to be found by counting.*
+
+*That list named DO-178C §12.2 as a seventh, and §12.2 DOES resolve — against
+`### 12.2 ISO 26262-8 §11 — confidence in the use of software tools`, a heading
+about a different standard that happens to carry the same number. Re-driven
+over every §N.M in the file: exactly the six above fail to resolve, and the
+list is now those six. The collision is the more interesting half. An external
+clause reference that lands on a local heading by number is invisible to
+counting in the direction counting looks — so §12.2 went onto an exception list
+to explain an absence that was not there, and the exception is the only thing
+that was wrong: every §N.M this file does not resolve is still an external
+clause.*
 
 ### 15.1 What stelling does not have
 
