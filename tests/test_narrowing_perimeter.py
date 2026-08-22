@@ -61,6 +61,8 @@ import numpy as np  # noqa: E402
 
 import stelling  # noqa: E402
 from conftest import (  # noqa: E402
+    borrowed_eager,
+    borrowed_tripwire,
     deterministic_order_args,
     lowered_perimeter,
     tripwire_plugin_args,
@@ -87,55 +89,128 @@ EXACT = 1000
 #: THE OTHER HALF OF THE FLOAT STORY, and it had no acceptance case until
 #: B22. ``MOVED`` is out of REPRESENTABILITY; this one is out of RANGE for the
 #: float format itself, which is ``prop_guard.REASONS``' fourth entry
-#: ``overflows-float`` -- and the FORMAT matters, because that is what decides
-#: whether the door is silent. Every ``int64`` value is finite in ``float32``
-#: and ``bfloat16``, so among the four catalogued formats only ``float16``
-#: has a finite range an integer literal can leave QUIETLY: measured disarmed
-#: in both x64 cells, ``x_f16 <= 100000`` is ``[True, True, True]`` and the
-#: comparison that runs is against ``inf``. Written large enough to overflow
-#: ``float32`` the literal is also too large for jax to convert at all and jax
-#: raises ``OverflowError`` on its own, so a ``float32`` case here would be a
-#: test that the perimeter beats jax to a defect jax already reports.
+#: ``overflows-float``.
+#:
+#: **THE FORMAT SET IS NOT A CATALOGUE, AND B22 SAID IT WAS.** The sentence
+#: that stood here read "among the four catalogued formats only ``float16``
+#: has a finite range an integer literal can leave QUIETLY", justified as
+#: arithmetic rather than policy. The arithmetic INSIDE those four is right --
+#: every ``int64`` value is finite in ``float32``, ``bfloat16`` and
+#: ``float64`` -- but the four were ``propagate._FLOAT_FORMATS``, the
+#: VERIFIER's IEEE-mode catalogue, which decides what a VERDICT may reason
+#: about and has nothing to do with this perimeter. ``prop_guard`` has no
+#: catalogue at all: it asks ``ml_dtypes.finfo``, which is why F1 exists and
+#: why its own self-test drives ``float8_e5m2``. Driven over every float dtype
+#: ``jax.numpy`` exposes, EIGHT can lose an integer literal quietly, not one.
+#: :data:`QUIET_FLOAT_FORMATS` is that enumeration, and the test that drives
+#: it is what stops a borrowed catalogue getting in again.
 OVERFLOWING_FMT = "float16"
 OVERFLOWS = 100000
 OVERFLOWS_IMAGE = float("inf")
 
-#: And the case NOTHING in this release sees, which is the same sentence's
-#: other side: a value that is ALREADY a float. Only ``type(b) is int``
-#: reaches the predicate (``report.PERIMETER_UNCOVERED``'s second bullet) and
-#: the other two instruments are integer-to-integer throughout, so a finite
-#: double becoming ``inf`` raises no alarm anywhere. That is a scope boundary
-#: rather than a hole, and it is now stated on the page instead of being
-#: inferable from the fact that every example on it happened to be an int --
-#: which is what ``docs/overflow-tripwire.md``, a page NAMED for overflow,
-#: left a reader to do.
-#: The failure message for the test below, in one place because it is the
-#: whole point of the test: this pin exists to keep a DISCLOSURE true, so
-#: going red means the PAGE is now wrong, not that the code is.
-_LOUDER_THAN_THE_PAGE = (
-    "{label} is now caught ({exc}). That is better news than this test "
-    "records, and it makes docs/overflow-tripwire.md wrong in two places: the "
-    "'And it is integers, all the way down' bullets under 'What it does NOT "
-    "find', and bullet 3 of the narrowing perimeter's 'What it does NOT "
-    "cover'. Both say a value that is already a float raises no alarm "
-    "anywhere in this release. Rewrite them, then move this case out of "
-    "FLOAT_VALUES_NOTHING_SEES."
+#: Every float dtype ``jax.numpy`` exposes whose largest finite value an
+#: ``int64`` literal can exceed, with what the comparison then RUNS AS.
+#: Measured in all four cells (jax 0.10.2 / 0.11.0 x x64 off/on), identical in
+#: each.
+#:
+#: **The ``nan`` rows are worse in kind than the ``inf`` ones.** ``fn`` and
+#: ``fnuz`` formats encode no infinity, so the literal saturates to ``nan``
+#: and ``x <= N`` inverts to ``False`` EVERYWHERE -- a harness guard that
+#: stops holding, rather than one that holds vacuously against ``inf``.
+#:
+#: ``warns_traced`` is whether numpy's host cast emits ``RuntimeWarning:
+#: overflow encountered in cast`` when the comparison is TRACED. Only
+#: ``float16`` does, which is exactly why the seven ``float8_*`` rows matter:
+#: ``-W error::RuntimeWarning`` reaches the first row and none of the others,
+#: so on those seven this perimeter is the only instrument that speaks. None
+#: of the eight warns when it runs eagerly.
+QUIET_FLOAT_FORMATS = (
+    # (dtype, largest finite, literal written, image it runs as, warns traced)
+    ("float16",            65504,    100000, float("inf"), True),
+    ("float8_e3m4",         15.5,        33, float("inf"), False),
+    ("float8_e4m3",          240,       483, float("inf"), False),
+    ("float8_e5m2",        57344,    114691, float("inf"), False),
+    ("float8_e4m3fn",        448,       899, float("nan"), False),
+    ("float8_e4m3b11fnuz",    30,        63, float("nan"), False),
+    ("float8_e4m3fnuz",      240,       483, float("nan"), False),
+    ("float8_e5m2fnuz",    57344,    114691, float("nan"), False),
 )
 
-FLOAT_VALUES_NOTHING_SEES = (
-    ("jnp.full((2,), 1e300, jnp.float32)", lambda: jnp.full((2,), 1e300, jnp.float32)),
-    ("jnp.full((2,), 70000.0, jnp.float16)", lambda: jnp.full((2,), 70000.0, jnp.float16)),
+#: A VALUE THAT IS ALREADY A FLOAT, and the sentence B22 got backwards.
+#:
+#: None of this release's three instruments sees one: only ``type(b) is int``
+#: reaches this predicate (``report.PERIMETER_UNCOVERED``'s second bullet) and
+#: the other two are integer-to-integer throughout. B22 wrote that down as "a
+#: float value that overflows is seen by nothing" and "raises no alarm
+#: anywhere in this release", and BOTH ARE FALSE -- for most of the cases it
+#: named, and in the direction that matters, because the page defines silence
+#: as "no ``RuntimeWarning`` you could turn into one" and names ``-W error``
+#: as common in scientific repos.
+#:
+#: The split is HOST versus DEVICE and nothing else. A float narrowed by numpy
+#: on the way into a jax array -- which is every constant a TRACE embeds --
+#: goes through ``lax._convert_element_type``'s numpy cast and warns. A float
+#: already inside a ``jax.Array`` is narrowed by XLA, and there is no host
+#: cast to warn.
+#:
+#: THE GATE BELOW USED TO WRAP ITS DRIVE IN ``simplefilter("ignore",
+#: RuntimeWarning)``, so the test certifying "no alarm anywhere" silenced the
+#: alarm and passed under ``pytest -W error::RuntimeWarning``. It asserts the
+#: warning now, per case, in both directions.
+FLOAT_OVERFLOW_HOST_WARNS = (
+    ("jnp.full((2,), 1e300, jnp.float32)",
+     lambda: jnp.full((2,), 1e300, jnp.float32)),
+    ("jnp.full((2,), 70000.0, jnp.float16)",
+     lambda: jnp.full((2,), 70000.0, jnp.float16)),
     ("jnp.float16(70000.0)", lambda: jnp.float16(70000.0)),
-    ("x_f32 + 1e300", lambda: jnp.zeros((2,), jnp.float32) + 1e300),
-    ("x_f16 + 70000.0", lambda: jnp.zeros((2,), jnp.float16) + 70000.0),
-    ("jnp.asarray([1e300, 1e300]).astype(jnp.float32)",
-     lambda: jnp.asarray([1e300, 1e300]).astype(jnp.float32)),
+    ("jnp.array([1e300], jnp.float32)",
+     lambda: jnp.array([1e300], jnp.float32)),
     # The integer literal that IS refused through an operator, at a
-    # CONSTRUCTION site instead -- where no operator exists and the eager
-    # detector is integer-to-integer, so nothing sees it either.
+    # CONSTRUCTION site instead -- no operator for the perimeter to sit in and
+    # the eager detector is integer-to-integer, so no INSTRUMENT sees it. It
+    # is a host cast all the same, so numpy does.
     ("jnp.full((2,), 100000, jnp.float16)",
      lambda: jnp.full((2,), 100000, jnp.float16)),
+    # ...and the three whose EAGER spelling is silent or x64-dependent, driven
+    # under `jit`, where the constant is embedded through the host cast at
+    # trace time. All three warn in all four cells this way, which is the
+    # point: a harness is traced.
+    ("jit(x_f32 + 1e300)",
+     lambda: jax.jit(lambda a: a + 1e300)(jnp.zeros((2,), jnp.float32))),
+    ("jit(x_f16 + 70000.0)",
+     lambda: jax.jit(lambda a: a + 70000.0)(jnp.zeros((2,), jnp.float16))),
+    ("jit(x.astype(jnp.float32)) on [1e300, 1e300]",
+     lambda: jax.jit(lambda a: a.astype(jnp.float32))(
+         jnp.asarray([1e300, 1e300], jnp.float64 if jax.config.jax_enable_x64
+                     else jnp.float32))),
 )
+
+#: ...and the residue that IS genuinely silent, which is smaller and sharper
+#: than what B22 claimed and is the case a numerical program actually
+#: produces: the overflow is COMPUTED, so there is no literal for any of the
+#: three instruments to read even in principle, and no host cast for numpy to
+#: warn about. Silent in all four cells under ``simplefilter("error")``.
+FLOAT_OVERFLOW_DEVICE_SILENT = (
+    ("a * a on float32 1e30", lambda: _big_f32() * _big_f32()),
+    ("a ** 2 on float32 1e30", lambda: _big_f32() ** 2),
+    ("jit(a * a) on float32 1e30", lambda: jax.jit(lambda a: a * a)(_big_f32())),
+    ("jnp.exp(float32 1000.0)",
+     lambda: jnp.exp(jnp.asarray([1000.0], jnp.float32))),
+    ("a.astype(jnp.float16) on float32 1e30",
+     lambda: _big_f32().astype(jnp.float16)),
+    ("lax.convert_element_type(a, jnp.float16) on float32 1e30",
+     lambda: jax.lax.convert_element_type(_big_f32(), jnp.float16)),
+)
+
+
+def _big_f32():
+    """A ``float32`` array whose SQUARE overflows -- built without overflowing.
+
+    ``1e30`` is finite in ``float32``, so this construction is not itself a
+    narrowing and emits nothing; every case above overflows on DEVICE, which
+    is the whole distinction the two tuples draw.
+    """
+    return jnp.asarray([1e30, 1e30], jnp.float32)
 
 
 @pytest.fixture(autouse=True)
@@ -152,9 +227,11 @@ def _isolate():
     release, which is exactly the asymmetry ``perimeter.arm(owner=...)``
     exists to prevent, aimed at the session's own hold. Under
     ``--stelling-narrowing-perimeter=error`` the plugin arms under the
-    session's ``Config`` before any test runs; this file sorted **71 of 146**
-    when that was measured, so its FIRST test unhooked that hold and the ~4,300
-    tests after it ran unprotected with nothing red. Driven at ``e6968fe``, the documented
+    session's ``Config`` before any test runs; this file sorts **72nd of the
+    149 files** ``pytest --collect-only -q`` names in this tree (re-measured at
+    B22's fixup, which is the figure the CHANGELOG entry carries too), so its
+    FIRST test unhooked that hold and the ~4,300 tests after it ran
+    unprotected with nothing red. Driven at ``e6968fe``, the documented
     dial-on command over the whole suite reported::
 
         NOT ARMED [detached] ... 0 integer literal(s) ... were checked
@@ -472,32 +549,75 @@ def test_check_returns_verified_disarmed_and_refuses_armed(
 #: when it comes out ``-25536``-filled, in both x64 cells, and the table whose
 #: whole job is *"what the program actually runs"* was the one carrying it.
 #:
-#: ``runs`` is the text that must appear in the page's *what runs* cell AND
-#: the value the program actually produces, so neither can move alone. The
-#: instrument triple is (tripwire, eager, perimeter) and reads the page's last
-#: three cells: ``fires`` for the one that refuses, ``quiet`` for a cell that
-#: says ``no fire``, and ``n/a`` for one the page marks ``—``.
+#: ``cell`` is the page's *what runs* cell VERBATIM and ``runs`` is the value
+#: the drive must produce, so neither can move alone.
+#:
+#: **THEY ARE TWO FIELDS BECAUSE ONE FIELD WAS A SUBSTRING TEST.** The
+#: assertion was ``runs in row[1]`` against a bare ``"-25536"``, so a page cell
+#: reading ``-255360`` satisfied it -- driven, and green. An exact cell
+#: comparison cannot be satisfied by a longer number that happens to start the
+#: same way.
+#:
+#: ``runs`` for a COMPARISON row is the literal jax puts in the jaxpr, read
+#: out of the jaxpr. That row used to be excluded from the drive entirely: the
+#: test threw away the value it had just computed and substituted
+#: ``repr(float(np.asarray(2**31 - 1).astype("float32")))`` -- a re-derivation
+#: on numpy's cast path, not a measurement of what the program ran -- so the
+#: one row whose whole subject is a literal that MOVES was the one row nothing
+#: measured.
+#:
+#: The instrument triple is (tripwire, eager, perimeter) and reads the page's
+#: last three cells: ``fires`` for the one that refuses, ``quiet`` for a cell
+#: that says ``no fire``, and ``n/a`` for one the page marks ``—``.
 _WHAT_RUNS = (
-    ("jnp.full((3,), 40000, int16)", "-25536",
+    ("jnp.full((3,), 40000, int16)", "`-25536`-filled", "-25536",
      ("n/a", "fires", "n/a"),
      lambda: jnp.full((3,), 40000, jnp.int16)),
-    ("x_int16 + 40000", "-25536",
+    ("x_int16 + 40000", "`-25536`", "-25536",
      ("quiet", "quiet", "fires"),
      lambda: jnp.zeros((3,), jnp.int16) + 40000),
-    ("40000 + x_int16", "-25536",
+    ("40000 + x_int16", "`-25536`", "-25536",
      ("quiet", "quiet", "fires"),
      lambda: 40000 + jnp.zeros((3,), jnp.int16)),
-    ("x_f32 <= 2**31 - 1", "2147483648.0",
+    ("x_f32 <= 2**31 - 1", "`<= 2147483648.0`", "2147483648.0",
      ("quiet", "quiet", "fires"),
      lambda: jnp.zeros((3,), jnp.float32) <= 2**31 - 1),
-    ("x_int16 + 3", "3",
+    ("x_int16 + 3", "`3`", "3",
      ("n/a", "n/a", "quiet"),
      lambda: jnp.zeros((3,), jnp.int16) + 3),
 )
 
+#: The jaxpr each comparison row lowers to, so that "what runs" for a row
+#: whose output is a BOOL is read from the program rather than re-derived.
+_WHAT_RUNS_TRACED = {
+    "x_f32 <= 2**31 - 1": (
+        lambda: jax.make_jaxpr(lambda a: a <= 2**31 - 1)(
+            jnp.zeros((3,), jnp.float32)),
+    ),
+}
+
 _WHAT_RUNS_HEADER = (
     "| written | what runs | the tripwire | the eager detector | the perimeter |"
 )
+
+
+def _literals_of(closed) -> str:
+    """The scalar literals a jaxpr holds, as text -- what the program RUNS ON.
+
+    A comparison's output is a bool and says nothing about the literal that
+    was converted to produce it; the jaxpr says exactly that, and it is the
+    artefact jax executes.
+    """
+    out = []
+    for eqn in closed.jaxpr.eqns:
+        for var in eqn.invars:
+            val = getattr(var, "val", None)
+            if val is None:
+                continue
+            arr = np.asarray(val)
+            out.append(repr(float(arr)) if arr.dtype.kind == "f" else str(arr))
+    assert out, f"no literal in {closed}"
+    return " ".join(out)
 
 
 def _doc_what_runs_rows():
@@ -538,19 +658,21 @@ def test_the_pages_what_runs_table_is_the_measured_one():
         f"{len(_WHAT_RUNS)}. A row added there is a row driven here."
     )
 
-    tw_status, recorder = _tripwire.arm()
-    eager_status = _eager.arm()
-    try:
+    with borrowed_tripwire() as (tw_status, recorder), \
+            borrowed_eager() as eager_status:
         assert tw_status.armed and eager_status.armed
-        for (written, runs, expected, build), row in zip(_WHAT_RUNS, doc_rows):
+        for (written, cell, runs, expected, build), row in zip(_WHAT_RUNS, doc_rows):
             assert f"`{written}`" == row[0], (
                 f"row order moved: this test drives {written!r} where the "
                 f"page's row reads {row[0]!r}"
             )
-            assert runs in row[1], (
-                f"the page says {written} runs as {row[1]!r}; this test drives "
-                f"it as {runs!r}"
+            assert cell == row[1], (
+                f"the page says {written} runs as {row[1]!r}; this test "
+                f"declares the cell {cell!r}. This is an EXACT comparison on "
+                f"purpose: it used to be `{runs!r} in <cell>`, and `-255360` "
+                f"satisfies that."
             )
+            assert runs in cell, (written, cell, runs)   # the two agree
 
             jax.clear_caches()
             before = (recorder.fires, _eager.TRUNCATIONS, perimeter.FINDINGS)
@@ -564,13 +686,23 @@ def test_the_pages_what_runs_table_is_the_measured_one():
                 except perimeter.NarrowingError:
                     fired = 2
                 else:
-                    ran_text = (repr(float(ran.ravel()[0]))
-                                if ran.dtype.kind == "f" else str(ran.ravel()[0]))
                     if ran.dtype.kind == "b":
-                        # the comparison rows: what RUNS is the literal jax
-                        # used, which is the moved one, not the bool it made
-                        ran_text = repr(float(
-                            np.asarray(2**31 - 1).astype("float32")))
+                        # THE COMPARISON ROWS, READ FROM THE PROGRAM. What
+                        # RUNS here is the literal jax converted, not the bool
+                        # the comparison produced -- and it is taken out of the
+                        # jaxpr, which is the program. This used to substitute
+                        # `repr(float(np.asarray(2**31 - 1).astype("float32")))`
+                        # for the driven value: a re-derivation down numpy's
+                        # cast path, which is true of numpy whatever jax does,
+                        # so the one row about a literal that MOVES was
+                        # measuring nothing.
+                        (trace_it,) = _WHAT_RUNS_TRACED[written]
+                        jax.clear_caches()
+                        ran_text = _literals_of(trace_it())
+                    else:
+                        ran_text = (repr(float(ran.ravel()[0]))
+                                    if ran.dtype.kind == "f"
+                                    else str(ran.ravel()[0]))
                     assert runs in ran_text, (
                         f"{written} runs as {ran_text}, and the page and this "
                         f"test both say {runs}"
@@ -579,26 +711,24 @@ def test_the_pages_what_runs_table_is_the_measured_one():
             moved = tuple(a - b for a, b in zip(after, before))
 
             for i, (claim, delta) in enumerate(zip(expected, moved)):
-                cell = row[2 + i]
+                instrument_cell = row[2 + i]
                 if claim == "fires":
                     assert fired == i, (
                         f"{written}: the page says instrument {i} refuses it "
                         f"and the refusal came from {fired}"
                     )
-                    assert "refuses" in cell, (row, cell)
+                    assert "refuses" in instrument_cell, (row, instrument_cell)
                     if i:
                         assert delta == 1, (written, moved)
                 elif claim == "quiet":
                     assert delta == 0, (
                         f"{written}: instrument {i} fired {delta} time(s) and "
-                        f"the page's cell reads {cell!r}"
+                        f"the page's cell reads {instrument_cell!r}"
                     )
-                    assert "no fire" in cell or "passes" in cell, (row, cell)
+                    assert ("no fire" in instrument_cell
+                            or "passes" in instrument_cell), (row, instrument_cell)
                 else:
-                    assert cell in {"—", "-"}, (row, cell)
-    finally:
-        _eager.disarm()
-        _tripwire.disarm()
+                    assert instrument_cell in {"—", "-"}, (row, instrument_cell)
 
 
 def test_the_float_OVERFLOW_literal_is_refused_and_the_door_was_silent():
@@ -615,15 +745,21 @@ def test_the_float_OVERFLOW_literal_is_refused_and_the_door_was_silent():
     So both halves are pinned. This is the half the release DOES catch: an
     integer literal with no finite image in the float dtype it meets. The
     disarmed assertion is the load-bearing one -- it is what makes this a
-    silent door rather than a jax error the perimeter merely relabels, and it
-    is why the format is ``float16`` (see :data:`OVERFLOWING_FMT`).
+    silent door rather than a jax error the perimeter merely relabels -- and
+    it is now qualified EAGER, because traced, ``float16``'s host cast warns
+    (:func:`test_the_quiet_float_formats_are_enumerated_not_borrowed` is where
+    that is driven per format).
     """
     x = jnp.zeros((3,), getattr(jnp, OVERFLOWING_FMT))
 
-    # DISARMED: silent, and the comparison that runs is against `inf`.
-    assert (x <= OVERFLOWS).tolist() == [True, True, True]
+    # DISARMED AND EAGER: silent, and the comparison that runs is against
+    # `inf`. `simplefilter("error")` and not `ignore`: the silence is the
+    # claim, so a warning appearing here must fail this test rather than be
+    # swallowed by it.
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
+        warnings.simplefilter("error")
+        assert (x <= OVERFLOWS).tolist() == [True, True, True]
+    with np.errstate(over="ignore"):
         image = float(np.asarray(OVERFLOWS).astype(OVERFLOWING_FMT))
     assert image == OVERFLOWS_IMAGE
 
@@ -644,74 +780,260 @@ def test_the_float_OVERFLOW_literal_is_refused_and_the_door_was_silent():
     assert inexact.value.finding.reason == "inexact", inexact.value.finding
 
     # the door is open again
-    assert (x <= OVERFLOWS).tolist() == [True, True, True]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert (x <= OVERFLOWS).tolist() == [True, True, True]
 
     # AND THE SENTENCES ARE READ. This batch's whole subject is a page that
     # measured nothing wrong and simply said nothing, so a behaviour pin with
     # no reader is only half the repair: both pages that now answer the float
     # question have to be naming the case this test drives.
+    #
+    # EVERY OCCURRENCE, NOT ANY OCCURRENCE. The page states this comparison
+    # TWICE, and the assertion here was `f"...{OVERFLOWS}..." in page` -- so
+    # either occurrence kept it green while the other rotted. Driven: changing
+    # the second to `x_f16 <= 999` left this file green.
     repo = pathlib.Path(__file__).resolve().parents[1]
-    for rel in ("docs/overflow-tripwire.md", "docs/quickstart.md"):
+    # One pattern per page, each matching the PROSE spelling that page uses
+    # and not the per-format table (whose rows are driven, row by row, in
+    # `test_the_quiet_float_formats_are_enumerated_not_borrowed`).
+    spellings = {
+        "docs/overflow-tripwire.md": re.compile(r"`x_f16 <= (\d+)`"),
+        "docs/quickstart.md": re.compile(r"`x <= (\d+)` on `float16`"),
+    }
+    for rel, spelling in spellings.items():
         page = (repo / rel).read_text(encoding="utf-8")
-        assert f"`x_f16 <= {OVERFLOWS}`" in page or f"`x <= {OVERFLOWS}`" in page, (
+        found = spelling.findall(page)
+        assert found, (
             f"{rel} no longer names the comparison this test drives, so its "
             f"float-overflow answer has stopped being about a measured case"
+        )
+        assert set(found) == {str(OVERFLOWS)}, (
+            f"{rel} writes this comparison against {sorted(set(found))} and "
+            f"this test drives {OVERFLOWS}. EVERY occurrence has to be the "
+            f"driven one: the page states it more than once, and an assertion "
+            f"that only asks whether the value appears SOMEWHERE lets one "
+            f"occurrence rot behind the other."
         )
         assert OVERFLOWING_FMT in page, f"{rel} no longer names {OVERFLOWING_FMT}"
 
 
-def test_a_float_VALUE_that_overflows_is_seen_by_NOTHING_in_this_release():
-    """The other half, and it is a scope boundary that is now written down.
+def test_the_quiet_float_formats_are_enumerated_not_borrowed():
+    """Eight formats, not the four of somebody else's catalogue.
 
-    A value that is already a float is outside all three instruments: only
+    The sentence this replaces said *"among the four catalogued formats only
+    ``float16`` has a finite range an integer literal can leave quietly"*,
+    justified as *"arithmetic rather than policy"* -- and the justification is
+    what made it wrong. The four were ``propagate._FLOAT_FORMATS``, the
+    VERIFIER's IEEE-mode catalogue, which the perimeter's page never
+    introduces and the perimeter's predicate never consults: ``prop_guard``
+    asks ``ml_dtypes.finfo``, which is why F1 exists at all.
+
+    So the set is DERIVED here, from every float dtype ``jax.numpy`` exposes,
+    and compared against the declared one in both directions -- a format that
+    starts or stops being able to lose a literal quietly is a change to
+    :data:`QUIET_FLOAT_FORMATS` and to the page's table, not a silent drift.
+    """
+    ml_dtypes = pytest.importorskip("ml_dtypes")
+
+    # (1) THE SET, DERIVED. Every float dtype jnp exposes whose largest finite
+    # value an int64 literal can exceed -- and that can actually be built on
+    # this jax (the float6_* dtypes have no XLA type and raise).
+    derived = {}
+    for name in dir(jnp):
+        obj = getattr(jnp, name)
+        if not isinstance(obj, type) or not name.startswith(("float", "bfloat")):
+            continue
+        try:
+            biggest = float(ml_dtypes.finfo(obj).max)
+        except Exception:  # noqa: BLE001 - np.floating & friends are not dtypes
+            continue
+        if biggest >= 2**63 - 1:
+            continue                    # every int64 value is finite here
+        try:
+            jnp.zeros((3,), obj)
+        except Exception:  # noqa: BLE001 - no XLA primitive type for it
+            continue
+        derived[name] = biggest
+
+    declared = {row[0]: row[1] for row in QUIET_FLOAT_FORMATS}
+    assert set(derived) >= set(declared), (
+        f"declared formats that jax.numpy no longer exposes or cannot build: "
+        f"{sorted(set(declared) - set(derived))}"
+    )
+    # A format jax gains that saturates (float4_e2m1fn clamps to its max and
+    # is `inexact`, not `overflows-float`) is not a QUIET row; sort the
+    # derived set by what the literal actually runs as rather than asserting
+    # equality against a set that mixes the two.
+    for name, biggest in sorted(derived.items()):
+        literal = int(biggest) * 2 + 3
+        with np.errstate(over="ignore", invalid="ignore"):
+            image = float(np.asarray(literal).astype(np.dtype(getattr(jnp, name))))
+        overflowed = image != image or np.isinf(image)
+        assert overflowed == (name in declared), (
+            f"{name}: a literal past its largest finite value "
+            f"({biggest}) runs as {image!r}, and this file "
+            f"{'declares' if name in declared else 'does not declare'} it a "
+            f"quiet-overflow format. QUIET_FLOAT_FORMATS and the table in "
+            f"docs/overflow-tripwire.md are the two places to change."
+        )
+        if name in declared:
+            assert biggest == declared[name], (name, biggest, declared[name])
+
+    # (2) EACH ROW, DRIVEN -- disarmed silence eager, the image it runs as,
+    # the traced warning, and the refusal.
+    page = (pathlib.Path(__file__).resolve().parents[1]
+            / "docs" / "overflow-tripwire.md").read_text(encoding="utf-8")
+    for name, biggest, literal, image, warns_traced in QUIET_FLOAT_FORMATS:
+        dt = getattr(jnp, name)
+        x = jnp.zeros((3,), dt)
+
+        # EAGER: silent in all four cells, and the comparison inverts to False
+        # on the formats that have no infinity to saturate to.
+        jax.clear_caches()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            ran = np.asarray(x <= literal).tolist()
+        inverted = image != image                       # nan
+        assert ran == [not inverted] * 3, (name, ran, image)
+
+        # TRACED: numpy's host cast is where the warning lives, and float16 is
+        # the only one of the eight that gets one. That asymmetry is the whole
+        # reason the seven float8 rows are worth a page paragraph.
+        jax.clear_caches()
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always")
+            jaxpr = str(jax.make_jaxpr(lambda a: a <= literal)(x))
+        warned = any(
+            issubclass(w.category, RuntimeWarning)
+            and "overflow encountered in cast" in str(w.message)
+            for w in seen
+        )
+        assert warned == warns_traced, (
+            f"{name}: traced, numpy "
+            f"{'warned' if warned else 'did not warn'} and this file declares "
+            f"{warns_traced}. If this flipped to True everywhere, "
+            f"`-W error::RuntimeWarning` now reaches these and the page's "
+            f"paragraph saying it does not has to change."
+        )
+        assert f"{'nan' if inverted else 'inf'}:" in jaxpr, (name, jaxpr)
+
+        # ARMED: refused as overflows-float, on every one of the eight.
+        with perimeter.armed(("array",)) as status:
+            assert status.armed, status.explanation
+            with pytest.raises(perimeter.NarrowingError) as caught:
+                _ = x <= literal
+        finding = caught.value.finding
+        assert finding.reason == "overflows-float", (name, finding)
+        assert finding.literal == literal, (name, finding)
+
+        # (3) AND THE PAGE'S ROW FOR IT.
+        assert f"| `{name}` | {biggest} | `x <= {literal}` |" in page, (
+            f"docs/overflow-tripwire.md has no row for {name} written against "
+            f"the largest finite value ({biggest}) and the literal ({literal}) "
+            f"this test drives. The table there and QUIET_FLOAT_FORMATS are "
+            f"the same enumeration and a format may not be in one only."
+        )
+    assert page.count("| `float8_") == 7, (
+        "the page's quiet-format table no longer carries exactly the seven "
+        "float8 rows this test drives"
+    )
+
+
+def test_a_float_VALUE_that_overflows_warns_on_the_HOST_and_is_silent_on_DEVICE():
+    """The other half, and B22 had its silence axis INVERTED.
+
+    None of the three instruments sees a value that is already a float: only
     ``type(b) is int`` reaches this predicate, and the const-fold tripwire and
     the eager detector are integer-to-integer (``intentional_wrap`` refuses
     every non-integer dtype by name, asserted below so that "integer to
-    integer" is measured here rather than repeated).
+    integer" is measured here rather than repeated). That much was right.
 
-    **This test exists to keep a DISCLOSURE true, not to keep a detector
-    working**, and the direction it fails in says so: if a future release
-    starts catching one of these, this goes red and the page's paragraph is
-    what has to change. Widening the detector to floats is out of scope; a
-    page that says nothing while a neighbouring instrument says
-    ``overflows-float`` is the defect this replaces.
+    **What was wrong is the sentence drawn from it** -- *"seen by nothing"*,
+    *"raises no alarm anywhere in this release"* -- and it was wrong in the
+    direction that costs a reader something, because the page defines silence
+    as *"no RuntimeWarning you could turn into one"* and names ``-W error`` as
+    common in scientific repos. Most of the cases it listed emit
+    ``RuntimeWarning: overflow encountered in cast``, so
+    ``pytest -W error::RuntimeWarning`` catches them today and the page told
+    the reader there was nothing to be done.
+
+    **And the gate could not see it**, because it wrapped its drive in
+    ``simplefilter("ignore", RuntimeWarning)``: the test certifying "no alarm
+    anywhere" silenced the alarm and passed under
+    ``pytest -W error::RuntimeWarning``. Both groups are asserted here, in
+    both directions, under ``simplefilter("error")`` -- so a host case that
+    stops warning and a device case that starts are each red.
     """
     from stelling._tripwire import eager as _eager
 
-    tw_status, recorder = _tripwire.arm()
-    eager_status = _eager.arm()
-    try:
+    # ---- (1) THE HOST HALF: numpy's cast warns, and that is the reader's
+    #      existing remedy. Nothing is ignored; the warning IS the assertion.
+    for label, build in FLOAT_OVERFLOW_HOST_WARNS:
+        jax.clear_caches()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            with pytest.raises(RuntimeWarning, match="overflow encountered in cast"):
+                np.asarray(build())
+        # ...and it really is an overflow to inf, not some other cast warning
+        jax.clear_caches()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            got = np.asarray(build())
+        assert np.isinf(got).all(), f"{label} is no longer inf: {got!r}"
+
+    # ---- (2) THE DEVICE HALF: the genuinely silent residue. No host cast
+    #      runs, so there is nothing for `-W error::RuntimeWarning` to catch,
+    #      and the overflow is COMPUTED so there is no literal for any of the
+    #      three instruments to read.
+    with borrowed_tripwire() as (tw_status, recorder), \
+            borrowed_eager() as eager_status:
         assert tw_status.armed, tw_status.explanation
         assert eager_status.armed, eager_status.explanation
         with perimeter.armed(("tracer", "array")) as status:
             assert status.armed, status.explanation
             before = (recorder.fires, _eager.TRUNCATIONS, perimeter.FINDINGS)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", RuntimeWarning)
-                for label, build in FLOAT_VALUES_NOTHING_SEES:
-                    # A refusal is caught rather than allowed to escape, so
-                    # that a release which starts catching one of these fails
-                    # with the sentence a maintainer needs and not with a
-                    # traceback out of a jax operator slot.
+            for label, build in FLOAT_OVERFLOW_DEVICE_SILENT:
+                jax.clear_caches()
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error")
                     try:
                         got = np.asarray(build())
                     except BaseException as exc:  # noqa: BLE001
                         pytest.fail(_LOUDER_THAN_THE_PAGE.format(
                             label=label, exc=type(exc).__name__))
-                    assert np.isinf(got).all(), f"{label} is no longer inf: {got!r}"
+                assert np.isinf(got).all(), f"{label} is no longer inf: {got!r}"
             after = (recorder.fires, _eager.TRUNCATIONS, perimeter.FINDINGS)
         assert after == before, _LOUDER_THAN_THE_PAGE.format(
             label=f"one of them (tripwire/eager/perimeter {before} -> {after})",
             exc="a counter moving",
         )
-    finally:
-        _eager.disarm()
-        _tripwire.disarm()
 
-    # ...and the reason the other two cannot be the ones that catch it.
+    # ---- (3) ...and the reason the other two cannot be the ones that catch it.
     for dtype in ("float16", "bfloat16", "float32", "float64"):
         with pytest.raises(ValueError, match="not one of the integer dtypes"):
             stelling.intentional_wrap(1, dtype)
+
+    # ---- (4) AND THE PAGES SAY THE REMEDY. A reader who has just been told
+    #      that stelling does not watch this is owed the thing that does.
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    for rel in ("docs/overflow-tripwire.md", "docs/quickstart.md"):
+        page = (repo / rel).read_text(encoding="utf-8")
+        assert "-W error::RuntimeWarning" in page, (
+            f"{rel} no longer names `-W error::RuntimeWarning`. It is the "
+            f"remedy a reader ALREADY HAS for the host half above, and the "
+            f"sentence this test replaced withheld it by saying the case was "
+            f"seen by nothing."
+        )
+    # ...and the warning's own text, so a reader recognises it in their output.
+    # Whitespace-normalised because prose wraps and the phrase spans a line.
+    flowed = " ".join(
+        (repo / "docs/overflow-tripwire.md").read_text(encoding="utf-8").split()
+    )
+    assert "overflow encountered in cast" in flowed, (
+        "docs/overflow-tripwire.md no longer quotes the warning text this "
+        "test matches on, so a reader cannot recognise it in their own output"
+    )
 
 
 def test_the_refusal_names_the_line_that_wrote_the_literal():
@@ -854,6 +1176,16 @@ def _lowerable(x, n):
     emitted HLO is byte-identical across an armed boundary was carried by
     nobody. It is the row a reader is most likely to act on -- it is the one
     that says an armed run can be compared against a normal build.
+
+    **AND THE PLAIN SPELLING CANNOT REDDEN ON THE THING THE ROW IS ABOUT.**
+    ``as_text()`` -- the spelling the page quotes -- emits NO ``loc(`` at all
+    (measured: 0, in all four cells), so there is no ``source_info`` in that
+    text for the perimeter to perturb and the entry is identical for a reason
+    that has nothing to do with arming. ``as_text(debug_info=True)`` emits 144
+    on this harness and DIFFERS across the boundary. Both are lowered, both
+    are in the table, and :func:`test_the_stablehlo_rows_say_why_one_is_blind`
+    pins the ``loc(`` counts so that "identical" stays readable as "identical
+    because the text carries none of it".
     """
     assume_ok = (n >= 1) & (n <= 3)
 
@@ -869,6 +1201,18 @@ def _lowerable(x, n):
     return jnp.all(w <= 1e9) & assume_ok
 
 
+def _stablehlo(debug_info: bool) -> str:
+    """One lowering, one call site -- see :data:`PERTURBED_LOWERING`.
+
+    Every caller must invoke this from a FIXED source line when it intends to
+    compare two ``debug_info=True`` texts, because that text records the
+    caller's line number.
+    """
+    jax.clear_caches()
+    return jax.jit(_lowerable).lower(C32, jnp.int32(2)).as_text(
+        debug_info=debug_info)
+
+
 def _artefacts():
     jax.clear_caches()
     closed = trace(_rich_harness)
@@ -877,8 +1221,7 @@ def _artefacts():
     raw_eqns = "\n".join(repr((e.primitive, tuple(e.params))) for e in closed.jaxpr.eqns)
     jax.clear_caches()
     verdict = check(_rich_harness, vacuity_mode="inputs-only")
-    jax.clear_caches()
-    stablehlo = jax.jit(_lowerable).lower(C32, jnp.int32(2)).as_text()
+    stablehlo = _stablehlo(debug_info=False)
 
     def digest(obj):
         return hashlib.sha256(
@@ -919,6 +1262,18 @@ PERTURBED = (
     "str(jaxpr)",
     "eqns (raw repr, source_info included)",
 )
+
+#: The artefact that MOVES and cannot be measured through :func:`_artefacts`,
+#: which is why it has a tuple of its own rather than a row in ``PERTURBED``.
+#:
+#: ``as_text(debug_info=True)`` records the PYTHON CALL SITE of the lowering,
+#: caller frames included -- so two calls to ``_artefacts()`` written on
+#: different lines produce different text with nothing armed. Comparing those
+#: digests across an armed boundary would have "differed" for a reason that
+#: has nothing to do with the perimeter: a positive control satisfied by its
+#: own instrument. Measured: from ONE call site, disarmed and re-disarmed
+#: agree exactly, and armed does not.
+PERTURBED_LOWERING = ("StableHLO text (debug_info=True)",)
 
 
 def test_arming_is_observational_on_everything_the_hash_scope_covers():
@@ -965,6 +1320,174 @@ def test_the_source_info_perturbation_is_disclosed_rather_than_denied():
     assert "perimeter.py" in text, (
         "the extra frame should be the perimeter's wrapper, and naming it is "
         "what makes this a disclosure rather than a mystery"
+    )
+
+
+
+
+#: ``docs/overflow-tripwire.md``'s artefact table, row label -> the keys of
+#: :func:`_artefacts` that row is a claim about. Declared rather than derived
+#: because the page's labels are prose and the keys are not, and a mapping
+#: somebody has to edit is the point: **nothing in this tree read that table.**
+#: B22 fixed an instance of it -- ``StableHLO text`` was missing from
+#: ``IDENTICAL`` -- without adding the gate, and a row moving between the two
+#: halves stayed silent afterwards. Driven: flipping the StableHLO row to
+#: ``**DIFFERS**`` on the page left 124 tests green.
+_DOC_ARTEFACT_ROWS = (
+    ("`ClosedJaxpr.content_hash()`", ("content_hash",)),
+    ("`consts`", ("consts",)),
+    ("`to_dict(include_metadata=False)`", ("to_dict(include_metadata=False)",)),
+    ("the `eqns` of that metadata-free document", ("eqns (metadata-free)",)),
+    ("StableHLO text (`jit(...).lower().as_text()`)", ("StableHLO text",)),
+    ("`check()` status and notes", ("check status", "check notes")),
+    ("`to_dict(include_metadata=True)`", ("to_dict(include_metadata=True)",)),
+    ("`str(jaxpr)`", ("str(jaxpr)",)),
+    ("a raw `repr()` of an equation's params, which carries `source_info`",
+     ("eqns (raw repr, source_info included)",)),
+    ("StableHLO text with debug info "
+     "(`jit(...).lower().as_text(debug_info=True)`)",
+     ("StableHLO text (debug_info=True)",)),
+)
+
+_DOC_ARTEFACT_HEADER = "| artefact | armed == disarmed |"
+
+
+def test_the_pages_artefact_table_is_the_two_declared_halves():
+    """The page's ten rows against ``IDENTICAL`` and ``PERTURBED``.
+
+    Both directions, so neither side can move alone: every page row is
+    declared here and mapped to a measured key, every measured key is claimed
+    by exactly one page row, and each row's **identical**/**DIFFERS** cell has
+    to agree with which tuple its keys are in.
+
+    This is a table-vs-tuple comparison and not a re-drive: the drive is
+    :func:`test_arming_is_observational_on_everything_the_hash_scope_covers`
+    and :func:`test_the_source_info_perturbation_is_disclosed_rather_than_denied`,
+    which is where a WRONG tuple goes red. What goes red here is a page that
+    stops agreeing with the tuple -- the failure that had no instrument.
+    """
+    page = (pathlib.Path(__file__).resolve().parents[1]
+            / "docs" / "overflow-tripwire.md").read_text(encoding="utf-8")
+    assert _DOC_ARTEFACT_HEADER in page, (
+        "docs/overflow-tripwire.md no longer carries the artefact table this "
+        "test reads, under the header it is located by"
+    )
+    body = page.split(_DOC_ARTEFACT_HEADER, 1)[1].split("\n\n", 1)[0]
+    rows = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith("|") or set(line) <= set("|- "):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        assert len(cells) == 2, line
+        rows.append(cells)
+
+    assert len(rows) == len(_DOC_ARTEFACT_ROWS), (
+        f"the page's artefact table has {len(rows)} rows and this test "
+        f"declares {len(_DOC_ARTEFACT_ROWS)}. A row added there is a row "
+        f"declared here, against a key of _artefacts()."
+    )
+
+    claimed: set[str] = set()
+    for (label, keys), (page_label, verdict) in zip(_DOC_ARTEFACT_ROWS, rows):
+        assert label == page_label, (
+            f"row order moved: this test declares {label!r} where the page's "
+            f"row reads {page_label!r}"
+        )
+        halves = {"**identical**": IDENTICAL,
+                  "**DIFFERS**": PERTURBED + PERTURBED_LOWERING}
+        assert verdict in halves, (
+            f"the page's cell for {label!r} reads {verdict!r}; this test knows "
+            f"only {sorted(halves)}"
+        )
+        for key in keys:
+            assert key in halves[verdict], (
+                f"the page says {label!r} is {verdict} across an armed "
+                f"boundary, and {key!r} is declared in "
+                f"{'IDENTICAL' if key in IDENTICAL else 'a DIFFERS'} tuple. One of "
+                f"the two is now wrong, and this test exists because moving a "
+                f"row between the halves used to be silent."
+            )
+            claimed.add(key)
+
+    measured = set(IDENTICAL) | set(PERTURBED) | set(PERTURBED_LOWERING)
+    assert claimed == measured, (
+        f"artefacts measured but claimed by no row of the page: "
+        f"{sorted(measured - claimed)}; rows claiming artefacts that are not "
+        f"measured: {sorted(claimed - measured)}"
+    )
+
+
+def test_the_stablehlo_rows_say_why_one_is_blind():
+    """``as_text()`` is identical because it carries no `loc(` -- measured.
+
+    **THE PLAIN ROW IS A CONTROL THAT CANNOT FAIL, AND THE PAGE CALLED IT THE
+    ROW A READER IS MOST LIKELY TO ACT ON.** ``jit(...).lower().as_text()`` --
+    the spelling the page quotes -- emits **no** ``loc(`` at all, so the
+    perimeter's extra ``source_info`` frame has nowhere to appear in it and
+    the ``IDENTICAL`` entry could never redden on the perturbation it exists
+    to disclose. With ``debug_info=True`` the same lowering carries 144 of
+    them and the text **DIFFERS** armed against disarmed.
+
+    So both are in the page's table now, and the reason is pinned rather than
+    reasoned about: if a future jax starts emitting locations from the plain
+    spelling, the first assertion here goes red and the page's first StableHLO
+    row is what has to change -- before somebody diffs an armed build against
+    a normal one and gets a wrong answer.
+
+    **THREE WINDOWS, FROM ONE CALL SITE.** ``disarmed``/``armed``/``again``
+    are all lowered on the same source line, because ``debug_info=True``
+    records the caller's line and two calls written on different lines differ
+    with nothing armed at all. The ``again`` window is what makes the middle
+    one a measurement of the perimeter: it has to come back.
+
+    Control, so that "no ``loc(``" is not read as "the wrapper was not live":
+    the guard sees checks during the lowering itself.
+    """
+    before = perimeter.snapshot().get("checks", 0)
+    texts = {}
+    for state in ("disarmed", "armed", "again"):
+        window = (perimeter.armed(("tracer",)) if state == "armed"
+                  else contextlib.nullcontext(None))
+        with window as status:
+            if state == "armed":
+                assert status.armed, status.explanation
+            texts[state] = (_stablehlo(False), _stablehlo(True))
+    after = perimeter.snapshot().get("checks", 0)
+
+    plain = {state: v[0] for state, v in texts.items()}
+    debug = {state: v[1] for state, v in texts.items()}
+
+    assert plain["disarmed"].count("loc(") == 0, (
+        f"jit(...).lower().as_text() now emits "
+        f"{plain['disarmed'].count('loc(')} loc( entries. It emitted none, "
+        f"which is the whole reason its row is IDENTICAL; if it carries "
+        f"source_info now, that row is a claim about arming again and has to "
+        f"be re-measured."
+    )
+    assert debug["disarmed"].count("loc(") > 0, (
+        "as_text(debug_info=True) emits no loc( either, so this file no "
+        "longer has a positive control for the StableHLO rows at all"
+    )
+    assert plain["armed"] == plain["disarmed"], (
+        "the plain StableHLO text moved across an armed boundary; the page's "
+        "first StableHLO row says it does not"
+    )
+    assert debug["armed"] != debug["disarmed"], (
+        "the HLO with debug info no longer moves across an armed boundary. "
+        "That would be good news and it is not a silent improvement: "
+        "docs/overflow-tripwire.md's second StableHLO row says it DIFFERS."
+    )
+    assert debug["again"] == debug["disarmed"], (
+        "the debug-info HLO did not come back after disarming, so the "
+        "difference above is not attributable to the perimeter. Every "
+        "lowering here has to be on ONE source line -- that text records the "
+        "caller's line number."
+    )
+    assert after > before, (
+        "no guard check ran during the lowering, so a 'no loc(' reading above "
+        "would be about a perimeter that was not live rather than about the "
+        "text"
     )
 
 
@@ -1655,21 +2178,23 @@ def test_all_three_instruments_arm_together_in_either_order():
     """
     for order in (("perimeter", "tripwire"), ("tripwire", "perimeter")):
         statuses = {}
-        try:
-            for which in order:
-                if which == "perimeter":
-                    statuses["perimeter"] = perimeter.arm(perimeter.FACES, owner="A")
-                else:
-                    status, _rec = _tripwire.arm()
-                    statuses["tripwire"] = status
-            statuses["eager"] = _tripwire.arm_eager()
-            assert statuses["perimeter"].armed, statuses["perimeter"].explanation
-            assert statuses["tripwire"].armed, statuses["tripwire"].explanation
-            assert statuses["eager"].armed, statuses["eager"].explanation
-        finally:
-            _tripwire.disarm_eager()
-            _tripwire.disarm()
-            perimeter.disarm("A")
+        # `borrowed_*` and not bare arm/disarm: an unconditional `disarm()`
+        # here DETACHES a session-armed tripwire. See `conftest.borrowed_tripwire`.
+        with contextlib.ExitStack() as stack:
+            try:
+                for which in order:
+                    if which == "perimeter":
+                        statuses["perimeter"] = perimeter.arm(
+                            perimeter.FACES, owner="A")
+                    else:
+                        status, _rec = stack.enter_context(borrowed_tripwire())
+                        statuses["tripwire"] = status
+                statuses["eager"] = stack.enter_context(borrowed_eager())
+                assert statuses["perimeter"].armed, statuses["perimeter"].explanation
+                assert statuses["tripwire"].armed, statuses["tripwire"].explanation
+                assert statuses["eager"].armed, statuses["eager"].explanation
+            finally:
+                perimeter.disarm("A")
 
 
 def test_the_probe_the_tripwire_attributes_on_is_the_one_this_perimeter_avoids():
@@ -1948,9 +2473,8 @@ def test_the_eager_door_is_open_with_everything_else_armed_and_this_closes_it():
     operation from C++ without entering Python would leave this face blind
     while every arm-time check still passed.
     """
-    tripwire_status, _rec = _tripwire.arm()
-    eager_status = _tripwire.arm_eager()
-    try:
+    with borrowed_tripwire() as (tripwire_status, _rec), \
+            borrowed_eager() as eager_status:
         assert tripwire_status.armed, tripwire_status.explanation
         assert eager_status.armed, eager_status.explanation
 
@@ -1986,9 +2510,6 @@ def test_the_eager_door_is_open_with_everything_else_armed_and_this_closes_it():
                 )
                 # ...and a literal that survives is still not refused
                 assert outcome(lambda: (x16 + 3)[0]) == ("value", 3)
-    finally:
-        _tripwire.disarm_eager()
-        _tripwire.disarm()
 
 
 def test_pow_is_excluded_and_rpow_is_kept_through_the_REAL_slots():

@@ -125,10 +125,14 @@ And a third dial, for a narrowing neither of those two can see at all:
 a comparison against a float array need not be out of *range* to be destroyed
 — `x <= 2**31 - 1` on `float32` runs as `x <= 2147483648.0`, one greater than
 what you wrote, and it is a VERIFIED today. (It can also be destroyed by
-overflowing: `x <= 100000` on `float16` runs as `x <= inf`, silently, and this
-dial refuses that too. That is the only float loss any of the three watches,
-and it is about the literal you wrote — a value that is already a float and
-overflows is outside all three.) This raises
+overflowing: `x <= 100000` on `float16` runs as `x <= inf` — silently when it
+runs eagerly — and this dial refuses that too, on `float16` and on the seven
+`float8_*` formats, four of which run as `nan` and invert the comparison to
+`False`. Those are losses of the literal you wrote, which is the only kind any
+of the three watches: a value the program COMPUTED and overflowed is outside
+all three, and where its narrowing happens on the host numpy still warns, so
+`-W error::RuntimeWarning` catches that part and nothing catches the rest.)
+This raises
 `stelling.NarrowingError` at the line that wrote the literal. Off by default,
 and neither dial above turns it on.
 
