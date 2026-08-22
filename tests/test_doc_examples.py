@@ -19,17 +19,18 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                57
-      marked illustrative — not run                 14
+    ```python blocks                                58
+      marked illustrative — not run                 15
       EXECUTED (exit 0 required)                    43
         marked run-only — output not compared        3
         OUTPUT COMPARED against a fence             40
-    plain ``` fences                                85
+    plain ``` fences                                86
       consumed as an example's claimed output       40
-      HAND-WRITTEN, compared to nothing             45
+      HAND-WRITTEN, compared to nothing             46
+
 So the claim this file earns is: *every runnable example runs, and 40 of
 the 43 have their stdout compared byte for byte after a narrow
-normalisation.* The 45 unattached fences — a render pasted into prose, a
+normalisation.* The 46 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
 
@@ -173,6 +174,13 @@ EXPECTED_INVENTORY = {
     # the eager detector armed it raises by design, and with it off it prints
     # nothing, so there is no output to compare either way; it is a record of
     # what jax does, which is what `illustrative` means.
+    #
+    # B17 added one, illustrative for the same reason one level over: the
+    # narrowing perimeter's section shows a harness whose comparison threshold
+    # does not exist in the program jax runs. With the perimeter armed it
+    # raises by design and with it off it prints nothing, so there is no
+    # output to compare in either direction.
+    #
     # B19 on `docs/preconditions.md`: THREE more, and two of them exist
     # because a whole shipped layer had no route from the docs. That page's
     # out-of-scope list welded a built layer to an unbuilt one --
@@ -251,8 +259,8 @@ EXPECTED_INVENTORY = {
     # booleans, not a render, because the normaliser only rewrites a source-info
     # line that begins the line and a fence carrying an inline temp path could
     # not be byte-compared.
-    "python_blocks": 57,
-    "illustrative": 14,
+    "python_blocks": 58,
+    "illustrative": 15,
     "executed": 43,
     "run_only": 3,
     "compared": 40,
@@ -278,8 +286,15 @@ EXPECTED_INVENTORY = {
     # which is the gap that program has in jax's DEFAULT configuration.
     # Measured, hand-written, attached to nothing;
     # `tests/test_tripwire_eager.py` re-drives every line of it.
-    "plain_fences": 85,
-    "plain_unattached": 45,
+    #
+    # B17 fixup added one, same page and same reason: the narrowing
+    # perimeter's own section now quotes what the dial reports over THIS
+    # repository's suite -- armed, the denominator, the permitted count and
+    # the pass line. Hand-written from a measured run and attached to
+    # nothing; `tests/test_narrowing_perimeter.py` and the whole-suite drive
+    # in the commit message are what hold the figures down.
+    "plain_fences": 86,
+    "plain_unattached": 46,
 }
 
 _MARKER = re.compile(r"<!--\s*doc-example:\s*(illustrative|run-only)\s*-->")
@@ -1153,8 +1168,8 @@ BLIND_SPOT = {
               "one numpy-vs-lax sign reading that tests/test_tripwire_eager "
               "and the norm's own instance re-drive"),
     "overflow-tripwire.md": (
-        4, 9, "B17's page. Its own module comment above EXPECTED_INVENTORY "
-              "records each of these; not re-decided here"),
+        5, 10, "B17's page. Its own module comment above EXPECTED_INVENTORY "
+               "records each of these; not re-decided here"),
     "preconditions.md": (
         1, 0, "READER-SUPPLIES: the LibmBudget example takes the reader's own "
               "profile name and measurement"),

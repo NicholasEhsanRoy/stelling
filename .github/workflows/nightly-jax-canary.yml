@@ -48,6 +48,19 @@
 #      move again. An install that cannot reach it is infra, not signal, and
 #      takes a distinct non-failing path that says so.
 #
+# THREE INSTRUMENTS, ONE SCRIPT, ONE PAGE. `tripwire_canary.py` arms the
+# const-fold tripwire, the eager construction-site detector AND the narrowing
+# perimeter, drives a live control for each in both directions, and asks the
+# one displacement question while all three are live. The perimeter adds a
+# fourth kind of row to the page: not "did the hook work" but "do the facts it
+# RESTS ON still hold" — the type is still a heap type, it still owns the
+# operator slots, `setattr` still rebinds them, a WARM operation still enters
+# Python, and no in-place slot has appeared. Those are positive assertions
+# about this jax, so a release that takes one away reddens a row instead of
+# passing quietly, which is the direction an alarm about upstream drift has to
+# fail in. Two canaries on two schedules would be two pages to read and one of
+# them eventually stops being read.
+#
 # The jax version and the const-fold rule's sha1 go into
 # `$GITHUB_STEP_SUMMARY` on every run, red or green, so a failure is
 # diagnosable from the summary page without re-running anything. The hash is

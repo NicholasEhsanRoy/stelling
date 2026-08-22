@@ -88,18 +88,25 @@ offence always is. The controls for that direction are
 WHAT IT WATCHES — the inventory, and it is enumerated
 ────────────────────────────────────────────────────────────────────────────
 
-:data:`ENTRIES`. Four, named by the incident: the identity of jax's registered
-const-fold rule, the tripwire's installation record, ``jax_enable_x64``, and
-the ``STELLING_*`` / ``JAX_*`` environment.
+:data:`ENTRIES`. Five, named by the incident: the identity of jax's registered
+const-fold rule, the tripwire's installation record, the dunder perimeter's
+installation, ``jax_enable_x64``, and the ``STELLING_*`` / ``JAX_*``
+environment.
+
+The perimeter entry is the newest and it was added after the fact, which is
+the lesson rather than the footnote: 0.2.0's third instrument rebinds 39
+dunder slots on two foreign C-extension types and registers owners in a
+module-global list, and none of that was watched by anything here for the
+whole of the batch that built it.
 
 The environment entry is a **prefix rule and not a list**, on purpose. Every
 other inventory in this repository that enumerated its own domain has had to
 be widened after something outside it went unwatched; a key added to
 ``src/stelling`` tomorrow is watched here today without anybody remembering to
-come back. The other three have no such spelling and are enumerated.
+come back. The other four have no such spelling and are enumerated.
 
 READERS TOLERATE ABSENT DEPENDENCIES. The zero-dep lane runs this too: with no
-jax installed the three jax-shaped readers return :data:`ABSENT`, which is a
+jax installed the four jax-shaped readers return :data:`ABSENT`, which is a
 value like any other and compares equal to itself, so the guard is live there
 and simply has less to watch. A reader that *raises* returns
 :class:`Unreadable` carrying the exception text rather than a bare sentinel —
@@ -128,6 +135,13 @@ against what this suite actually mutates:
   replaced with a plain assignment in a test body is invisible here).
 * **The tripwire recorder's CONTENTS.** The installation record's identity is
   watched; the counts inside a live recorder are not.
+* **The dunder perimeter's COUNTERS**, for the same reason one instrument
+  over: ``perimeter.CHECKS``, ``FINDINGS``, ``INTERNAL_ERRORS`` and
+  ``PERMITTED`` move on every guarded operation any test performs, so they are
+  a running total rather than a fingerprint. What ``perimeter:installed``
+  watches is the installation, the owners and the live slot bindings — the
+  state whose staleness makes the instrument lie. ``prop_guard._TARGET_CACHE``
+  is watched only for keys memoised to ``None``; its size grows legitimately.
 * **The warnings filter registry, logging configuration, the ``random`` and
   ``numpy.random`` global generators, the process CWD, open file descriptors,
   ``linecache``, and hypothesis's own database and profile registration.**
@@ -203,6 +217,7 @@ exemption is a licence nobody is using pointed at nothing.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from typing import Callable
 
@@ -307,6 +322,121 @@ def _read_tripwire_installation() -> object:
     )
 
 
+def _binding(owner_type, slot, original, wrapper) -> str:
+    """Which of the three known objects is live on ``slot`` right now."""
+    live = owner_type.__dict__.get(slot)
+    if live is wrapper:
+        return "wrapper"
+    if live is original:
+        return "original"
+    return "foreign"
+
+
+def _read_perimeter() -> object:
+    """The dunder perimeter's installation, its owners, and the LIVE bindings.
+
+    THIS BATCH REBINDS DUNDER SLOTS ON TWO FOREIGN C-EXTENSION TYPES, which is
+    exactly the class of process-global state this inventory exists to name,
+    and it had no entry until this fixup: not `perimeter._installed`, not
+    `_owners`, not the 39 live slot bindings, and not the predicate's lazy
+    caches. `ci.yml`'s `random-order` lane annotates a shuffled failure the
+    guard did not name as "state outside that inventory", so an uninventoried
+    perimeter made that annotation say the wrong thing about the most
+    order-sensitive thing in the tree.
+
+    THE LIVE BINDING AND THE RECORD, both, and it is the same separation
+    `_read_tripwire_installation` makes for the same reason: a record cleared
+    while the object stays live, and an object replaced while the record still
+    names it, are two different incidents and each is invisible in the other's
+    reading.
+
+    WHICH IDENTITY IS READ IS THE WHOLE DESIGN OF THIS ENTRY, and reading the
+    wrong one makes it fire on every well-behaved test. The WRAPPER is a fresh
+    closure on every `arm()`, so a test that disarms and re-arms -- or a
+    fixture that hands a session's hold back the way
+    `tests/test_narrowing_perimeter.py::_isolate` does -- produces a new
+    wrapper object for an identical state, and `id(wrapper)` would report 58
+    offences in that one file alone. What is load-bearing is the SAVED
+    ORIGINAL: it is jax's own function, it is what `disarm()` puts back, and a
+    re-arm that captured the wrong one is the defect
+    `test_arm_disarm_arm_returns_to_the_original_object` exists for. So the
+    original is read by identity and the live attribute is read as WHICH of
+    the two it is -- `wrapper`, `original` or `foreign` -- which is exactly
+    the three states `live_check()` separates and is stable under a
+    restore-to-equivalent.
+
+    THE TYPES ARE READ OFF THE INSTALLATION RECORD RATHER THAN LOCATED. This
+    reader runs before and after every test in the session, and
+    `adapter.perimeter_locate("tracer")` costs a fresh `make_jaxpr` -- roughly
+    9,000 traces over a full suite, plus a trace-cache entry each. A face that
+    is not installed reads `None`, which is a value like any other and is
+    exactly what the transition into and out of armed has to look like.
+
+    AND THE PREDICATE'S LAZY CACHES, because they are how this instrument goes
+    blind without moving a single slot: a test that caches a STAND-IN into
+    `_JNP`/`_ML`/`_JAX` -- measured, and disclosed in
+    `tests/test_tripwire_record.py::_stub_jax` -- leaves every later
+    `classify()` declining with an internal error and the perimeter dead for
+    the rest of the process.
+
+    WHAT IS READ THERE IS "IS ANYTHING FOREIGN IN IT", NOT THE IDENTITIES,
+    and that is measured rather than tidy. These three are lazily bound, so
+    `None -> the real module` is a legitimate one-time transition that
+    whichever test first touches the guard performs; an entry reading `id()`
+    reports that test as a polluter, which is how an instrument becomes
+    something people suppress. Driven, before the reading was narrowed::
+
+        perimeter:installed: (..., (10750112, 10750112, 10750112), ...)
+                          -> (..., (129825609081344, ...), ...)
+
+    -- three `id(None)`s becoming three modules, on a planted test that armed
+    and released cleanly. So each cache is compared against what `sys.modules`
+    holds for it and only a MISMATCH is named: unbound and correctly-bound are
+    the same reading, and a `SimpleNamespace` in `_JNP` is not.
+
+    `_TARGET_CACHE`'s contents grow legitimately as new dtypes are seen, so its
+    size is NOT read either; what is read is the set of keys memoised to
+    `None`, which is a permanent blindness on that key and can only arrive
+    from a fault the module has since fixed (`prop_guard.py` edit 5).
+    """
+    from stelling import _optional
+
+    if not _optional.available("jax"):
+        return ABSENT
+    from stelling._tripwire import perimeter, prop_guard
+
+    faces = []
+    for face in perimeter.FACES:
+        entry = perimeter._installed.get(face)
+        if entry is None:
+            faces.append((face, None))
+            continue
+        owner_type = entry["type"]
+        faces.append((
+            face,
+            f"{owner_type.__module__}.{owner_type.__qualname__}",
+            tuple(
+                (slot, id(original), _binding(owner_type, slot, original, wrapper))
+                for slot, (original, wrapper) in sorted(entry["slots"].items())
+            ),
+        ))
+    return (
+        tuple(faces),
+        tuple(id(held) for held in perimeter._owners),
+        tuple(
+            name
+            for name, cached, module in (
+                ("_JNP", prop_guard._JNP, "jax.numpy"),
+                ("_ML", prop_guard._ML, "ml_dtypes"),
+                ("_JAX", prop_guard._JAX, "jax"),
+            )
+            if cached is not None and cached is not sys.modules.get(module)
+        ),
+        tuple(sorted(k for k, v in prop_guard._TARGET_CACHE.items() if v is None)),
+        tuple(sorted(prop_guard.UNKNOWN_SLOTS)),
+    )
+
+
 def _read_jax_enable_x64() -> object:
     from stelling import _optional
 
@@ -351,6 +481,12 @@ ENTRIES: tuple[Entry, ...] = (
         _guarded(_read_tripwire_installation),
         "`_adapter_jax._installed` and `._detached` — which keys each record "
         "holds and which rule objects they name",
+    ),
+    Entry(
+        "perimeter:installed",
+        _guarded(_read_perimeter),
+        "the dunder perimeter's faces, the type and LIVE binding of each of "
+        "its slots, its owner list, and the predicate's lazy module caches",
     ),
     Entry(
         "jax:enable_x64",

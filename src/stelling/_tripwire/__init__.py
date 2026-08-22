@@ -56,6 +56,14 @@ FAILURE_CODES = (
     "no-site",
     "signature-drift",
     "route-blind",
+    # The dunder perimeter's own codes (Mode 3). In THIS tuple for the reason
+    # the eager detector's are: the tuple is advertised as the complete list
+    # of "not armed, and here is why" and a user greps it. `not-invoked` and
+    # `cries-wolf` are shared with the const-fold tripwire -- the same two
+    # failures, asked of a different hook -- and are not repeated.
+    "no-type",
+    "no-slot",
+    "no-face",
 )
 
 _WHAT_STILL_WORKS = (
@@ -158,6 +166,24 @@ _EXPLAIN = {
         "route is what a jax release actually produces; keeping the other "
         "routes and losing this one quietly is not a trade this tool makes "
         "on your behalf, so it disables itself and names the route."
+    ),
+    # --- the dunder perimeter (Mode 3) ---
+    "no-type": (
+        "the type whose operator slots the perimeter rebinds could not be "
+        "found through any public route, or was found and no longer owns "
+        "them. The perimeter asks jax for an instance and reads its class "
+        "rather than naming one, so this means a jax release restructured "
+        "the face -- and a tool that guessed instead would arm over nothing."
+    ),
+    "no-slot": (
+        "the type is there and does not carry one of the operator slots the "
+        "perimeter installs. Rebinding the rest and saying nothing would "
+        "leave a hole in a perimeter whose whole value is that it has none."
+    ),
+    "no-face": (
+        "the perimeter was asked for a face it does not have. That is a "
+        "caller error rather than a jax one, and it refuses rather than "
+        "arming a different face from the one it was asked for."
     ),
 }
 
@@ -495,7 +521,7 @@ def eager_live_check() -> str:
 def displaced() -> tuple[str, ...]:
     """The armed hooks that are no longer live. ``()`` when none are.
 
-    ONE INSTRUMENT, BOTH HOOKS, and B15's audit is why it exists at all:
+    ONE INSTRUMENT, EVERY HOOK, and B15's audit is why it exists at all:
     ``live_check() == "foreign-patch"`` is a fourth way the trace gate's watch
     goes partial, and the gate consulted none of it. Rebinding the const-fold
     registry entry after arming leaves the recorder's identity unchanged and
@@ -505,7 +531,7 @@ def displaced() -> tuple[str, ...]:
     Pre-existing, and byte-identical on ``main`` before this batch.
 
     See :func:`_adapter_jax.displacement_check` for the per-hook detail and for
-    why one instrument covers both.
+    why one instrument covers all three.
     """
     try:
         from stelling._tripwire import _adapter_jax as adapter
@@ -513,3 +539,81 @@ def displaced() -> tuple[str, ...]:
         return adapter.displaced()
     except Exception:  # noqa: BLE001
         return ()
+
+
+# ---------------------------------------------------------------------------
+# Mode 3: the dunder perimeter.
+#
+# A THIRD, INDEPENDENT INSTRUMENT, and the independence is the same deliberate
+# thing it is between Modes 1 and 2. This one attaches to the operator slots a
+# Python integer literal passes through on its way into jax, and it is the only
+# one of the three that can see INEXACTNESS rather than only integer range:
+# `x <= 2**31 - 1` on a float32 array is not out of range, it is not
+# representable, and the const-fold tripwire and the eager detector are both
+# blind to it by construction. `perimeter.py` carries the argument, the slot
+# lists, the session-scoped arm/disarm and what the instrument does not see.
+#
+# These five are the same lazy-import façade the other two instruments' entry
+# points are, for the same reason: importing this package must not import jax.
+# `perimeter.py` itself is standard-library-only at module scope -- it binds the
+# predicate, which needs numpy, at arm time -- because `stelling/__init__.py`
+# exports its exception class and the zero-dependency core has no numpy.
+# ---------------------------------------------------------------------------
+
+
+def arm_perimeter(faces=None, owner=None):
+    """Arm the dunder perimeter on every face. Returns a :class:`Status`.
+
+    Never raises.
+
+    ``owner`` is the SESSION SCOPE: pass the object whose lifetime the arming
+    belongs to (the pytest plugin passes the session's ``Config``), and pass
+    the same object to :func:`disarm_perimeter`. Two callers that are not the
+    same session must pass different owners, which is what stops a nested
+    in-process session from unhooking its parent.
+    """
+    from stelling._tripwire import perimeter
+
+    # BOTH FACES BY DEFAULT, and `None` rather than a literal tuple so that
+    # the default cannot drift out of step with `perimeter.FACES`: the two
+    # faces close different doors and a caller who asked for "the perimeter"
+    # asked for the perimeter.
+    return perimeter.arm(perimeter.FACES if faces is None else faces, owner=owner)
+
+
+def disarm_perimeter(owner=None) -> str:
+    """Release ``owner``'s hold on the perimeter. A code, never an exception.
+
+    ``restored`` only when it was the last hold; ``still-armed`` when somebody
+    else is still holding, which is the whole point of the token.
+    """
+    from stelling._tripwire import perimeter
+
+    return perimeter.disarm(owner)
+
+
+def perimeter_live_check() -> str:
+    """``armed``, ``detached`` or ``foreign-patch`` for the perimeter's slots."""
+    from stelling._tripwire import perimeter
+
+    return perimeter.live_check()
+
+
+def perimeter_snapshot() -> dict:
+    """The perimeter's counters, as primitives. See :func:`perimeter.snapshot`."""
+    from stelling._tripwire import perimeter
+
+    return perimeter.snapshot()
+
+
+def perimeter_error():
+    """The exception class the perimeter raises, without importing jax.
+
+    A caller that wants to write ``except`` around an armed region needs the
+    type; importing ``perimeter`` for it is fine (it imports no jax) and this
+    is the spelling that says so. ``stelling.NarrowingError`` is the same
+    class, re-exported where a user will look for it.
+    """
+    from stelling._tripwire import perimeter
+
+    return perimeter.NarrowingError

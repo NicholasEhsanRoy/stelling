@@ -1016,7 +1016,9 @@ def _stub_jax(monkeypatch, probe):
     """Give `main()` a jax boundary in a lane that has no jax.
 
     ``make_jaxpr`` really calls the shipped ``_probe.over``, so the probe is
-    the program it is everywhere else; only the tracer is a stand-in.
+    the program it is everywhere else; only the tracer is a stand-in. The same
+    stand-in serves the perimeter's control, whose probes take an array and
+    compare it against an int -- ``float32`` is here for those.
     """
     import sys
     import types
@@ -1033,17 +1035,37 @@ def _stub_jax(monkeypatch, probe):
     fake = types.ModuleType("stelling._jax_compat")
     fake.jax = types.SimpleNamespace(make_jaxpr=lambda fn: lambda *a, **k: fn(*a, **k))
     fake.jnp = types.SimpleNamespace(
-        zeros=lambda shape, dtype: _Array(), int8="int8",
-        full=lambda shape, value, dtype: _Array(),
+        zeros=lambda shape, dtype: _Array(), int8="int8", int16="int16",
+        float32="float32", full=lambda shape, value, dtype: _Array(),
     )
     monkeypatch.setitem(sys.modules, "stelling._jax_compat", fake)
     monkeypatch.setattr(stelling, "_jax_compat", fake, raising=False)
 
+    # AND THE PREDICATE'S OWN MEMOS, PUT BACK ON THE WAY OUT. `prop_guard`
+    # caches the modules it lazily imports and memoises promotion targets, and
+    # a lookup that happens inside this window caches THE FAKE -- permanently,
+    # because those are module globals and `monkeypatch` knows nothing about
+    # them. Measured: one `classify()` reaching `_x64()` here left
+    # `prop_guard._JAX` bound to a `SimpleNamespace` with no `.config`, so
+    # every later call in the process declined with an internal AttributeError
+    # and the perimeter was silently dead for the rest of the session. It did
+    # not show up in file order -- `test_narrowing_perimeter.py` sorts before
+    # this file -- which is exactly the shape a shuffled lane exists to catch.
+    # Re-setting each to its current value records it, and teardown restores
+    # it whatever this window did.
     if probe == "raises":
         def _boom(a):
             raise RuntimeError("FORCED: the probe could not execute")
 
         monkeypatch.setattr(_probe, "over", _boom)
+
+    try:
+        from stelling._tripwire import prop_guard
+    except Exception:  # noqa: BLE001 - the zero-dep lane has no numpy
+        return
+    for name in ("_JNP", "_ML", "_JAX"):
+        monkeypatch.setattr(prop_guard, name, getattr(prop_guard, name))
+    monkeypatch.setattr(prop_guard, "_TARGET_CACHE", dict(prop_guard._TARGET_CACHE))
 
 
 #: The eager detector's states this battery can put the canary in, and what
@@ -1108,6 +1130,83 @@ def _stub_eager(monkeypatch, choice):
     return status
 
 
+#: The DUNDER PERIMETER's states this battery can put the canary in. Same
+#: shape and same argument as :data:`_EAGER_STATES`, one instrument over:
+#: what is chosen is the status `arm_perimeter()` hands back, what the live
+#: control does in each direction, which structural facts moved, and whether
+#: the promotion identity drifted. `_perimeter_reasons` -- the decision -- is
+#: the shipped function and is never replaced.
+#:
+#: THE FACTS AND THE PROMOTION IDENTITY ARE STUBBED AT THE MEASUREMENT, and
+#: that is a real limit of this table rather than a hidden one: those two rows
+#: ask jax questions, and this file's copy runs in the lane that has no jax.
+#: `tests/test_narrowing_perimeter.py` drives the real `_perimeter_facts` and
+#: `_perimeter_promotion` against a real jax, with faults injected into each;
+#: this drives the decision they feed.
+_PERIMETER_STATES = {
+    "clean": ("armed", "refuse", "allow", (), ()),
+    "not-armed": ("no-type", "refuse", "allow", (), ()),
+    "did-not-fire": ("armed", "allow", "allow", (), ()),
+    "cries-wolf": ("armed", "refuse", "refuse", (), ()),
+    "raised": ("armed", "raise-other", "allow", (), ()),
+    "facts-moved": ("armed", "refuse", "allow", ("Py_TPFLAGS_HEAPTYPE",), ()),
+    "promotion-drift": ("armed", "refuse", "allow", (),
+                        ("int16/add: says int16, jax uses int32",)),
+}
+
+
+def _stub_perimeter(monkeypatch, canary, choice):
+    """Force the perimeter half of the canary into one of :data:`_PERIMETER_STATES`."""
+    import types
+
+    from stelling import _tripwire
+    from stelling._tripwire import Status, _probe
+    from stelling._tripwire.perimeter import NarrowingError
+
+    code, over, under, moved, drift = _PERIMETER_STATES[choice]
+    status = Status(code=code, jax_version="0.11.0")
+
+    def _behave(kind):
+        def probe(x):
+            if kind == "refuse":
+                # A STAND-IN FINDING and not `prop_guard.Finding`: that
+                # module imports numpy, and this file's copy runs in the lane
+                # that has none. The canary reads three fields off it, which
+                # is what this carries.
+                raise NarrowingError(
+                    types.SimpleNamespace(
+                        reason="inexact", slot="le", literal=2**31 - 1,
+                        narrowed_to=2147483648.0, target_dtype="float32",
+                    ),
+                    file="probe.py", line=1, func="compare",
+                    message="stelling: 2147483647 is not exactly representable",
+                )
+            if kind == "raise-other":
+                raise RuntimeError("FORCED: the perimeter control could not run")
+            return None
+
+        return probe
+
+    monkeypatch.setattr(_tripwire, "arm_perimeter", lambda **kw: status)
+    monkeypatch.setattr(_tripwire, "disarm_perimeter", lambda owner=None: "restored")
+    monkeypatch.setattr(_probe, "compare_over", _behave(over))
+    monkeypatch.setattr(_probe, "compare_under", _behave(under))
+    # BOTH FACES' PROBES, because the canary drives both and a stub that
+    # patched only the traced pair would leave the eager one running against
+    # the stand-in tracer -- which is not a jax array and does not add.
+    monkeypatch.setattr(_probe, "arith_over", _behave(over))
+    monkeypatch.setattr(_probe, "arith_under", _behave(under))
+    monkeypatch.setattr(
+        canary, "_perimeter_facts",
+        lambda face, located: ([(f"{face}: type", "PASS stub")], list(moved)),
+    )
+    monkeypatch.setattr(
+        canary, "_perimeter_promotion",
+        lambda sample=None: (f"stubbed, {len(drift)} disagree", list(drift)),
+    )
+    return status
+
+
 class _Run:
     """One driven run of the canary, as its consumers see it."""
 
@@ -1132,7 +1231,8 @@ class _Run:
         return (
             f"<exit {self.code} reasons={self.reasons} "
             f"control={self.rows.get('control state')!r}/"
-            f"{self.rows.get('control report')!r}>"
+            f"{self.rows.get('control report')!r} "
+            f"perimeter={self.rows.get('perimeter control state')!r}>"
         )
 
 
@@ -1140,7 +1240,7 @@ def _drive_canary(
     capsys, tmp_path, *,
     require=False, armed=True, hash_state="as-tested",
     probe="runs", findings="one", narrowings="readable",
-    summary="writable", eager="clean",
+    summary="writable", eager="clean", perimeter="clean",
 ):
     """Run `main()` once with every input chosen, and collect what it emitted.
 
@@ -1163,13 +1263,14 @@ def _drive_canary(
             mp, capsys, tmp_path, require=require, armed=armed,
             hash_state=hash_state, probe=probe, findings=findings,
             narrowings=narrowings, summary=summary, eager=eager,
+            perimeter=perimeter,
         )
 
 
 def _drive_canary_once(
     monkeypatch, capsys, tmp_path, *,
     require, armed, hash_state, probe, findings, narrowings, summary,
-    eager="clean",
+    eager="clean", perimeter="clean",
 ):
     import sys
 
@@ -1179,6 +1280,7 @@ def _drive_canary_once(
     canary = _canary()
     _stub_jax(monkeypatch, probe)
     _stub_eager(monkeypatch, eager)
+    _stub_perimeter(monkeypatch, canary, perimeter)
 
     hashes = {
         "as-tested": ("abc", "abc"),
@@ -1346,6 +1448,83 @@ _CANARY_TABLE = [
 ]
 
 
+#: The perimeter's own rows. A SECOND TABLE and not eight more columns on the
+#: first, because the first is 25 rows about two instruments and adding a
+#: third column to every one of them would have meant re-typing 25 expected
+#: values that no perimeter state moves. Same contract, same three questions:
+#: did it attach, did its live control behave in BOTH directions, and do the
+#: facts it rests on still hold.
+#:
+#: (name, kwargs, exit, reason codes, perimeter control state)
+_PERIMETER_TABLE = [
+    ("clean", {}, 0, [], "fired"),
+    ("clean+require", {"require": True}, 0, [], "fired"),
+    # ARMING IS `--require`'s QUESTION AND THE CONTROL'S IS NOT, exactly as
+    # for the other two: a human running this by hand against a jax that moved
+    # the type wants to see it, not be paged by it.
+    ("not-armed", {"perimeter": "not-armed"}, 0, [], "not-run"),
+    ("not-armed+require", {"perimeter": "not-armed", "require": True}, 1,
+     ["perimeter:not-armed"], "not-run"),
+    # THE DEAD PERIMETER: it attached and allowed a literal it must refuse.
+    # `--require` must not matter -- this is the campaign's signature defect.
+    ("dead", {"perimeter": "did-not-fire"}, 1, ["perimeter:did-not-fire"],
+     "did-not-fire"),
+    # ...and the other direction, which is why the control has two: a
+    # perimeter replaced by "refuse every int" passes the positive probe.
+    ("cries-wolf", {"perimeter": "cries-wolf"}, 1, ["perimeter:cries-wolf"],
+     "cries-wolf"),
+    ("probe-raised", {"perimeter": "raised"}, 1, ["perimeter:raised"],
+     "raised"),
+    # THE FACTS THE PERIMETER RESTS ON. These are the rows that redden when
+    # jax takes something away -- the heap-type flag, the own slots, a warm op
+    # entering Python -- and they page whether or not `--require` was passed,
+    # because a perimeter resting on a fact that stopped being true is not a
+    # perimeter with one feature missing.
+    ("facts-moved", {"perimeter": "facts-moved"}, 1, ["perimeter:facts-moved"],
+     "fired"),
+    ("promotion-drift", {"perimeter": "promotion-drift"}, 1,
+     ["perimeter:promotion-drift"], "fired"),
+    # ALL THREE INSTRUMENTS BROKEN AT ONCE, and all three must be said.
+    ("everything-dead+require", {"findings": "none", "eager": "did-not-fire",
+                                 "perimeter": "did-not-fire", "require": True},
+     1, ["control:did-not-fire", "eager:did-not-fire",
+         "perimeter:did-not-fire"], "did-not-fire"),
+]
+
+
+def test_the_canary_pages_for_the_perimeters_reasons_and_no_others(
+    capsys, tmp_path
+):
+    """The perimeter's half of the contract, driven the same way as the rest.
+
+    The set of reason codes, exactly, for the reason the first table asserts
+    the set: ``main() == 1`` is satisfied by any of a dozen branches, and a
+    cell that names one while another produces it is a cell measuring nothing.
+    """
+    failures = []
+    for name, kw, expect_code, expect_reasons, control in _PERIMETER_TABLE:
+        run = _drive_canary(capsys, tmp_path, **kw)
+        got = (run.code, sorted(run.reasons),
+               run.rows.get("perimeter control state"))
+        want = (expect_code, sorted(expect_reasons), control)
+        if got != want:
+            failures.append(f"  {name}: got {got}, contract {want}\n    {run.err}")
+    assert not failures, (
+        "the canary's perimeter reasons are not what the contract says:\n"
+        + "\n".join(failures)
+    )
+
+    # EVERY DECLARED STATE IS REACHABLE, the same claim the other two
+    # instruments' state sets carry: a state nothing can drive is a claim.
+    canary = _canary()
+    reached = {row[4] for row in _PERIMETER_TABLE}
+    assert reached == set(canary.PERIMETER_CONTROL_STATES), (
+        f"declared perimeter control states "
+        f"{sorted(canary.PERIMETER_CONTROL_STATES)} but the table can only "
+        f"reach {sorted(reached)}"
+    )
+
+
 def test_the_canary_pages_for_the_reasons_it_measured_and_no_others(
     capsys, tmp_path
 ):
@@ -1483,6 +1662,11 @@ def test_the_canarys_live_control_row_reports_the_recorder_and_not_a_constant(
         # over: a test that takes an instrument out must put it back, and the
         # cheapest way to put it back is never to touch it.
         _stub_eager(monkeypatch, "clean")
+        # AND THE PERIMETER, for exactly the reason above, one instrument
+        # over: the real `disarm_perimeter()` would release a hold this
+        # process did not take and could restore slots an outer session is
+        # relying on.
+        _stub_perimeter(monkeypatch, canary, "clean")
 
         from stelling import _tripwire
         from stelling._tripwire import Status
@@ -1744,6 +1928,7 @@ def test_the_canarys_documented_exit_codes_are_exactly_the_ones_it_produces():
     # table, and the two codes no input can drive, which their own tests
     # above call directly.
     driven = {code for row in _CANARY_TABLE for code in row[3]}
+    driven |= {code for row in _PERIMETER_TABLE for code in row[3]}
     driven |= {"control:unknown-state", "hash:unknown-state",
                "eager:unenumerated-jax-constant"}
     assert driven <= produced, (

@@ -119,6 +119,34 @@ those runs really printed are still read, now as a control on the parse.
      Unlike a rowless RELEASE at the hash map — which is loud and exits 0 —
      this one is already producing wrong alarms, so it pages. See
      `_eager_sweep_row`.
+  1  `perimeter:not-armed` — ``--require`` was passed and the DUNDER
+     PERIMETER (Mode 3) could not attach. Its own arm-time self-check drives
+     the reference defect through the live slots in both directions and
+     refuses on either going wrong, so this code covers a moved type, a
+     missing slot, a blind guard and a guard that refuses everything alike;
+     the sentence names which.
+  1  `perimeter:did-not-fire` — the perimeter attached and its live control
+     DID NOT REFUSE a literal that does not survive the conversion. Every
+     figure beside it is unverified, exactly as for the tripwire's control.
+  1  `perimeter:cries-wolf` — the perimeter attached and refused a literal
+     that IS exactly representable. Every refusal it would make this run
+     would be noise, so it pages rather than being trusted.
+  1  `perimeter:raised` — the perimeter's live control DID NOT COMPLETE:
+     something other than ``NarrowingError`` came out of it, so whether the
+     hook works has not been established.
+  1  `perimeter:facts-moved` — one of the facts the perimeter RESTS ON no
+     longer holds on this jax: the type could not be located, it is no longer
+     a heap type, it no longer owns the slots, ``setattr`` no longer rebinds
+     and restores identity, a WARM operation no longer enters Python, or an
+     in-place slot has appeared so that ``x += N`` no longer falls back to
+     the forward slot. Each is a positive assertion, so anything that
+     disappears turns it red rather than passing quietly. The sentence names
+     the rows that moved.
+  1  `perimeter:promotion-drift` — the dtype the predicate says a literal is
+     converted INTO disagrees with the dtype jax actually converts it into.
+     That identity is the whole of the predicate's F6, and every verdict it
+     gives is computed against the target it names; a disagreement means the
+     answers are being computed about the wrong dtype.
   0  anything else. That includes NOT ARMED without ``--require`` — the shape
      a human wants when running this by hand to see what a given jax does —
      a release with NO ROW in the version -> hash map, which is loud on
@@ -179,6 +207,231 @@ RENDER_STATES = ("not-run", "rendered", "unrenderable")
 #: raised something else (`raised`), or refused an in-range value
 #: (`cries-wolf`).
 EAGER_CONTROL_STATES = ("not-run", "raised", "did-not-fire", "cries-wolf", "fired")
+
+
+
+#: The states the PERIMETER's live control can be recorded in. Declared for
+#: the reason :data:`CONTROL_STATES` is: so that :func:`_perimeter_reasons`
+#: can recognise a state it was never taught rather than passing it.
+PERIMETER_CONTROL_STATES = ("not-run", "raised", "did-not-fire", "cries-wolf", "fired")
+
+
+def _perimeter_facts(face, located):
+    """The facts the perimeter RESTS ON for one face, each a positive assertion.
+
+    Returns ``(rows, moved)``: rows for the page, and the names of the ones
+    that did not hold. **Every row asserts that something is STILL TRUE**, so
+    a jax that drops the heap-type flag, renames the type, stops routing a
+    warm operation through Python, or grows an ``__iadd__`` turns a row RED
+    rather than passing quietly. That direction is the whole design: this is
+    an alarm about upstream drift, and an alarm that only fires when something
+    NEW appears cannot report a disappearance.
+
+    ``located`` is the type ``perimeter_locate`` returned, or the status code
+    string it returned instead -- in which case every row below is unanswerable
+    and that is itself the finding.
+
+    TWO FACES, ONE FUNCTION, and the rows are named with the face they are
+    about: the array face rests on the same five facts as the tracer face,
+    asked of a different type, and a page that reported one set for "the
+    perimeter" would be reporting half of what is armed.
+    """
+    rows: list[tuple[str, str]] = []
+    moved: list[str] = []
+
+    def record(name, ok, detail):
+        label = f"{face}: {name}"
+        rows.append((label, f"{'PASS' if ok else 'RED '} {detail}"))
+        if not ok:
+            moved.append(label)
+
+    if isinstance(located, str):
+        record("type", False, f"could not be located: {located}")
+        return rows, moved
+
+    from stelling._jax_compat import jax as _jax
+    from stelling._jax_compat import jnp as _jnp
+    from stelling._tripwire import perimeter as _perimeter
+
+    record("type", True, f"{located.__module__}.{located.__qualname__}")
+    # CPython's own flag, read off the type. A static type cannot have its
+    # slots rebound at all, so this row is the one that says `setattr` is even
+    # legal here -- and it is checked as well as `setattr` being driven,
+    # because the two fail in different ways.
+    heap = bool(located.__flags__ & (1 << 9))
+    record("Py_TPFLAGS_HEAPTYPE", heap, f"__flags__=0x{located.__flags__:x}")
+
+    slots = _perimeter.FACE_SLOTS[face]
+    missing = [s for s in slots if s not in located.__dict__]
+    record(
+        "slots are own attributes",
+        not missing,
+        f"{len(slots) - len(missing)}/{len(slots)}"
+        + (f", missing {missing}" if missing else ""),
+    )
+
+    # The slot each face's warm-op probe drives, and the program that drives
+    # it. `__le__` on a tracer is what `check()` runs through; `__add__` on an
+    # array is the eager door's headline.
+    probe_slot = "__le__" if face == "tracer" else "__add__"
+    if face == "tracer":
+        def _run():
+            _jax.clear_caches()
+            _jax.make_jaxpr(lambda z: z <= 1)(_jnp.zeros((3,), _jnp.float32))
+    else:
+        _arr = _jnp.zeros((3,), _jnp.int16)
+
+        def _run():
+            _arr + 1
+
+    entered = [0]
+    restored = False
+    if probe_slot not in missing and probe_slot in located.__dict__:
+        original = located.__dict__[probe_slot]
+
+        def _counting(a, b):
+            entered[0] += 1
+            return original(a, b)
+
+        # WARM FIRST, then rebind. The question is not "does a cold op enter
+        # Python" -- it is whether a WARM one still does. A jax that routed a
+        # warm operation entirely through C++ would leave every `setattr`
+        # succeeding and every wrapper cold, which is the silent failure this
+        # row exists for.
+        try:
+            _run()
+            setattr(located, probe_slot, _counting)
+            for _ in range(2):
+                _run()
+        finally:
+            setattr(located, probe_slot, original)
+            restored = located.__dict__[probe_slot] is original
+    record(
+        "setattr rebinds and restores identity", restored, f"identity back={restored}"
+    )
+    record(
+        f"a WARM {probe_slot} still enters Python", entered[0] == 2, f"{entered[0]}/2"
+    )
+
+    inplace = [s for s in _perimeter.INPLACE_SLOTS if s in located.__dict__]
+    # `x += N` falls back to the forward slot only while there is no in-place
+    # slot to prefer. If jax ever adds one, the perimeter grows a hole in a
+    # spelling people write constantly, and this row is how anyone finds out.
+    record(
+        "no in-place slots to bypass the forward ones",
+        not inplace,
+        f"{inplace or 'none'}",
+    )
+    return rows, moved
+
+
+def _perimeter_promotion(sample=None):
+    """Does the predicate name the dtype jax actually converts the literal into?
+
+    ``(note, disagreements)``. This is F6, the identity every verdict the
+    predicate gives is computed against: it asks jax's own promotion for the
+    target and then checks each answer against what jax DOES -- the dtype of
+    ``x + 3`` for the dtype-preserving slots, and of ``x / 3`` for the two
+    that redirect into a float. Two different code paths in jax, which is what
+    makes the agreement worth something.
+    """
+    from stelling._jax_compat import jnp as _jnp
+    from stelling._tripwire import prop_guard
+
+    names = sample or (
+        "bool", "int8", "int16", "int32", "uint8", "uint16", "uint32",
+        "float16", "float32", "bfloat16", "complex64",
+    )
+    agree = 0
+    disagree: list[str] = []
+    for name in names:
+        try:
+            x = _jnp.zeros((1,), name)
+        except Exception:  # noqa: BLE001 - a dtype this build does not have
+            continue
+        for slot, probe in (("add", lambda a: a + 3), ("truediv", lambda a: a / 3)):
+            try:
+                predicted = prop_guard._target_dtype(x.dtype, slot)
+                actual = probe(x).dtype
+            except Exception as exc:  # noqa: BLE001
+                disagree.append(f"{name}/{slot}: {type(exc).__name__}")
+                continue
+            if predicted is not None and str(predicted) == str(actual):
+                agree += 1
+            else:
+                disagree.append(f"{name}/{slot}: says {predicted}, jax uses {actual}")
+    note = f"{agree} agree, {len(disagree)} disagree"
+    if disagree:
+        note += " -- " + "; ".join(disagree[:4])
+    return note, disagree
+
+
+def _perimeter_reasons(status, control_state, control, facts_moved, promotion_drift,
+                       require):
+    """Every ``(reason code, sentence)`` the perimeter owes, possibly none."""
+    reasons: list[tuple[str, str]] = []
+    if require and not status.armed:
+        reasons.append((
+            "perimeter:not-armed",
+            f"the dunder perimeter could not attach [{status.code}]: "
+            f"{status.explanation} " + _TWO_LEGS,
+        ))
+    if control_state not in PERIMETER_CONTROL_STATES:
+        reasons.append((
+            "perimeter:facts-moved",
+            f"the perimeter's live control reported the state "
+            f"{control_state!r}, which this script has no answer for. An "
+            "instrument that cannot say what happened has not said that "
+            "nothing happened.",
+        ))
+    elif control_state == "did-not-fire":
+        reasons.append((
+            "perimeter:did-not-fire",
+            f"the perimeter attached and its live control did not refuse "
+            f"{_probe_moved()}: {control}. Attached-but-blind is what a jax "
+            "release actually produces, and it is the failure a presence "
+            "check misses.",
+        ))
+    elif control_state == "cries-wolf":
+        reasons.append((
+            "perimeter:cries-wolf",
+            f"the perimeter refused a literal that IS exactly representable: "
+            f"{control}. Every refusal it would make this run would be noise.",
+        ))
+    elif control_state == "raised":
+        reasons.append((
+            "perimeter:raised",
+            f"the perimeter's live control did not complete: {control}. A "
+            "control that could not run is not a control that passed.",
+        ))
+    if facts_moved:
+        reasons.append((
+            "perimeter:facts-moved",
+            "the perimeter rests on these facts and they no longer hold: "
+            + ", ".join(facts_moved)
+            + ". Each row is a positive assertion about this jax, so this is "
+            "a disappearance rather than a new problem, and the perimeter's "
+            "attachment is the thing to re-derive before trusting it again.",
+        ))
+    if promotion_drift:
+        reasons.append((
+            "perimeter:promotion-drift",
+            "the dtype the predicate says a literal is converted into "
+            "disagrees with the dtype jax actually converts it into: "
+            + "; ".join(promotion_drift[:4])
+            + ". Every verdict the predicate gives is computed against the "
+            "target it names.",
+        ))
+    return reasons
+
+
+def _probe_moved() -> str:
+    from stelling._tripwire import _probe
+
+    return (
+        f"{_probe.PERIMETER_OVER} against {_probe.PERIMETER_DTYPE}, or "
+        f"{_probe.ARITH_OVER} into {_probe.ARITH_DTYPE}"
+    )
 
 
 def _control_reasons(
@@ -621,6 +874,12 @@ def _hash_row(status) -> tuple[str, tuple[str, str] | None]:
     )
 
 
+#: The probe input length, bumped per drive so no trace is answered from the
+#: cache. A list because the driver that reads it is a closure inside
+#: :func:`main`.
+_perimeter_shape = [16]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -772,6 +1031,98 @@ def main() -> int:
             eager_control_state = "raised"
             eager_control = f"raised {type(exc).__name__}: {exc}"
 
+    # ---------------------------------------------------------------------
+    # THE THIRD HOOK. Mode 3 rebinds OPERATOR SLOTS on a jax type, and what it
+    # rests on is a short list of facts about that type -- it is a heap type,
+    # it owns the slots, `setattr` rebinds them, and a WARM operation still
+    # enters Python. Every one of those is a fact about jax that a release can
+    # take away silently, which is what this workflow exists for, so each is
+    # asserted positively below rather than assumed.
+    #
+    # ARMED LAST, and for the same sequencing reason the eager detector is
+    # armed second: neither instrument's arm-time self-check should run inside
+    # another's jurisdiction. Nothing is disarmed first, so the one
+    # displacement question below is asked while all three hooks are live and
+    # therefore answers for all three.
+    perimeter_status = _tripwire.arm_perimeter(owner="canary")
+    perimeter_control_state = "not-run"
+    perimeter_control = "not run"
+    if perimeter_status.armed:
+        try:
+            from stelling._jax_compat import jax as _jax
+            from stelling._jax_compat import jnp as _jnp
+            from stelling._tripwire import _probe
+            from stelling._tripwire.perimeter import NarrowingError
+
+            def _drive(program):
+                # A FRESH SHAPE EVERY TIME. jax's trace cache is process-wide,
+                # so re-tracing at the same avals never re-runs the probe's
+                # Python -- and a hook that is never entered looks exactly
+                # like a hook that is entered and stays quiet.
+                _perimeter_shape[0] += 1
+                return _jax.make_jaxpr(program)(
+                    _jnp.zeros((_perimeter_shape[0],), _jnp.float32)
+                )
+
+            def _drive_eager(program):
+                # The ARRAY face, driven WARM: the operation runs twice, and
+                # the second one is the question. The eager door this face
+                # closes is specifically the warm one -- cold and warm are
+                # both `-25536` with nothing else armed, and a cold-only
+                # control would pass on a jax answering warm ops from C++.
+                arr = _jnp.zeros((3,), _jnp.int16)
+                program(arr)
+                return program(arr)
+
+            try:
+                _drive(_probe.compare_over)
+                _drive_eager(_probe.arith_over)
+            except NarrowingError as exc:
+                perimeter_control_state = "fired"
+                perimeter_control = (
+                    f"refused {exc.finding.literal} -> "
+                    f"{exc.finding.narrowed_to} ({exc.finding.target_dtype})"
+                    f" at {exc.file}:{exc.line}"
+                )
+            else:
+                perimeter_control_state = "did-not-fire"
+                perimeter_control = (
+                    f"{_probe.PERIMETER_OVER} compared against a "
+                    f"{_probe.PERIMETER_DTYPE} tracer, or {_probe.ARITH_OVER} "
+                    f"added to a warm {_probe.ARITH_DTYPE} array, was ALLOWED "
+                    "THROUGH -- THE CONTROL DID NOT FIRE"
+                )
+            if perimeter_control_state == "fired":
+                # ...and the negative direction, because a perimeter replaced
+                # by "refuse every int" passes the positive one.
+                try:
+                    _drive(_probe.compare_under)
+                    _drive_eager(_probe.arith_under)
+                except NarrowingError as exc:
+                    perimeter_control_state = "cries-wolf"
+                    perimeter_control = (
+                        f"an exactly representable {exc.finding.literal} was "
+                        "refused"
+                    )
+                else:
+                    perimeter_control += (
+                        f"; and allowed the exact {_probe.PERIMETER_UNDER} and "
+                        f"the in-range {_probe.ARITH_UNDER}"
+                    )
+        except Exception as exc:  # noqa: BLE001
+            perimeter_control_state = "raised"
+            perimeter_control = f"raised {type(exc).__name__}: {exc}"
+
+    from stelling._tripwire import perimeter as _perimeter_mod
+
+    perimeter_rows: list = []
+    perimeter_moved: list = []
+    for _face in _perimeter_mod.FACES:
+        _rows, _moved = _perimeter_facts(_face, adapter.perimeter_locate(_face))
+        perimeter_rows.extend(_rows)
+        perimeter_moved.extend(_moved)
+    perimeter_promotion_note, perimeter_promotion_drift = _perimeter_promotion()
+
     # THE OTHER MAP, RE-DERIVED, AND IT RUNS WHILE THE HOOK IS STILL LIVE.
     # `_eager_sweep_row` needs the attached wrapper -- it swaps a collector in
     # for the observer and puts it back -- so it cannot go after the disarm
@@ -790,6 +1141,7 @@ def main() -> int:
     displaced = _tripwire.displaced()
     disarmed = _tripwire.disarm()
     eager_disarmed = _tripwire.disarm_eager()
+    perimeter_disarmed = _tripwire.disarm_perimeter("canary")
 
     hash_note, hash_reason = _hash_row(status)
     eager_hash_note, eager_hash_reason = _eager_hash_row(eager_status)
@@ -826,6 +1178,12 @@ def main() -> int:
         reasons.append(eager_hash_reason)
     if eager_sweep_reason is not None:
         reasons.append(eager_sweep_reason)
+    reasons.extend(
+        _perimeter_reasons(
+            perimeter_status, perimeter_control_state, perimeter_control,
+            perimeter_moved, perimeter_promotion_drift, args.require,
+        )
+    )
 
     rows = [
         ("status", status.code),
@@ -854,6 +1212,14 @@ def main() -> int:
         ("displaced hooks", ", ".join(displaced) or "none"),
         ("disarm_eager()", eager_disarmed),
         ("eager detail", eager_status.explanation),
+        # --- the dunder perimeter, same three-part shape ---
+        ("perimeter status", perimeter_status.code),
+        ("perimeter control state", perimeter_control_state),
+        ("perimeter live control", perimeter_control),
+        ("perimeter promotion identity", perimeter_promotion_note),
+        *perimeter_rows,
+        ("disarm_perimeter()", perimeter_disarmed),
+        ("perimeter detail", perimeter_status.explanation),
     ]
 
     for name, value in rows:
