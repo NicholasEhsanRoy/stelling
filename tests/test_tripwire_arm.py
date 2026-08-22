@@ -914,6 +914,70 @@ def test_jax_s_own_prng_mask_is_suppressed_and_named_not_blamed_on_the_caller(ar
     assert suppressed.origin == record.ORIGIN_JAX
 
 
+def test_the_pages_OPENING_DEMO_is_what_jax_does():
+    """``docs/overflow-tripwire.md``'s *"What it finds"* block, driven.
+
+    It is the first thing a reader of that page runs and the whole argument
+    for the tool -- ``x + 256`` on ``int8`` reaching the jaxpr as ``add a
+    0:i8[]``, and the jitted function returning its input unchanged. It is
+    marked ``illustrative`` because its output is written INTO the block as
+    comments, with an arrow under the byte that is gone, so
+    ``test_doc_examples.py`` has no fence to attach to it. That is a
+    legitimate reason not to run it there and it is not a reason for nobody
+    to run it: measured before this existed, ``grep`` for the jaxpr text and
+    for ``[100, 50, -10]`` across ``tests/`` had no hits, so the page's
+    flagship demo -- and the excerpt fence six paragraphs above it, which
+    quotes one equation of the same jaxpr -- were verified by nothing at all.
+
+    The page says the output is byte-identical on 0.10.2 and 0.11.0. This
+    runs on whichever is installed, so both lanes assert it.
+    """
+    import re
+
+    def add_offset(x):
+        return x + 256
+
+    jaxpr = jax.make_jaxpr(add_offset)(jnp.zeros(1, jnp.int8))
+    result = jax.jit(add_offset)(jnp.int8([100, 50, -10])).tolist()
+
+    page = (
+        pathlib.Path(__file__).resolve().parents[1] / "docs" / "overflow-tripwire.md"
+    ).read_text(encoding="utf-8")
+
+    # the full jaxpr, quoted in the block as a comment
+    quoted = [
+        ln.lstrip("# ").rstrip()
+        for ln in page.splitlines()
+        if ln.startswith("# { lambda ")
+    ]
+    assert len(quoted) == 1, (
+        f"the page quotes {len(quoted)} jaxpr lines in its opening demo; this "
+        f"test reads exactly the one"
+    )
+    assert quoted[0] == str(jaxpr), (
+        f"the page's opening demo says the jaxpr is\n  {quoted[0]}\nand jax "
+        f"{jax.__version__} produces\n  {str(jaxpr)}"
+    )
+
+    # the executed values, quoted on the next comment line
+    executed = re.search(r"^# (\[[-0-9, ]+\])  — the function is", page, re.M)
+    assert executed, "the page no longer quotes what the jitted function returns"
+    assert executed.group(1) == str(result), (
+        f"the page says the jitted function returns {executed.group(1)} and it "
+        f"returns {result}"
+    )
+
+    # ...and the excerpt fence above it, which is one equation of that jaxpr
+    excerpt = "add a 0:i8[]"
+    assert f"\n{excerpt}\n" in page, (
+        "the page's excerpt fence no longer carries the equation it excerpts"
+    )
+    assert excerpt in str(jaxpr), (
+        f"the page excerpts {excerpt!r} from a jaxpr that now reads "
+        f"{str(jaxpr)!r}"
+    )
+
+
 #: The eleven doors ``SOUNDNESS.md`` enumerates, as callables of
 #: ``(array, operand)``. Split by SHAPE, because that split is the finding:
 #: six promote an operand against an array and five construct an array from an

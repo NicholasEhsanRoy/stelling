@@ -846,6 +846,29 @@ def _rich_harness():
     return assert_(jnp.all(w <= 1e9) & assume_ok)
 
 
+def _lowerable(x, n):
+    """``_rich_harness``'s body as a plain jax function, so it can be LOWERED.
+
+    ``docs/overflow-tripwire.md``'s artefact table has a StableHLO row and
+    this file's ``IDENTICAL`` tuple did not, so the page's claim that the
+    emitted HLO is byte-identical across an armed boundary was carried by
+    nobody. It is the row a reader is most likely to act on -- it is the one
+    that says an armed run can be compared against a normal build.
+    """
+    assume_ok = (n >= 1) & (n <= 3)
+
+    def body(carry, _):
+        return carry + x, carry
+
+    total, _ = jax.lax.scan(body, jnp.zeros((4,), jnp.float32), None, length=3)
+    picked = jax.lax.cond(n > 1, lambda t: t * 2.0, lambda t: t, total)
+    v = jax.vmap(lambda a: a + 1.0)(picked)
+    _, w = jax.lax.while_loop(
+        lambda s: s[0] < 3, lambda s: (s[0] + 1, s[1] + 1.0), (jnp.int32(0), v)
+    )
+    return jnp.all(w <= 1e9) & assume_ok
+
+
 def _artefacts():
     jax.clear_caches()
     closed = trace(_rich_harness)
@@ -854,6 +877,8 @@ def _artefacts():
     raw_eqns = "\n".join(repr((e.primitive, tuple(e.params))) for e in closed.jaxpr.eqns)
     jax.clear_caches()
     verdict = check(_rich_harness, vacuity_mode="inputs-only")
+    jax.clear_caches()
+    stablehlo = jax.jit(_lowerable).lower(C32, jnp.int32(2)).as_text()
 
     def digest(obj):
         return hashlib.sha256(
@@ -865,6 +890,7 @@ def _artefacts():
         "consts": digest([(str(getattr(c, "dtype", "?")), repr(c)) for c in closed.consts]),
         "eqns (metadata-free)": digest(bare.get("jaxpr", {}).get("eqns", bare)),
         "to_dict(include_metadata=False)": digest(bare),
+        "StableHLO text": digest(stablehlo),
         "check status": verdict.status,
         "check notes": digest(repr(getattr(verdict, "notes", ()))),
         # the two that MOVE, kept in the same table so that a reader of this
@@ -884,6 +910,7 @@ IDENTICAL = (
     "consts",
     "eqns (metadata-free)",
     "to_dict(include_metadata=False)",
+    "StableHLO text",
     "check status",
     "check notes",
 )
