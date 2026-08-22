@@ -13,8 +13,12 @@ tree describe the tree it was written against. Three of them said in so many
 words that *"the repository is pre-Stage-0"* and that harness primitives, the
 query object and the z3 encoder do **not** exist — in the executive summary, in
 §2.3 and in Appendix B, in a file that ships in the sdist. All three exist.
-`v0.1.0` is tagged, `stelling.__version__` is `0.2.0.dev0`, and the suite
-collects 4,564 tests. `git blame` puts all three sentences at `22c176f`,
+`v0.1.0` is tagged, `stelling.__version__` is `0.2.0.dev0`, and the suite is
+thousands of tests — run `pytest --collect-only -q` for the figure; it moves
+with every commit and is deliberately not written down here, which is
+`docs/norms.md`'s rule about figures and the same reason
+`.github/workflows/ci.yml` deleted the pass counts that used to stand in it.
+`git blame` puts all three sentences at `22c176f`,
 2026-07-17; the file was edited on 2026-07-28, 2026-08-20 and 2026-08-21 and
 none of the three was touched. They are dated in place rather than deleted,
 because the argument each one introduces is about a decision taken at that
@@ -131,7 +135,7 @@ it is a consequence of what a witness is.
 pre-Stage-0 — the IR and the jax boundary existed and the first verdict did
 not.* **That stopped being true before `v0.1.0` and the sentence stood for
 another five weeks.** On this tree `stelling.__version__` is `0.2.0.dev0`,
-`v0.1.0` is a tag, the suite collects 4,564 tests, and verdicts are minted,
+`v0.1.0` is a tag, the suite is thousands of tests, and verdicts are minted,
 stamped and routed through a solver portfolio. The three things below were fixed at the
 moment the paragraph describes, which is why the paragraph is kept: it is the
 record of a decision taken in time, not a description of the tree. Every one of
