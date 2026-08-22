@@ -1442,7 +1442,14 @@ def test_every_sidecar_writing_path_carries_the_provisional_marking(tmp_path):
         assert "provisional" in doc["schema"], subject.name
         assert doc["stability"] == R.SCHEMA_STABILITY, subject.name
         assert "PROVISIONAL / UNSTABLE" in doc["stability"]
-        assert "0.1.1" in doc["stability"]
+        # the FREEZE CONDITION, not a release number. This asserted
+        # `"0.1.1" in doc["stability"]` -- the release the schema was said
+        # to freeze in, which has been and gone while the schema is still
+        # `1-provisional`. A commitment stated as a version expires; one
+        # stated as a condition does not, and this is the half a consumer
+        # holding only the JSON can read.
+        assert "freezes on a CONDITION" in doc["stability"]
+        assert "parsed real emissions" in doc["stability"]
         assert set(doc) == set(SIDECAR_KEYS), subject.name
         # and the reader who never opens the JSON sees it too
         assert "sidecar schema   : " in em.source

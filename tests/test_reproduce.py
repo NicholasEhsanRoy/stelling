@@ -224,13 +224,25 @@ def test_the_schema_is_marked_provisional_in_the_identifier_itself():
     # the check a consumer written against a stable 0.1.0 would do
     assert SCHEMA != "stelling.reproducer/1"
     for phrase in (
-        "PROVISIONAL / UNSTABLE for stelling 0.1.0",
-        "added, removed or renamed in 0.1.1",
+        "PROVISIONAL / UNSTABLE",
+        "added, removed or renamed in any release",
         "without a deprecation cycle",
-        "freeze in 0.1.1",
-        "soak has parsed real emissions",
+        "freezes on a CONDITION and not on a version number",
+        "parsed real emissions",
     ):
         assert phrase in R.SCHEMA_STABILITY, phrase
+    # AND NO RELEASE NUMBER, which is the repair this list is pinning. The
+    # string named 0.1.1 as both the release fields could move in and the
+    # release it would freeze in; 0.1.1 passed, the running version is
+    # 0.2.0.dev0, the schema is still `1-provisional`, and the sentence had
+    # become a promise about a release in the past. A commitment stated as a
+    # condition cannot expire.
+    import re
+    assert not re.search(r"\b0\.\d+\.\d+\b", R.SCHEMA_STABILITY), (
+        "SCHEMA_STABILITY names a release version again. State the "
+        "CONDITION the schema freezes on; a version number goes stale on "
+        "the day it ships and this one did."
+    )
 
 
 def test_the_execution_modes_are_pinned_too():

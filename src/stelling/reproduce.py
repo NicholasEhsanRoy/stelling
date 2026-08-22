@@ -62,7 +62,14 @@ set.
 * ``RigidBody`` — a velocity span of ``[-1.962, 0]`` was measured over
   200 steps and recorded as the reachable set. ``200 × 0.001 × 9.81 =
   1.962`` exactly: a free-fall artifact of the trajectory length that was
-  chosen. At 100 000 steps the same node spans ``[-9805.9, 0]``. Velocity
+  chosen. At 100 000 steps, ``dt`` held at ``0.001``, the same node spans
+  ``[-981.0, 0]`` — the same law, five hundred times the trajectory.
+  (This read ``[-9805.9, 0]``, which is a ``dt = 0.01`` figure: the
+  sentence's own arithmetic gives ``100000 × 0.001 × 9.81 = 981.0``, and
+  the larger number silently changed the ``dt`` the clause before it
+  states. The point — that the span is a property of the trajectory and
+  not of the node — is unchanged, and is stronger when only one variable
+  moves.) Velocity
   there is a pure accumulator — no drag, no clamp, no collision — so
   **there is no reachable span to compare against at all**, and any finite
   envelope on it is a modelling choice rather than a discovery.
@@ -213,10 +220,20 @@ NOT_EXECUTED_EXIT = 3
 
 # ── the sidecar schema, PROVISIONAL for 0.1.0 ────────────────────────────────
 #
-# **The schema is PROVISIONAL / UNSTABLE for 0.1.0.** Fields may be added,
-# removed or renamed in 0.1.1 without a deprecation cycle. It is planned to
-# FREEZE in 0.1.1, once the external soak has parsed real emissions and the
-# fields have been exercised by a consumer that did not write them.
+# **The schema is PROVISIONAL / UNSTABLE.** Fields may be added, removed or
+# renamed in any release without a deprecation cycle. It FREEZES ON A
+# CONDITION, not on a version: once a consumer that did not write it has
+# parsed real emissions and the fields have been exercised from outside.
+#
+# THE CONDITION IS THE COMMITMENT, AND NAMING A RELEASE INSTEAD BROKE IT.
+# This said "may be added, removed or renamed in 0.1.1 ... planned to FREEZE
+# in 0.1.1". 0.1.1 came and went; the running version is 0.2.0.dev0, the
+# schema is still `1-provisional`, and the sentence had become a promise
+# about a release that is in the past — which reads to a consumer either as
+# "this froze and nobody updated the string" or as an abandoned plan, and
+# neither is true. The condition below has not been met, so nothing about
+# the guarantee has changed; only the way it is stated, so that it cannot
+# expire again.
 #
 # The withdrawal is deliberate, and the reason is that the argument for
 # declaring it stable was never an argument for declaring it stable NOW. It
@@ -240,11 +257,13 @@ NOT_EXECUTED_EXIT = 3
 SCHEMA = "stelling.reproducer/1-provisional"
 
 SCHEMA_STABILITY = (
-    "PROVISIONAL / UNSTABLE for stelling 0.1.0: fields may be added, "
-    "removed or renamed in 0.1.1 without a deprecation cycle. Planned to "
-    "freeze in 0.1.1, once the external soak has parsed real emissions and "
-    "these fields have been exercised by a consumer that did not write "
-    "them. Do not build on this without pinning the stelling version."
+    "PROVISIONAL / UNSTABLE: fields may be added, removed or renamed in any "
+    "release without a deprecation cycle. This freezes on a CONDITION and "
+    "not on a version number -- once a consumer that did not write it has "
+    "parsed real emissions and these fields have been exercised from "
+    "outside -- and until the identifier stops saying 'provisional' the "
+    "condition has not been met. Do not build on this without pinning the "
+    "stelling version."
 )
 
 # JSON HAS NO ENCODING FOR ±inf OR NaN, and Python's json module emits the
@@ -1122,8 +1141,19 @@ def _reproducer_source(verdict, subject: Subject, obligation_index) -> str:
     }
     text = string.Template(_TEMPLATE).substitute(
         banner=_banner(sidecar, witness, disclosures, sha, x64),
-        sidecar=json.dumps(sidecar, indent=2, sort_keys=True),
-        payload=json.dumps(payload, indent=2, sort_keys=True),
+        # allow_nan=False on BOTH, which is what the NONFINITE comment
+        # above claims. It was true of the runtime writer only: these two
+        # produce the blocks that land in the emitted FILE
+        # (`SIDECAR = json.loads(r"""…""")`), and a non-finite reaching
+        # here would have been written as a bare `Infinity`/`NaN` token
+        # that jq, JSON.parse, Go and serde all reject. No escape was
+        # demonstrated -- `_json_number` sanitises `envelope.lo/hi`
+        # upstream -- so this closes a claim defect rather than a shown
+        # bug, and it is the guard that makes the claim true.
+        sidecar=json.dumps(sidecar, indent=2, sort_keys=True,
+                           allow_nan=False),
+        payload=json.dumps(payload, indent=2, sort_keys=True,
+                           allow_nan=False),
         confirmed=CONFIRMED,
         diverged=DIVERGED,
         unreachable=UNREACHABLE,
@@ -1415,11 +1445,12 @@ the assertion held where it ran and the other mode raised, so DIVERGED,
 which is a claim of absence, is not available and nothing was false
 either. The sidecar's `detail` says which. Read it, not the status.
 
-THE SIDECAR SCHEMA IS PROVISIONAL. It is unstable for stelling 0.1.0 —
-fields may be added, removed or renamed in 0.1.1 without a deprecation
-cycle — and is planned to freeze in 0.1.1, once an external soak has
-parsed real emissions and the fields have been exercised by a consumer
-that did not write them. The schema identifier says so, and every sidecar
+THE SIDECAR SCHEMA IS PROVISIONAL. Fields may be added, removed or
+renamed in any release without a deprecation cycle. It freezes on a
+CONDITION rather than on a version number — once a consumer that did not
+write it has parsed real emissions and the fields have been exercised
+from outside — and until the schema identifier stops saying
+"provisional", that has not happened. The schema identifier says so, and every sidecar
 this file writes carries the same sentence in its `stability` field. Pin
 the stelling version if you build on it.
 """

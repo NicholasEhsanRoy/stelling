@@ -30,15 +30,36 @@ the whole mechanism cannot reach.
 > property is `xfail`-marked against an open defect (the integer-literal wrap),
 > and `tests/test_skip_inventory.py::test_no_session_skip_is_undisclosed`
 > withdraws its claim — by skipping, and saying so — on any session that
-> reported an xfail. Measured on the whole tree: `3910 passed, 13 skipped,
-> 1 xfailed`, exit 0, that pin among the skips — re-driven at `3482822` on
-> jax 0.11.0 with hypothesis 6.165.10, CPython 3.12.3, `JAX_ENABLE_X64`
-> unset. It read `2470 passed` until then; the skip and xfail counts have
-> not moved, only the size of the suite. Nothing is hidden from you: the
+> reported an xfail. The **shape** to expect on the whole tree with
+> hypothesis installed is `exit 0`, `1 xfailed`, and that pin among the
+> skips — re-driven at `3482822` on jax 0.11.0 with hypothesis 6.165.10,
+> CPython 3.12.3, `JAX_ENABLE_X64` unset.
+>
+> *No absolute `passed` count is written here, deliberately.* It has been
+> restated twice — `2470`, then `3910` — and gone stale both times, and it
+> is read only by humans. `git rev-list --count 3482822..HEAD` is 52
+> commits, `git diff --stat 3482822..HEAD -- tests/` is 76 files changed
+> and 20,334 insertions, and a plain `pytest` on this tree passes well over
+> four thousand — in a configuration *smaller* than the one the figure
+> names, since hypothesis is absent and six `tests/property/` modules gate
+> at collection. The three parts that carry information — the exit status,
+> the xfail, and which pin is among the skips — do not move with the
+> suite's size. The dated figure is kept, with its sha, in
+> `.github/workflows/ci.yml`, where it is a record of one run rather than a
+> number a contributor checks a green line against.
+>
+> Nothing is hidden from you: the
 > pin's *other* half, which checks every skip the session did see, still runs.
 > But "this suite's skip set is complete" is not being asserted in your local
-> run. It **is** asserted in CI, which does not install `hypothesis` — so the
-> pin is off for exactly the sessions that can run the property suite. It comes
+> run. It **is** asserted in the CI jobs that run the whole tree, none of
+> which installs `hypothesis` — the one job that does, `property`, runs
+> `pytest -q -ra tests/property` only, so `tests/test_skip_inventory.py`
+> never runs there. (Written that way because "CI does not install
+> `hypothesis`" is literally false of the workflow as a whole: `ci.yml`'s
+> `property` job installs it, read out of `pyproject.toml`'s dev group, so a
+> reader who checks finds the sentence contradicted before finding the
+> reconciliation.) So the pin is off for exactly the sessions that can run
+> the property suite. It comes
 > back the day the wrap remedy lands and the marker in
 > `tests/property/test_oracle.py` is deleted; narrowing the session with `-k` or
 > `--deselect` does not bring it back, by the same rule.
