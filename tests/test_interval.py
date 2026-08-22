@@ -1463,18 +1463,58 @@ def test_the_docstring_names_every_operation_a_reader_would_guess_wrong():
 
 def _scatter_debt_evidence():
     """``scatter_add_rows`` driven on ACCUMULATED elements whose exact real
-    total is representable, over every shape distinction its kernel makes.
+    total is representable -- over every shape distinction its kernel
+    makes, AND over the operand VALUES a fix can be keyed on instead.
 
     Only accumulated elements: an element no index writes to is a copy of
     the operand and is not bumped, by design, so counting one as evidence
     that the debt is paid would be reading the wrong element.
 
-    The two axes are the two a partial fix can hide behind -- ``rowsz``,
+    THE SHAPE AXES are the two a partial fix can hide behind: ``rowsz``,
     which the kernel branches on, and the number of contributions folded
-    into one element, which decides how many bumps it spends. The question
-    asked of each is coarser than the one :data:`DISCIPLINE` asks and is the
-    one the debt is actually about: does the bracket contain nothing but the
-    exact total, or is it wider?
+    into one element, which decides how many bumps that element spends.
+
+    THE VALUE AXIS IS THE OTHER HALF, and it is here because the shape axes
+    alone were walked through TWICE. Every endpoint of the seven shape
+    cases is drawn from ``{0, 1, 2, 3, 4, 16}`` -- all non-negative, none
+    larger than 16, ranks 1 and 2 only. Sign, rank and magnitude were held
+    constant across the whole set, so a fix keyed on the operand's VALUES
+    rather than on its shape returned the exact total for all seven, after
+    which this gate reported the debt PAID and DEMANDED the row move to
+    ``EXACT_PER_STEP`` and both docstring entries be deleted. Measured
+    twice, each ending green at ``48 passed`` with the debt still owed:
+
+    * the exact-``Fraction`` route taken only where every endpoint of the
+      step is ``>= 0.0``. This is the shape a fixer would actually reach
+      for, which is why it matters: the M16 story the debt entry itself
+      tells is a zero corner going negative, ``sqrt`` already clamps at
+      ``max(0.0, ...)`` and ``reduce_sum`` carries a nonnegative clamp, so
+      *"take the exact route where the accumulation cannot cross zero"* is
+      a natural fix rather than a contrived one. Meanwhile
+      ``scatter_add_rows([-1], [-1])`` still returned
+      ``(-2.0000000000000004, -1.9999999999999998)`` where ``(-2.0, -2.0)``
+      is exact.
+    * the same route taken only where ``len(a.shape) <= 2``, which leaves
+      every rank-3 operand on the unconditional bump. A second and
+      independent key, so the first was not one unlucky predicate.
+
+    Neither is a SOUNDNESS defect -- both branches still round outward,
+    which is why nothing else in the tree caught either -- and that is
+    exactly the failure mode this gate exists for: the debt half paid, with
+    the docstring deleted as though it were paid in full. So the cases
+    below also carry negative and mixed-sign endpoints, an accumulation
+    whose running total crosses zero, a rank the shape axes never reach,
+    and a magnitude outside ``{0 ... 16}``.
+
+    Each case records the OPERAND'S SHAPE as its last field, because those
+    four dimensions -- sign, mixed sign, magnitude, rank -- are read back
+    off this list in the gate rather than trusted to survive its next edit.
+    The sign-crossing case is not one of the four: it is a second witness
+    against the ``>= 0.0`` key, which the all-negative case already reddens.
+
+    The question asked of each is coarser than the one :data:`DISCIPLINE`
+    asks and is the one the debt is actually about: does the bracket
+    contain nothing but the exact total, or is it wider?
     """
     one = iv.scatter_add_rows(_vals((1,), [1.0]), _vals((1,), [1.0]), [0])
     twice = iv.scatter_add_rows(_vals((1,), [0.0]),
@@ -1487,21 +1527,61 @@ def _scatter_debt_evidence():
     costed = iv.scatter_add_rows(
         iv.IntervalArray(shape=(1,), los=(0.0,), his=(0.0,)),
         iv.IntervalArray(shape=(1,), los=(0.0,), his=(16.0,)), [0])
+    # -- the same two shape axes, driven on the values the seven above
+    # hold constant. `neg` and `crossing` are rank 1 and `straddling` is
+    # rank 2, all three carrying endpoints no case above reaches; `cube`
+    # and `cube_twice` are rank 3, `rowsz` 4.
+    neg = iv.scatter_add_rows(_vals((1,), [-1.0]), _vals((1,), [-1.0]), [0])
+    crossing = iv.scatter_add_rows(_vals((1,), [1024.0]),
+                                   _vals((2,), [-4096.0, 128.0]), [0, 0])
+    straddling = iv.scatter_add_rows(
+        iv.IntervalArray(shape=(2, 2), los=(1.0, 2.0, -3.0, 4.0),
+                         his=(1.0, 2.0, 5.0, 4.0)),
+        iv.IntervalArray(shape=(1, 2), los=(-1.0, -8.0),
+                         his=(2.0, -8.0)), [1])
+    cube = iv.scatter_add_rows(
+        _vals((2, 2, 2), [1.0, 2.0, 3.0, 4.0, -5.0, 6.0, -7.0, 8.0]),
+        _vals((1, 2, 2), [-1.0, -2.0, 3.0, -16.0]), [1])
+    cube_twice = iv.scatter_add_rows(
+        _vals((2, 2, 2), [-1.0, 2.0, -3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+        _vals((2, 2, 2), [-2.0, -4.0, -6.0, -8.0, 1.0, 3.0, 5.0, 7.0]),
+        [0, 0])
     return [
         ("rowsz 1, one contribution: [1] += [1]",
-         *_at(one, 0), Fraction(2), Fraction(2)),
+         *_at(one, 0), Fraction(2), Fraction(2), one.shape),
         ("rowsz 1, two contributions: [0] += [1] += [1]",
-         *_at(twice, 0), Fraction(2), Fraction(2)),
+         *_at(twice, 0), Fraction(2), Fraction(2), twice.shape),
         ("rowsz 2, one contribution: row 1 += [1,2], column 0",
-         *_at(wide, 2), Fraction(4), Fraction(4)),
+         *_at(wide, 2), Fraction(4), Fraction(4), wide.shape),
         ("rowsz 2, one contribution: row 1 += [1,2], column 1",
-         *_at(wide, 3), Fraction(6), Fraction(6)),
+         *_at(wide, 3), Fraction(6), Fraction(6), wide.shape),
         ("rowsz 2, two contributions: row 1 += [1,2] += [1,2], column 0",
-         *_at(wide_twice, 2), Fraction(5), Fraction(5)),
+         *_at(wide_twice, 2), Fraction(5), Fraction(5), wide_twice.shape),
         ("rowsz 2, two contributions: row 1 += [1,2] += [1,2], column 1",
-         *_at(wide_twice, 3), Fraction(8), Fraction(8)),
+         *_at(wide_twice, 3), Fraction(8), Fraction(8), wide_twice.shape),
         ("the costed case: [0,0] += [0,16]",
-         *_at(costed, 0), Fraction(0), Fraction(16)),
+         *_at(costed, 0), Fraction(0), Fraction(16), costed.shape),
+        ("NEGATIVE, rowsz 1, one contribution: [-1] += [-1]",
+         *_at(neg, 0), Fraction(-2), Fraction(-2), neg.shape),
+        ("SIGN-CROSSING at 4096 scale, rowsz 1, two contributions: "
+         "[1024] += [-4096] += [128]",
+         *_at(crossing, 0), Fraction(-2944), Fraction(-2944),
+         crossing.shape),
+        ("MIXED-SIGN element, rowsz 2, one contribution: "
+         "row 1 [-3,5] += [-1,2], column 0",
+         *_at(straddling, 2), Fraction(-4), Fraction(7), straddling.shape),
+        ("SIGN-FLIPPING element, rowsz 2, one contribution: "
+         "row 1 [4,4] += [-8,-8], column 1",
+         *_at(straddling, 3), Fraction(-4), Fraction(-4), straddling.shape),
+        ("RANK 3, rowsz 4, one contribution: row 1 += [-1,-2,3,-16], "
+         "column 0 (-5 + -1)",
+         *_at(cube, 4), Fraction(-6), Fraction(-6), cube.shape),
+        ("RANK 3, rowsz 4, one contribution: row 1 += [-1,-2,3,-16], "
+         "column 3 (8 + -16)",
+         *_at(cube, 7), Fraction(-8), Fraction(-8), cube.shape),
+        ("RANK 3, rowsz 4, two contributions: row 0 column 2 "
+         "(-3 += -6 += 5)",
+         *_at(cube_twice, 2), Fraction(-4), Fraction(-4), cube_twice.shape),
     ]
 
 
@@ -1532,9 +1612,51 @@ def test_the_scatter_add_rows_debt_is_the_one_the_code_owes():
     scope entry, and the discipline-list bullet. When the fix lands, all
     three come down together -- and this test goes red until they do, which
     is what a self-destructing debt has to do to be one.
+
+    What it drives is BOTH the shapes the kernel branches on and the
+    operand VALUES a fix can be keyed on instead. The second half is not
+    hypothetical either: driven on the shapes alone, two independent
+    value-keyed partial fixes reported the debt paid and took both
+    docstring entries down with them, green at ``48 passed``, with
+    ``scatter_add_rows([-1], [-1])`` still returning a bumped bracket. Both
+    are recorded in :func:`_scatter_debt_evidence`, and the reach of the
+    case set is checked below rather than trusted.
     """
     evidence = _scatter_debt_evidence()
     assert evidence, "no case is driven, so this gate measures nothing"
+
+    # THE REACH OF THE CASE SET, READ OFF IT RATHER THAN TRUSTED. Seven
+    # cases over the two SHAPE axes were satisfied whole by a fix keyed on
+    # the operand's VALUES -- twice, on two independent keys, both recorded
+    # in `_scatter_debt_evidence` -- and an edit that quietly trimmed this
+    # list back to non-negative, small, rank-1-and-2 operands would re-open
+    # that route with this gate still green and still demanding the entries
+    # come down.
+    #
+    # It reads each case's EXACT total and its operand shape, never the
+    # endpoints the module returned: those carry the bump, and the bump is
+    # what makes the costed case's `-5e-324` look like a negative endpoint
+    # while the debt is owed and stop looking like one the moment it is
+    # paid. The reach of a case set is a property of the cases.
+    exacts = [e for c in evidence for e in (c[3], c[4])]
+    thin = sorted(k for k, reached in {
+        "an exact total that is negative": any(e < 0 for e in exacts),
+        "an element whose exact interval straddles zero":
+            any(c[3] < 0 < c[4] for c in evidence),
+        "a magnitude outside the {0 ... 16} the shape cases use":
+            any(abs(e) > 16 for e in exacts),
+        "an operand of rank 3 or more":
+            any(len(c[5]) >= 3 for c in evidence),
+    }.items() if not reached)
+    assert not thin, (
+        f"the cases this gate drives no longer reach {thin}, so a fix keyed "
+        f"on the operand's VALUES rather than on its shape could satisfy "
+        f"every one of them and this gate would then report the debt paid "
+        f"and require the docstring entries to be deleted. Two such keys "
+        f"are recorded in `_scatter_debt_evidence`, with what each one "
+        f"left bumped."
+    )
+
     exact = [c for c in evidence if _f(c[1]) == c[3] and _f(c[2]) == c[4]]
     wider = [c for c in evidence if c not in exact]
 
