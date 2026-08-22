@@ -19,16 +19,16 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                53
-      marked illustrative — not run                 15
-      EXECUTED (exit 0 required)                    38
+    ```python blocks                                54
+      marked illustrative — not run                 14
+      EXECUTED (exit 0 required)                    40
         marked run-only — output not compared        3
-        OUTPUT COMPARED against a fence             35
-    plain ``` fences                                78
-      consumed as an example's claimed output       35
+        OUTPUT COMPARED against a fence             37
+    plain ``` fences                                80
+      consumed as an example's claimed output       37
       HAND-WRITTEN, compared to nothing             43
-So the claim this file earns is: *every runnable example runs, and 35 of
-the 38 have their stdout compared byte for byte after a narrow
+So the claim this file earns is: *every runnable example runs, and 37 of
+the 40 have their stdout compared byte for byte after a narrow
 normalisation.* The 43 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
@@ -161,6 +161,18 @@ EXPECTED_INVENTORY = {
     # the eager detector armed it raises by design, and with it off it prints
     # nothing, so there is no output to compare either way; it is a record of
     # what jax does, which is what `illustrative` means.
+    # B19 on `docs/harness-api.md`: the page opened "Every code block on this
+    # page was executed verbatim ... and the outputs are what it printed",
+    # which one block on the page contradicted -- it was marked illustrative,
+    # and it could not have been executed verbatim because it uses `lax` and
+    # nothing on the page imports it. It also carried `# VERIFIED` on a
+    # harness that is UNKNOWN under the call the page documents. Now executed
+    # and compared, with a third harness added so the withholding it is about
+    # is visible: `no_assume` REFUTED against `not_honoured` UNKNOWN is what
+    # makes the first row evidence rather than a comment. And a second block
+    # PRINTS `check`'s signature from the object, because the typed one had
+    # published four of its nine parameters for six weeks.
+    #
     # B19: `docs/inductive-step.md` went from FOUR illustrative blocks and no
     # gate at all to four executed-and-compared ones. It was the page whose
     # running example was REFUTED by the solver the page recommends, with the
@@ -194,11 +206,11 @@ EXPECTED_INVENTORY = {
     # booleans, not a render, because the normaliser only rewrites a source-info
     # line that begins the line and a fence carrying an inline temp path could
     # not be byte-compared.
-    "python_blocks": 53,
-    "illustrative": 15,
-    "executed": 38,
+    "python_blocks": 54,
+    "illustrative": 14,
+    "executed": 40,
     "run_only": 3,
-    "compared": 35,
+    "compared": 37,
     # B15 added two: `docs/overflow-tripwire.md` now quotes the trace gate's
     # narrowed refusal and its NOT-FULLY-OBSERVED refusal side by side, which
     # is the whole point of that section — the two sentences have to be
@@ -221,7 +233,7 @@ EXPECTED_INVENTORY = {
     # which is the gap that program has in jax's DEFAULT configuration.
     # Measured, hand-written, attached to nothing;
     # `tests/test_tripwire_eager.py` re-drives every line of it.
-    "plain_fences": 78,
+    "plain_fences": 80,
     "plain_unattached": 43,
 }
 
