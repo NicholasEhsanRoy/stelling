@@ -16,21 +16,19 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   **ℝ-mode is the scoping word and it is load-bearing.** The ``ieee_*``
   kernels, ``ieee_fma_hull`` and ``subnormal_haze``/``subnormal_haze_fmt``
   serve ``semantics="ieee"``, where the thing being bracketed is the FLOAT
-  the compiled program computes and not a real. They are **outside the
-  outward-ℝ claim** — they do not round outward and it is not about them —
-  driven:
+  the compiled program computes and not a real; ``meet`` is an
+  INTERSECTION, so it drops points on purpose, and its own docstring opens
+  *"No outward rounding, deliberately."* Every one of them is **outside the
+  outward-ℝ claim** above, which is not about them. Driven:
   ``ieee_add([0.1], [0.2])`` returns a bracket that EXCLUDES the exact real
-  ``0.1 + 0.2``, and ``ieee_sqrt([2])`` one that excludes √2. ``meet`` is
-  outside it for a different reason — it is an intersection, so it drops
-  points on purpose — **outside the outward-ℝ claim** for that reason —
-  and its own docstring opens *"No outward rounding, deliberately."* The carve-out used to appear only in the ``ieee_*``
-  paragraph at the end of this docstring, which is a long way after the
-  word *always*. ``tests/test_interval.py``'s ``DISCIPLINE`` table drives
-  a real that the returned bracket EXCLUDES for every ``ieee_*`` kernel and
-  for ``meet``; the two ``subnormal_haze`` helpers are in the same carve-out
-  for the same reason — they are ieee-mode band machinery, not ℝ arithmetic
-  — but they only ever WIDEN (they hull with 0), so no such witness exists
-  and the table drives that instead.
+  ``0.1 + 0.2``, and ``ieee_sqrt([2])`` one that excludes √2 —
+  ``tests/test_interval.py``'s ``DISCIPLINE`` table drives one excluded
+  real for every ``ieee_*`` kernel and for ``meet``. The two
+  ``subnormal_haze`` helpers sit in the carve-out for the same reason and
+  need no such witness: they only ever WIDEN (they hull with 0), so the
+  table drives that instead. This carve-out used to appear only in the
+  ``ieee_*`` paragraph at the far end of this docstring, which is a long
+  way after the word *always*.
 
   **How TIGHT the bracket is is per-operation and is NOT universal**, so
   the scope below travels with any claim about tightness.
