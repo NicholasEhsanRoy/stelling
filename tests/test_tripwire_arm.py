@@ -931,18 +931,44 @@ def test_the_pages_OPENING_DEMO_is_what_jax_does():
 
     The page says the output is byte-identical on 0.10.2 and 0.11.0. This
     runs on whichever is installed, so both lanes assert it.
+
+    **AND IT RUNS THE PAGE'S PROGRAM, NOT A COPY OF IT.** The first version
+    re-implemented ``add_offset`` here and compared the page's ANSWERS to the
+    re-implementation, so the one direction it could not see was the page's
+    CODE drifting from the answers printed under it -- which is the exact
+    question this batch was commissioned to answer. Driven: changing the
+    page's line to ``return x + 300`` left 325 tests green, while the real
+    jaxpr becomes ``add a 44:i8[]`` and the result ``[-112, 94, 34]``. The
+    block is now executed out of the page, so the program and its printed
+    reading move together or not at all.
     """
     import re
-
-    def add_offset(x):
-        return x + 256
-
-    jaxpr = jax.make_jaxpr(add_offset)(jnp.zeros(1, jnp.int8))
-    result = jax.jit(add_offset)(jnp.int8([100, 50, -10])).tolist()
 
     page = (
         pathlib.Path(__file__).resolve().parents[1] / "docs" / "overflow-tripwire.md"
     ).read_text(encoding="utf-8")
+
+    # THE PAGE'S OWN BLOCK, EXECUTED. Located by the two lines that make it
+    # this block and not another fence: the `def add_offset` the prose names
+    # and the `jax.jit` call whose reading is quoted below it.
+    blocks = [
+        b for b in re.findall(r"^```python\n(.*?)^```", page, re.M | re.S)
+        if "def add_offset" in b and "jax.jit(add_offset)" in b
+    ]
+    assert len(blocks) == 1, (
+        f"the page carries {len(blocks)} opening-demo blocks; this test "
+        f"executes exactly the one, located by `def add_offset` and "
+        f"`jax.jit(add_offset)`"
+    )
+    ns: dict = {}
+    exec(compile(blocks[0], "docs/overflow-tripwire.md", "exec"), ns)  # noqa: S102
+    assert "jaxpr" in ns and "result" in ns, (
+        "the page's demo no longer binds `jaxpr` and `result`; this test reads "
+        "the values it printed rather than recomputing them"
+    )
+
+    jaxpr = ns["jaxpr"]
+    result = ns["result"].tolist()
 
     # the full jaxpr, quoted in the block as a comment
     quoted = [
@@ -1160,6 +1186,37 @@ def test_strict_promotion_is_a_DTYPE_check_measured_over_the_WHOLE_door_set():
     )
     for door in sorted(loud_for_a_bare_int):
         assert f"`{door}`" in row, f"the page's bare-int row does not name {door}"
+
+    # (3c) AND THE SURFACE A USER ACTUALLY READS. The same sentence ships in
+    # `report._suggestions`, printed under every finding, and the page's
+    # correction left it behind: "it rejects a Python int at none of the
+    # eleven, which is the spelling in front of you" -- flat, and contradicted
+    # by the bullet immediately above it in the same list, which tells the
+    # reader that `jnp.array(N, dt)` raises OverflowError for a Python int.
+    # Shipping the corrected claim in the docs and the wrong one in the
+    # message is worse than either alone, so the SAME measurement holds both.
+    from stelling._tripwire import report as _report
+
+    advice = " ".join(_report._suggestions(record.Finding(
+        file="m.py", line=1, func="f", written=256,
+        from_dtype="int64", to_dtype="int8", became=0, origin=record.ORIGIN_USER,
+    )))
+    assert "at none of the eleven" not in advice, (
+        "report._suggestions still says a Python int is rejected at none of "
+        "the eleven doors. Three of them raise OverflowError on the VALUE, "
+        "which the bullet above it in the same list already tells the reader."
+    )
+    assert "no TypePromotionError" in advice, (
+        f"the strict-promotion bullet no longer says WHICH rejection a bare "
+        f"Python int does not get. 'never rejects it' is the false reading "
+        f"that was there. Rendered advice:\n{advice}"
+    )
+    for door in sorted(loud_for_a_bare_int):
+        assert door in advice, (
+            f"report._suggestions does not name {door} among the doors that "
+            f"raise OverflowError on a bare Python int, and this test just "
+            f"measured that it does"
+        )
 
     # ...and the control for all of it: without strict, none of the eleven
     # raises, so the sets above are about the SETTING and not about the doors
