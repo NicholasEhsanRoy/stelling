@@ -683,9 +683,16 @@ def test_the_norm_count_is_the_same_number_in_all_three_files():
 
 
 _NORM_LETTER = re.compile(r"\bNorm [A-Z]\b")
-# `src/stelling/propagate.py` carries one more ("Norm G"), and is owned by a
-# sibling batch at the time of writing. Listed so this gate can go in now and
-# the last site is a visible, named debt rather than a silent exemption.
+# `src/stelling/propagate.py` carries one more ("Norm G"). It was owned by a
+# sibling batch when this gate was written, which is why it went in as a
+# NAMED debt rather than a silent exemption. That batch has since landed
+# (B18, merged at `9cb2c0f`), so the reason for the exemption has expired and
+# the entry is now a one-line cleanup owed by whoever next opens that file:
+# replace it with "An instrument must declare its SCOPE, and an acceptance
+# criterion must check that the scope covers the claim". Left here rather
+# than taken, because this branch is a documentation batch and that file was
+# out of its scope; `test_the_norm_letter_debt_is_still_real` will fail the
+# day it is fixed, which is how the entry gets removed.
 _LETTER_DEBT = {"src/stelling/propagate.py"}
 # This file names the letters in order to forbid them, so it cannot scan
 # itself. Excluded by path rather than by a marker, because a marker in a
