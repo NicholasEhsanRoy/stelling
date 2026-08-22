@@ -303,7 +303,8 @@ because of it.
 
 ### **STUB-DIRECTION AUDIT: two zeros questioned — one restored, one re-run and held**
 
-Norm I says an over-permissive stub's zero is conclusive — a stub granting MORE
+*An over-permissive stub's ZERO is conclusive; its NONZERO is not*
+(`docs/norms.md`) says a stub granting MORE
 than a real implementation upper-bounds the benefit, so a zero means a real fix
 can only do worse. **That argument requires the stub to be over-permissive, and
 two of these were not.**

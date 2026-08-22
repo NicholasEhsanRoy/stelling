@@ -393,7 +393,7 @@ def test_every_non_reaching_idiom_declines_for_its_recorded_reason():
 
 
 def test_the_census_is_not_vacuous():
-    """ANTI-VACUITY (Norm C). A census of idioms that turned out not to be
+    """ANTI-VACUITY (docs/norms.md, "A measurement whose result is an ABSENCE needs a positive control"). A census of idioms that turned out not to be
     scattering idioms at all would pin nothing: every entry would 'not reach'
     for reasons having nothing to do with the rows. So prove each entry
     really does lower to a scatter-family primitive, that the census covers

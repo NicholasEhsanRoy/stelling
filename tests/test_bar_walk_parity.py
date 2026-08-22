@@ -233,7 +233,7 @@ def test_the_fingerprint_walk_would_catch_the_old_accessor():
 
 
 def test_the_parity_test_catches_the_old_accessor():
-    """ANTI-VACUITY (Norm C). A parity test that passes under the BROKEN walk
+    """ANTI-VACUITY (docs/norms.md, "A measurement whose result is an ABSENCE needs a positive control"). A parity test that passes under the BROKEN walk
     would prove nothing. Re-implement the old descent and confirm it fails
     exactly where it did in the field: a barred primitive inside `cond`."""
     closed = transcribe(jax.make_jaxpr(_in_cond)())
@@ -564,7 +564,7 @@ def test_slice_root_walk_has_parity_with_the_canonical_accessor(
 
 
 def test_the_slice_parity_test_catches_the_naive_flat_version(monkeypatch):
-    """ANTI-VACUITY (Norm C) for the slice root, on the MEASURED case.
+    """ANTI-VACUITY (docs/norms.md, "A measurement whose result is an ABSENCE needs a positive control") for the slice root, on the MEASURED case.
 
     The flat comprehension is the implementation a slice-scoped bar invites,
     and on a `scatter-add` slice under a barred set of `{"add"}` it is wrong:
@@ -664,7 +664,7 @@ def test_the_bar_re_derives_the_slice_that_was_actually_emitted(
 
 
 def test_the_re_derivation_is_not_vacuous(monkeypatch):
-    """ANTI-VACUITY (Norm C) for the agreement above: at least one of those
+    """ANTI-VACUITY (docs/norms.md, "A measurement whose result is an ABSENCE needs a positive control") for the agreement above: at least one of those
     slices must actually CARRY a barred primitive, or the parity is between
     two empty sets and would hold under any re-derivation at all."""
     from stelling.obligation import (

@@ -9,7 +9,7 @@ target, because XLA flushes subnormals. `rem`: `lax.rem` is truncated while
 
 Every soundness assertion here carries an anti-vacuity control: remove the
 guard under test and the false box must come back. Without that these pass
-for reasons unrelated to what they claim (Norm D).
+for reasons unrelated to what they claim (docs/norms.md, "A measurement whose result is an ABSENCE needs a positive control").
 """
 from __future__ import annotations
 

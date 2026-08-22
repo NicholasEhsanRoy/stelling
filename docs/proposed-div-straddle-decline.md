@@ -109,7 +109,8 @@ so the verdicts were already `unknown`. **What changes is the bookkeeping** — 
 coverage number stops reporting 100% known for a query that knows nothing, and
 the cause becomes attributable.
 
-Per Norm I the stub is *more restrictive* than the change would be, so a zero
+Per *An over-permissive stub's ZERO is conclusive; its NONZERO is not*
+(`docs/norms.md`) the stub is *more restrictive* than the change would be, so a zero
 here is the conclusive direction: a real implementation can only break less.
 
 ## What this does NOT claim

@@ -20,7 +20,7 @@ harness, a stamped verdict, in four files.
 | [Reproducing a witness](reproducing-a-witness.md) | emitting a runnable file that executes a REFUTED's witness through your own program, without importing stelling |
 | [The overflow tripwire](overflow-tripwire.md) | one line in `conftest.py`: find the integer constants JAX silently narrows in the traced code you run, and read exactly which doors it does not watch |
 | [Inductive step verification](inductive-step.md) | `check_inductive_step(body, state_bounds)`: prove a loop body preserves its invariant in one step — VERIFIED means it holds for all iterations |
-| [Norms](norms.md) | twenty-three rules, each earned by a specific failure and each naming the instances that earned it — the reasoning behind what a contribution is asked for |
+| [Norms](norms.md) | twenty-six rules, each earned by a specific failure and each naming the instances that earned it — the reasoning behind what a contribution is asked for |
 
 ## Records
 
