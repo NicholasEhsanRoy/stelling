@@ -63,14 +63,12 @@ def test_core_lines_naming_libraries_carry_provenance_markers():
     )
 
 
-# Every `path::test_name` citation in core prose. The trailing `*` is part of
-# the citation, not noise: `interval.py` cites `::test_reassociation_*`, a
+# Every `path::test_name` citation in shipped prose. The trailing `*` is part
+# of the citation, not noise: `interval.py` cites `::test_reassociation_*`, a
 # FAMILY of tests, and a family citation is dangling when NO test matches the
 # prefix. Both forms are resolved rather than one being skipped, because
 # skipping is how a citation stops being checked without anyone deciding to.
-_TEST_REF = re.compile(r"(tests/[A-Za-z0-9_./]+\.py)::(test_[A-Za-z0-9_]+)(\*?)")
-
-#: The same citation, allowing the IDENTIFIER to be wrapped. `SOUNDNESS.md`
+#: The citation, allowing the IDENTIFIER to be wrapped. `SOUNDNESS.md`
 #: wraps nine of its eighteen citations mid-name, always after an underscore
 #: because that is where a long identifier breaks; a line-by-line scan sees
 #: `…::test_a_lying_` and calls it dangling. The continuation is tried only
