@@ -3389,11 +3389,37 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
         # 2026-08-22. Without ``JAX_ENABLE_X64=1`` the outvar aval is not
         # ``float64`` at all: jax warns that the requested dtype "is not
         # available, and will be truncated to dtype float32", so a reader
-        # following the recipe traces a DIFFERENT document. Measured on this
-        # commit, the same harness in the two cells:
+        # following the recipe traces a DIFFERENT document — ``float32`` in
+        # the declaration where the x64=1 one carries ``float64`` only, and a
+        # different ``content_hash`` with it. Which cell it was traced in is
+        # therefore part of the recipe and not a detail of it.
         #
-        #     x64=1   float64 only         content_hash a037be6d…
-        #     x64=0   float32 in the doc   content_hash 4d4d1c33…
+        # NO HASH IS QUOTED FOR EITHER CELL, and this paragraph's own rule is
+        # why. A pair of literals stood here for one day, in the paragraph
+        # that exists to explain why an earlier literal was deleted. THEY ARE
+        # NOT WRONG — re-derived from the recipe above, they come back
+        # identical, on this commit and on ``844ba48``, in both cells. What
+        # happened instead is that an independent re-derivation over 90
+        # variants per cell landed on a DIFFERENT pair, and a third pair for
+        # "this recipe" is recorded in the sweep's carry-forward and appears
+        # nowhere in this tree. Three contexts, three pairs, one recipe.
+        #
+        # The reason is measurable and is the whole argument: the hash is
+        # over the WHOLE canonical document, so it moves for anything. SIX
+        # one-line variations of the harness above — dropping the ``return``,
+        # a scalar shape, ``(3,)``, bounds ``(-1, 1)``, the other comparator,
+        # a ``float32`` declaration — give six more values in each cell, all
+        # distinct from each other and from the recipe's own, and not one of
+        # the twelve is any of the six literals three contexts have recorded
+        # for "this recipe". (The ``float32`` variation is the one that reads
+        # the SAME in both cells, which says it again: the document decides,
+        # and the cell decides the document.) A reader with a digit and no
+        # document cannot tell "the guard changed" from "I typed a different
+        # harness". So the rule this comment block ends on is
+        # applied to this paragraph too: the document is above, and the hash
+        # is not needed. (That rule was "twelve lines below" when this
+        # sentence was written; it is further now, and a distance is one more
+        # numeral nothing derives.)
         #
         # The PROPERTY below holds either way; the document does not, and a
         # recipe a reader cannot re-trace is how a measurement turns into a

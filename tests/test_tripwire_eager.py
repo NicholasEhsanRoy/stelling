@@ -2370,7 +2370,13 @@ def test_the_const_fold_tripwire_still_needs_ITS_origin_filter(armed):
     try:
         assert _tripwire.evict_trace_caches() == "evicted"
         before = recorder.suppressed_jax
-        narrowings = recorder.int_narrowings
+        # `int_narrowings` is the const-fold rule's INSPECTED DENOMINATOR --
+        # "folded, integer source, integer target: the population that is
+        # range-checked" (`record.py`) -- and not a count of findings. The
+        # local was called `narrowings`, which made the comment beside the
+        # assertion below read as its own contradiction; the name says which
+        # of the two it is now.
+        inspected = recorder.int_narrowings
         jax.random.key(0)
         if jax.config.jax_enable_x64:
             # AND THE COMPLEMENTARY FACT AT ``jax_enable_x64=1``, asserted
@@ -2385,7 +2391,7 @@ def test_the_const_fold_tripwire_still_needs_ITS_origin_filter(armed):
             # did meet jax's PRNG and really did decide it was not a
             # truncation, which is a different state from a rule that was
             # never reached.
-            assert recorder.int_narrowings > narrowings, (
+            assert recorder.int_narrowings > inspected, (
                 "the const-fold rule saw no integer narrowing at all in jax's "
                 "own PRNG, so 'nothing to attribute' is indistinguishable "
                 "from a rule that was never reached"

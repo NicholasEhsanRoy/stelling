@@ -216,11 +216,35 @@ def test_the_scratchpad_annotation_is_load_bearing_and_present():
         # the floor is still not run, the skip still says so, and the
         # `rc`/`stderr` a reader would want are in a warning rather than in a
         # string `pytest -rs` truncates to the terminal width anyway.
+        #
+        # NO `stacklevel=2` HERE, AND THAT IS NOT AN OVERSIGHT. This `warn`
+        # is in the TEST BODY, so one frame out is pytest's own caller:
+        # `stacklevel=2` attributed it to `_pytest/python.py`, the line where
+        # the runner calls the test function, and pointed the reader at the
+        # runner instead of at the check that could not run. The two in
+        # `tests/test_soundness_routing.py` sit in a HELPER the test calls,
+        # so their `stacklevel=2` lands on the test file, which is what all
+        # three want; the number differs because the depth does. Measured in
+        # a `.git`-less tree: each routing warning is attributed to the line
+        # in that file where its TEST calls the helper -- which is what
+        # `stacklevel=2` means and is a line a reader can act on -- and this
+        # one to the `warnings.warn` below. NO LINE NUMBER IS QUOTED FOR
+        # THEM: the first draft of this comment named one, and it had
+        # already moved by eleven before the commit, because the same fixup
+        # added a paragraph to that file's docstring.
+        #
+        # LATENT UNDER `-W error`, and inert today: `pyproject.toml` sets no
+        # `filterwarnings` and no workflow passes `-W`. If warnings are ever
+        # promoted, these disclosed skips become errors rather than skips —
+        # driven in a `.git`-less zero-dep tree, `-W error::UserWarning` turns
+        # `23 passed, 9 skipped` into `9 failed, 23 passed` across this file
+        # and the routing one, so the sdist lane would go red for a reason
+        # that is a disclosure working correctly. The fix if that day comes is
+        # a `filterwarnings` entry naming these, not deleting the detail.
         warnings.warn(
             f"`git ls-files scratchpad` failed (rc={tracked.returncode}, "
             f"stderr={tracked.stderr.strip()!r}), so this test's non-vacuity "
-            f"floor did not run. The annotation assertion above DID.",
-            stacklevel=2,
+            f"floor did not run. The annotation assertion above DID."
         )
         pytest.skip("not a git checkout (an unpacked sdist, say)")
     headerless = []

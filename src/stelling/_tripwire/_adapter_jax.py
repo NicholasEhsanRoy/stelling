@@ -1771,10 +1771,10 @@ def eager_selfcheck() -> str:
         installed, and jax has stopped routing one construction spelling
         through it. It is silent, it is what a jax release actually produces,
         and a presence check cannot see it. **It refuses to arm.** Losing one
-        of the seven construction routes quietly is not a trade this tool gets to make on
-        a user's behalf -- the whole value of Mode 2 is that a program either
-        cannot contain an undeclared truncation or the tool says it is not
-        watching.
+        of the seven construction routes quietly is not a trade this tool
+        gets to make on a user's behalf -- the whole value of Mode 2 is that
+        a program either cannot contain an undeclared truncation or the tool
+        says it is not watching.
     ``cries-wolf``
         an IN-RANGE value was reported as out of range, so every alarm this run
         would be noise.

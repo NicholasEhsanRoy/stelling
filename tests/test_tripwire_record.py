@@ -1973,7 +1973,7 @@ def _x64_cells(workflow: str, block: str, wanted) -> list[str]:
     the workflow's top-level one. Reading only the step chunk and calling a
     miss "unset" is how the sweep guard first went blind: hoisting the
     repeated ``env:`` up to the job -- a tidy-up this workflow openly invites,
-    now six steps repeat it -- left every canary run at x64=1 with the guard
+    six steps repeat it today -- left every canary run at x64=1 with the guard
     still green. What must NOT leak is ANOTHER STEP's ``env:``, so the
     per-step search stays per-step and the job's is taken from the head alone.
     Anchored, because a comment QUOTING the setting is not the workflow

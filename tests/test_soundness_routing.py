@@ -221,7 +221,18 @@ quiet.
   — the eight here and one in `tests/test_reuse_pins.py`. The reason is the
   constant `_GIT_LESS_SKIP` now and the detail is a warning, which is where
   a reader was going to meet it anyway: `-rs` truncates a skip reason to the
-  terminal width.
+  terminal width. **THOSE WARNINGS ARE LATENT UNDER `-W error`, said here
+  rather than found later.** `pyproject.toml` configures no
+  `filterwarnings` and no workflow passes `-W`, so this is inert today; if
+  warnings are ever promoted, all nine disclosed skips become errors —
+  driven in a `.git`-less zero-dep tree, `-W error::UserWarning` over this
+  file and `tests/test_reuse_pins.py` gives `9 failed, 23 passed` where the
+  same two files give `23 passed, 9 skipped` without it. The sdist lane
+  would be red for a disclosure doing its job, and the answer that day is a
+  `filterwarnings` entry naming these, not a quieter skip. `stacklevel=2` is
+  right for the two here, which warn from a HELPER the test calls; the one
+  in `tests/test_reuse_pins.py` warns from the test body and takes the
+  default, because one frame out of a test body is pytest's own caller.
 
   **AND UNTIL 2026-08-21 THEY CARRIED A DIFFERENT ONE.** This list named
   SEVEN columns; `_LOST`, the string both skip messages are built from,

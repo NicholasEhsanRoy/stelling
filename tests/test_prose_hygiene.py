@@ -108,7 +108,7 @@ _TEST_REF_WRAPPED = re.compile(
 #: in use, and the `FOUR arguments, not one` paragraph, whose bare `::name`
 #: is not an annotation at all but an ABBREVIATED second citation of a test
 #: in the file already named — a licence nothing needs, covering a paragraph
-#: 1382 characters wide. Driven at `24a77cb`: a deleted-long-ago citation of
+#: 1382 characters wide at `24a77cb`. Driven there: a deleted citation of
 #: `tests/test_propagation_identity.py` planted at the head of that paragraph
 #: gave **5 passed**; the identical plant one paragraph later gave **1
 #: failed**.
@@ -119,7 +119,7 @@ _TEST_REF_WRAPPED = re.compile(
 #: `::test_y`.]**"*) and is what "the citation it annotates" means when the
 #: only thing a checker can read is position. The residue that remains is one
 #: citation wide and stated: a supersession still licenses the whole span
-#: back to the previous citation — 307 characters in that same paragraph,
+#: back to the previous citation — 307 characters of that same paragraph,
 #: down from 1382 — so an annotation and the sentence it corrects may still
 #: be a clause apart, and the licence still requires only that the
 #: replacement RESOLVE IN THE CITED FILE, not that it be related to the name
