@@ -368,7 +368,7 @@ is 0.2.0 development work throughout.
   therefore unmeasurable on the shipped tree.**
   `tests/test_narrowing_perimeter.py`'s autouse fixture restored
   unconditionally — the exact asymmetry `arm(owner=...)` exists to prevent,
-  aimed at the plugin's hold. That file sorts **72nd of the 149 files** `pytest --collect-only -q` names in this tree (re-measured at B22's fixup), so its
+  aimed at the plugin's hold. That file sorts **72nd of the 148 files** `pytest --collect-only -q -p no:randomly` names in this tree, so its
   first test took the perimeter out and roughly **4,300 later
   tests ran unprotected with nothing red**; the documented dial-on command reported `NOT ARMED
   [detached] ... 0 integer literal(s) ... were checked`. It now records what
@@ -429,14 +429,19 @@ is 0.2.0 development work throughout.
   that certified it silenced the alarm.** `docs/overflow-tripwire.md` said a
   float value that overflows *"is seen by nothing"* and *"raises no alarm
   anywhere in this release"*. None of the three instruments sees one — that
-  part holds — but the narrowing is numpy's, and where it happens **on the
-  host** numpy raises `RuntimeWarning: overflow encountered in cast`, so
-  **`pytest -W error::RuntimeWarning` fails on it today**. Driven under
-  `warnings.simplefilter("error")`, identical in all four cells (0.10.2 /
-  0.11.0 × x64 off/on): of the six cases the page named, four warn eagerly
-  and **all of them warn inside `jit`**, because a trace embeds its constants
-  through that same cast — while the integer cases the page contrasted them
-  against are genuinely silent, eager and traced alike. The page defines
+  part holds — but the narrowing is numpy's, and some of it numpy reports as
+  `RuntimeWarning: overflow encountered in cast`, so
+  **`pytest -W error::RuntimeWarning` fails on that part today**. Driven under
+  `warnings.simplefilter("error")` over the six cases the page named, in all
+  four cells (0.10.2 / 0.11.0 × x64 off/on): **five warn eagerly with x64
+  off, three with x64 on** — the eager half is exactly what the x64 flag
+  moves — and **five of the six warn inside `jit`**, because a trace embeds
+  its constants through that same cast. The sixth is
+  `jit(lambda a: a.astype(jnp.float32))` on `[1e300, 1e300]` with the operand
+  built outside the measurement window, which is **silent in all four cells**:
+  the operand really is an array by then and the conversion really is XLA's.
+  The integer cases the page contrasted all six against are genuinely silent,
+  eager and traced alike. The page defines
   silence as *"no `RuntimeWarning` you could turn into one"* and names
   `-W error` as common in scientific repos, so the conclusion drawn — *"a
   scope boundary and not a hole … closing it would be a different
@@ -458,8 +463,8 @@ is 0.2.0 development work throughout.
   does not reach any of them. The overflow there is *computed*, so there is no
   literal for a literal-watcher to read even in principle.
 
-  **The axis is the ROUTE, not the spelling**, and two lines change sides
-  between cells to prove it: `x_f32 + 1e300` and
+  **Whether a given line is on the host at all can change with the x64 flag**,
+  and two lines change sides between cells to prove it: `x_f32 + 1e300` and
   `jnp.asarray([1e300, 1e300]).astype(jnp.float32)`, run eagerly, warn at
   `JAX_ENABLE_X64=0` and are silent at `JAX_ENABLE_X64=1` — numpy
   canonicalises to `float32` on the way in with x64 off, and XLA does the
@@ -469,6 +474,38 @@ is 0.2.0 development work throughout.
   (`jit(a.astype(jnp.float32))` on `[1e300, 1e300]`, whose x64-off warning came
   from the `asarray` that built the operand, not from the `astype` it was
   named for).
+
+- **…and HOST versus DEVICE does not partition it either, which is the second
+  correction to the same paragraph.** The fixup's replacement claimed a
+  universal — *"where the narrowing is done ON THE HOST, by numpy, the cast
+  emits `RuntimeWarning`"* — and drew a remedy from it: `-W
+  error::RuntimeWarning` *"covers whatever numpy touched and nothing else."*
+  Measured, **it does not cover `bfloat16`**: `jnp.full((2,), 1e300,
+  jnp.bfloat16)`, `jnp.array([1e300], jnp.bfloat16)` and `jnp.bfloat16(1e300)`
+  are each `inf` with nothing raised, in all four cells, at the same three
+  construction doors that raise for `float32` — and `jax.make_jaxpr` already
+  holds `inf:bf16[]`, so it is a host narrowing and not the device residue.
+  **The page contained its own counter-example** three paragraphs from the
+  sentence: its float8 table said `float16` is the only format whose host cast
+  warns when traced, which is seven silent host casts beside a claim that host
+  casts warn.
+
+  **What decides is the TARGET FORMAT.** The warning comes from numpy's own
+  floating-point machinery, which knows only the formats numpy implements
+  itself — `float16`, `float32`, `float64`. The **other twelve** float
+  formats `jax.numpy` exposes come from `ml_dtypes`, which converts by integer
+  bit arithmetic and raises no floating-point flag. The control that settles
+  it has no jax in it: one numpy cast loop on one `float32` array of `1e30`
+  **warns** into `float16` and is **silent** into `float8_e5m2` (`inf`) and
+  `float8_e4m3fn` (`nan`) — the silent ones lost far more. So the page now
+  states the remedy exactly — it catches a host narrowing into `float16`,
+  `float32` or `float64` and nothing else — and a new gate derives both lists
+  from `jax.numpy`, drives all three doors on all fifteen formats, and
+  compares the page's table, its enumeration and its remedy sentence against
+  what was driven. **Measured before it existed:** inverting the axis
+  sentence, rewriting the device-silent case list, and changing the page to
+  claim `-W error::RuntimeWarning` *does* reach the device residue were all
+  three green.
 
 - **`overflows-float` fires on EIGHT of `jax.numpy`'s float formats, not the
   one the page claimed — and four of them run as `nan`.** The sentence said

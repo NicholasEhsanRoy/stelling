@@ -46,8 +46,11 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import pathlib
 import re
+import subprocess
+import sys
 import warnings
 
 import pytest
@@ -223,6 +226,103 @@ FLOAT_OVERFLOW_DEVICE_SILENT = (
 )
 
 
+#: Ordinal suffixes, for the collection-rank sentence below.
+_ORDINAL = {1: "st", 2: "nd", 3: "rd", 0: "th", 4: "th", 5: "th",
+            6: "th", 7: "th", 8: "th", 9: "th"}
+
+
+#: The numerals this page writes as words, so a count can be compared against
+#: the sentence that carries it instead of against a hand-typed digit.
+_WORDS = {
+    1: "One", 2: "Two", 3: "three", 4: "four", 5: "five", 6: "six",
+    7: "seven", 8: "Eight", 9: "Nine", 10: "Ten", 11: "eleven", 12: "twelve",
+}
+
+
+#: THE SECOND AXIS, AND THE ONE THIS PAGE HAS NOW HAD WRONG TWICE.
+#:
+#: B22 wrote "seen by nothing"; its fixup corrected that to HOST versus
+#: DEVICE. **Host versus device does not partition it either**, and the page
+#: carried its own counter-example three paragraphs away without anyone
+#: noticing: the float8 table below says ``float16`` is the ONLY format whose
+#: host cast warns when traced -- seven silent host casts, beside a sentence
+#: saying host casts warn.
+#:
+#: **What decides is the TARGET FORMAT.** ``RuntimeWarning: overflow
+#: encountered in cast`` comes from numpy's own floating-point machinery, and
+#: that machinery only knows numpy's own binary formats. ``ml_dtypes``
+#: converts by integer bit arithmetic and raises no FP flag, so a narrowing
+#: into ``bfloat16`` or any ``float8_*`` is silent at every host door -- and
+#: ``bfloat16`` is the most common non-``float32`` dtype in real jax code.
+#:
+#: The two lists are DERIVED in :func:`test_the_host_half_is_the_TARGET_
+#: FORMAT_and_not_the_door` from ``dir(jnp)`` and ``hasattr(numpy, name)``,
+#: not read off this declaration, and both are compared against the page.
+HOST_DOOR_LOUD = ("float16", "float32", "float64")
+HOST_DOOR_SILENT = (
+    "bfloat16",
+    "float4_e2m1fn",
+    "float6_e2m3fn",
+    "float6_e3m2fn",
+    "float8_e3m4",
+    "float8_e4m3",
+    "float8_e4m3b11fnuz",
+    "float8_e4m3fn",
+    "float8_e4m3fnuz",
+    "float8_e5m2",
+    "float8_e5m2fnuz",
+    "float8_e8m0fnu",
+)
+
+#: No finite Python float exceeds ``float64``'s range, so ``float64`` has no
+#: construction-door case to drive; the test asserts that positively rather
+#: than quietly dropping the row.
+#:
+#: ``float6_e2m3fn`` and ``float6_e3m2fn`` are the other exclusion and it is
+#: SERIES-DEPENDENT: jax 0.10.2 refuses to build them at all (*Invalid XLA
+#: PrimitiveType*), and jax 0.11.0 builds them and then fails the CPU
+#: compiler's ``RET_CHECK`` (*Invalid bitcast i6 to i8*) on the first
+#: operation. Excluded by DRIVING the door and recording what came back, not
+#: by a proxy -- see :data:`_ZEROS_IS_NOT_BUILDABILITY`.
+HOST_DOOR_SILENT_DRIVEN_EVERYWHERE = tuple(
+    n for n in HOST_DOOR_SILENT if not n.startswith("float6_")
+)
+
+#: The three CONSTRUCTION doors the page enumerates, as (label, builder).
+#: Each takes a dtype and a Python float literal past that format's largest
+#: finite value. They are the doors a reader writes; ``.astype`` is a
+#: different route and is covered by the DEVICE half.
+_HOST_CONSTRUCTION_DOORS = (
+    ("jnp.full((2,), LIT, dt)", lambda dt, lit: jnp.full((2,), lit, dt)),
+    ("jnp.array([LIT], dt)", lambda dt, lit: jnp.array([lit], dt)),
+    ("jnp.<dt>(LIT)", lambda dt, lit: dt(lit)),
+)
+
+#: ``jnp.zeros`` IS NOT A BUILDABILITY PROXY, and this is the recorded reason.
+#:
+#: The first version of the quiet-format gate used ``jnp.zeros((3,), obj)`` to
+#: decide whether a format could be driven at all. Measured: on jax 0.10.2
+#: that raises for ``float6_e2m3fn``/``float6_e3m2fn`` and the proxy is right;
+#: on jax **0.11.0 it succeeds** and the FIRST OPERATION crashes the XLA CPU
+#: compiler with ``RET_CHECK failure ... Invalid bitcast i6 to i8``. So the
+#: proxy answers "can be built" when the question is "can be driven", and it
+#: answers it differently on the two series this project tests. Harmless while
+#: both float6 formats SATURATE (they are ``inexact``, never
+#: ``overflows-float``, so nothing selects them into the driven set) -- and a
+#: crash rather than a report the day a format arrives that does both.
+#:
+#: The classification below therefore does not consult jax at all: what a
+#: literal RUNS AS is ``ml_dtypes`` arithmetic and is answerable in any cell.
+#: jax is asked only to drive, and a format jax cannot drive is recorded as
+#: excluded with the exception it actually raised.
+_ZEROS_IS_NOT_BUILDABILITY = (
+    "jnp.zeros succeeded for {name} and the first operation on it raised "
+    "{exc}. That is the trap this constant records: `jnp.zeros` answers "
+    "'can be built', not 'can be driven', and it answers differently on the "
+    "two tested jax series."
+)
+
+
 #: The failure message for the DEVICE half, in one place because it is the
 #: whole point of that half: the pin exists to keep a DISCLOSURE true, so
 #: going red means the PAGE is now wrong, not that the code is.
@@ -272,8 +372,10 @@ def _isolate():
     exists to prevent, aimed at the session's own hold. Under
     ``--stelling-narrowing-perimeter=error`` the plugin arms under the
     session's ``Config`` before any test runs; this file sorts **72nd of the
-    149 files** ``pytest --collect-only -q`` names in this tree (re-measured at
-    B22's fixup, which is the figure the CHANGELOG entry carries too), so its
+    148 files** ``pytest --collect-only -q -p no:randomly`` names in this tree
+    -- derived in
+    :func:`test_this_files_position_in_the_collection_is_the_measured_one`,
+    which is also what holds the CHANGELOG's copy of it -- so its
     FIRST test unhooked that hold and the ~4,300 tests after it ran
     unprotected with nothing red. Driven at ``e6968fe``, the documented
     dial-on command over the whole suite reported::
@@ -718,39 +820,65 @@ def test_the_pages_what_runs_table_is_the_measured_one():
             )
             assert runs in cell, (written, cell, runs)   # the two agree
 
+            # ---- WHAT RUNS, READ DISARMED, FOR EVERY ROW.
+            #
+            # This read used to sit in the `else:` branch of the ARMED drive
+            # below, and FOUR OF THE FIVE ROWS RAISE BEFORE REACHING IT --
+            # `EagerTruncationError` on row 1, `NarrowingError` on rows 2, 3
+            # and 4. So the page's "what runs" column, which is the column a
+            # reader trusts to know what their program does, was held by
+            # nothing but string agreement between two places a careless edit
+            # touches together. Measured before this was fixed: `-25536` ->
+            # `-25537` in BOTH the page and `_WHAT_RUNS` was GREEN, so was
+            # `2147483648.0` -> `999.0`, and so was `_WHAT_RUNS_TRACED = {}`
+            # -- a KeyError if it had ever been reached, which is what makes
+            # "the comparison row is read out of the jaxpr" a claim about
+            # code that did not run.
+            #
+            # The value is what the program does with NOTHING armed, so it is
+            # read here, before the instruments go up. The region is the
+            # declaration `expected_truncation` exists for: these rows' whole
+            # subject is a narrowing, and a session that armed the eager
+            # detector globally would otherwise raise on row 1.
+            jax.clear_caches()
+            with expected_truncation(
+                f"docs/overflow-tripwire.md's 'what runs' cell for "
+                f"`{written}` is exactly this value, read disarmed"
+            ):
+                ran = np.asarray(build())
+            if ran.dtype.kind == "b":
+                # THE COMPARISON ROWS, READ FROM THE PROGRAM. What RUNS here
+                # is the literal jax converted, not the bool the comparison
+                # produced -- and it is taken out of the jaxpr, which is the
+                # program. This used to substitute
+                # `repr(float(np.asarray(2**31 - 1).astype("float32")))` for
+                # the driven value: a re-derivation down numpy's cast path,
+                # which is true of numpy whatever jax does, so the one row
+                # about a literal that MOVES was measuring nothing.
+                (trace_it,) = _WHAT_RUNS_TRACED[written]
+                jax.clear_caches()
+                ran_text = _literals_of(trace_it())
+            else:
+                ran_text = (repr(float(ran.ravel()[0]))
+                            if ran.dtype.kind == "f"
+                            else str(ran.ravel()[0]))
+            assert runs in ran_text.split(), (
+                f"{written} runs as {ran_text}, and the page and this test "
+                f"both say {runs}. This is a token match and not a substring "
+                f"one: `-255360` must not satisfy `-25536`."
+            )
+
             jax.clear_caches()
             before = (recorder.fires, _eager.TRUNCATIONS, perimeter.FINDINGS)
             fired = None
             with perimeter.armed(("tracer", "array")) as status:
                 assert status.armed, status.explanation
                 try:
-                    ran = np.asarray(build())
+                    np.asarray(build())
                 except stelling.EagerTruncationError:
                     fired = 1
                 except perimeter.NarrowingError:
                     fired = 2
-                else:
-                    if ran.dtype.kind == "b":
-                        # THE COMPARISON ROWS, READ FROM THE PROGRAM. What
-                        # RUNS here is the literal jax converted, not the bool
-                        # the comparison produced -- and it is taken out of the
-                        # jaxpr, which is the program. This used to substitute
-                        # `repr(float(np.asarray(2**31 - 1).astype("float32")))`
-                        # for the driven value: a re-derivation down numpy's
-                        # cast path, which is true of numpy whatever jax does,
-                        # so the one row about a literal that MOVES was
-                        # measuring nothing.
-                        (trace_it,) = _WHAT_RUNS_TRACED[written]
-                        jax.clear_caches()
-                        ran_text = _literals_of(trace_it())
-                    else:
-                        ran_text = (repr(float(ran.ravel()[0]))
-                                    if ran.dtype.kind == "f"
-                                    else str(ran.ravel()[0]))
-                    assert runs in ran_text, (
-                        f"{written} runs as {ran_text}, and the page and this "
-                        f"test both say {runs}"
-                    )
             after = (recorder.fires, _eager.TRUNCATIONS, perimeter.FINDINGS)
             moved = tuple(a - b for a, b in zip(after, before))
 
@@ -909,10 +1037,14 @@ def test_the_quiet_float_formats_are_enumerated_not_borrowed():
     """
     ml_dtypes = pytest.importorskip("ml_dtypes")
 
-    # (1) THE SET, DERIVED. Every float dtype jnp exposes whose largest finite
-    # value an int64 literal can exceed -- and that can actually be built on
-    # this jax (the float6_* dtypes have no XLA type and raise).
-    derived = {}
+    # (1) THE SET, DERIVED -- and derived WITHOUT ASKING JAX, because what a
+    # literal runs as is `ml_dtypes` arithmetic and is answerable in every
+    # cell. This loop used to gate each format on `jnp.zeros((3,), obj)`
+    # succeeding, as a proxy for "can be driven". THAT PROXY IS WRONG, and
+    # differently wrong on the two tested series: see
+    # :data:`_ZEROS_IS_NOT_BUILDABILITY`. jax is asked to DRIVE below, and a
+    # format it cannot drive is reported rather than dropped.
+    derived, derived_all = {}, {}
     for name in dir(jnp):
         obj = getattr(jnp, name)
         if not isinstance(obj, type) or not name.startswith(("float", "bfloat")):
@@ -921,19 +1053,30 @@ def test_the_quiet_float_formats_are_enumerated_not_borrowed():
             biggest = float(ml_dtypes.finfo(obj).max)
         except Exception:  # noqa: BLE001 - np.floating & friends are not dtypes
             continue
+        if name != np.dtype(obj).name:
+            continue                    # an alias: float_ is float64 again
+        derived_all[name] = biggest
         if biggest >= 2**63 - 1:
             continue                    # every int64 value is finite here
-        try:
-            jnp.zeros((3,), obj)
-        except Exception:  # noqa: BLE001 - no XLA primitive type for it
-            continue
         derived[name] = biggest
 
     declared = {row[0]: row[1] for row in QUIET_FLOAT_FORMATS}
     assert set(derived) >= set(declared), (
-        f"declared formats that jax.numpy no longer exposes or cannot build: "
+        f"declared formats that jax.numpy no longer exposes: "
         f"{sorted(set(declared) - set(derived))}"
     )
+    # ...and every declared one can actually be DRIVEN here -- one real
+    # operation, not `jnp.zeros`. On jax 0.11.0 `jnp.zeros` succeeds for
+    # float6_e2m3fn and the first operation fails the XLA CPU compiler's
+    # RET_CHECK ("Invalid bitcast i6 to i8"), so the proxy answers a
+    # different question from the one being asked.
+    for name in declared:
+        obj = getattr(jnp, name)
+        try:
+            np.asarray(jnp.zeros((3,), obj) <= 1)
+        except Exception as exc:  # noqa: BLE001 - this IS the measurement
+            pytest.fail(_ZEROS_IS_NOT_BUILDABILITY.format(
+                name=name, exc=f"{type(exc).__name__}: {exc}"[:160]))
     # A format jax gains that saturates (float4_e2m1fn clamps to its max and
     # is `inexact`, not `overflows-float`) is not a QUIET row; sort the
     # derived set by what the literal actually runs as rather than asserting
@@ -1000,17 +1143,63 @@ def test_the_quiet_float_formats_are_enumerated_not_borrowed():
         assert finding.reason == "overflows-float", (name, finding)
         assert finding.literal == literal, (name, finding)
 
-        # (3) AND THE PAGE'S ROW FOR IT.
-        assert f"| `{name}` | {biggest} | `x <= {literal}` |" in page, (
-            f"docs/overflow-tripwire.md has no row for {name} written against "
-            f"the largest finite value ({biggest}) and the literal ({literal}) "
-            f"this test drives. The table there and QUIET_FLOAT_FORMATS are "
-            f"the same enumeration and a format may not be in one only."
+        # (3) AND THE PAGE'S ROW FOR IT -- ALL SIX CELLS.
+        #
+        # This assertion used to stop at the third cell, so the page's LAST
+        # THREE columns were unchecked: the `inf`-versus-`nan` distinction
+        # the page itself calls "worse in kind", and both silence flags.
+        # Measured: flipping `float8_e4m3fn`'s image from `**`nan`**` to
+        # `` `inf` `` was GREEN, and so was turning `float16`'s traced
+        # `**warns**` into `silent` -- which is the exact cell that is this
+        # section's counter-example to "host casts warn".
+        row = (
+            f"| `{name}` | {biggest} | `x <= {literal}` "
+            f"| {'**`nan`**' if inverted else '`inf`'} "
+            f"| silent | {'**warns**' if warns_traced else 'silent'} |"
+        )
+        assert row in page, (
+            f"docs/overflow-tripwire.md has no row for {name} matching what "
+            f"this test just drove. Expected, cell for cell:\n  {row}\n"
+            f"The table there and QUIET_FLOAT_FORMATS are the same "
+            f"enumeration and a format may not be in one only."
         )
     assert page.count("| `float8_") == 7, (
         "the page's quiet-format table no longer carries exactly the seven "
         "float8 rows this test drives"
     )
+
+    # (4) THE PROSE ABOVE THE TABLE, which is where the COUNTS live and where
+    # nothing was reading. `Eight` -> `Nine` was a green mutation.
+    flowed = " ".join(page.split())
+    n_quiet = len(QUIET_FLOAT_FORMATS)
+    assert f"**{_WORDS[n_quiet]} can lose a literal to `inf` or `nan`**" in flowed, (
+        f"docs/overflow-tripwire.md no longer says {_WORDS[n_quiet]} formats "
+        f"can lose a literal quietly, and QUIET_FLOAT_FORMATS has {n_quiet}"
+    )
+    # ...and the partition it sits in: 15 formats = 4 that cannot lose an
+    # int64 + 3 that saturate + the eight above. Derived, both directions.
+    safe = sorted(n for n, big in derived_all.items() if big >= 2**63 - 1)
+    saturating = sorted(set(derived) - set(declared))
+    assert len(safe) + len(saturating) + n_quiet == 15, (
+        f"{len(safe)} formats hold every int64, {len(saturating)} saturate "
+        f"and {n_quiet} overflow, which is not the 15 the page states"
+    )
+    assert (
+        "`jax.numpy` exposes **15** concrete float formats" in flowed
+    ), "docs/overflow-tripwire.md no longer states the 15 this test derived"
+    assert f"so those **{_WORDS[len(safe)]}** cannot lose one this way" in flowed, (
+        f"the page's count of formats that hold every int64 is not "
+        f"{_WORDS[len(safe)]}: {safe}"
+    )
+    assert f"so those **{_WORDS[len(saturating)]}** are not this table" in flowed, (
+        f"the page's count of SATURATING formats is not "
+        f"{_WORDS[len(saturating)]}: {saturating}"
+    )
+    for name in saturating:
+        assert f"`{name}`" in flowed, (
+            f"the page does not name {name} among the formats that saturate "
+            f"rather than overflowing"
+        )
 
 
 def test_a_float_VALUE_that_overflows_warns_on_the_HOST_and_is_silent_on_DEVICE():
@@ -1132,6 +1321,306 @@ def test_a_float_VALUE_that_overflows_warns_on_the_HOST_and_is_silent_on_DEVICE(
         "test matches on, so a reader cannot recognise it in their own output"
     )
 
+
+def _host_door_outcome(dt, literal, build):
+    """Drive one construction door under ``simplefilter("error")``.
+
+    Returns ``("WARNS", None)``, ``("silent", image)`` or
+    ``("unbuildable", exc)``. The third is a MEASUREMENT of this jax rather
+    than a proxy for one -- see :data:`_ZEROS_IS_NOT_BUILDABILITY`.
+    """
+    jax.clear_caches()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        try:
+            return "silent", float(np.asarray(build(dt, literal)).reshape(-1)[0])
+        except RuntimeWarning:
+            return "WARNS", None
+        except Exception as exc:  # noqa: BLE001 - an XLA refusal is data here
+            return "unbuildable", f"{type(exc).__name__}: {exc}"[:120]
+
+
+def test_the_host_half_is_the_TARGET_FORMAT_and_not_the_door():
+    """Which host narrowings numpy reports -- and the page's answer, pinned.
+
+    **This page has stated the partition wrongly twice.** B22 said a float
+    that overflows is *"seen by nothing"*; B22's fixup corrected that to HOST
+    versus DEVICE and stated a universal -- *"where the narrowing is done ON
+    THE HOST, by numpy, the cast emits RuntimeWarning"* -- with a remedy
+    sentence drawn from it: ``-W error::RuntimeWarning`` *"covers whatever
+    numpy touched and nothing else."*
+
+    **Measured, that is false, and the page carried its own counter-example.**
+    ``jnp.full((2,), 1e300, jnp.bfloat16)``, ``jnp.array([1e300],
+    jnp.bfloat16)`` and ``jnp.bfloat16(1e300)`` are each ``inf`` with nothing
+    raised, in all four cells, at the same three doors that raise for
+    ``float32``; and the float8 table three paragraphs below the sentence
+    already said ``float16`` was the only format whose host cast warns when
+    traced -- seven silent host casts sitting beside a claim that host casts
+    warn.
+
+    **The axis is the TARGET FORMAT.** ``RuntimeWarning: overflow encountered
+    in cast`` is raised by numpy's own floating-point machinery, which knows
+    numpy's own binary formats and nothing else; every other float format
+    ``jax.numpy`` exposes comes from ``ml_dtypes``, whose conversions are
+    integer bit arithmetic and raise no floating-point flag. The control at
+    the bottom of this test is the decisive one and has no jax in it: ONE
+    numpy cast loop on ONE ``float32`` source array warns into ``float16``
+    and is silent into ``float8_e5m2`` and ``float8_e4m3fn``, which lose far
+    more.
+
+    Both lists are derived here rather than read off the declaration, and the
+    page's table, its enumeration of the silent formats and its remedy
+    sentence are all compared against what was just driven -- so the prose
+    that carries this claim cannot be inverted without this going red.
+    """
+    ml_dtypes = pytest.importorskip("ml_dtypes")
+
+    # ---- (1) THE PARTITION, DERIVED. Every concrete float format jax.numpy
+    #      exposes, split by whether numpy implements it itself.
+    derived_loud, derived_silent = [], []
+    for name in sorted(dir(jnp)):
+        obj = getattr(jnp, name, None)
+        if not isinstance(obj, type):
+            continue
+        try:
+            dtype = np.dtype(obj)
+        except Exception:  # noqa: BLE001 - not every jnp type is a dtype
+            continue
+        if name != dtype.name:
+            continue                       # an alias: single, double, float_
+        try:
+            ml_dtypes.finfo(dtype)
+        except Exception:  # noqa: BLE001 - ints, bools and complex
+            continue
+        if dtype.kind == "c":
+            continue                       # complex is not this page's subject
+        (derived_loud if hasattr(np, name) else derived_silent).append(name)
+
+    assert tuple(derived_loud) == tuple(sorted(HOST_DOOR_LOUD)), (
+        f"the float formats numpy implements itself are now {derived_loud}; "
+        f"this file declares {sorted(HOST_DOOR_LOUD)}. That set is the whole "
+        f"reach of `-W error::RuntimeWarning` on the host, so a change here "
+        f"is a change to docs/overflow-tripwire.md's remedy sentence."
+    )
+    assert tuple(derived_silent) == tuple(sorted(HOST_DOOR_SILENT)), (
+        f"the ml_dtypes float formats jax.numpy exposes are now "
+        f"{derived_silent}; this file declares {sorted(HOST_DOOR_SILENT)}."
+    )
+    assert len(derived_loud) + len(derived_silent) == 15, (
+        f"jax.numpy now exposes {len(derived_loud) + len(derived_silent)} "
+        f"concrete float formats, and docs/overflow-tripwire.md says 15"
+    )
+
+    # ---- (2) THE LOUD HALF, DRIVEN AT ALL THREE DOORS. float64 has no case:
+    #      no finite Python float exceeds it, and that is asserted rather than
+    #      assumed, because a silently dropped row is how the last two
+    #      versions of this claim were reached.
+    assert float(ml_dtypes.finfo(np.dtype(np.float64)).max) == sys.float_info.max, (
+        "float64's largest finite value is no longer Python's, so a float "
+        "literal past it may now exist and float64 needs a driven row here"
+    )
+    for name in HOST_DOOR_LOUD:
+        if name == "float64":
+            continue
+        dt = getattr(jnp, name)
+        literal = float(ml_dtypes.finfo(np.dtype(dt)).max) * 100.0
+        for label, build in _HOST_CONSTRUCTION_DOORS:
+            outcome, _ = _host_door_outcome(dt, literal, build)
+            assert outcome == "WARNS", (
+                f"{label} on {name} with {literal!r} came back {outcome!r}. "
+                f"numpy's own binary formats are the ENTIRE reach of "
+                f"`-W error::RuntimeWarning` on the host, and "
+                f"docs/overflow-tripwire.md's remedy sentence names this one."
+            )
+
+    # ---- (3) THE SILENT HALF, THE SAME THREE DOORS. This is the finding.
+    excluded = {}
+    for name in HOST_DOOR_SILENT:
+        dt = getattr(jnp, name)
+        biggest = float(ml_dtypes.finfo(np.dtype(dt)).max)
+        literal = 1e300 if biggest * 100.0 == float("inf") else biggest * 100.0
+        for label, build in _HOST_CONSTRUCTION_DOORS:
+            outcome, image = _host_door_outcome(dt, literal, build)
+            if outcome == "unbuildable":
+                excluded.setdefault(name, image)
+                continue
+            assert outcome == "silent", (
+                f"{label} on {name} with {literal!r} now WARNS. That is "
+                f"better news than docs/overflow-tripwire.md records: its "
+                f"float-overflow table says a host narrowing into any format "
+                f"numpy does not implement itself is silent, and its remedy "
+                f"sentence says `-W error::RuntimeWarning` does not reach "
+                f"them. Move {name} across in both places."
+            )
+            assert image != image or abs(image) >= biggest, (
+                f"{label} on {name}: {literal!r} came back {image!r}, which "
+                f"is neither nan nor at least the largest finite value"
+            )
+    for name in HOST_DOOR_SILENT_DRIVEN_EVERYWHERE:
+        assert name not in excluded, (
+            f"{name} could not be driven at a construction door on this jax "
+            f"({excluded[name]}). It is declared drivable in every cell, so "
+            f"this half of the measurement has gone partly vacuous."
+        )
+
+    # ---- (4) AND IT IS A HOST NARROWING, not the device residue wearing its
+    #      clothes: the jaxpr already holds the overflowed constant, before
+    #      any XLA program exists -- exactly as the float16 route does, and
+    #      that one warns.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        quiet = str(jax.make_jaxpr(lambda: jnp.full((), 1e300, jnp.bfloat16))())
+        loud = str(jax.make_jaxpr(lambda: jnp.full((), 1e300, jnp.float16))())
+    assert "inf:bf16[]" in quiet, quiet
+    assert "inf:f16[]" in loud, loud
+
+    # ---- (5) THE CONTROL, WITH NO JAX IN IT. One numpy cast loop, one
+    #      float32 source array: loud into float16, silent into two formats
+    #      that lose more. Nothing about hosts or devices can explain this.
+    source = np.array([1e30], dtype=np.float32)
+    control = {}
+    for name in ("float16", "float8_e5m2", "float8_e4m3fn"):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            try:
+                got = source.astype(np.dtype(getattr(jnp, name)))
+                control[name] = ("silent", float(got[0]))
+            except RuntimeWarning:
+                control[name] = ("WARNS", None)
+    assert control["float16"][0] == "WARNS", control
+    assert control["float8_e5m2"] == ("silent", float("inf")), control
+    assert control["float8_e4m3fn"][0] == "silent", control
+    assert control["float8_e4m3fn"][1] != control["float8_e4m3fn"][1], control
+
+    # ---- (6) THE PAGE. Three rows, and the third is the one two rounds of
+    #      this page denied. Compared cell by cell against what was driven.
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    page = (repo / "docs" / "overflow-tripwire.md").read_text(encoding="utf-8")
+    header = ("| the narrowing | a spelling of it | is there a "
+              "`RuntimeWarning` to turn on? |")
+    assert header in page, (
+        "docs/overflow-tripwire.md no longer carries the float-overflow "
+        "warning table this test drives, under the header it is located by"
+    )
+    body = page.split(header, 1)[1].split("\n\n", 1)[0]
+    rows = [
+        [c.strip() for c in line.strip().strip("|").split("|")]
+        for line in body.splitlines()
+        if line.strip().startswith("|") and set(line.strip()) - set("|- ")
+    ]
+    assert len(rows) == 3, rows
+    assert rows[0][0] == "on DEVICE, into any dtype", rows[0]
+    assert rows[0][2].startswith("**no**"), rows[0]
+    assert rows[1][0] == (
+        "on the HOST, into "
+        + ", ".join(f"`{n}`" for n in HOST_DOOR_LOUD[:-1])
+        + f" or `{HOST_DOOR_LOUD[-1]}`"
+    ), rows[1]
+    assert rows[1][2].startswith("**yes**"), rows[1]
+    assert "overflow encountered in cast" in rows[1][2], rows[1]
+    assert len(HOST_DOOR_SILENT) == 12, HOST_DOOR_SILENT
+    assert rows[2][0] == (
+        "on the HOST, into any of the **other twelve** float formats "
+        "`jax.numpy` has"
+    ), rows[2]
+    assert rows[2][2].startswith("**no**"), rows[2]
+
+    # ...the enumeration of the silent half, in both directions.
+    flowed = " ".join(page.split())
+    listed = sorted(HOST_DOOR_SILENT)
+    sentence = (
+        "**The other twelve are** "
+        + ", ".join(f"`{n}`" for n in listed[:-1])
+        + f" and `{listed[-1]}` — every float format `jax.numpy` exposes "
+        "that `numpy` does not implement itself."
+    )
+    assert sentence in flowed, (
+        f"docs/overflow-tripwire.md does not enumerate the silent formats as "
+        f"this test just measured them. Expected:\n{sentence}"
+    )
+    for name in HOST_DOOR_LOUD:
+        assert f"`{name}`" not in sentence, name   # the lists cannot be swapped
+
+    # ...and the remedy sentence itself, which is the one line on this page a
+    # reader acts on and the one that has been wrong twice.
+    remedy = (
+        "it catches a HOST narrowing into "
+        + ", ".join(f"`{n}`" for n in HOST_DOOR_LOUD[:-1])
+        + f" or `{HOST_DOOR_LOUD[-1]}`, and it catches nothing else."
+    )
+    assert remedy in flowed, (
+        f"docs/overflow-tripwire.md's remedy sentence no longer names exactly "
+        f"the formats numpy reports. Expected:\n{remedy}"
+    )
+    assert "It does not reach a device narrowing in any dtype" in flowed, (
+        "docs/overflow-tripwire.md no longer says `-W error::RuntimeWarning` "
+        "misses the DEVICE half, which this file's FLOAT_OVERFLOW_DEVICE_"
+        "SILENT group measures"
+    )
+    assert (
+        "it does not reach a host narrowing into `bfloat16` or any of the "
+        "other eleven formats listed above" in flowed
+    ), (
+        "docs/overflow-tripwire.md no longer says `-W error::RuntimeWarning` "
+        "misses the HOST narrowing into the ml_dtypes formats, which is the "
+        "half this test just drove and the half a bfloat16 program lives in"
+    )
+
+
+
+def test_this_files_position_in_the_collection_is_the_measured_one():
+    """``72nd of 148`` -- counted, not typed.
+
+    Two artefacts carry that pair: :func:`_isolate`'s docstring, which is
+    where the incident it explains is recorded, and the CHANGELOG entry for
+    the same repair. It stood at **149** in both, one measurement behind --
+    the hand-maintained-numeral class this batch's own first commit is named
+    for, in the batch that named it.
+
+    The rank is the load-bearing half: it is why *"the ~4,300 tests after it
+    ran unprotected"* is the size it is. Both halves are derived here from
+    the collection itself, so a file added or removed reddens this rather
+    than rotting two prose paragraphs.
+
+    ``-p no:randomly`` is part of the claim and not an implementation detail:
+    with ``pytest-randomly`` active the order is shuffled and a rank means
+    nothing, so the artefacts name that spelling too.
+    """
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q",
+         *deterministic_order_args()],
+        cwd=repo, capture_output=True, text=True,
+        env={**os.environ, "PYTHONPATH": str(repo / "src"),
+             "JAX_PLATFORMS": "cpu", "COLUMNS": "200"},
+    )
+    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
+    seen, order = set(), []
+    for line in proc.stdout.splitlines():
+        if "::" not in line:
+            continue
+        rel = line.split("::", 1)[0].strip()
+        if rel not in seen:
+            seen.add(rel)
+            order.append(rel)
+    assert order, proc.stdout[-2000:]
+
+    mine = pathlib.Path(__file__).name
+    rank = next(i + 1 for i, rel in enumerate(order) if rel.endswith(mine))
+    total = len(order)
+
+    phrase = f"**{rank}{_ORDINAL[rank % 10]} of the {total} files**"
+    for rel in ("tests/test_narrowing_perimeter.py", "CHANGELOG.md"):
+        flowed = " ".join((repo / rel).read_text(encoding="utf-8").split())
+        assert phrase in flowed, (
+            f"{rel} does not say {phrase}. `pytest --collect-only -q "
+            f"-p no:randomly` names {total} files here and {mine} sorts "
+            f"{rank}th among them."
+        )
+        assert "`pytest --collect-only -q -p no:randomly`" in flowed or (
+            "``pytest --collect-only -q -p no:randomly``" in flowed
+        ), f"{rel} no longer names the command this figure comes from"
 
 def test_the_refusal_names_the_line_that_wrote_the_literal():
     """Attribution with no stack walk: the writer is the wrapper's caller.

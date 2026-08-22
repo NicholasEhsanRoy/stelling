@@ -143,29 +143,64 @@ watches integer RANGE, the eager detector watches integer CONSTRUCTION, and
 `stelling.intentional_wrap` refuses every non-integer dtype by name. Two
 different things get called float overflow — a value that is already a float
 and overflows, and an integer literal with no finite image in the float dtype
-it meets — and the first of them **splits again by route**, which is what
-decides whether it is silent. Driven under `warnings.simplefilter("error")`,
-the answer is the opposite way round from what this section said before it was
-driven at all:
+it meets. **Neither is seen by any of the three instruments. The first is
+partly seen by numpy, and which part is a measurement rather than a rule of
+thumb** — this page has now stated that partition wrongly twice, once with the
+sides swapped and once as HOST versus DEVICE, which does not partition it
+either. Driven under `warnings.simplefilter("error")`:
+
+<a id="float-overflow-warning-table"></a>
+
+| the narrowing | a spelling of it | is there a `RuntimeWarning` to turn on? |
+|---|---|---|
+| on DEVICE, into any dtype | `a * a` on a `float32` `1e30` | **no** — nothing on the host cast it, so there is nothing to enable |
+| on the HOST, into `float16`, `float32` or `float64` | `jnp.full((2,), 1e300, jnp.float32)` | **yes** — `RuntimeWarning: overflow encountered in cast` |
+| on the HOST, into any of the **other twelve** float formats `jax.numpy` has | `jnp.full((2,), 1e300, jnp.bfloat16)` | **no** — and this is the row a reader loses on |
+
+**The other twelve are** `bfloat16`, `float4_e2m1fn`, `float6_e2m3fn`,
+`float6_e3m2fn`, `float8_e3m4`, `float8_e4m3`, `float8_e4m3b11fnuz`,
+`float8_e4m3fn`, `float8_e4m3fnuz`, `float8_e5m2`, `float8_e5m2fnuz` and
+`float8_e8m0fnu` — every float format `jax.numpy` exposes that `numpy` does
+not implement itself. They come from `ml_dtypes`, which converts by integer
+bit arithmetic and raises no floating-point flag, so numpy has nothing to
+report; the three above are numpy's own binary formats and it reports all of
+them. It is the TARGET FORMAT that decides, not the door: all three of the
+construction doors below are silent for `bfloat16` and all three warn for
+`float32`.
 
 * **A value that is already a FLOAT and overflows the format it is converted
   into is seen by none of these three instruments — but "seen by nothing" is
-  not the same sentence, and it is false.** Where the narrowing is done ON THE
-  HOST, by numpy, the cast emits `RuntimeWarning: overflow encountered in
-  cast`, so **`pytest -W error::RuntimeWarning` turns it into a failure today**
-  and no new instrument is needed. Measured under
-  `warnings.simplefilter("error")`, identical in all four cells:
+  not the same sentence, and it is false.** Measured under
+  `warnings.simplefilter("error")`, identical in all four cells, each of
   `jnp.full((2,), 1e300, jnp.float32)`, `jnp.full((2,), 70000.0, jnp.float16)`,
   `jnp.float16(70000.0)`, `jnp.array([1e300], jnp.float32)` and
-  `jnp.full((2,), 100000, jnp.float16)` each raise, and so do `x_f32 + 1e300`
+  `jnp.full((2,), 100000, jnp.float16)` raises, and so do `x_f32 + 1e300`
   and `x_f16 + 70000.0` **inside `jit`** — because a trace embeds its
-  constants through that same host cast, and **a harness is traced**.
-* **What IS silent is the narrowing that happens on DEVICE**, and that is the
-  smaller, sharper residue this page owes you. Once the value is inside a
-  `jax.Array`, nothing on the host casts it and there is no warning to turn
-  on. Measured under `warnings.simplefilter("error")`, silent in all four
-  cells: `a * a` and `a ** 2` on a `float32` array of `1e30`, `jnp.exp` of a
-  `float32` `1000.0`, `a.astype(jnp.float16)` and
+  constants through that same host cast, and **a harness is traced**. So
+  **`pytest -W error::RuntimeWarning` turns that part into a failure today**
+  and no new instrument is needed. Every case in that list narrows into
+  `float16` or `float32`, which is why it is the loud part.
+* **The same three doors, the same host, `bfloat16` instead — and all three
+  go quiet.** Measured under `warnings.simplefilter("error")`, silent in all
+  four cells: `jnp.full((2,), 1e300, jnp.bfloat16)`,
+  `jnp.array([1e300], jnp.bfloat16)` and `jnp.bfloat16(1e300)` are each `inf`
+  with nothing raised, and so is every one of the other eleven formats above
+  at those same doors (the `fn`/`fnuz` ones give `nan`, and the `float4`/
+  `float6` ones saturate to their largest finite value). **This is not the
+  device residue in disguise**: `jax.make_jaxpr` already holds `inf:bf16[]`
+  before any XLA program exists, exactly as the `float16` route holds
+  `inf:f16[]` — and that one warns.
+* **The control that separates the two**, with no jax in it at all: one numpy
+  cast loop, one `float32` source array of `1e30`. `.astype(jnp.float16)`
+  **warns**; `.astype(jnp.float8_e5m2)` is **silent** and gives `inf`;
+  `.astype(jnp.float8_e4m3fn)` is **silent** and gives `nan`. Same call, same
+  source, and the two silent ones lost far more than the loud one.
+* **What IS silent whatever the dtype is the narrowing that happens on
+  DEVICE**, and that is the sharpest residue this page owes you. Once the
+  value is inside a `jax.Array`, nothing on the host casts it and there is no
+  warning to turn on. Measured under `warnings.simplefilter("error")`, silent
+  in all four cells: `a * a` and `a ** 2` on a `float32` array of `1e30`,
+  `jnp.exp` of a `float32` `1000.0`, `a.astype(jnp.float16)` and
   `lax.convert_element_type(a, jnp.float16)` on that same array, and
   `x_f16 + 70000.0` run EAGERLY — each `inf`, with 0 fires here, 0
   truncations from the eager detector and no refusal from the perimeter.
@@ -174,24 +209,32 @@ driven at all:
   That is a scope boundary and not a hole — nothing on this page claims a
   float — but it is the boundary, and `-W error::RuntimeWarning` does not
   reach it.
-* **The axis is WHERE the narrowing happens, not how the line is spelled**,
-  and two spellings prove it by changing sides between cells.
+* **Whether a given source line is on the host at all can change with the
+  x64 flag**, and two spellings prove it by changing sides between cells.
   `x_f32 + 1e300` and `jnp.asarray([1e300, 1e300]).astype(jnp.float32)`, run
   eagerly, **warn at `JAX_ENABLE_X64=0` and are silent at
   `JAX_ENABLE_X64=1`** — with x64 off the value is canonicalised to `float32`
   by numpy on the way in and overflows there; with x64 on it stays `float64`
   through the host and XLA does the narrowing. Same source line, same result
-  (`inf`), opposite answer to "is there a warning to turn on". So read the two
-  bullets above as a rule about the ROUTE, and if you want the guarantee
-  rather than the coincidence, `-W error::RuntimeWarning` covers whatever
-  numpy touched and nothing else.
+  (`inf`), opposite answer to "is there a warning to turn on".
+
+**So the remedy, stated exactly.** `-W error::RuntimeWarning` is worth turning
+on and it is not a guarantee: it catches a HOST narrowing into `float16`,
+`float32` or `float64`, and it catches nothing else. It does not reach a
+device narrowing in any dtype, and it does not reach a host narrowing into
+`bfloat16` or any of the other eleven formats listed above — at any of the
+three construction doors — which is the half of the answer a program written
+in `bfloat16` lives in.
+
 * **An integer LITERAL that has no finite image in the float dtype it meets IS
   caught — by the third instrument, through an operator slot only.**
   `x_f16 <= 100000` runs as a comparison against `inf`, and
   [the narrowing perimeter](#the-third-door-a-literal-that-never-existed)
   refuses it. It is silent EAGER; **traced, `float16` is the one format where
   numpy's host cast warns**, so inside a `jit` this particular literal is also
-  reachable by `-W error::RuntimeWarning`. The other seven formats that can
+  reachable by `-W error::RuntimeWarning` — which is the table above again,
+  under a different door: `float16` is numpy's, and the `float8_*` names are
+  not. The other seven formats that can
   lose a literal this way — seven of the eight `float8_*` names `jax.numpy`
   exposes — are silent both ways, and there the perimeter is the only
   instrument that speaks; they are tabulated under
@@ -202,7 +245,7 @@ driven at all:
   `jnp.full((2,), 100000, jnp.float16)` is `[inf, inf]` with all three armed
   and 0 fires, because the eager detector below is integer→integer and there
   is no operator for the perimeter to sit in — though that spelling, being a
-  host cast, does warn.
+  host cast into a format numpy implements, does warn.
 
 | door | status | measured |
 |---|---|---|
@@ -727,11 +770,16 @@ formats a *verdict* can reason about; it has nothing to do with which formats
 this perimeter watches, and an earlier version of this paragraph borrowed it
 and came out four times too narrow.)
 
-Every `int64` value is finite in `float32`, `bfloat16`, `float64` and
-`float8_e8m0fnu`, so those cannot lose one this way. **Eight of `jax.numpy`'s
-float dtypes can**, and the perimeter refuses the literal as `overflows-float`
-on all eight. Measured disarmed under `warnings.simplefilter("error")`,
-identical in all four cells:
+`jax.numpy` exposes **15** concrete float formats, and they fall into three
+groups. Every `int64` value is finite in `float32`, `bfloat16`, `float64` and
+`float8_e8m0fnu`, so those **four** cannot lose one this way. `float4_e2m1fn`,
+`float6_e2m3fn` and `float6_e3m2fn` have `int64` values past their largest
+finite value, but they **saturate** to it rather than overflowing — the
+literal becomes `6`, `7.5` and `28`, which is `inexact` and not
+`overflows-float`, so those **three** are not this table either. **Eight can
+lose a literal to `inf` or `nan`**, and the perimeter refuses it as
+`overflows-float` on all eight. Measured disarmed under
+`warnings.simplefilter("error")`, identical in all four cells:
 
 | dtype | largest finite | written | runs as | disarmed, eager | disarmed, traced |
 |---|---|---|---|---|---|
