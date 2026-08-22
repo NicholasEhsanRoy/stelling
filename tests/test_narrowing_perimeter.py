@@ -465,6 +465,142 @@ def test_check_returns_verified_disarmed_and_refuses_armed(
     assert _verdict_or_raise(harness) == ("verdict", "VERIFIED")
 
 
+#: ``docs/overflow-tripwire.md``'s five-row table under *"What it covers"*:
+#: what each spelling RUNS AS, and which of the three instruments refuses it.
+#: Declared here and driven below, with the page's own cells read back --
+#: because the page's row for the first one said the array came out ``0``-filled
+#: when it comes out ``-25536``-filled, in both x64 cells, and the table whose
+#: whole job is *"what the program actually runs"* was the one carrying it.
+#:
+#: ``runs`` is the text that must appear in the page's *what runs* cell AND
+#: the value the program actually produces, so neither can move alone. The
+#: instrument triple is (tripwire, eager, perimeter) and reads the page's last
+#: three cells: ``fires`` for the one that refuses, ``quiet`` for a cell that
+#: says ``no fire``, and ``n/a`` for one the page marks ``—``.
+_WHAT_RUNS = (
+    ("jnp.full((3,), 40000, int16)", "-25536",
+     ("n/a", "fires", "n/a"),
+     lambda: jnp.full((3,), 40000, jnp.int16)),
+    ("x_int16 + 40000", "-25536",
+     ("quiet", "quiet", "fires"),
+     lambda: jnp.zeros((3,), jnp.int16) + 40000),
+    ("40000 + x_int16", "-25536",
+     ("quiet", "quiet", "fires"),
+     lambda: 40000 + jnp.zeros((3,), jnp.int16)),
+    ("x_f32 <= 2**31 - 1", "2147483648.0",
+     ("quiet", "quiet", "fires"),
+     lambda: jnp.zeros((3,), jnp.float32) <= 2**31 - 1),
+    ("x_int16 + 3", "3",
+     ("n/a", "n/a", "quiet"),
+     lambda: jnp.zeros((3,), jnp.int16) + 3),
+)
+
+_WHAT_RUNS_HEADER = (
+    "| written | what runs | the tripwire | the eager detector | the perimeter |"
+)
+
+
+def _doc_what_runs_rows():
+    page = (pathlib.Path(__file__).resolve().parents[1]
+            / "docs" / "overflow-tripwire.md").read_text(encoding="utf-8")
+    assert _WHAT_RUNS_HEADER in page, (
+        "docs/overflow-tripwire.md no longer carries the five-row 'what runs' "
+        "table this test drives, under the header it is located by"
+    )
+    body = page.split(_WHAT_RUNS_HEADER, 1)[1].split("\n\n", 1)[0]
+    rows = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith("|") or set(line) <= set("|- "):
+            continue
+        rows.append([c.strip() for c in line.strip("|").split("|")])
+    return rows
+
+
+def test_the_pages_what_runs_table_is_the_measured_one():
+    """Five rows, driven with all three armed, against the page's own cells.
+
+    The page's *"what runs"* column is the one a reader trusts to know what
+    their program does, and its first row said ``0``-filled about an array
+    that comes out ``-25536``-filled -- the ``0`` belonging to
+    ``jnp.full((), 256, jnp.int8)`` three sections up. Nothing read that
+    table, so a value carried over from a different example sat in it.
+
+    Both directions are checked: every declared row must be in the page and
+    every page row must be declared, so a sixth row cannot arrive unmeasured
+    and a fifth cannot leave and pass as compliance.
+    """
+    from stelling._tripwire import eager as _eager
+
+    doc_rows = _doc_what_runs_rows()
+    assert len(doc_rows) == len(_WHAT_RUNS), (
+        f"the page's table has {len(doc_rows)} rows and this test declares "
+        f"{len(_WHAT_RUNS)}. A row added there is a row driven here."
+    )
+
+    tw_status, recorder = _tripwire.arm()
+    eager_status = _eager.arm()
+    try:
+        assert tw_status.armed and eager_status.armed
+        for (written, runs, expected, build), row in zip(_WHAT_RUNS, doc_rows):
+            assert f"`{written}`" == row[0], (
+                f"row order moved: this test drives {written!r} where the "
+                f"page's row reads {row[0]!r}"
+            )
+            assert runs in row[1], (
+                f"the page says {written} runs as {row[1]!r}; this test drives "
+                f"it as {runs!r}"
+            )
+
+            jax.clear_caches()
+            before = (recorder.fires, _eager.TRUNCATIONS, perimeter.FINDINGS)
+            fired = None
+            with perimeter.armed(("tracer", "array")) as status:
+                assert status.armed, status.explanation
+                try:
+                    ran = np.asarray(build())
+                except stelling.EagerTruncationError:
+                    fired = 1
+                except perimeter.NarrowingError:
+                    fired = 2
+                else:
+                    ran_text = (repr(float(ran.ravel()[0]))
+                                if ran.dtype.kind == "f" else str(ran.ravel()[0]))
+                    if ran.dtype.kind == "b":
+                        # the comparison rows: what RUNS is the literal jax
+                        # used, which is the moved one, not the bool it made
+                        ran_text = repr(float(
+                            np.asarray(2**31 - 1).astype("float32")))
+                    assert runs in ran_text, (
+                        f"{written} runs as {ran_text}, and the page and this "
+                        f"test both say {runs}"
+                    )
+            after = (recorder.fires, _eager.TRUNCATIONS, perimeter.FINDINGS)
+            moved = tuple(a - b for a, b in zip(after, before))
+
+            for i, (claim, delta) in enumerate(zip(expected, moved)):
+                cell = row[2 + i]
+                if claim == "fires":
+                    assert fired == i, (
+                        f"{written}: the page says instrument {i} refuses it "
+                        f"and the refusal came from {fired}"
+                    )
+                    assert "refuses" in cell, (row, cell)
+                    if i:
+                        assert delta == 1, (written, moved)
+                elif claim == "quiet":
+                    assert delta == 0, (
+                        f"{written}: instrument {i} fired {delta} time(s) and "
+                        f"the page's cell reads {cell!r}"
+                    )
+                    assert "no fire" in cell or "passes" in cell, (row, cell)
+                else:
+                    assert cell in {"—", "-"}, (row, cell)
+    finally:
+        _eager.disarm()
+        _tripwire.disarm()
+
+
 def test_the_float_OVERFLOW_literal_is_refused_and_the_door_was_silent():
     """``overflows-float``, driven both ways -- the page's float answer, half one.
 

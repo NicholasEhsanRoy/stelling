@@ -963,6 +963,39 @@ def test_every_failure_code_is_explained_and_documented():
         "the doc's list and FAILURE_CODES are supposed to BE the same list"
     )
 
+    # AND THE ORDER, AND THE POSITIONAL PHRASES THAT USED TO DIVIDE IT UP.
+    # The set comparison above is order-blind, and the three paragraphs under
+    # the list were not: two said "the last four" and "the last three" about
+    # codes at positions 12-15 and 16-18 of a NINETEEN-item list, because
+    # `unexpected:<ExcType>` -- the one code that is not in the tuple, and the
+    # one that belongs to no instrument's group -- trails it. The codes each
+    # paragraph named were right and the positions were not, and nothing read
+    # them. Two things are checked instead of one, because either alone can be
+    # satisfied while the other rots.
+    listed = re.findall(r"`([a-z][a-z:<>A-Za-z-]*)`", sentence)
+    assert listed == list(_tripwire.FAILURE_CODES) + ["unexpected:<ExcType>"], (
+        f"the doc lists the codes in a different order from FAILURE_CODES, so "
+        f"any sentence below it that counts along the list is now wrong.\n"
+        f"  doc:   {listed}\n  tuple: {list(_tripwire.FAILURE_CODES)}"
+    )
+
+    after = page.split(marker, 1)[1].split("\n\n", 1)[1]
+    after = after.split("### It can also stop being armed", 1)[0]
+    positional = re.findall(
+        r"\b(?:the|its) (?:last|first) (?:two|three|four|five|six|\d+)\b",
+        after,
+        re.IGNORECASE,
+    )
+    assert not positional, (
+        f"the paragraphs that divide the code list say {positional}, and a "
+        f"positional phrase about that list cannot be right: "
+        f"`unexpected:<ExcType>` sits at the end of it and belongs to none of "
+        f"the groups, so 'the last N' always names one code too many or the "
+        f"wrong N. Name the group instead -- 'Four of them belong to ...'. "
+        f"This is the defect the sentence above records, and it survived "
+        f"because the check beside it compared a SET."
+    )
+
     # an unknown code still explains itself rather than rendering `None`
     fallback = _tripwire.Status(code="unexpected:ValueError").explanation
     assert "does not have a name for" in fallback

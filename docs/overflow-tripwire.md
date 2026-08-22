@@ -79,7 +79,7 @@ retracted for being wider than its measurement.
 | the **6** doors that promote an operand against an array — `x + N`, `x >= N`, `x.at[i].set(N)`, `jnp.where`, `jnp.clip`, `jnp.maximum` | raises `TypePromotionError` |
 | the **5** construction doors — `jnp.array`, `jnp.asarray`, `jnp.int8`, `jnp.full`, `jnp.full_like` | **silent**, and the operand narrows |
 | the same doors with the *in-range* `np.int64(3)` | raises at the same 6 |
-| a bare Python `int`, at any of the 11 | never raises |
+| a bare Python `int`, at any of the 11 | never raises a `TypePromotionError` — three of the construction doors (`jnp.array`, `jnp.asarray`, `jnp.int8`) raise `OverflowError` on the VALUE instead, under strict and standard alike |
 | a weakly-typed `jax.Array` (`jnp.asarray(256)`), at any of the 11 | never raises, and it wraps |
 
 So it separates **dtypes, not values**: it flags in-range code and misses the
@@ -632,7 +632,7 @@ ships armed** and `jit` warm:
 
 | written | what runs | the tripwire | the eager detector | the perimeter |
 |---|---|---|---|---|
-| `jnp.full((3,), 40000, int16)` | `0`-filled | — | **refuses** | — |
+| `jnp.full((3,), 40000, int16)` | `-25536`-filled | — | **refuses** | — |
 | `x_int16 + 40000` | `-25536` | no fire | no fire | **refuses** |
 | `40000 + x_int16` | `-25536` | no fire | no fire | **refuses** |
 | `x_f32 <= 2**31 - 1` | `<= 2147483648.0` | no fire | no fire | **refuses** |
@@ -948,7 +948,7 @@ The codes are stable and greppable: `no-module`, `no-registry`, `no-entry`,
 arms and whose status is its workers' agreement: the first when not one worker
 sent a status back, the second when they disagreed.
 
-The last four belong to the **eager construction-site detector**, which
+Four of them belong to the **eager construction-site detector**, which
 attaches to a private jax *function* rather than a registry entry:
 `no-site-module` and `no-site` are the module and the attribute not being where
 they are expected; `signature-drift` is the function being there with its first
@@ -959,7 +959,7 @@ That last failure is silent, it is what a jax release actually produces, and
 the detector refuses to attach rather than quietly dropping one of the seven
 construction routes it claims.
 
-The last three belong to the **narrowing perimeter**, which rebinds operator
+Three more belong to the **narrowing perimeter**, which rebinds operator
 slots on a jax type: `no-type` is that type no longer being findable through
 any public route, or being found and no longer owning the slots; `no-slot` is
 one slot of the set being absent, which would leave a hole in a perimeter
@@ -1127,9 +1127,10 @@ $ pytest -p stelling.overflow --stelling-overflow=require
 ```
 
 **`--stelling-eager-truncation` is registered by the same plugin and has the
-same property.** Naming `stelling.overflow` loads the plugin without arming
-the tripwire — the two dials are independent — so this is the spelling for the
-eager detector alone under `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`:
+same property.** Naming `stelling.overflow` also arms the tripwire — that is
+mode `auto` in the table above — and the two dials are independent, so
+`--stelling-overflow=off` is what leaves the eager detector on its own under
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`:
 
 ```console
 $ pytest -p stelling.overflow --stelling-overflow=off --stelling-eager-truncation=error

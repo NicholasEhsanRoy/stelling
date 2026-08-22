@@ -1042,6 +1042,61 @@ def test_strict_promotion_is_a_DTYPE_check_measured_over_the_WHOLE_door_set():
         "the exclusive the report made of it"
     )
 
+    # (3b) AND "NEVER RAISES" IS NOT THE SAME SENTENCE AS "STRICT NEVER
+    # REJECTS IT". `docs/overflow-tripwire.md`'s row for the bare Python int
+    # said the first one, flat, and the page contradicted it ten lines later
+    # -- `jnp.array(256, jnp.int8)` raises `OverflowError` and the page says
+    # so, twice. Three of the eleven do, on the VALUE rather than the dtype,
+    # under strict AND standard alike, and that is exactly what makes the
+    # weakly-typed-array row below it a DIFFERENT row rather than the same
+    # sentence twice: for a weak `jax.Array`, "never raises" is true at all
+    # eleven. Measured in all four cells (0.10.2/0.11.0 x64 on/off).
+    loud_for_a_bare_int = None
+    for mode in ("strict", "standard"):
+        got = set()
+        with expected_truncation(
+            "the bare-int row: all eleven doors driven with a value that does "
+            "not fit, to separate a dtype rejection from a value rejection"
+        ), jax.numpy_dtype_promotion(mode):
+            for name, door in ELEVEN_DOORS.items():
+                try:
+                    door(jnp.zeros(3, jnp.int8), 256)
+                except OverflowError:
+                    got.add(name)
+                except Exception:  # noqa: BLE001 - promotion refusals are (3)
+                    pass
+        assert got == {"jnp.array", "jnp.asarray", "jnp.int8"}, (
+            f"under {mode} promotion a bare Python int raises OverflowError at "
+            f"{sorted(got)}; the page's row is written against exactly three"
+        )
+        loud_for_a_bare_int = got
+    assert _rejected_under_strict(lambda: jnp.asarray(256)) == set()
+    with expected_truncation("the weak-array control for the row below it"):
+        for name, door in ELEVEN_DOORS.items():
+            door(jnp.zeros(3, jnp.int8), jnp.asarray(256))  # raises nowhere
+
+    page = (
+        pathlib.Path(__file__).resolve().parents[1] / "docs" / "overflow-tripwire.md"
+    ).read_text(encoding="utf-8")
+    row = next(
+        (ln for ln in page.splitlines()
+         if ln.startswith("| a bare Python `int`, at any of the 11 |")),
+        None,
+    )
+    assert row is not None, (
+        "docs/overflow-tripwire.md no longer carries the bare-Python-int row "
+        "of the strict-promotion table this measurement is for"
+    )
+    assert "OverflowError" in row, (
+        f"the page's bare-int row reads {row!r}. It said 'never raises', and "
+        f"three of the eleven raise OverflowError on the value -- which the "
+        f"same page states ten lines below it. A row that is true only of "
+        f"TypePromotionError has to say so, because the row under it means "
+        f"'never raises' literally."
+    )
+    for door in sorted(loud_for_a_bare_int):
+        assert f"`{door}`" in row, f"the page's bare-int row does not name {door}"
+
     # ...and the control for all of it: without strict, none of the eleven
     # raises, so the sets above are about the SETTING and not about the doors
     x = jnp.zeros(3, jnp.int8)
