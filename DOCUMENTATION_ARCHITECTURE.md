@@ -7,6 +7,27 @@ names and the discipline around them. On anything technical, `SOUNDNESS.md`
 where contact with real code contradicts a judgement made here, the evidence
 wins and this document changes. It has already, twice — see below.
 
+**THE PRESENT TENSE IN THIS DOCUMENT IS JULY 2026'S, AND THE REPOSITORY HAS
+MOVED.** This is a planning document and its sentences about the state of the
+tree describe the tree it was written against. Three of them said in so many
+words that *"the repository is pre-Stage-0"* and that harness primitives, the
+query object and the z3 encoder do **not** exist — in the executive summary, in
+§2.3 and in Appendix B, in a file that ships in the sdist. All three exist.
+`v0.1.0` is tagged, `stelling.__version__` is `0.2.0.dev0`, and the suite is
+thousands of tests — run `pytest --collect-only -q` for the figure; it moves
+with every commit and is deliberately not written down here, which is
+`docs/norms.md`'s rule about figures and the same reason
+`.github/workflows/ci.yml` deleted the pass counts that used to stand in it.
+`git blame` puts all three sentences at `22c176f`,
+2026-07-17; the file was edited on 2026-07-28, 2026-08-20 and 2026-08-21 and
+none of the three was touched. They are dated in place rather than deleted,
+because the argument each one introduces is about a decision taken at that
+moment and does not depend on the moment lasting. **Treat every unqualified
+present-tense claim here about what the repository HAS as being as of that
+date, and check it against the tree**; `SOUNDNESS.md` is the ledger for
+anything that turns on current behaviour. Nothing in this repository gates this
+document's tense, which is why three sentences survived three later edits.
+
 **Evidence in this document.** Claims about jax were **verified against jax 0.10.2
 and 0.11.0 on 2026-07-16** by probing the installed package; re-verify on every
 series bump, per `TESTED_JAX_SERIES` and the discipline in
@@ -77,7 +98,8 @@ who does not trust stelling at all — **stelling could be a random number
 generator and a witness that survives both checks would still stand.** A verified
 verdict is a *universal* claim, and **no execution of the program can confirm
 it**, because you cannot run all of R. It rests instead on a chain of eight links
-(§2.3), five of which have nothing but a sampling budget behind them today, and
+(§2.3), **three of which — 4, 5 and 6 — have nothing but a sampling budget
+behind them today**, a fourth of which has that plus one constraint of use, and
 one of which — hardware — no roadmap item will ever close. Three of the founding
 roadmap's "hard and strategic" items close a link each; the rest are capability,
 not trust. **That subset of the roadmap is a trust-debt schedule** (§2.3).
@@ -109,9 +131,16 @@ expectation stands regardless — so this is a real result under two frameworks,
 not a universal pass, and §1.3 says which is which. It is not a marketing claim;
 it is a consequence of what a witness is.
 
-**What is cheap now and impossible later.** The repository is pre-Stage-0: the
-IR and the jax boundary exist, the first verdict does not. That is precisely the
-moment to fix three things, because none of them can be retrofitted:
+**What is cheap now and impossible later.** *Written when the repository was
+pre-Stage-0 — the IR and the jax boundary existed and the first verdict did
+not.* **That stopped being true before `v0.1.0` and the sentence stood for
+another five weeks.** On this tree `stelling.__version__` is `0.2.0.dev0`,
+`v0.1.0` is a tag, the suite is thousands of tests, and verdicts are minted,
+stamped and routed through a solver portfolio. The three things below were fixed at the
+moment the paragraph describes, which is why the paragraph is kept: it is the
+record of a decision taken in time, not a description of the tree. Every one of
+them can still only be *retrofitted* at the cost the table gives, so the
+argument stands where the tense did not:
 
 | | Why it cannot be retrofitted |
 |---|---|
@@ -451,10 +480,14 @@ of R. Its truth rests entirely on the chain in §2.3. This is why:
 ### 2.3 The trust product — the eight links of a green verdict
 
 For a `verified` verdict to mean *"this property holds of the program that
-runs"*, eight links must all hold. **The "Planned defence" column is planned:**
-the repository is pre-Stage-0, so at v0.1 every cell in it is a commitment, not a
-capability, and the qualification package's copy of this table (§11.1) must carry
-the *actual* state at each release rather than this one.
+runs"*, eight links must all hold. **The "Planned defence" column is planned**,
+and it was written when the repository was pre-Stage-0, so every cell in it was
+a commitment rather than a capability. **That column has not been re-derived
+against the tree since**, and this document does not get to claim it has: some
+of those defences now exist, some do not, and which is which is not settled
+here. The qualification package's copy of this table (§11.1) must carry the
+*actual* state at each release rather than this one — and until it does, read
+this column as the plan of record and not as an inventory.
 
 | # | Link | The claim | If it fails | Planned defence | What would close it | Phase |
 |---|---|---|---|---|---|---|
@@ -500,16 +533,48 @@ useful single artifact in this document. Six readings of it:
   item.** Pin the precision (§4.2). This is worth more than it sounds: JAX ships
   *two* mechanisms and only one of them is a contract. `precision=` is a **hint** —
   `HIGH` on a GPU means tf32 *"where available, otherwise float32"*, silently. But
-  `lax.DotAlgorithmPreset` is a **contract**: its docstring says *"using an
-  unsupported algorithm will **raise a Python exception when the computation is
-  compiled**"*, and `F32_F32_F32` is a real member of it. So the constraint of use
-  is not "prefer HIGHEST" — it is **"state the algorithm, not the preference, and
-  let it fail loudly on a device that cannot honour it."** Link 7's Planned-defence
-  cell is not *Nothing*.
-- **Five links have nothing but the fuzzer, and link 8 has nothing at all.** Links
-  4, 5, 6, and 7 are unchecked by any *dedicated* mechanism before Phase 3 — but
-  none of them is bare, because fuzz-on-verified (§2.5, §6.1) points at all of
-  them at once. Link 4 is the one **stelling owns entirely and can close by
+  `lax.DotAlgorithmPreset` is a **contract**, and the route from a preset member
+  to that guarantee is `DotAlgorithm`'s own docstring, which says *"Support for
+  these algorithms is platform dependent, and using an unsupported algorithm
+  will **raise a Python exception when the computation is compiled**"* and then,
+  in its very next sentence, says which algorithms it means: they *"are listed
+  in the `DotAlgorithmPreset` enum"*. `F32_F32_F32` is a real member of that
+  enum. *(TWO repairs here, and the second is the one worth reading. The
+  quotation was first attributed to the preset enum's own docstring, and it is
+  not in it on either pinned series: 0.10.2 and 0.11.0 both carry it on the base
+  class and give the preset enum a docstring that points at the base class. The
+  repair for that then asserted that a preset member **IS** a
+  `lax.DotAlgorithm`, and that is false on both series. Driven:
+  `isinstance(lax.DotAlgorithmPreset.F32_F32_F32, lax.DotAlgorithm)` is `False`,
+  `issubclass(lax.DotAlgorithmPreset, lax.DotAlgorithm)` is `False`, the preset
+  is an `enum.Enum` where `DotAlgorithm` is a `NamedTuple`, and of
+  `DotAlgorithm`'s seven fields the member exposes exactly one,
+  `accumulation_type`. jax's own text invites the error —
+  `DotAlgorithmPreset.__doc__` calls itself *"a named set of `DotAlgorithm`
+  objects"*, which is fair as description and wrong as typing — but a false
+  MECHANISM replacing a false ATTRIBUTION, in the paragraph whose whole subject
+  is getting an attribution right, is worse than what it replaced. The
+  conclusion survived both times; it now travels by the route the base class
+  states itself.)* So the constraint of use is not "prefer HIGHEST" — it is
+  **"state the algorithm, not the preference, and let it fail loudly on a device
+  that cannot honour it."** Link 7's Planned-defence cell is not *Nothing*.
+- **Three links have nothing but the fuzzer, a fourth has the fuzzer plus a
+  constraint of use, and link 8 has nothing at all.** Read off the table above:
+  links **4, 5 and 6** are the rows whose Planned-defence cell is
+  *"**fuzz-on-verified** only"*; link **7**'s cell leads with *"Pinning the
+  precision (§4.2) — a constraint of use, and a real partial defence"*, which is
+  what the bullet immediately above this one says in as many words; and link 8's
+  is *"Nothing, and nothing will"*. So **four** links are unchecked by any
+  *dedicated* mechanism before Phase 3 — but none of the four is bare, because
+  fuzz-on-verified (§2.5, §6.1) points at all of them at once.
+
+  *This bullet said* **five** *and then enumerated* **four**, *in one sentence,
+  and the executive summary repeated the five where a reviewer meets it first.
+  No reading of the table yields five: the "fuzz-only" rows are three and the
+  "no dedicated mechanism" rows are four. Three numerals for one quantity, one
+  of them contradicted by the bullet directly above it.*
+
+  Link 4 is the one **stelling owns entirely and can close by
   itself** — differential testing needs no research, only work — which is why it
   outranks the others despite being the least glamorous. Links 6 and 7 the *user*
   carries (§1.4); link 5 is shared and unresolved; link 8 is nobody's and stays
@@ -1088,9 +1153,35 @@ tool is that you stop looking after one.**
 
 ### 5.1 The tier is the claim
 
-Commitment 5 gives three tiers. This document does not get to amend a design
-commitment, so there are three, and ⊤ is reported as `sound` with
-`precision: none` and a `defaulted: true` flag rather than as a fourth tier.
+Commitment 5 gives three tiers — `design/founding.md`'s *"Transfer tiers.
+Exact / sound / heuristic declared per transfer function"* — and this document
+does not get to amend a design commitment. ⊤ is reported as `sound` with
+`precision: none` and a `defaulted: true` flag rather than as a tier of its
+own.
+
+**THE TREE'S THREE ARE NOT THIS THREE, AND THIS SECTION FORECLOSED THE
+QUESTION WRONGLY.** `stelling.propagate` declares `TIER_EXACT = "exact"`,
+`TIER_SOUND = "sound"` and `TIER_SOUND_LIBM = "sound-libm"` — cited by symbol
+and not by line, for the reason `SOUNDNESS.md`'s SF-0.2.0-14 gives — and
+`propagate`'s own module docstring enumerates those three. `heuristic`
+appears nowhere in `src/stelling/*.py`. Measured over the live registries:
+
+```
+real-mode transfers : exact 35, sound 13, sound-libm 2
+ieee-mode transfers : exact 46, sound  2, sound-libm 2
+```
+
+So the tier set a verdict actually stamps in `transfer_tiers` is
+`{exact, sound, sound-libm}`, and the third name in the table below is a tier
+nothing has ever been assigned. **Whether `sound-libm` is a fourth tier or a
+refinement of `sound` is a real question and this document is not the place it
+gets settled** — the sentence "so there are three" read as though it had been,
+which is the one thing a subordinate document must not do. What is not in
+doubt: `sound-libm` carries an explicit named assumption
+(`interval.EXP_LIBM_ASSUMPTION`) that plain `sound` does not, so the weakest-link
+rule below has three inputs in the code and four names between the two pages.
+The table's `heuristic` row is the commitment's vocabulary and is kept as such;
+it describes no transfer in the tree.
 
 | Tier | Means | The bar for claiming it |
 |---|---|---|
@@ -1776,8 +1867,42 @@ is wrong and must not be written. §14 is the full treatment.
 | `experimental` | May change without notice | None |
 | `deprecated` | Scheduled for removal | Removed next major |
 
-Applied to: the harness API (`any_array`, `any_scalar`, `assume`, `assert_`),
-the verdict artifact schema, `stelling.ir`, and the evidence schemas.
+Applied to: the harness API (`any_array`, `any_pytree`, `assume`, `assert_`,
+`nonvacuity`, `trace`), the verdict artifact schema, `stelling.ir`, and the
+evidence schemas.
+
+*This list read `any_array`, `any_scalar`, `assume`, `assert_`, and it was
+wrong in both directions. It named `any_scalar`, which `design/founding.md`
+sketched and nobody built — the string occurs in this file, in that one, and in
+no Python anywhere — and it omitted `any_pytree` and `nonvacuity`, which ship.
+This is the section that assigns semver stability levels, so a reader takes it
+for an inventory of the surface rather than a plan, and an inventory that names
+an absent function while missing two live ones is the wrong kind of wrong
+here.*
+
+*And the repair for that was still an entry short. `stelling.harness.__all__`
+holds **six** names and the corrected list gave five: `trace` was missing,
+although `harness.py`'s own module docstring documents `trace(harness)` and
+says in as many words that "the six names below" are re-exported from
+`_jax_compat`. Derived from `__all__` rather than retyped from memory this
+time, which is what the standard above was asking for and did not get: an
+inventory that misses one live function is a smaller instance of the same
+wrong kind of wrong, and it was written by the sentence complaining about it.*
+
+*The two further occurrences of `any_scalar`, in §10.8's positive-control
+example, sit inside a sketch of a PROPOSED idiom — `@stelling.harness`,
+`@stelling.control`, an `assume=` keyword — none of which exists either, and
+which that section presents as a remedy to build. They are left alone: a sketch
+may name what it proposes; it is this section, the stability inventory, that may
+not.*
+
+*That read "§9's". Both occurrences are under `### 10.8 Harness authoring
+controls — the use-error class`; §9 is* Contributor standards *and merely
+cross-references §10.8 for the positive-control rule, which is where the wrong
+number came from. §15's renumbering check cannot reach this and neither can any
+gate: §9 RESOLVES against a heading, it is just not the heading the sentence
+means. A section reference that lands on the wrong section is the quieter half
+of the defect §15 records, and counting is no use against it.*
 
 **The schemas are the stable surface that matters.** A user's pipeline reads
 `verdict.json` and `soundness.yaml`; an assessor reads them years later. They get
@@ -2813,7 +2938,30 @@ buried.
 
 ## 15. Process compatibility
 
-### 14.1 What stelling does not have
+*§15's and §16's subsections were numbered* `14.x` *and* `15.x` *— one parent
+behind, each — from the edit that inserted §14. Because §14 has no subsections
+of its own, the two runs did not collide and nothing looked wrong on the page;
+what it cost was six in-document cross-references pointing at headings that did
+not exist — §16.1 at four sites, §16.2 and §16.3. The references were right and
+the headings were wrong, so the headings are renumbered here, and every §N.M in
+the file now resolves against a heading — every one that does not is a clause
+of an external standard, and there are six of them: DO-178C §12.2.1,
+IEC 61508-3 §7.4.4 / §7.4.4.4, ISO 26262-8 §11.4.5 / §11.4.5.2, EN 50128 §6.7.
+Correctly so. Section NUMBERS are the one identifier in this document that no
+anchor, link or test holds, which is why this had to be found by counting.*
+
+*That list named DO-178C §12.2 as a seventh, and §12.2 DOES resolve — against
+`### 12.2 ISO 26262-8 §11 — confidence in the use of software tools`, a heading
+about a different standard that happens to carry the same number. Re-driven
+over every §N.M in the file: exactly the six above fail to resolve, and the
+list is now those six. The collision is the more interesting half. An external
+clause reference that lands on a local heading by number is invisible to
+counting in the direction counting looks — so §12.2 went onto an exception list
+to explain an absence that was not there, and the exception is the only thing
+that was wrong: every §N.M this file does not resolve is still an external
+clause.*
+
+### 15.1 What stelling does not have
 
 stelling is a solo open-source project. It does not operate under a certified
 development process, and this is stated plainly, not apologetically. A certified
@@ -2832,7 +2980,7 @@ Saying so plainly is strictly better than the alternative. A user's assessor wil
 determine this in ten minutes; the only question is whether they learn it from
 stelling's documentation or discover it after relying on an implication.
 
-### 14.2 What substitutes
+### 15.2 What substitutes
 
 | A certified process would give | stelling's equivalent |
 |---|---|
@@ -2852,7 +3000,7 @@ demonstrate, and the ledger's retroactive invalidation has no equivalent in any
 process framework — those frameworks assume the tool's past outputs stay valid,
 and provide no mechanism for withdrawing them when they do not.
 
-### 14.3 The route that is available
+### 15.3 The route that is available
 
 **Increased confidence from use** (ISO 26262-8 method 1a; IEC 61508-3 §7.4.4.4's
 "history of successful use") is the route a solo open-source project can support,
@@ -2870,7 +3018,7 @@ evidence that the record is real.**
 
 ## 16. Ecosystem
 
-### 15.1 The schema layer
+### 16.1 The schema layer
 
 `stelling.evidence` is the stable, importable, **jax-free and solver-free**
 surface for anyone who consumes stelling's output: the verdict schema, the
@@ -2890,7 +3038,7 @@ selling point is that it imports with nothing installed cannot be the module tha
 introduces stelling's first hard runtime dependency. Authoring tools that read the
 YAML source belong in the dev group, alongside `reuse` and `pre-commit`.
 
-### 15.2 Downstream harness libraries
+### 16.2 Downstream harness libraries
 
 The ecosystem play is not other verifiers — it is **libraries that ship their own
 harnesses**. A `jax-cfd` that ships stelling harnesses for its stencil kernels,
@@ -2918,7 +3066,7 @@ And must provide:
   exists to prevent, and they would do more damage to stelling's credibility than
   a soundness bug — a bug can be logged and fixed.
 
-### 15.3 Citing a verdict: the two modes
+### 16.3 Citing a verdict: the two modes
 
 The one question a downstream project or a user's assessor will actually ask is
 *may I reuse this verdict, or must I re-run it?* The answer is mechanical, which
@@ -3001,9 +3149,16 @@ The PoC may still be a single file; it just must not emit an unstamped verdict
 from it. Where that reading is wrong, `founding.md` wins and this appendix
 changes.
 
-The repository is **pre-Stage-0**: `ir.py`, `_jax_compat.py`, `_optional.py`, and
-`__main__.py` exist; harness primitives, the query object, and the z3 encoder do
-not.
+*When this appendix was written the repository was* **pre-Stage-0**: `ir.py`,
+`_jax_compat.py`, `_optional.py` and `__main__.py` existed; harness primitives,
+the query object and the z3 encoder did not. **All three now exist and have
+since before `v0.1.0` was tagged** — `stelling.harness` binds `any_array`,
+`any_pytree`, `assume`, `assert_` and `nonvacuity` to real jax primitives;
+`stelling.ir.ClosedJaxpr` is the query object and carries `content_hash()`; and
+`stelling.smt.emit` is the encoder, reaching z3 through
+`solvers.TRANSPORT_Z3_WHEEL` (`"wheel-bindings (smt2 text)"`) and cvc5 by wheel
+or external binary. The phase list below is kept as the plan it was; it is not
+a description of what the tree has.
 
 ### Phase 0 — now, before the first verdict exists
 

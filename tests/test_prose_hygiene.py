@@ -125,11 +125,26 @@ _TEST_REF_WRAPPED = re.compile(
 #: `FOUR arguments, not one` paragraph, the one whose licence is NEVER
 #: consulted, and 307 is not the residue there either but the gap from its
 #: citation to its bare `::name`. Measured on this tree, at the live
-#: supersession (`SOUNDNESS.md:1080`, `tests/test_verified_bar.py`):
+#: supersession — `SOUNDNESS.md`'s `tests/test_verified_bar.py` citation of
+#: `test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`, the
+#: one annotated `::test_the_two_pairing_gates_bind_the_ESCALATION_AND_
+#: the_propagation`:
 #:
 #:     paragraph                                    5945 chars
 #:     forward window — the span still licensed     4507 chars
 #:     citation to the annotation that licenses it   153 chars
+#:
+#: **THAT SUPERSESSION WAS NAMED BY LINE NUMBER, `SOUNDNESS.md:1080`, AND
+#: THE NUMBER WAS NOT RIGHT AT ANY REVISION ON THIS BRANCH.** Driven: the
+#: citation is at **1157** at `5ad906f` and at **1340** at `becad2b`, so it
+#: was already wrong before the 0.2.0 D5 accuracy pass began and that pass's
+#: own edits above it then pushed it 183 lines further out — and this commit
+#: moves it again, which is the point. All three figures beside it re-derive
+#: exactly at both revisions; only the handle was wrong. Nothing could catch
+#: it either: `test_no_shipped_page_cites_a_line_its_own_tree_does_not_have`
+#: checks only that a cited line is within EOF, and 1080 is. That test's own
+#: failure message is the rule followed here — *"Cite the SYMBOL, not the
+#: line."*
 #:
 #: So the licence went from 5945 characters to 4507 there, not from 1382 to
 #: 307; the paragraph-wide version licensed the 1438 characters BEFORE the
@@ -802,3 +817,427 @@ def test_the_citation_sweep_covers_the_whole_allowlist_and_the_resolver_works():
         ("src/stelling/obligation.py", "886")
     ]
     assert _LINE_CITATION.findall("no citation here") == []
+
+
+# ---------------------------------------------------------------------------
+# BARE test names — the citation form no checker in this tree could see.
+# ---------------------------------------------------------------------------
+
+#: A backticked BARE test name: `test_…`, with no `path.py::` in front of it.
+#: The optional continuation is the same mid-name wrap `_TEST_REF_WRAPPED`
+#: handles, and for the same reason — `SOUNDNESS.md` breaks long identifiers
+#: after an underscore. One of the three defects this gate was built on was
+#: wrapped that way, and it is the one no earlier sweep reached.
+_BARE_TEST_NAME = re.compile(
+    r"`(test_[A-Za-z0-9_]+)"
+    r"((?<=_)[ \t]*\n[ \t#*>]*[A-Za-z0-9_]+)?(\*?)`"
+)
+
+#: THE TWO CITATION FORMS ARE DISJOINT BY CONSTRUCTION, and this is where
+#: that is written down rather than guarded against.
+#:
+#: A first draft of this gate carried a skip: look back 90 characters, and if
+#: a `tests/….py::` sits there, leave the match to
+#: `test_every_test_cited_in_core_prose_still_exists`. **Driven on this
+#: tree, it never fired — 0 of 165 matches** — and it cannot, because
+#: :data:`_BARE_TEST_NAME` requires a backtick IMMEDIATELY before `test_`,
+#: while a `path::name` citation's backtick sits before the PATH: the
+#: characters after it are `tests/`, which is `test` with no underscore. A
+#: branch a checker never takes is a branch nobody has read, so the skip is
+#: gone and the disjointness is asserted instead, in
+#: `test_every_bare_test_name_in_shipped_prose_resolves`, against this
+#: number, which is the whole content of the claim.
+_PATH_FORM_OVERLAPS = 0
+
+#: NAMES THE PROSE DELIBERATELY MENTIONS AS ABSENT, each with its reason.
+#:
+#: **This table is the whole cost of this gate and it is stated rather than
+#: hidden.** Driven against `5ad906f`, the tree this gate was written on,
+#: with the resolver below and before any exemption existed: **162 backticked
+#: bare test-name mentions across 30 files** (97 of them in `SOUNDNESS.md`),
+#: against **74** `path::name` citations in the same set — so the form
+#: nothing could read was more than twice as common as the form something
+#: could. **Fifteen** of the 162 resolved to nothing. **Three were defects**
+#: and are repaired; the twelve that were not are here, together with the
+#: three defect names, which the repairs now quote as the ORIGINALS in the
+#: notes recording each rename. So the table is fifteen, and every one of the
+#: fifteen sits in a sentence whose SUBJECT is that the name is gone. Three
+#: shapes:
+#:
+#:   * a rename or removal the sentence itself records (eleven),
+#:   * another project's test name, cited as another project's (two),
+#:   * a name used as an EXAMPLE of a bad name or of a fabricated citation
+#:     (two).
+#:
+#: **The ledger is not rewritten to satisfy a checker.** `SOUNDNESS.md` records
+#: a closed finding by leaving the sentence standing and annotating it — the
+#: same reason :data:`_SUPERSEDED_BY` exists — so "make the prose resolve"
+#: is not available for any of the eleven, and would destroy the record for
+#: its own convenience if it were.
+#:
+#: **The table cannot rot into a blanket**: `test_the_declared_absences_are_
+#: still_absent` requires every name here to resolve NOWHERE, so an entry that
+#: has become a live test fails rather than silently exempting it.
+_NAMES_DECLARED_ABSENT: dict[str, str] = {
+    "test_the_nightly_workflow_still_runs_the_canary":
+        "renamed to `test_the_canary_and_the_workflow_agree_about_the_two_"
+        "legs`; `.github/scripts/tripwire_canary.py` cites the new name by "
+        "`path::name` two lines above and names the old one as the rename",
+    "test_a_TWO_FACED_records_cannot_show_the_bar_one_thing_and_the_loop_"
+    "ANOTHER":
+        "the one id REMOVED in the `3e107cf..faefc48` diff SOUNDNESS.md is "
+        "reporting; its successor is the parametrised refusal test and the "
+        "sentence says so",
+    "test_f4wheel2_sweep_the_reproducer_scan_errs_toward_crying_wolf":
+        "the de-vacuified test whose ten retired params SOUNDNESS.md is "
+        "counting in a `--collect-only` id diff",
+    "test_an_assume_after_the_assert_is_pinned_on_BOTH_legs":
+        "renamed to `…_withholds_on_BOTH_legs`; quoted in SOUNDNESS.md as "
+        "the ORIGINAL name in the note that records the rename (0.2.0 D5)",
+    "test_the_two_legs_do_not_yet_agree_on_assume_ordering":
+        "renamed to `test_the_two_legs_now_agree_on_assume_ordering`, a "
+        "SEMANTIC rename; quoted in SOUNDNESS.md as the original name in the "
+        "note that records it (0.2.0 D5)",
+    "test_reverse_mode_ad_DOES_preserve_the_clamp":
+        "renamed to `test_reverse_mode_ad_preserves_the_clamp_for_the_ds_dus_"
+        "pair`; SOUNDNESS.md writes the rename as `old` -> `new` and the new "
+        "name resolves",
+    "test_gather_dynamic_index_declines_not_crashes":
+        "one of the four renamed gather tests SOUNDNESS.md lists as the four "
+        "ids removed in an id diff",
+    "test_gather_out_of_range_index_declines_not_crashes":
+        "one of the four renamed gather tests SOUNDNESS.md lists as the four "
+        "ids removed in an id diff",
+    "test_fvm_gather_dynamic_index_declines_traced":
+        "one of the four renamed gather tests SOUNDNESS.md lists as the four "
+        "ids removed in an id diff",
+    "test_gather_out_of_range_static_index_declines_traced":
+        "one of the four renamed gather tests SOUNDNESS.md lists as the four "
+        "ids removed in an id diff",
+    "test_the_declaration_reader_is_a_FUNCTION_and_not_a_single_READ":
+        "deleted at `f729d70` and replaced by the two door-installs tests; "
+        "SOUNDNESS.md's measurement of it is stamped to `30d4b04` and the "
+        "paragraph names both successors by `path::name` (0.2.0 D5)",
+    "test_integer_overflow":
+        "jax's own, cited as `api_test.py:8351` in the sentence that names "
+        "it; it is not a test of this repository and never was",
+    "test_chees_adaptation":
+        "blackjax's own, quoted inside a table of blackjax issue titles in "
+        "`design/tracker-probe-classification.md`",
+    "test_float_div_is_completely_unchanged":
+        "`docs/norms.md` cites it as an EXAMPLE of a name asserting more "
+        "than its test checked — the instance is the point, not the test",
+    "test_this_page_s_numbered_sections_each_name_a_live_pinning_test":
+        "`docs/proposed-decline-messages.md` quotes it as a citation of a "
+        "test THAT DOES NOT EXIST, which is the sentence's whole subject",
+}
+
+
+def _resolvable_test_names() -> set[str]:
+    """Every name a bare `test_…` mention may legitimately denote.
+
+    TWO POPULATIONS, because a bare name is used for two things. A bare
+    `test_the_two_legs_now_agree_on_assume_ordering` names a FUNCTION; a bare
+    `test_assume_ledger` names a MODULE (`tests/test_assume_ledger.py`).
+    Driven at `5ad906f`: a function-only resolver reported 27 unresolved
+    mentions and **eleven of the 27 were module names**. Resolving both is
+    what keeps the exemption table down to the names that are genuinely
+    gone: with modules out, `_NAMES_DECLARED_ABSENT` would have had to carry
+    those eleven too — 26 entries instead of fifteen, eleven of them naming
+    live test modules.
+
+    **THAT NUMERAL READ "nine", AND THIS FILE'S OWN ARITHMETIC SAID ELEVEN.**
+    It was written rather than measured. Eleven is what closes the books:
+    27 − 11 = **16**, the mentions unresolved under BOTH populations, and
+    16 − 1 for the single one the supersession licence covers = **15**, which
+    is `_NAMES_DECLARED_ABSENT`'s size AND the dangling count with that table
+    emptied — and both of those were measured. Nine would have made them 18
+    and 17. Re-driven at `5ad906f` twice, once through the helpers below and
+    once through a re-implementation importing nothing from this file; both
+    give the same eleven: `test_any_pytree`, `test_assume_disclosure_claims`,
+    `test_assume_ledger`, `test_assume_scope_identity`,
+    `test_ir_message_totality`, `test_pow_row_gauge_jax`,
+    `test_scatter_gauge_jax`, `test_sdist_contents`,
+    `test_square_row_gauge_jax`, `test_suite_disclosure`, `test_vacuity`.
+
+    Functions come from :func:`_defined_test_names`, so the five shapes that
+    resolver deliberately over-reports and the two it closed apply here
+    unchanged — one resolver, one semantic, one place to change it.
+    """
+    names: set[str] = set()
+    for path in sorted(_TESTS.rglob("*.py")):
+        names.add(path.stem)
+        defined = _defined_test_names(path.read_text(encoding="utf-8"))
+        if defined:
+            names.update(defined)
+    return names
+
+
+def _bare_mentions(text: str):
+    """Every backticked bare test name in ``text``, as `(spellings, star, m)`.
+
+    Two spellings are yielded for a mention wrapped mid-name — the plain one
+    and the joined one — because the resolver must try both, exactly as
+    `test_every_test_cited_in_core_prose_still_exists` does.
+
+    The `path::name` form does not have to be excluded here; it cannot match.
+    See :data:`_PATH_FORM_OVERLAPS`.
+    """
+    for m in _BARE_TEST_NAME.finditer(text):
+        name, wrap, star = m.groups()
+        spellings = [name]
+        if wrap:
+            spellings.append(name + wrap.split("\n")[1].strip(" \t#*>"))
+        yield spellings, star, m
+
+
+def test_every_bare_test_name_in_shipped_prose_resolves():
+    """A BARE test name is a citation too, and nothing could read one.
+
+    `test_every_test_cited_in_core_prose_still_exists` matches
+    `tests/…\\.py::test_…`. Most of this project's prose does not write that
+    form. Driven at `5ad906f` over the same shipped set: **74 `path::name`
+    citations against 162 backticked bare names**, 97 of the bare ones in
+    `SOUNDNESS.md` alone. So the majority form was the unchecked one, and the
+    checked form's own docstring says what an unchecked citation is worth —
+    *"a renamed test turns it into a claim about nothing."*
+
+    **THREE DEFECTS WERE LIVE WHEN THIS WAS WRITTEN, AND ALL THREE HAD BEEN
+    GREEN FOR WEEKS.** Two came from the 0.2.0 D5 accuracy sweep and one this
+    gate found on its first run:
+
+        SOUNDNESS.md   test_an_assume_after_the_assert_is_pinned_on_BOTH_legs
+                       renamed to `…_withholds_on_BOTH_legs`
+        SOUNDNESS.md   test_the_two_legs_do_not_yet_agree_on_assume_ordering
+                       renamed to `…_now_agree_on_…` -- the OPPOSITE of what
+                       the sentence citing it describes
+        SOUNDNESS.md   test_the_declaration_reader_is_a_FUNCTION_and_not_a_
+                       single_READ -- DELETED at `f729d70`, cited in the
+                       present tense by a sentence written 8.5 hours earlier
+
+    The second is the sharpest: the sentence said the tree pinned a
+    *disagreement* between two legs and that a query-scoping change was
+    *forthcoming*; the tree pins the *agreement*, and the change landed. A
+    reader following that citation would have found a test asserting the
+    reverse of the claim it was offered as support for.
+
+    **AND HERE IS THE PIN FAILING, WHICH IS THE ONLY THING THAT MAKES IT A
+    PIN.** This file was dropped into a clean `5ad906f` checkout — the tree
+    this branch started from — with the three defect
+    names removed from :data:`_NAMES_DECLARED_ABSENT` and the other twelve
+    left in place. It reds, naming those three and **nothing else**:
+
+        SOUNDNESS.md:2923: `test_an_assume_after_the_assert_is_pinned_on_BOTH_legs`
+        SOUNDNESS.md:2925: `test_the_two_legs_do_not_yet_agree_on_assume_ordering`
+        SOUNDNESS.md:9980: `test_the_declaration_reader_is_a_FUNCTION_and_not_a_single_READ`
+
+    `1 failed, 6 passed`. So the twelve exemptions are the whole of the
+    false-positive surface on the tree this was written against, and the
+    three are the whole of what it catches there.
+
+    **WHY THIS IS NOT A SECOND `path::name` CHECKER.** It resolves a NAME,
+    against every test function and every test module under `tests/`, with no
+    path to key on — which is the only thing that can read the form the prose
+    actually uses. The cost is that a name legitimately mentioned as absent
+    has to be declared: :data:`_NAMES_DECLARED_ABSENT`, fifteen of them,
+    each with the reason, each held to still being absent by
+    `test_the_declared_absences_are_still_absent`. That table is the
+    honest price and it is bounded — eleven of the fifteen are rename records
+    in a ledger that is never rewritten, and those do not churn.
+
+    **THE RESIDUE, STATED RATHER THAN LEFT TO BE FOUND.** Six things this
+    does not do. This read *"Four things … each driven or reasoned rather
+    than assumed"* until 2026-08-22; the one that was reasoned is the third
+    below, the reasoning was WRONG, and all six are driven now.
+
+    * **The exemption is by NAME, not by SITE.** A new sentence that cited
+      `test_integer_overflow` as a live pin of something in THIS repository
+      would be exempt, because the table cannot tell that mention from the
+      one it was written for. Keying it to `(file, name)` would be tighter
+      and would also make every entry a position-bearing claim with no line
+      number in it; it is not done because all fifteen are names no test in
+      this tree currently has, so the widened licence covers nothing real —
+      and `test_the_declared_absences_are_still_absent` is what keeps that a
+      measurement rather than an assumption.
+    * **It resolves EXISTENCE, not identity.** A name that resolves may be a
+      different test that happens to share the name, in a different file
+      from the one the sentence means. The `path::name` form does not have
+      that gap, which is a reason to prefer writing citations that way.
+    * **The supersession licence carries `_SUPERSEDED_BY`'s residue, in a
+      WIDER window.** Both licences are keyed identically — from the mention
+      to the next SAME-KIND mention, else the end of the paragraph — so the
+      two spans are directly comparable. Measured on this tree, in
+      characters:
+
+          all shipped   bare  n=165  median 260  mean 941  max 24642
+                        path  n= 81  median 151  mean 924  max 14317
+          SOUNDNESS.md  bare  n=100  median 206  mean 533  max  6325
+                        path  n= 26  median 160  mean 377  max  4507
+
+      The bare form's window is the wider one at both scopes and on median,
+      mean and max. Wider is not open — it still asks only that the
+      replacement RESOLVE, not that it be related to the name it replaces —
+      but it is wider, and a residue is worth nothing stated in the wrong
+      direction.
+
+      **THIS SAID "NARROWER", AND THE ARGUMENT FOR IT IS THE INSTRUCTIVE
+      PART.** The reason given was that bare mentions are commoner — 165 to
+      81 across the shipped set, which is true — so the next one must arrive
+      sooner and close the window earlier. **AGGREGATE COMMONNESS DOES NOT
+      IMPLY PROXIMITY INSIDE THE ENCLOSING PARAGRAPH**, and the measurement
+      breaks the argument at every step of it:
+
+          share whose window runs to the END of
+              the paragraph, not to a next mention   bare 80.0%  path 80.2%
+          mentions per paragraph that holds any      bare  1.25  path  1.25
+          gap to the next same-kind mention where
+              there is one (median chars)            bare   120  path    22
+          mention to end of paragraph (median)       bare   352  path   326
+
+      Four licences in five, of EITHER form, are capped by the end of the
+      paragraph and not by a next mention, so the corpus-wide ratio never
+      gets to matter — and where it might, the within-paragraph density is
+      1.25 for both. Where a next mention DOES cap the window it is the
+      `path::name` gap that is the short one: repeated citations sit
+      adjacent in a list, 22 characters apart, where a repeated bare mention
+      is 120 away. The 165-to-81 ratio is a fact about the whole corpus and
+      the window is a fact about one paragraph, and nothing carries the
+      first into the second.
+
+      This was the only item in this list that was argued rather than
+      driven, and it is the same failure :data:`_SUPERSEDED_BY`'s comment
+      above records against itself — a residue bounded at the wrong width
+      because a number stood in for a measurement.
+    * **The star/prefix branch has never fired on this tree.**
+      :data:`_BARE_TEST_NAME`'s trailing `(\\*?)` switches resolution from
+      equality to PREFIX, for a family citation. Measured here: **0 of 165**
+      bare mentions carry the star, against **2 of 81** `path::name`
+      citations that do — so the form that actually has the families is the
+      one this gate does not read. The branch is live, not dead: planting a
+      real family into `docs/norms.md` gives `7 passed`, and a fabricated
+      one gives `1 failed` naming it. But an unexercised branch is a branch
+      nobody has read, which is exactly what :data:`_PATH_FORM_OVERLAPS`
+      above exists to forbid — and unlike that one this count is neither
+      asserted nor pinned. Recorded, not closed: it belongs beside
+      `_PATH_FORM_OVERLAPS` and is not there.
+    * **The resolver's namespace is wider than pytest's collection.**
+      :func:`_resolvable_test_names` scans EVERY `tests/**/*.py`, while
+      pytest collects `test_*.py` and `*_test.py` by default and
+      `pyproject.toml` sets no `python_files`. So a `test_…` defined in a
+      helper module would resolve a citation pytest never runs. **Latent,
+      and measured at 0**: 15 of the 170 `.py` files under `tests/` are not
+      `test_*.py`, and not one of them defines a `test_`-prefixed name or
+      has a stem beginning `test`. Driven by planting a `tests/_helperzz.py`
+      holding one `test_…` def — the citation resolves (`7 passed`) while a
+      `--collect-only` over `tests/` reports nothing from that file.
+    * **`tests/` and `scratchpad/` stay out**, for the same reasons the
+      `path::name` scan gives: three test modules write citation-shaped
+      strings as plants, and `scratchpad/` is tracked evidence.
+    """
+    resolvable = _resolvable_test_names()
+    dangling, seen, files = [], 0, set()
+    for source, text in _citation_sources():
+        for spellings, star, m in _bare_mentions(text):
+            seen += 1
+            files.add(source)
+            if any(
+                (any(d.startswith(s) for d in resolvable) if star
+                 else s in resolvable)
+                for s in spellings
+            ):
+                continue
+            if any(s in _NAMES_DECLARED_ABSENT for s in spellings):
+                continue
+            # ... and last, a supersession ANNOTATING THIS MENTION: a bare
+            # `::name` declared after it, with no other bare mention in
+            # between. Same rule, same reason and the same residue as
+            # `_SUPERSEDED_BY`'s -- a licence keyed to position, because
+            # position is the only thing a checker can read.
+            para_start, para = _enclosing_paragraph(text, m.start())
+            after = m.end() - para_start
+            following = _BARE_TEST_NAME.search(para, after)
+            window = para[after:following.start() if following else len(para)]
+            if any(
+                replacement in resolvable
+                for replacement in _SUPERSEDED_BY.findall(window)
+            ):
+                continue
+            lineno = text.count("\n", 0, m.start()) + 1
+            dangling.append(f"{source}:{lineno}: `{spellings[-1]}`")
+    assert not dangling, (
+        "shipped prose names test(s) that exist nowhere under `tests/`:\n  "
+        + "\n  ".join(dangling)
+        + "\nA bare name is the citation form this project's prose mostly "
+        "uses, and a renamed test turns it into a claim about nothing just "
+        "as surely as it does a `path::name` one. Repoint it, write the "
+        "successor beside it as `::new_name`, or -- if the sentence's "
+        "SUBJECT is that the name is gone -- declare it in "
+        "`_NAMES_DECLARED_ABSENT` with the reason."
+    )
+    # ... and it is not vacuous. Driven at `5ad906f`: 162 mentions across 30
+    # files, against 74 `path::name` citations in the same set.
+    assert seen >= 100, (
+        f"only {seen} bare test-name mention(s) found across "
+        f"{list(_CITATION_ROOTS)} and the root pages; the pattern has stopped "
+        f"matching how they are written, or the scan has stopped reaching "
+        f"them"
+    )
+    assert len(files) >= 10, (
+        f"bare test names were found in {len(files)} file(s); they have "
+        f"collapsed into one or two, or the scan has narrowed"
+    )
+    # ... and the resolver really resolves: a name that IS a live test, and a
+    # name that is a live test MODULE, both come back resolvable, so "not in
+    # the set" means something.
+    assert "test_every_bare_test_name_in_shipped_prose_resolves" in resolvable
+    assert "test_prose_hygiene" in resolvable
+    assert "test_no_such_test_anywhere_in_this_tree_at_all" not in resolvable
+    # ... and the two citation forms really are disjoint, so neither gate is
+    # reading the other's population -- :data:`_PATH_FORM_OVERLAPS`, measured
+    # rather than argued.
+    overlapping = []
+    for source, text in _citation_sources():
+        spans = [c.span() for c in _TEST_REF_WRAPPED.finditer(text)]
+        for _, _, m in _bare_mentions(text):
+            if any(lo <= m.start() < hi for lo, hi in spans):
+                overlapping.append(f"{source}:{m.group(1)}")
+    assert len(overlapping) == _PATH_FORM_OVERLAPS, (
+        f"{len(overlapping)} bare test-name match(es) fall inside a "
+        f"`path::name` citation and {_PATH_FORM_OVERLAPS} was measured: "
+        f"{overlapping[:5]}. The two forms are disjoint by construction -- a "
+        f"backticked bare name cannot start a `tests/…py::` citation -- and "
+        f"one gate is now reading the other's population."
+    )
+
+
+def test_the_declared_absences_are_still_absent():
+    """Every exemption must still be an absence, or it is a blanket.
+
+    An allowlist of names is only sound while each name is genuinely gone. A
+    name that came back — someone re-creates a test under a retired name, or
+    an entry is copied in by hand — would sit here silently exempting a live
+    citation from ever being checked again, which is the failure mode of
+    every allowlist that is written once and read never.
+
+    So the direction is inverted: this asserts the exemptions do NOT resolve.
+    The table can only shrink by deleting an entry, never by drifting into
+    one that covers something real.
+    """
+    resolvable = _resolvable_test_names()
+    resurrected = sorted(n for n in _NAMES_DECLARED_ABSENT if n in resolvable)
+    assert not resurrected, (
+        f"name(s) declared absent in `_NAMES_DECLARED_ABSENT` that now "
+        f"resolve under `tests/`: {resurrected}. An exemption for a name "
+        f"that exists is a live citation nothing checks. Delete the entry "
+        f"and let the gate read the name."
+    )
+    for name, reason in _NAMES_DECLARED_ABSENT.items():
+        assert len(reason) >= 40, (
+            f"the exemption for {name!r} gives no real reason. Every entry "
+            f"here is a claim that a sentence MEANS to name something gone, "
+            f"and a claim needs its argument beside it."
+        )
+    # ... and it is not vacuous: the table really has entries to check, and
+    # the resolver it checks them against really is populated.
+    assert len(_NAMES_DECLARED_ABSENT) >= 10
+    assert len(_resolvable_test_names()) >= 1000
