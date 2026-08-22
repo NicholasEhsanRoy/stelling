@@ -1481,3 +1481,154 @@ def test_a_bound_method_target_is_named_as_the_fixture_problem(tmp_path):
     # survives even when the execution leg does not
     assert set(sidecar) == set(SIDECAR_KEYS)
     assert sidecar["schema"] == SCHEMA
+
+
+# ── the path a READER takes, which is not the path anything above takes ──────
+#
+# Every runner in this file passes the emitted file by ABSOLUTE path, from a
+# working directory that is not the file's, with the target's module reachable
+# on PYTHONPATH. `docs/reproducing-a-witness.md` tells a reader to do none of
+# those things. It says: put your program in a file, run the harness, and then
+#
+#     $ python reproducers/reproduce_<name>.py
+#
+# from the directory holding that program — a RELATIVE path into a
+# subdirectory, with the target importable only because it is in the working
+# directory. Measured before the emitter appended the cwd to `sys.path`, on
+# exactly the two files that page prints: `ModuleNotFoundError: No module
+# named 'myprogram'`, exit 3, `== NO EXECUTION RESULT`.
+#
+# So the one path a reader actually takes was the one path nothing exercised,
+# and the suite was green for the whole time the first command after the
+# install line did not work. This closes that.
+
+
+def _reader_project(tmp_path):
+    """A reader's working directory: their program, and nothing else on the
+    import path that could reach it."""
+    project = tmp_path / "reader-project"
+    project.mkdir()
+    (project / "readerprogram.py").write_text(
+        textwrap.dedent(
+            '''
+            """The reader's own module, in their own working directory.
+
+            Shaped like `docs/reproducing-a-witness.md`'s `myprogram.py`:
+            four rates each at most 1, scaled by 3, against a budget of 10.
+            It imports no stelling, which is the point of the page.
+            """
+            import jax.numpy as jnp
+
+
+            def total_against_budget(rates):
+                total = jnp.sum(rates) * 3.0
+                return total, 10.0
+            '''
+        ).lstrip(),
+        encoding="utf-8",
+    )
+    # a blocker directory that is NOT the project: stelling stays
+    # unreachable, and the project directory stays off PYTHONPATH, so the
+    # target is importable from the cwd or not at all
+    blocked = tmp_path / "blocked"
+    blocked.mkdir(exist_ok=True)
+    (blocked / "sitecustomize.py").write_text(_blocker("stelling"))
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(blocked)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.pop("PYTHONSTARTUP", None)
+    return project, env
+
+
+def _reader_subject(project):
+    """Import the reader's module the way their harness would, and build the
+    subject around the function it defines."""
+    import importlib
+
+    sys.path.insert(0, str(project))
+    try:
+        sys.modules.pop("readerprogram", None)
+        mod = importlib.import_module("readerprogram")
+        return Subject(
+            name="reader-rate-budget",
+            fn=mod.total_against_budget,
+            relation="<=",
+            declarations=(((4,), "float32", (0.0, 1.0)),),
+            no_precondition_reason=(
+                "every rate in [0,1] is one the caller can supply"
+            ),
+        )
+    finally:
+        sys.path.remove(str(project))
+
+
+def test_the_emitted_file_runs_THE_WAY_THE_PAGE_TELLS_A_READER_TO_RUN_IT(
+    tmp_path,
+):
+    """`python reproducers/<file>.py`, from the directory holding the
+    program, with that directory on no PYTHONPATH — the documented command,
+    unmodified.
+
+    Python puts the SCRIPT'S directory on ``sys.path[0]``, not the working
+    directory, so a reproducer one level down could not import a module
+    sitting right beside its parent. The emitter appends the cwd for
+    exactly this; the anti-vacuity control below is what says so.
+    """
+    pytest.importorskip("z3")
+    project, env = _reader_project(tmp_path)
+    subject = _reader_subject(project)
+    v = check(
+        subject.harness, vacuity_mode="inputs-only", solver_timeout_ms=TIMEOUT_MS
+    )
+    assert v.status == "REFUTED", v.render()
+    em = write_reproducer(v, subject, str(project / "reproducers"))
+    assert em.runnable, em.unconstructible
+
+    relative = os.path.relpath(em.path, str(project))
+    assert relative.startswith("reproducers" + os.sep), relative
+    proc = subprocess.run(
+        [sys.executable, relative],
+        cwd=str(project), env=env, capture_output=True, text=True, timeout=600,
+    )
+    assert proc.returncode == RESULT_EXIT, proc.stdout + proc.stderr
+    assert f"== {CONFIRMED}" in proc.stdout, proc.stdout
+    assert "NO EXECUTION RESULT" not in proc.stdout
+    with open(em.sidecar_path) as fh:
+        sidecar = json.load(fh)
+    assert sidecar["execution"]["result"] == CONFIRMED
+    # the page's own arithmetic: four rates at 1 (and one rounded) scaled by
+    # 3 exceeds the budget of 10
+    (lhs,), (rhs,) = sidecar["execution"]["lhs"], sidecar["execution"]["rhs"]
+    assert lhs > rhs == 10.0, sidecar["execution"]
+
+
+def test_the_working_directory_is_WHY_that_run_found_the_target(tmp_path):
+    """The anti-vacuity control on the test above.
+
+    Without it, that test passes for any reason at all — the target could
+    have been reachable through PYTHONPATH, or through the emitted file's
+    own directory, and the assertion would not know the difference. Run the
+    SAME emitted file from a working directory the program is not in: if the
+    cwd is what makes it work, this must stop with NO EXECUTION RESULT and
+    name the module it could not import.
+    """
+    pytest.importorskip("z3")
+    project, env = _reader_project(tmp_path)
+    subject = _reader_subject(project)
+    v = check(
+        subject.harness, vacuity_mode="inputs-only", solver_timeout_ms=TIMEOUT_MS
+    )
+    assert v.status == "REFUTED", v.render()
+    em = write_reproducer(v, subject, str(project / "reproducers"))
+
+    elsewhere = tmp_path / "somewhere-else"
+    elsewhere.mkdir()
+    proc = subprocess.run(
+        [sys.executable, os.path.abspath(em.path)],
+        cwd=str(elsewhere), env=env, capture_output=True, text=True,
+        timeout=600,
+    )
+    assert proc.returncode == NOT_EXECUTED_EXIT, proc.stdout + proc.stderr
+    assert "NO EXECUTION RESULT" in proc.stdout
+    assert "readerprogram" in proc.stdout, proc.stdout
+    assert "could not be imported" in proc.stdout, proc.stdout

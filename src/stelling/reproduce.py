@@ -1429,6 +1429,31 @@ import os
 import sys
 from fractions import Fraction
 
+# THE TARGET IS IMPORTED BY NAME, AND THIS FILE IS NOT WHERE YOU RAN FROM.
+# Python puts THIS SCRIPT'S directory on sys.path[0], not the working
+# directory -- and a reproducer is emitted into a subdirectory, one level
+# below the program it is evidence about. So the documented command, run
+# from the directory holding that program,
+#
+#     $$ python reproducers/reproduce_<name>.py
+#
+# could not import a module sitting right there, and this file reported
+# NO EXECUTION RESULT about a target it could have executed. Measured
+# before this block existed, from exactly that directory:
+# `ModuleNotFoundError: No module named 'myprogram'`, exit 3 -- a wrongly
+# silent file, which is the same family of defect as a wrong one.
+#
+# APPENDED, never prepended. sys.path[0] stays this file's own directory
+# and every other entry keeps its position, so no import that resolved
+# before this line existed resolves to anything different now: the only
+# effect is that a name which previously resolved to NOTHING can now
+# resolve in the working directory. Run from somewhere the target is not
+# and the file still stops with the same honest "could not be imported"
+# detail it stopped with before.
+_CWD = os.getcwd()
+if _CWD not in sys.path:
+    sys.path.append(_CWD)
+
 # the published sidecar surface, minus the execution result this run adds
 SIDECAR = json.loads(r"""
 ${sidecar}
