@@ -5,6 +5,13 @@ SPDX-License-Identifier: Apache-2.0
 
 # Can the unit norm be mechanised? — MEASURED, and the answer is mostly NO
 
+**Both instruments this page names live in the campaign repo `stelling-sweeps`
+and are written as `stelling-sweeps/<name>`**, so that no reader looks for them
+here — the convention [state-0.1.0.md](state-0.1.0.md) states and
+[gauge-coverage.md](gauge-coverage.md) now follows. Neither is in this tree and
+nothing here re-derives what they measured. *As-of, in `stelling-sweeps` at
+`b694d52`.*
+
 *"A figure in a norm states the unit it counts"* has now failed on its own author
 **three times**, in the same shape each time. This asks whether a mechanism can
 replace the remembering, and the honest answer is that **no proposed mechanism
@@ -84,12 +91,12 @@ and a test. **The error was in re-typing, which is downstream of every helper.**
 
 | instance | why citing would have caught it |
 |---|---|
-| 1 | `bx_obligation_crosscheck.md` already existed; citing it surfaces both inflations and the unit |
+| 1 | `stelling-sweeps/bx_obligation_crosscheck.md` already existed; citing it surfaces both inflations and the unit |
 | 2 | no script existed — being required to produce one is what yielded 21 |
 | 3 | the script enumerated 23, and citing it makes the 23 visible next to the claim |
 
 This is the only candidate that catches all three, and there is a **demonstrated
-success in tree**: `safe_mask_scope.py` was written precisely because a number
+success in tree**: `stelling-sweeps/safe_mask_scope.py` was written precisely because a number
 needed an instrument, and writing it changed 24 to 21. But enforcing it
 mechanically needs a lint that can tell a claim-bearing count from an incidental
 number, which the 673-hit measurement says is infeasible in general. **So it
@@ -128,7 +135,8 @@ recommendation is not a fourth mechanism.
    re-derives it.* That costs nothing new, and it is the only intervention with
    a 3-of-3 record.
 4. **Keep the convention where it has worked**: when a number is going to be
-   published, write the instrument first and cite it. `safe_mask_scope.py` is
+   published, write the instrument first and cite it.
+   `stelling-sweeps/safe_mask_scope.py` is
    the pattern. This is a convention and is stated as one, not dressed as
    enforcement.
 5. **And record the answer to the question asked**, because it is worth knowing

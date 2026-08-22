@@ -29,13 +29,13 @@ how the two faces drifted apart once already.
 
 | primitive | emission gauged | transfer gauged | by what |
 |---|---|---|---|
-| `scatter` | **yes** | **yes** | `tests/test_scatter_gauge_jax.py` already drove both — `emission-agreement` runs the pipeline through `escalate`, `interval-soundness` and `point-box-exactness` drive the transfer. Now also `param_gauge.py` (both gates) and `scatter_containment.py` |
-| `scatter-add` | **yes** | **yes** | as above |
-| `dot_general` | **partly** | **yes** | `param_gauge_dot.py` drives `TRANSFERS`/`interval_env` only and `tests/test_dot_general_interval.py` is containment, so the parameter-space gauge is still transfer-only. What is now driven from BOTH faces is the SHAPE half: `tests/test_dot_general_both_faces.py` runs six well-formed and nine malformed forms through the transfer and through `_dot_general_plan` and asserts they AGREE, and pins that each face obtains its geometry from `interval.dot_general_geometry` rather than deriving its own (audit 0.2.0 S12, where they did not) |
-| `convert_element_type` | **no** | **yes** | `param_gauge_convert.py` drives `interval_env` only |
+| `scatter` | **yes** | **yes** | `tests/test_scatter_gauge_jax.py` already drove both — `emission-agreement` runs the pipeline through `escalate`, `interval-soundness` and `point-box-exactness` drive the transfer. Now also `stelling-sweeps/param_gauge.py` (both gates, `scatter` only — its `scatter-add` arm voids itself, see above) and `stelling-sweeps/scatter_containment.py`, neither in this tree |
+| `scatter-add` | **yes** | **yes** | `tests/test_scatter_gauge_jax.py`, as above. **Not** `stelling-sweeps/param_gauge.py`: its `scatter-add` baseline is declined by the accumulate row bound, so it measures nothing on this row |
+| `dot_general` | **partly** | **yes** | `stelling-sweeps/param_gauge_dot.py` (not in this tree, and it no longer runs against it — see above) drove `TRANSFERS`/`interval_env` only and `tests/test_dot_general_interval.py` is containment, so the parameter-space gauge is still transfer-only. What is now driven from BOTH faces is the SHAPE half: `tests/test_dot_general_both_faces.py` runs six well-formed and nine malformed forms through the transfer and through `_dot_general_plan` and asserts they AGREE, and pins that each face obtains its geometry from `interval.dot_general_geometry` rather than deriving its own (audit 0.2.0 S12, where they did not) |
+| `convert_element_type` | **no** | **yes** | `stelling-sweeps/param_gauge_convert.py` drives `interval_env` only — not in this tree, but it does still run against it: 70 mutations, 0 survivors |
 | `pow` | **yes** | **partly** | `tests/test_pow_row_gauge_jax.py` drives both from one battery, whose size, survivor count and asymmetry count are MEASURED under *The `pow` row's gauge* below rather than restated here — a digit typed in this cell is the class of thing this page got wrong. Emission: both exponent branches through `check`/`escalate` to a replayed witness, eager AND with the `pow` fused inside a `jit`, at a MEASURED exponent arity and with the per-element emission asserted INVARIANT to the array shape over a printed range of element counts. Transfer: `interval-containment-eager-and-jit` drives `interval_env` against the values jax computes on this target — but only over STRICTLY POSITIVE base boxes, which is the whole domain of `interval.pow_`'s corner rule, so the transfer column is **partly** and not **yes**. See the paragraphs below for what else it does not reach |
 | `square` | **yes** | **yes** | `tests/test_square_row_gauge_jax.py` drives both from one battery — the emission gates run the pipeline through `check`/`escalate` to a replayed witness, eagerly AND with the `square` fused inside a `jit`; `interval-containment-eager-and-jit` drives `interval_env` against the values jax computes on this target. Its transfer-face mutation is CAUGHT by the containment gate and ADMITTED by every emission gate, so the two faces are visibly independent rather than assumed to be |
-| every other member of the emission set | **no** | mostly yes | containment sweep (Run 11), which is transfer-face by construction |
+| every other member of the emission set | **no** | mostly yes | containment sweep (`stelling-sweeps/STELLING_01.md`, `OVERNIGHT RUN 11`), which is transfer-face by construction and is not re-derivable here |
 | every transfer with no emission row | n/a | mostly yes | same |
 
 *Those two rows read "the other 29" and "the 6" when the table was written, and
@@ -727,7 +727,9 @@ shape of program most likely to meet this bound.
 
 ## What this table says that the earlier numbers did not
 
-- **"35 of 39 transfers gauged, zero survivors"** was a *transfer-face* figure.
+- **"35 of 39 transfers gauged, zero survivors"** — Run 11's figure
+  (`stelling-sweeps/STELLING_01.md`, `OVERNIGHT RUN 11`, at `b694d52`; not in
+  this tree and not re-derivable here) — was a *transfer-face* figure.
   Containment cannot see an emission gate at all — it compares a box against an
   executed value, and an emission plan produces neither. So that sweep says
   nothing about the emission set — not one row of it, whatever its size, which
@@ -735,7 +737,8 @@ shape of program most likely to meet this bound.
   not restate. (It said "33 emission rows"; the emission set is not 33 any
   more, and the *nothing* is what the sentence is for.)
 - **The two rows the project built by hand are gauged in opposite directions.**
-  `param_gauge.py` was emission-only and `param_gauge_dot.py` is transfer-only,
+  `stelling-sweeps/param_gauge.py` was emission-only and
+  `stelling-sweeps/param_gauge_dot.py` is transfer-only,
   and each was quoted as coverage of its row.
 - **But "no instrument covered both faces of anything" is too strong**, and the
   table is what shows it. `tests/test_scatter_gauge_jax.py` already drove both
@@ -763,12 +766,20 @@ other face still catches the mutation. **A survivor count cannot detect a
 one-face regression, by construction.**
 
 What detects one is a mutation that some gates catch and others admit — the two
-faces disagreeing about a single program. `param_gauge.py` reports that as a
+faces disagreeing about a single program. `stelling-sweeps/param_gauge.py`
+reports that as a
 **face asymmetry** and it is a finding whether or not any survivor exists.
 Verified by injection: with the transfers made to stop reading the real index
 dtype and the emission face untouched, the survivor count stayed at **0** while
 **6 face asymmetries** appeared (three per row: int8 at n=129, uint8 at n=257,
 int16 at n=32769). Reverting returned both counts to zero.
+
+*That is a two-row figure — `scatter` and `scatter-add` — and it is **no longer
+reproducible from this instrument against this tree**, because its `scatter-add`
+baseline is now declined by the accumulate row bound (see the instrument table
+at the top of this page). The `scatter` half still gauges. The inference is
+reasoned from that measured decline, not re-measured: re-running the injection
+would mean mutating the tree.*
 
 ## What follows from the table
 

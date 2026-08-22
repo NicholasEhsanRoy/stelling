@@ -44,8 +44,11 @@ about.
 * the census population against clause 1's list of external terminals,
   under the identification clause 2 states — so dropping a member from
   ``recorded`` and editing the fence to match no longer passes;
-* every file the release page names is either in this tree or written
-  with the ``stelling-sweeps/`` prefix that says it is not;
+* every file **any page under ``docs/``** names is either in this tree,
+  or written with the ``stelling-sweeps/`` prefix that says it is not, or
+  listed in :data:`NOT_IN_THIS_TREE` as a decision — the scope was one
+  page, which is why four campaign scripts sat uncited in
+  ``gauge-coverage.md`` with this file green;
 * the quotations REGISTERED BELOW are verbatim in the file they are
   attributed to, and verbatim in the file that quotes them.
 
@@ -386,39 +389,105 @@ _LINK_REF = re.compile(r"\]\(([A-Za-z0-9_][A-Za-z0-9_./-]*\.md)\)")
 EXTERNAL_PREFIX = "stelling-sweeps/"
 
 
-def test_every_file_the_release_page_names_is_placed():
+# Directories a bare basename may legitimately be short for. A page writing
+# `obligation.py` means `src/stelling/obligation.py`, and demanding the full
+# path everywhere would make the docs worse to satisfy a scanner.
+_SHORTHAND_ROOTS = (
+    "", "src/", "src/stelling/", "src/stelling/_tripwire/",
+    "tests/", "docs/", "design/", "corpus/", "tools/",
+)
+
+# References that resolve nowhere in this tree and are NOT campaign
+# instruments. Each is a decision, made here in the open, and each says which
+# of the two legitimate cases it is. A name that is neither is a defect: it
+# reads to a reader as a file they can open, and it is not one.
+NOT_IN_THIS_TREE = {
+    # (1) files the reader is instructed to CREATE. The page is telling them
+    # what to name it, so "not in this tree" is the point of the sentence.
+    "docs/quickstart.md": {
+        "quickstart.py", "statuses.py", "witness.py", "nonvacuity_demo.py",
+    },
+    "docs/overflow-tripwire.md": {
+        # (2) another package's source, cited as the site of a jax behaviour.
+        # It is in the installed jax, not here, and rewriting it with the
+        # campaign prefix would be a lie about where it lives.
+        "jax/_src/random/prng.py",
+    },
+}
+
+
+def test_every_file_the_docs_name_is_placed():
     """An instrument named without a location reads as in-tree.
 
-    Five were: three named as *"re-measured in this tree"* while living
-    in the campaign repo. The rule this page states — a population that
-    is not in the tree gets a sha, one that is gets a gate — cannot be
-    applied by a reader who cannot tell which case a name is. So a name
-    is either resolvable here or carries the prefix that says it is not.
+    Five were, on ``docs/state-0.1.0.md``: three named as *"re-measured in
+    this tree"* while living in the campaign repo. The rule that page states
+    — a population that is not in the tree gets a sha, one that is gets a
+    gate — cannot be applied by a reader who cannot tell which case a name
+    is. So a name is either resolvable here, or carries the prefix that says
+    it is not, or is listed above as a decision.
 
-    *Scope:* bare ``‘name.ext’`` references and markdown links, in
-    ``docs/state-0.1.0.md``. A reference written with a line number
-    (``gnn.py:312``) is outside it."""
-    text = STATE.read_text(encoding="utf-8")
-    refs = sorted(set(_FILE_REF.findall(text)) | set(_LINK_REF.findall(text)))
-    # both branches of the check must be reachable, or it cannot fail
-    assert any(r.startswith(EXTERNAL_PREFIX) for r in refs), (
+    **THE SCOPE WAS ONE PAGE, AND THAT IS WHY THIS KEPT HAPPENING.** With
+    ``docs/state-0.1.0.md`` gated and nothing else, ``gauge-coverage.md``
+    rested a whole table column on four campaign scripts a reader had no way
+    to learn were not here, ``proposed-unit-mechanism.md`` cited two more,
+    and ``docs/verdict-ledger.md``'s central entry pointed at a third — all
+    with this test green, because it was not looking. Widened to every page
+    under ``docs/``.
+
+    *Scope:* bare ``name.ext`` references in backticks, and markdown links.
+    A reference written with a line number (``gnn.py:312``) is outside it,
+    and so is a symbol reference with no extension (``frontier.warm()``) —
+    the second is a real hole and is stated here rather than implied."""
+    seen_external = False
+    seen_intree = False
+    unplaced: dict[str, list[str]] = {}
+    pages = sorted((REPO / "docs").glob("*.md"))
+    assert len(pages) >= 20, f"the docs glob found only {len(pages)} pages"
+    for page in pages:
+        text = page.read_text(encoding="utf-8")
+        refs = sorted(
+            set(_FILE_REF.findall(text)) | set(_LINK_REF.findall(text))
+        )
+        allowed = NOT_IN_THIS_TREE.get(f"docs/{page.name}", set())
+        for ref in refs:
+            if ref.startswith(EXTERNAL_PREFIX):
+                seen_external = True
+                continue
+            if ref in allowed:
+                continue
+            if (REPO / ref).exists() or (page.parent / ref).exists() or any(
+                (REPO / (root + ref)).exists() for root in _SHORTHAND_ROOTS
+            ):
+                seen_intree = True
+                continue
+            unplaced.setdefault(page.name, []).append(ref)
+    # both branches must be reachable, or the check cannot fail
+    assert seen_external, (
         "the scanner found no external reference at all; it has stopped "
         "reaching the case it exists for"
     )
-    assert any(not r.startswith(EXTERNAL_PREFIX) for r in refs), (
-        "the scanner found no in-tree reference at all"
-    )
-    unplaced = [
-        r for r in refs
-        if not r.startswith(EXTERNAL_PREFIX)
-        and not (REPO / r).exists()
-        and not (STATE.parent / r).exists()
-    ]
+    assert seen_intree, "the scanner found no in-tree reference at all"
     assert not unplaced, (
-        f"{STATE.name} names files that are not in this tree and are not "
-        f"marked as living elsewhere: {unplaced}\nEither commit them, or "
-        f"write them as {EXTERNAL_PREFIX}<name> with the sha they were read "
-        "at."
+        f"docs/ names files that are not in this tree and are not marked as "
+        f"living elsewhere: {unplaced}\nEither commit them, write them as "
+        f"{EXTERNAL_PREFIX}<name> with the sha they were read at, or add "
+        f"them to NOT_IN_THIS_TREE with which case they are."
+    )
+
+
+def test_the_placement_exemptions_are_all_still_needed():
+    """An exemption for a reference a page no longer makes is a licence
+    nobody is using, and it would silently cover the next one."""
+    stale: dict[str, list[str]] = {}
+    for page_path, refs in NOT_IN_THIS_TREE.items():
+        text = (REPO / page_path).read_text(encoding="utf-8")
+        found = set(_FILE_REF.findall(text)) | set(_LINK_REF.findall(text))
+        gone = sorted(r for r in refs if r not in found)
+        if gone:
+            stale[page_path] = gone
+    assert not stale, (
+        f"NOT_IN_THIS_TREE exempts references these pages no longer make: "
+        f"{stale}. Drop them."
     )
 
 
