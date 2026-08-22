@@ -19,16 +19,16 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                54
+    ```python blocks                                55
       marked illustrative — not run                 14
-      EXECUTED (exit 0 required)                    40
+      EXECUTED (exit 0 required)                    41
         marked run-only — output not compared        3
-        OUTPUT COMPARED against a fence             37
-    plain ``` fences                                80
-      consumed as an example's claimed output       37
+        OUTPUT COMPARED against a fence             38
+    plain ``` fences                                81
+      consumed as an example's claimed output       38
       HAND-WRITTEN, compared to nothing             43
-So the claim this file earns is: *every runnable example runs, and 37 of
-the 40 have their stdout compared byte for byte after a narrow
+So the claim this file earns is: *every runnable example runs, and 38 of
+the 41 have their stdout compared byte for byte after a narrow
 normalisation.* The 43 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
@@ -161,6 +161,15 @@ EXPECTED_INVENTORY = {
     # the eager detector armed it raises by design, and with it off it prints
     # nothing, so there is no output to compare either way; it is a record of
     # what jax does, which is what `illustrative` means.
+    # B19 on `docs/reading-a-verdict.md`: ROW 1 of the status table -- the
+    # first thing a reader of that page reads -- said VERIFIED means "true at
+    # every point of the declared box", and under a narrowing `assume` it does
+    # not. The page said the qualified thing correctly eight hundred lines
+    # lower down. The new block DEMONSTRATES the counter-example rather than
+    # asserting the qualifier: VERIFIED, with `0.2` in the declared box and
+    # `0.2 > 0.5` False, and the stamp's `constrained assume` line naming the
+    # narrowing.
+    #
     # B19 on `docs/harness-api.md`: the page opened "Every code block on this
     # page was executed verbatim ... and the outputs are what it printed",
     # which one block on the page contradicted -- it was marked illustrative,
@@ -206,11 +215,11 @@ EXPECTED_INVENTORY = {
     # booleans, not a render, because the normaliser only rewrites a source-info
     # line that begins the line and a fence carrying an inline temp path could
     # not be byte-compared.
-    "python_blocks": 54,
+    "python_blocks": 55,
     "illustrative": 14,
-    "executed": 40,
+    "executed": 41,
     "run_only": 3,
-    "compared": 37,
+    "compared": 38,
     # B15 added two: `docs/overflow-tripwire.md` now quotes the trace gate's
     # narrowed refusal and its NOT-FULLY-OBSERVED refusal side by side, which
     # is the whole point of that section — the two sentences have to be
@@ -233,7 +242,7 @@ EXPECTED_INVENTORY = {
     # which is the gap that program has in jax's DEFAULT configuration.
     # Measured, hand-written, attached to nothing;
     # `tests/test_tripwire_eager.py` re-drives every line of it.
-    "plain_fences": 80,
+    "plain_fences": 81,
     "plain_unattached": 43,
 }
 

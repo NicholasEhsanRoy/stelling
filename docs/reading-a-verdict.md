@@ -10,18 +10,78 @@ recorded per verdict rather than assumed from context. `Verdict.render()`
 prints all of it. This page walks the render top to bottom, then takes
 the two lines people reliably read as a contradiction.
 
-Every code block on this page was executed verbatim against this tree
-(stelling 0.2.0.dev0, jax 0.11.0, CPU, `jax_enable_x64=True`) and the outputs
-are what it printed.
+Every ```` ```python ```` block on this page is executed verbatim by
+`tests/test_doc_examples.py` and the fence under it is compared byte for byte
+against what it printed (stelling 0.2.0.dev0, jax 0.11.0, CPU,
+`jax_enable_x64=True`).
+
+**The four fences that stand alone are hand-checked excerpts of a real render,
+elided where marked `…`, and one of them is not a transcript at all.** Stated
+because the sentence above used to cover them and did not describe them:
+
+* the `coverage-not-established` fence reproduces **byte for byte**;
+* the `assumes: ieee libm accuracy` fence is the first two lines of a single
+  ~1,400-character line, wrapped here with a continuation indent and cut at
+  the `…`. Nothing prints it in that shape;
+* the `vacuity checked` / `nonvacuity UNCHECKED` pair does occur in one real
+  render, but **not adjacent** — a `coverage:` line sits between them, and the
+  first is elided;
+* the `== DECLINED` fence shows the right three framing lines, but its reason
+  string is an illustration. A real DECLINED prints the same frame with a
+  reason from the transcriber.
 
 ## The status
 
 | status | means | does **not** mean |
 |---|---|---|
-| `VERIFIED` | every obligation is definitely true at every point of the declared box | that it holds when you run it in floats — read the `semantics` line |
-| `REFUTED` | at least one obligation is definitely false over the propagated superset of your box: the box is **not invariant as stated** | that a concrete input was produced, unless the verdict carries a witness |
+| `VERIFIED` | every obligation is definitely true at every point of the declared box **as narrowed by any `assume`** — the stamp's `constrained assume` line names the narrowing | that it holds when you run it in floats — read the `semantics` line; and **not** that it holds at every point of the box you *declared*, if an `assume` narrowed it |
+| `REFUTED` | at least one obligation is definitely false over the propagated superset of your box: the box is **not invariant as stated** | that a concrete input was produced, unless the verdict carries a witness — an interval-decided REFUTED has `witnesses: ()` |
 | `UNKNOWN` | the analysis could not decide, and says why | that the property is undecidable, or that it fails |
 | `DECLINED` | the query could not be transcribed at all, so nothing was analysed and nothing is stamped | that anything was judged in either direction |
+
+**Row 1's qualifier is the one that bites, so it is demonstrated rather
+than asserted.** A narrowing `assume` moves what VERIFIED is about, and this
+block runs under `tests/test_doc_examples.py`:
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp
+from stelling.harness import any_array, assert_, assume
+from stelling.preconditions import check
+
+
+def narrowed():
+    a = any_array((), jnp.float64, (0.0, 10.0))
+    assume(a > 1.0)
+    return assert_(a > 0.5)
+
+
+verdict = check(narrowed, vacuity_mode="inputs-only")
+print("status  :", verdict.status)
+print("coverage:", verdict.stamp.coverage)
+line = next(a for a in verdict.stamp.assumptions if "constrained assume" in a)
+print("assumes :", line.split(": ", 1)[1])
+print()
+print("but 0.2 is in the DECLARED box [0.0, 10.0], and 0.2 > 0.5 is",
+      0.2 > 0.5)
+```
+
+```
+status  : VERIFIED
+coverage: 5 eqns: 4 known (80%); 1 assume(s) CONSTRAINED (stelling_assume ×1)
+assumes : the verdict holds where the precondition holds — narrowed x0 (IR var 1) to [1.0, 10.0]
+
+but 0.2 is in the DECLARED box [0.0, 10.0], and 0.2 > 0.5 is False
+```
+
+`0.2` is in the declared box and the obligation is false there. The verdict is
+still correct — it is a claim about the box *intersected with* the
+precondition, and it says so on the `assumes:` line and in the coverage line's
+`1 assume(s) CONSTRAINED`. But a reader who takes row 1 without its qualifier
+has the wrong claim, and this page said the qualified thing only in item 9 of
+*Reading an UNKNOWN*, eight hundred lines below the table.
 
 The three judged statuses, measured on one predicate and three declared
 boxes:
@@ -175,7 +235,7 @@ Three of the four produce a `jit` equation and only the first asked for
 one. That is also where the quickstart's `1 transparent` comes from — its
 harness calls `jnp.roll`.
 
-The word also appears in one refusal, where it matters: a declaration
+The word also appears in a refusal where it matters: a declaration
 made *inside* a transparent wrapper cannot be reached by the vacuity
 widening, which rewrites top-level declarations. The verdict says so
 instead of claiming something about an envelope it did not widen:
@@ -240,12 +300,23 @@ for a two-primitive case where that gap is the whole answer.
 
 Almost every stamped assumption is something stelling **did**: a
 convention it applied, a band it hulled with, a widening it performed. One
-is not. An `ieee` verdict over `exp` or `pow` carries
+is not. An `ieee` verdict over `exp` or `pow` **with a declared
+`libm_budget`** carries
 
 ```
 assumes: ieee libm accuracy DECLARED, NOT VERIFIED — profile
   'xla-cpu-2026-08': exp@float32 <= 6 ulps. …
 ```
+
+**Without one there is no such line, because there is no such verdict.**
+`exp` and `pow` under `ieee` DECLINE by default and the obligation falls to ⊤.
+Measured on `assert_(jnp.exp(x) > 0.0)`, `x ∈ [1.0, 2.0]` in float32:
+`libm_budget='xla-cpu-2026-08'` gives VERIFIED with the line above;
+omitting it gives **UNKNOWN**, no `libm accuracy` line anywhere in the stamp,
+and the note *"exp under semantics='ieee' has no DECLARED accuracy budget for
+float32 — declined rather than judged against an assumption stelling cannot
+check"*. [preconditions.md](preconditions.md) states the default correctly and
+is the page to read for how to declare one.
 
 and that line records a claim **you** made about the function your backend
 executes, which stelling cannot see, execute or measure. If the backend is
@@ -275,8 +346,12 @@ does. It does not count what those transfers *returned*.
 
 A registered transfer can run, succeed, and hand back `[-inf, inf]`.
 Nothing on the `coverage:` line moves when it does. Measured, on
-`exp(x) - exp(x)` over x ∈ [-1000, 1000] — five equations, every
-primitive registered:
+`e = jnp.exp(x)` then `e - e`, over x ∈ [-1000, 1000] — five equations, every
+primitive registered. **The spelling matters, which is why it is named here
+rather than written as an expression**: `jnp.exp(x) - jnp.exp(x)` traces `exp`
+twice and the census reads `6 eqns: 6 known`, so a reader who types that gets a
+figure the fence below disagrees with. The five-equation form is the one
+`tests/test_top_despite_coverage.py` builds:
 
 ```
 coverage: 5 eqns: 5 known (100%)
@@ -313,8 +388,14 @@ query was bounded.
 
 It is a separate line rather than an addition to `coverage:` because that
 string is trend data: `stamp.coverage.split(" eqns")[0]` is parsed by
-`reproduce.py` and by the sweep scripts, and the disclosure must not move
-it a byte.
+`reproduce.py:757` and by `Verdict.render` (`verdict.py:437`), and the
+disclosure must not move it a byte.
+
+*This said "and by the sweep scripts". No sweep script, present or historical,
+parses it — `git log --all -S 'split(" eqns")'` returns four commits and none
+touches one — while the consumer that does matter, the renderer, was not
+named. `src/stelling/verdict.py`'s comment at the site carries the same
+unsupported claim.*
 
 ## `PORTFOLIO DEGRADED` — when a verdict rests on one solver
 
@@ -324,7 +405,7 @@ stamped, and still contribute nothing — its transport crashed, it timed
 out, or its parser refused the emitted fragment. When that happens the
 stamp still reads `2 invocation(s)` and the decision still rests on one.
 
-That gap matters most on a **VERIFIED**. A REFUTED carries a witness, and
+That gap matters most on a **VERIFIED**. A **solver-decided** REFUTED carries a witness, and
 a witness is re-derived in exact rational arithmetic before it is
 believed, so a lost backend there costs a cross-check another mechanism
 still performs. A VERIFIED is a universal claim over the whole declared
@@ -370,7 +451,7 @@ They share the root "vacu-" and nothing else.
 | | obligation vacuity | nonvacuity |
 |---|---|---|
 | **question** | did the declared box do any work, or is the obligation true regardless? | does the declared box contain the data you actually run on? |
-| **appears as** | an `assumes:` line beginning `vacuity checked` / `vacuity instrument inert` | the `nonvacuity:` stamp field, plus a `note:` when it is not `checked` |
+| **appears as** | an `assumes:` line beginning `vacuity checked` / `vacuity instrument inert` | the `nonvacuity:` stamp field, plus a `note:` unless it begins `checked` |
 | **how it runs** | automatic: on a VERIFIED, `check()` re-runs the identical query with declared bounds widened to (−inf, +inf) | only if your harness calls `nonvacuity(...)` |
 | **you control it with** | the required `vacuity_mode` argument | writing membership conditions |
 | **failing looks like** | `obligation #0: discharges with all declared bounds widened (vacuity mode=inputs-only) — envelope not load-bearing` | `nonvacuity: UNCHECKED` / `undecided` / `FAILED` / `VACUOUS` and the may-be-vacuous note |
@@ -673,7 +754,12 @@ removed: are the declared boxes and those axioms satisfiable at all?
   under `assume(x < y)`, `assume(y < z)`, `assume(z < x)` with
   `assert_(x - y <= 0.0)` — the assert's cone is `{x, y}`, so the script
   states only `x < y`, which is satisfiable; the query's precondition is
-  not, and the VERIFIED was stamped clean.
+  not, and *before this was repaired* the VERIFIED was stamped clean. It now
+  carries `[MAY BE VACUOUS: no mechanism established that the declared boxes
+  admit a point satisfying EVERY assume of this query …]` on the obligation's
+  own detail line and a stamped `precondition satisfiability uncertified` —
+  which is what this bullet's own headline, *Treated as undecided*, is
+  reporting. Driven on exactly the harness named here.
 * **undecided** — nobody answered, or nobody answered *this* question. The
   discharge stands (it is sound — every admitted point satisfies the
   obligation, and there may be none) and it stops being clean: the
@@ -701,7 +787,9 @@ already have been the propagation's own `UnsatisfiableAssumptionError`. That
 refusal fires when a *narrowing* empties a box — and an assume that never
 narrowed anything (a `jnp.all(...)` reduction, an unclassified predicate, one
 written inside a `scan` body) empties nothing. Measured: two assumes inside a
-`lax.scan` body, `x < y` and `y < x`, no relational assume anywhere, and an
+`lax.scan` body, `x < y` and `y < x`, no **forwarded** relational assume
+anywhere (both ARE relational; neither is classified, because each sits inside
+`scan`), and an
 obligation the solver discharges — VERIFIED, stamped entirely clean, with no
 mention of an assume in the verdict at all, over a region an exact 41×41
 `Fraction` grid shows admits 0 points. Since that repair, an obligation that
