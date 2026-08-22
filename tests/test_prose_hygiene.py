@@ -125,11 +125,26 @@ _TEST_REF_WRAPPED = re.compile(
 #: `FOUR arguments, not one` paragraph, the one whose licence is NEVER
 #: consulted, and 307 is not the residue there either but the gap from its
 #: citation to its bare `::name`. Measured on this tree, at the live
-#: supersession (`SOUNDNESS.md:1080`, `tests/test_verified_bar.py`):
+#: supersession — `SOUNDNESS.md`'s `tests/test_verified_bar.py` citation of
+#: `test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`, the
+#: one annotated `::test_the_two_pairing_gates_bind_the_ESCALATION_AND_
+#: the_propagation`:
 #:
 #:     paragraph                                    5945 chars
 #:     forward window — the span still licensed     4507 chars
 #:     citation to the annotation that licenses it   153 chars
+#:
+#: **THAT SUPERSESSION WAS NAMED BY LINE NUMBER, `SOUNDNESS.md:1080`, AND
+#: THE NUMBER WAS NOT RIGHT AT ANY REVISION ON THIS BRANCH.** Driven: the
+#: citation is at **1157** at `5ad906f` and at **1340** at `becad2b`, so it
+#: was already wrong before the 0.2.0 D5 accuracy pass began and that pass's
+#: own edits above it then pushed it 183 lines further out — and this commit
+#: moves it again, which is the point. All three figures beside it re-derive
+#: exactly at both revisions; only the handle was wrong. Nothing could catch
+#: it either: `test_no_shipped_page_cites_a_line_its_own_tree_does_not_have`
+#: checks only that a cited line is within EOF, and 1080 is. That test's own
+#: failure message is the rule followed here — *"Cite the SYMBOL, not the
+#: line."*
 #:
 #: So the licence went from 5945 characters to 4507 there, not from 1382 to
 #: 307; the paragraph-wide version licensed the 1438 characters BEFORE the
@@ -925,9 +940,25 @@ def _resolvable_test_names() -> set[str]:
     `test_the_two_legs_now_agree_on_assume_ordering` names a FUNCTION; a bare
     `test_assume_ledger` names a MODULE (`tests/test_assume_ledger.py`).
     Driven at `5ad906f`: a function-only resolver reported 27 unresolved
-    mentions and **nine of the 27 were module names**. Resolving both is
+    mentions and **eleven of the 27 were module names**. Resolving both is
     what keeps the exemption table down to the names that are genuinely
-    gone, rather than padding it with a third of the module list.
+    gone: with modules out, `_NAMES_DECLARED_ABSENT` would have had to carry
+    those eleven too — 26 entries instead of fifteen, eleven of them naming
+    live test modules.
+
+    **THAT NUMERAL READ "nine", AND THIS FILE'S OWN ARITHMETIC SAID ELEVEN.**
+    It was written rather than measured. Eleven is what closes the books:
+    27 − 11 = **16**, the mentions unresolved under BOTH populations, and
+    16 − 1 for the single one the supersession licence covers = **15**, which
+    is `_NAMES_DECLARED_ABSENT`'s size AND the dangling count with that table
+    emptied — and both of those were measured. Nine would have made them 18
+    and 17. Re-driven at `5ad906f` twice, once through the helpers below and
+    once through a re-implementation importing nothing from this file; both
+    give the same eleven: `test_any_pytree`, `test_assume_disclosure_claims`,
+    `test_assume_ledger`, `test_assume_scope_identity`,
+    `test_ir_message_totality`, `test_pow_row_gauge_jax`,
+    `test_scatter_gauge_jax`, `test_sdist_contents`,
+    `test_square_row_gauge_jax`, `test_suite_disclosure`, `test_vacuity`.
 
     Functions come from :func:`_defined_test_names`, so the five shapes that
     resolver deliberately over-reports and the two it closed apply here
@@ -1014,8 +1045,10 @@ def test_every_bare_test_name_in_shipped_prose_resolves():
     honest price and it is bounded — eleven of the fifteen are rename records
     in a ledger that is never rewritten, and those do not churn.
 
-    **THE RESIDUE, STATED RATHER THAN LEFT TO BE FOUND.** Four things this
-    does not do, each driven or reasoned rather than assumed:
+    **THE RESIDUE, STATED RATHER THAN LEFT TO BE FOUND.** Six things this
+    does not do. This read *"Four things … each driven or reasoned rather
+    than assumed"* until 2026-08-22; the one that was reasoned is the third
+    below, the reasoning was WRONG, and all six are driven now.
 
     * **The exemption is by NAME, not by SITE.** A new sentence that cited
       `test_integer_overflow` as a live pin of something in THIS repository
@@ -1030,12 +1063,73 @@ def test_every_bare_test_name_in_shipped_prose_resolves():
       different test that happens to share the name, in a different file
       from the one the sentence means. The `path::name` form does not have
       that gap, which is a reason to prefer writing citations that way.
-    * **The supersession licence carries `_SUPERSEDED_BY`'s residue**, in a
-      NARROWER window: it runs from the mention to the next bare mention or
-      the end of the paragraph, and bare mentions are commoner than
-      `path::name` ones, so the span a licence covers is usually shorter
-      here than there. Narrower is not closed — it still asks only that the
-      replacement RESOLVE, not that it be related to the name it replaces.
+    * **The supersession licence carries `_SUPERSEDED_BY`'s residue, in a
+      WIDER window.** Both licences are keyed identically — from the mention
+      to the next SAME-KIND mention, else the end of the paragraph — so the
+      two spans are directly comparable. Measured on this tree, in
+      characters:
+
+          all shipped   bare  n=165  median 260  mean 941  max 24642
+                        path  n= 81  median 151  mean 924  max 14317
+          SOUNDNESS.md  bare  n=100  median 206  mean 533  max  6325
+                        path  n= 26  median 160  mean 377  max  4507
+
+      The bare form's window is the wider one at both scopes and on median,
+      mean and max. Wider is not open — it still asks only that the
+      replacement RESOLVE, not that it be related to the name it replaces —
+      but it is wider, and a residue is worth nothing stated in the wrong
+      direction.
+
+      **THIS SAID "NARROWER", AND THE ARGUMENT FOR IT IS THE INSTRUCTIVE
+      PART.** The reason given was that bare mentions are commoner — 165 to
+      81 across the shipped set, which is true — so the next one must arrive
+      sooner and close the window earlier. **AGGREGATE COMMONNESS DOES NOT
+      IMPLY PROXIMITY INSIDE THE ENCLOSING PARAGRAPH**, and the measurement
+      breaks the argument at every step of it:
+
+          share whose window runs to the END of
+              the paragraph, not to a next mention   bare 80.0%  path 80.2%
+          mentions per paragraph that holds any      bare  1.25  path  1.25
+          gap to the next same-kind mention where
+              there is one (median chars)            bare   120  path    22
+          mention to end of paragraph (median)       bare   352  path   326
+
+      Four licences in five, of EITHER form, are capped by the end of the
+      paragraph and not by a next mention, so the corpus-wide ratio never
+      gets to matter — and where it might, the within-paragraph density is
+      1.25 for both. Where a next mention DOES cap the window it is the
+      `path::name` gap that is the short one: repeated citations sit
+      adjacent in a list, 22 characters apart, where a repeated bare mention
+      is 120 away. The 165-to-81 ratio is a fact about the whole corpus and
+      the window is a fact about one paragraph, and nothing carries the
+      first into the second.
+
+      This was the only item in this list that was argued rather than
+      driven, and it is the same failure :data:`_SUPERSEDED_BY`'s comment
+      above records against itself — a residue bounded at the wrong width
+      because a number stood in for a measurement.
+    * **The star/prefix branch has never fired on this tree.**
+      :data:`_BARE_TEST_NAME`'s trailing `(\\*?)` switches resolution from
+      equality to PREFIX, for a family citation. Measured here: **0 of 165**
+      bare mentions carry the star, against **2 of 81** `path::name`
+      citations that do — so the form that actually has the families is the
+      one this gate does not read. The branch is live, not dead: planting a
+      real family into `docs/norms.md` gives `7 passed`, and a fabricated
+      one gives `1 failed` naming it. But an unexercised branch is a branch
+      nobody has read, which is exactly what :data:`_PATH_FORM_OVERLAPS`
+      above exists to forbid — and unlike that one this count is neither
+      asserted nor pinned. Recorded, not closed: it belongs beside
+      `_PATH_FORM_OVERLAPS` and is not there.
+    * **The resolver's namespace is wider than pytest's collection.**
+      :func:`_resolvable_test_names` scans EVERY `tests/**/*.py`, while
+      pytest collects `test_*.py` and `*_test.py` by default and
+      `pyproject.toml` sets no `python_files`. So a `test_…` defined in a
+      helper module would resolve a citation pytest never runs. **Latent,
+      and measured at 0**: 15 of the 170 `.py` files under `tests/` are not
+      `test_*.py`, and not one of them defines a `test_`-prefixed name or
+      has a stem beginning `test`. Driven by planting a `tests/_helperzz.py`
+      holding one `test_…` def — the citation resolves (`7 passed`) while a
+      `--collect-only` over `tests/` reports nothing from that file.
     * **`tests/` and `scratchpad/` stay out**, for the same reasons the
       `path::name` scan gives: three test modules write citation-shaped
       strings as plants, and `scratchpad/` is tracked evidence.
