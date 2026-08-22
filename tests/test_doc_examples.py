@@ -376,10 +376,18 @@ def _doc_files() -> list[pathlib.Path]:
 
     There are no subdirectories under ``docs/`` today, so this changes no
     figure in ``EXPECTED_INVENTORY`` -- which is exactly when widening a
-    population is cheap. What stays outside it, deliberately, is every
-    other ``.md`` in the tree: ``README.md`` and ``docs/`` are the pages a
-    reader is sent to, and ``design/``, ``CONTRIBUTING.md`` and the rest
-    carry their own gates.
+    population is cheap.
+
+    **AND THE QUALIFIER, BECAUSE THE POPULATION IS STILL A CHOICE.** Every
+    other ``.md`` in the tree is outside it, and a new TOP-LEVEL directory
+    of pages would be outside it too. Those files are swept for prose
+    defects by ``tests/test_prose_hygiene.py``, which walks the shipped
+    roots recursively -- but their fences are executed by NOBODY, and that
+    gap has already been paid for once: ``SOUNDNESS.md``'s integer-wrap
+    reproducer sat at the repository root, outside this population, run by
+    nothing, until ``tests/test_soundness_wrap_reproducer.py`` was written
+    for it alone. Widening here does not close that; it closes one
+    direction of it, and the other is written down rather than implied.
     """
     return [REPO / "README.md", *sorted((REPO / "docs").rglob("*.md"))]
 

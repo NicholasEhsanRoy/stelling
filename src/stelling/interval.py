@@ -187,9 +187,9 @@ wrong, so nothing is inferred from an absence from it.
   *exact per step, not per result* bullet below, and :func:`reduce_sum`,
   for why the step rule is not a rule about the total). The endpoint is
   computed exactly (``Fraction``; a double is a dyadic rational) and then
-  rounded outward ONLY if the exact result
-  is not representable. Sound because these are correctly-rounded ops whose
-  slack was pure *endpoint-representation* conservatism. (``div`` belongs
+  rounded outward ONLY if the exact result is not representable. Sound
+  because these are correctly-rounded ops whose slack was pure
+  *endpoint-representation* conservatism. (``div`` belongs
   here for its finite, non-zero-straddling case; its two ⊤ escapes — a
   divisor interval containing 0, and ``inf/inf`` — are untouched, which is
   what keeps ``integer_pow``'s negative-exponent use of the zero discipline
@@ -210,10 +210,11 @@ wrong, so nothing is inferred from an absence from it.
   0.2.0 M16).
 * **unconditional one-ulp bump paying for nothing but endpoint
   representation** — ``scatter_add_rows``, and it is the M16 defect
-  surviving one operation over rather than a discipline anyone chose. See
-  the DEBT entry in the first bullet of this docstring for the
-  measurements and for who is fixing it. **When that lands, delete this
-  bullet** and read ``scatter_add_rows`` off the one below.
+  surviving one operation over rather than a discipline anyone chose. The
+  entry headed **A DEBT** in the scope block above carries the
+  measurements and says who is fixing it. **When that lands, delete this
+  bullet** and read ``scatter_add_rows`` off the *exact per step, not per
+  result* one instead.
 * **exact per step, not per result** — ``reduce_sum`` and ``dot_general``.
   Every step is exact-when-representable and rounds outward only where THAT
   step is inexact, which is sound and is NOT the first discipline: for an
