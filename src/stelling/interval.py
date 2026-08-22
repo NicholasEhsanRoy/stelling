@@ -239,8 +239,19 @@ _FORMAT_MIN_NORMAL_TEXT = {
 # The control on the float64 row: 1e-300, a NORMAL float64, reads True in the
 # same run, so the row is measuring the band and not the dtype.
 #
-# EVERY SENTENCE THIS PROJECT WRITES ABOUT THE FLUSH IS DERIVED FROM HERE,
-# and there is deliberately no second spelling of it anywhere. The reason is
+# EVERY PARAMETRIC SENTENCE THIS PROJECT WRITES ABOUT THE FLUSH IS DERIVED
+# FROM HERE. The one exception is deliberate and is the common path:
+# `SUBNORMAL_INDETERMINACY_ASSUMPTION`, the binary64-only stamp that predates
+# the parametric builders, spells the fact out verbatim and is returned
+# unchanged for `()` and `("float64",)`. It is held to this table by
+# `test_the_flush_SENTENCE_is_the_ieee_stamps_own_sentence`, not by
+# derivation, and that is the whole of what "no second spelling" means here.
+#
+# An earlier draft of this block said "no second spelling of it ANYWHERE",
+# which is false of that common path — a false universal written into the
+# same commit that withdrew one. The word has now been wrong three times in
+# this batch's lineage, which is its own argument for naming the exception
+# rather than reaching for the absolute. The reason is
 # a defect this table was added to close (0.2.0 B18 fixup): the real-mode
 # subnormal tell carried its OWN hard-coded float64 sentence — *"the
 # measured one does (jax 0.11.0 CPU reads 5e-324 > 0 as False)"* — and

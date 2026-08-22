@@ -579,3 +579,197 @@ def test_end_to_end_the_verdict_carries_the_tell_and_the_control_does_not():
         assert bool(jnp.asarray(1.5, "float64") > 0.0) is True
     finally:
         jax.config.update("jax_enable_x64", old)
+
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+#
+# ===========================================================================
+# THREE REGRESSION PINS FOR THE B18 FIXUP — APPEND-ONLY SNIPPET
+# ===========================================================================
+#
+# APPEND TARGET, exactly:  tests/test_subnormal_tell.py   (at 958f56e)
+# Append verbatim to the END of that file. Nothing above it changes.
+#
+# NAMES USED: every one is already defined by that file — `iv` (line 48),
+# `P` (50), `propagate` (51), `F64`/`F32`/`F16`/`BF16` (53-56),
+# `SUB_LO, SUB_HI` (67, a TUPLE UNPACK — `grep '^SUB_HI'` misses it, which
+# is why it can look absent), `SUB_F16`/`SUB_F32`/`SUB_BF16` (75-77),
+# `cmp_query` (99, whose `rhs_aval=` kwarg the fixup itself added) and
+# `tells` (122). NO new helper is needed and nothing here is contorted to
+# avoid one. The only literals introduced are the three smallest-positive
+# subnormals, and they are deliberately literal: deriving them from
+# `P._ieee_format_min_positive(P._FLOAT_FORMATS[d])` would restate the code
+# under test and would NOT redden mutant M-C below, which changes that
+# call's ARGUMENT rather than the function.
+#
+# ---------------------------------------------------------------------------
+# WHY THESE THREE — the mutants they close, each of which survives the
+# shipped 30-test file, in every lane, with ZERO failures.
+# ---------------------------------------------------------------------------
+#
+# M-A  THE FLUSH GATE MOVED FROM PER OPERAND TO PER EQUATION.
+#      In `propagate._subnormal_flush_tell`, replace
+#          band = _subnormal_tell_band(v.aval.dtype)
+#      with a gate hoisted out of the loop:
+#          _g = any(iv.target_flushes_subnormals(w.aval.dtype) is True
+#                   for w in eqn.invars)
+#          band = (_ieee_format_min_normal(_FLOAT_FORMATS[v.aval.dtype])
+#                  if (_g and v.aval.dtype in _FLOAT_FORMATS) else None)
+#      Bands stay each operand's own; the table is untouched; only the
+#      PAIRING of "which operand" with "does THAT operand's format flush"
+#      breaks. Measured (line-count-neutral copy, 12142 lines, so the
+#      `.py:N` doc test cannot flag it): tests/test_subnormal_tell.py 30
+#      passed; FULL nojax lane 2143 passed / 148 skipped / 0 failed; FULL
+#      jax lane x64 unset 4366 passed / 10 skipped / 0 failed — bit for bit
+#      the fixup's own figures. What it does: `gt(float16 [1e-6,1e-5],
+#      float64 0.0)` FIRES, asserting "jax 0.11.0 CPU reads
+#      5.960464477539063e-08 > 0 as False", which is measurably FALSE
+#      (float16 reads it True, eager and jit, both x64 cells). That is
+#      defect F1 restored. The row is corpus/subnormal_tell_renders.py
+#      GROUP C row 4, whose prose already says "SILENT" — but `drive_ir()`
+#      only prints and `testpaths = ["tests"]`, so nothing asserts it. Both
+#      mixed rows in the shipped file put the NARROW format on the literal
+#      side, so the float16-in-band x other-operand-flushes corner is the
+#      one shape section 2b does not carry.
+#
+# M-B  THE WITNESS REGRESSED TO float64's 5e-324 ON EVERY FORMAT.
+#      In `propagate._subnormal_tell_text`, replace
+#          f"{_ieee_format_min_positive(_FLOAT_FORMATS[d])!r} > 0 as False"
+#      with `_FLOAT_FORMATS["float64"]` in place of `_FLOAT_FORMATS[d]`.
+#      Measured: 30 passed. The bfloat16 note then reads "bfloat16: 0 < |x|
+#      < 2**-126 = 1.1754943508222875e-38, and jax 0.11.0 CPU reads 5e-324
+#      > 0 as False" — the exact sentence the commit message quotes as the
+#      original symptom. It walks through
+#      `test_bfloat16_and_float32_DO_fire_and_name_their_own_band` because
+#      that test checks the MIN NORMAL (`repr(MIN_NORMAL_F32)`, and
+#      `"2**-1022" not in note`) while the witness is a MIN POSITIVE.
+#
+# M-C  THE FLUSH SENTENCE WRITTEN OUT A SECOND TIME, VERBATIM-CORRECT.
+#      In `propagate._subnormal_tell_text`, replace
+#          f"PER-FORMAT — {iv.measured_flush_clause()} — so on the formats "
+#      with today's exact string spelled out inline. Measured: 30 passed.
+#      `test_the_flush_SENTENCE_is_the_ieee_stamps_own_sentence` asserts the
+#      two faces carry the SAME STRING, which a correct-today second copy
+#      satisfies — so "there is no second spelling left to drift" is a
+#      property of today's code, not an invariant the suite maintains.
+#
+# ---------------------------------------------------------------------------
+# ACCEPTANCE, DRIVEN (stelling-jax venv, jax 0.11.0 CPU, python 3.12.3,
+# COLUMNS=200, PYTHONPATH pinned absolute, __pycache__ purged per run):
+#
+#   clean 958f56e + these three pins .............. 33 passed
+#   M-A  + these three pins ....................... 1 failed, 32 passed
+#         -> test_the_flush_gate_is_PER_OPERAND_not_per_equation
+#   M-B  + these three pins ....................... 1 failed, 32 passed
+#         -> test_the_witness_is_each_formats_OWN_smallest_subnormal
+#   M-C  + these three pins ....................... 1 failed, 32 passed
+#         -> test_the_flush_SENTENCE_is_DERIVED_and_not_a_second_copy
+#
+#   Each mutant reddens exactly one pin, and the right one.
+#
+# ---------------------------------------------------------------------------
+# ONE CONSTRAINT WORTH KNOWING, because it will look like a bug otherwise:
+# the derivation pin MUST call `subnormal_indeterminacy_assumption` with a
+# TWO-FORMAT tuple. `subnormal_indeterminacy_assumption(())` and
+# `(("float64",))` short-circuit to the hard-coded
+# `SUBNORMAL_INDETERMINACY_ASSUMPTION` constant, which is a genuine second
+# spelling deliberately kept verbatim (the fixup's own test calls it "the
+# ONE sentence deliberately kept verbatim"). Passing `("float64",)` there
+# makes the pin fail on the CLEAN tree, for a true reason that is not the
+# one the pin is about.
+# ===========================================================================
+
+
+# --------------------------------------------------------------------------
+# 2c. THE PAIRING AND THE CLAIM — the layer the mutants walked through
+# --------------------------------------------------------------------------
+#
+# Section 2b pins WHICH FORMATS the tell fires on. These three pin the two
+# things that survived it: that the flush gate is asked of the OPERAND
+# rather than of the equation, and that the sentence the note then makes is
+# DERIVED rather than restated. A mutant for which formats fire is not a
+# mutant for what the firing note asserts about them.
+
+
+def test_the_flush_gate_is_PER_OPERAND_not_per_equation():
+    """corpus/subnormal_tell_renders.py GROUP C row 4, ASSERTED rather than
+    printed. The float16 operand is deep inside float16's own band, and the
+    OTHER operand's format (float64) is one this target does flush. A gate
+    asked of the EQUATION opens here and hazes the float16 operand at its
+    own band, producing a note that asserts a flush this target does not
+    perform — defect F1, restored, and green on all thirty tests above.
+
+    The control is the row directly below it: the same mixed pair with the
+    float64 operand inside ITS band still fires, so this is not "mixed rows
+    are silent"."""
+    p = propagate(
+        cmp_query("gt", *SUB_F16, 0.0, dtype="float16", aval=F16, rhs_aval=F64)
+    )
+    assert p.obligations[0].status == "discharged"
+    assert tells(p) == [], p.notes
+    # the control, and it is what makes the silence above a PAIRING claim
+    q = propagate(
+        cmp_query("gt", SUB_LO, SUB_HI, 0.0, dtype="float64", aval=F64,
+                  rhs_aval=F16)
+    )
+    assert len(tells(q)) == 1
+    assert "float64: 0 < |x| <" in tells(q)[0]
+
+
+def test_the_witness_is_each_formats_OWN_smallest_subnormal():
+    """The note's *"reads X > 0 as False"* must cite the smallest subnormal
+    of the format that reached its band — not float64's 5e-324, which is
+    the evidence the defect stamped on every run regardless of format.
+
+    Stated as an EXCLUSION as well as an inclusion, because "contains my own
+    witness" alone is satisfied by a note that contains all four. float64 is
+    in the sweep as the control: its own witness IS 5e-324, so this pin
+    forbids a string only where that string is the wrong format's."""
+    # each format's 2**(emin - p + 1), written out rather than derived from
+    # `P._ieee_format_min_positive`, which is the function under test
+    min_positive = {
+        "bfloat16": 2.0**-133,   # emin -126, p 8   -> 9.183549615799121e-41
+        "float32": 2.0**-149,    # emin -126, p 24  -> 1.401298464324817e-45
+        "float64": 2.0**-1074,   # emin -1022, p 53 -> 5e-324
+    }
+    for dtype, aval, box in (
+        ("bfloat16", BF16, SUB_BF16),
+        ("float32", F32, SUB_F32),
+        ("float64", F64, (SUB_LO, SUB_HI)),
+    ):
+        assert iv.target_flushes_subnormals(dtype) is True
+        note = tells(
+            propagate(cmp_query("gt", *box, 0.0, dtype=dtype, aval=aval))
+        )[0]
+        assert f"reads {min_positive[dtype]!r} > 0 as False" in note, note
+        for other, mp in min_positive.items():
+            if other != dtype:
+                assert f"reads {mp!r} > 0 as False" not in note, (dtype, other, note)
+
+
+def test_the_flush_SENTENCE_is_DERIVED_and_not_a_second_copy(monkeypatch):
+    """Move the TABLE and every face must move with it. The test above this
+    one in section 2b asserts the tell and the `ieee` stamp carry the SAME
+    STRING — which a second copy that is correct today satisfies, and a
+    second copy that is correct today is exactly how this defect shipped.
+    This one asserts the string is DERIVED: change the table under it and
+    both faces follow, or the pin fails.
+
+    `assert clause != before` is the anti-vacuity guard: if the builder
+    itself were hard-coded, the pin would otherwise pass by comparing a
+    constant to itself.
+
+    The stamp is asked for a TWO-FORMAT tuple deliberately — see the header:
+    `("float64",)` short-circuits to the verbatim constant, which is a
+    second spelling this project keeps on purpose."""
+    before = iv.measured_flush_clause()
+    monkeypatch.setitem(iv._FORMAT_TARGET_FLUSHES, "bfloat16", False)
+    clause = iv.measured_flush_clause()
+    assert clause != before, (
+        "measured_flush_clause() did not move with _FORMAT_TARGET_FLUSHES, "
+        "so it is not derived from it and this pin proves nothing"
+    )
+    note = tells(propagate(cmp_query("gt", SUB_LO, SUB_HI, 0.0)))[0]
+    assert clause in note, note
+    stamp = iv.subnormal_indeterminacy_assumption(("float16", "float64"))
+    assert clause in stamp, stamp
