@@ -89,7 +89,15 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
     because it is a numeric change in the soundness-critical module and this
     is a documentation change. **When it lands, delete this entry** and flip
     that test to VERIFIED on both spellings; the bullets around this one are
-    true either way.
+    true either way. **That deletion is not on trust, and neither is this
+    entry's survival:** ``tests/test_interval.py``'s
+    ``test_the_scatter_add_rows_debt_is_the_one_the_code_owes`` drives this
+    operation on every shape its kernel distinguishes — rank-1 and
+    multi-column, one contribution and several — and requires THIS entry,
+    the discipline-list bullet below and that file's ``DISCIPLINE`` row to
+    agree with what it measured. The entry cannot outlive the defect, cannot
+    be deleted before it, and cannot be refiled around: the gate reads the
+    running code, not the classification.
 
   So: *outward* is a claim about the module; *tight* is a claim about one
   operation, and the operation's own docstring is the authority for it.
@@ -128,14 +136,22 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   ``tests/test_interval.py``'s ``DISCIPLINE`` table enumerates this
   module's public operations FROM THE MODULE, requires every one of them to
   declare an endpoint discipline, and drives each declaration against the
-  running code. So a new operation forces a classification, an operation
+  running code. So a new public **function** forces a classification — the
+  enumeration is ``inspect.isfunction`` over this module's own namespace,
+  which is the shape every operation here has today and is NOT every shape a
+  public callable can take (a callable object, a ``functools.partial``, a
+  function re-exported from another module are all invisible to it, and
+  ``tests/test_interval.py`` says so where it enumerates) — an operation
   that stops rounding outward reddens, an operation whose tightness is
-  loosened *or tightened* reddens, and this text is checked for what it
-  CLAIMS about the operations that are not correctly directed-rounded —
-  each of them has to be named in a block of this text that also says what
-  the discipline IS — rather than for which digits it contains. Every one of
-  those directions was watched go red, one mutation at a time, before the
-  table was believed.
+  loosened *or tightened* reddens, a row that does not call the operation it
+  is filed under reddens, and this text is checked for what it CLAIMS about
+  the operations that are not correctly directed-rounded — each of them has
+  to be named in a block of this text that also says what the discipline IS,
+  and the measurements quoted here are matched as whole PAIRS in the block
+  that names their operation, so an operation TIGHTENED reddens on this text
+  and not only on the drive — rather than for which digits it contains.
+  Every one of those directions was watched go red, one mutation at a time,
+  before the table was believed.
 
   The stamp still reads ``interval/f64/outward-1ulp``. That string is a
   published surface and is not changed here; it names the guarantee's

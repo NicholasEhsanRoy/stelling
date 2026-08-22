@@ -380,14 +380,25 @@ def _doc_files() -> list[pathlib.Path]:
 
     **AND THE QUALIFIER, BECAUSE THE POPULATION IS STILL A CHOICE.** Every
     other ``.md`` in the tree is outside it, and a new TOP-LEVEL directory
-    of pages would be outside it too. Those files are swept for prose
-    defects by ``tests/test_prose_hygiene.py``, which walks the shipped
-    roots recursively -- but their fences are executed by NOBODY, and that
-    gap has already been paid for once: ``SOUNDNESS.md``'s integer-wrap
-    reproducer sat at the repository root, outside this population, run by
-    nothing, until ``tests/test_soundness_wrap_reproducer.py`` was written
-    for it alone. Widening here does not close that; it closes one
-    direction of it, and the other is written down rather than implied.
+    of pages would be outside it too. Their fences are executed by NOBODY,
+    and that gap has already been paid for once: ``SOUNDNESS.md``'s
+    integer-wrap reproducer sat at the repository root, outside this
+    population, run by nothing, until
+    ``tests/test_soundness_wrap_reproducer.py`` was written for it alone.
+    Widening here does not close that; it closes one direction of it, and
+    the other is written down rather than implied.
+
+    **AND THE PROSE SWEEP IS NOT A CEILING EITHER, WHICH THIS SENTENCE USED
+    TO SAY IT WAS.** It read *"Those files are swept for prose defects by
+    ``tests/test_prose_hygiene.py``, which walks the shipped roots
+    recursively"* -- the recursion is true, the universality is not.
+    That sweep's population is ``_shipped_roots()``, DERIVED from the sdist
+    allowlist in ``pyproject.toml``, so it covers the SHIPPED tree and not
+    the tree: anything outside the allowlist -- this repository's
+    ``scratchpad/`` pages, for instance -- is outside that sweep as well,
+    and is therefore read by neither module. The exclusion is deliberate
+    and is documented where the allowlist is; the defect was this sentence,
+    in the commit whose whole subject is this qualifier.
     """
     return [REPO / "README.md", *sorted((REPO / "docs").rglob("*.md"))]
 
@@ -1355,6 +1366,21 @@ _OWED_PAGES = {"docs/overflow-tripwire.md"}
 # at 47 owed items, more than three times today's. Nothing ratcheted, so the
 # drift was silent, and the assertion's "most of what this gate is supposed
 # to cover" named a trip point the arithmetic did not deliver.
+#
+# WHAT THE RATCHET IS AND IS NOT. It is an EQUALITY over a derived number,
+# so the debt cannot grow silently and cannot shrink silently either: either
+# direction is an edit somebody makes here on purpose. That is the whole of
+# it. It does NOT check that a reason is true, and there is no way for it
+# to: `HISTORICAL` and `OWED` are claims about the world, and this file can
+# read the counts but not the pages. Measured, so the limit is not implied:
+# relabelling `docs/overflow-tripwire.md`'s SAME fifteen unclassified blocks
+# as `"HISTORICAL: fifteen measurements that have since moved, kept as
+# measured"`, emptying `_OWED_PAGES` and setting `_OWED_DEBT = 0` gives
+# `14 passed, 43 skipped` -- the debt discharged by retyping it, with no
+# block classified and none of these gates disturbed. So the assertion below
+# says what it can see; what it cannot see is stated there rather than
+# implied, because the message it replaced read as though a smaller number
+# were evidence somebody had done the work.
 _OWED_DEBT = 15
 
 
@@ -1365,8 +1391,19 @@ def test_every_blind_spot_entry_carries_a_reason_from_the_closed_set():
     classification is ``OWED`` and by whom -- and an ``OWED`` page must be
     declared in ``_OWED_PAGES``, so the exemption is a visible edit and not a
     silent bypass. ``OWED`` is not a seventh way for a block to be
-    legitimately ungated; it is a debt, and the assertion below bounds how
-    much of the blind spot may sit in one.
+    legitimately ungated; it is a debt, and the assertion below pins how
+    much of the blind spot sits in one.
+
+    **WHAT IS CHECKED IS THE SHAPE OF THE REASON, NOT ITS TRUTH, AND THAT
+    IS A CEILING ON EVERY LINE BELOW.** This gate reads three things: that
+    each reason names one of the six cases or declares ``OWED``, that the
+    ``OWED`` set is the one declared in ``_OWED_PAGES``, and that the DERIVED
+    item counts still add up to ``_OWED_DEBT``. It cannot read a page, so it
+    cannot tell a block that was classified from a reason that was retyped
+    -- measured, in the comment that declares ``_OWED_DEBT``. What the
+    equality does buy is that neither direction is silent: growing or
+    shrinking the debt is an edit in this file, in the open, next to the
+    sentence saying which one you are making.
     """
     cases = (
         "NEEDS-A-DEPENDENCY", "READER-SUPPLIES", "HISTORICAL",
@@ -1403,11 +1440,17 @@ def test_every_blind_spot_entry_carries_a_reason_from_the_closed_set():
     total_items = sum(i + u for i, u, _w in BLIND_SPOT.values())
     assert owed_items == _OWED_DEBT, (
         f"the OWED debt moved: {owed_items} of {total_items} blind-spot "
-        f"items ({100.0 * owed_items / total_items:.1f}%) are OWED rather "
-        f"than classified, and _OWED_DEBT records {_OWED_DEBT}.\n"
-        f"THIS NUMBER RATCHETS DOWN. If it GREW, an ungated block was added "
-        f"to a page whose blocks nobody has classified: classify it, or put "
-        f"it on a page that is gated -- do not raise this number, which is "
-        f"what the bound it replaced silently allowed three times over. If "
-        f"it SHRANK, lower _OWED_DEBT in the commit that classified them."
+        f"items ({100.0 * owed_items / total_items:.1f}%) are declared OWED "
+        f"rather than classified, and _OWED_DEBT records {_OWED_DEBT}.\n"
+        f"THIS NUMBER DOES NOT MOVE BY ITSELF. If it GREW, an ungated block "
+        f"was added to a page whose blocks nobody has classified: classify "
+        f"it, or put it on a page that is gated -- do not raise this "
+        f"number, which is what the bound it replaced silently allowed "
+        f"three times over.\n"
+        f"If it SHRANK, lower _OWED_DEBT here and say in the commit which "
+        f"blocks moved and where they went. THIS GATE CANNOT TELL YOU THAT "
+        f"THEY DID: it reads the counts in BLIND_SPOT and the case names in "
+        f"the reasons, never the pages, so a block classified and a reason "
+        f"retyped look identical from here. A smaller number is an edit "
+        f"somebody made, not evidence somebody did the work."
     )

@@ -13,6 +13,7 @@ from __future__ import annotations
 import inspect
 import math
 import re
+import sys
 from fractions import Fraction
 from typing import NamedTuple
 
@@ -505,6 +506,17 @@ def _e(r):
     return r.los[0], r.his[0]
 
 
+def _at(r, i):
+    """The endpoints of ONE element of a result, as a plain pair.
+
+    A row that reads element 0 of a rank-1 result measures one shape. Some
+    operations take a different path through a different shape -- see
+    :func:`_scatter_debt_evidence`, which exists because that was not
+    hypothetical.
+    """
+    return r.los[i], r.his[i]
+
+
 def _ie(r):
     """The endpoints of an ieee kernel's ``(interval, made_nan)`` result."""
     return r[0].los[0], r[0].his[0]
@@ -593,13 +605,28 @@ _op("div", CORRECTLY_ROUNDED,
     ],
     quoted=(0,))
 
+# `0.7 ** 2` is here because `0.1 ** 3` alone left this row ONE-SIDED. Both
+# of `_frac_bracket`'s inexact branches are reachable -- the nearest double
+# can fall either side of the exact power -- and `0.1 ** 3` falls ABOVE, so
+# it drove the `xf > fr` branch and nothing drove the other. Measured:
+# flipping `xf < fr` to bump the wrong way gives
+# `integer_pow([0.7,0.7], 2) = (0.4899999999999999, 0.48999999999999994)`,
+# a bracket that EXCLUDES the exact real 0.7**2, with this whole file green
+# at `dbde454`'s own 46 passed. (`tests/test_three_rows.py`'s
+# `test_integer_pow_endpoints_bracket_the_exact_rational_power` did catch
+# it, so it was never a tree-level hole -- but a row that drives one branch
+# of a two-branch rounding is not driving the discipline it declares.)
 _op("integer_pow", CORRECTLY_ROUNDED,
     "Fraction(x) ** n is the EXACT power; bumped only on the side that fell",
     lambda: [
         ("[0.5,0.5] ** 2", *_e(iv.integer_pow(scalar(0.5, 0.5), 2)),
          Fraction(1, 4), Fraction(1, 4)),
-        ("0.1 ** 3", *_e(iv.integer_pow(iv.point(0.1), 3)),
+        ("0.1 ** 3 (the double falls ABOVE the exact power)",
+         *_e(iv.integer_pow(iv.point(0.1), 3)),
          _f(0.1) ** 3, _f(0.1) ** 3),
+        ("0.7 ** 2 (the double falls BELOW it)",
+         *_e(iv.integer_pow(iv.point(0.7), 2)),
+         _f(0.7) ** 2, _f(0.7) ** 2),
     ])
 
 _op("boundary_div", CORRECTLY_ROUNDED,
@@ -640,22 +667,42 @@ _op("pow_", ONE_ULP_BUMPED,
               Fraction(8), Fraction(8))],
     quoted=(0,))
 
+# THE MULTI-COLUMN CASES ARE NOT DECORATION. This row used to drive exactly
+# one shape -- `(1,)`, one index, one contribution -- and the kernel branches
+# on `rowsz`, so a fix applied only where `rowsz > 1` left the rank-1 shape
+# on the unconditional bump. Measured: `scatter_add_rows` then carried TWO
+# disciplines at once -- correctly directed-rounded for a multi-column row,
+# the unconditional bump for a rank-1 one -- falsifying both this row and the
+# docstring's flat claim for half the shapes, with that tree's whole zero-dep
+# suite green at its own `2178 passed, 164 skipped`. CONTRIBUTIONS is the
+# other axis a partial fix can hide behind, and a two-step fold spends two
+# bumps rather than one, so it cannot live in a row that declares a
+# ONE-ulp bump: `test_the_scatter_add_rows_debt_is_the_one_the_code_owes`
+# drives that axis with the coarser question -- exact total, or wider?
+def _scatter_row_cases():
+    one = iv.scatter_add_rows(_vals((1,), [1.0]), _vals((1,), [1.0]), [0])
+    wide = iv.scatter_add_rows(_vals((2, 2), [1.0, 2.0, 3.0, 4.0]),
+                               _vals((1, 2), [1.0, 2.0]), [1])
+    costed = iv.scatter_add_rows(
+        iv.IntervalArray(shape=(1,), los=(0.0,), his=(0.0,)),
+        iv.IntervalArray(shape=(1,), los=(0.0,), his=(16.0,)), [0])
+    return [
+        ("[1] +=[1]", *_e(one), Fraction(2), Fraction(2)),
+        ("[0,0] += [0,16]", *_e(costed), Fraction(0), Fraction(16)),
+        ("[[1,2],[3,4]] row 1 += [1,2], column 0 (rowsz 2)",
+         *_at(wide, 2), Fraction(4), Fraction(4)),
+        ("[[1,2],[3,4]] row 1 += [1,2], column 1 (rowsz 2)",
+         *_at(wide, 3), Fraction(6), Fraction(6)),
+    ]
+
+
 _op("scatter_add_rows", ONE_ULP_BUMPED,
     "A DEBT, not a discipline: it folds like reduce_sum and its steps are "
     "bumped unconditionally, so the ulp buys nothing but endpoint "
     "representation -- the M16 defect one operation over. When the "
     "exact-Fraction route lands, this entry moves to EXACT_PER_STEP and the "
     "docstring's debt bullets are deleted",
-    lambda: [
-        ("[1] +=[1]",
-         *_e(iv.scatter_add_rows(_vals((1,), [1.0]), _vals((1,), [1.0]), [0])),
-         Fraction(2), Fraction(2)),
-        ("[0,0] += [0,16]",
-         *_e(iv.scatter_add_rows(
-             iv.IntervalArray(shape=(1,), los=(0.0,), his=(0.0,)),
-             iv.IntervalArray(shape=(1,), los=(0.0,), his=(16.0,)), [0])),
-         Fraction(0), Fraction(16)),
-    ],
+    _scatter_row_cases,
     quoted=(0, 1))
 
 
@@ -1053,6 +1100,24 @@ def _public_operations() -> set[str]:
     ``__module__`` filters out the names imported into the module's
     namespace (``dataclass``, ``NamedTuple``), so an import cannot silently
     add a row.
+
+    **AND ``isfunction`` IS THE SHAPE, NOT THE REACH.** It sees plain
+    functions, module-level lambdas, aliases and ``functools.wraps``-wrapped
+    functions. It does NOT see a callable OBJECT, a ``functools.partial``,
+    or a function re-exported from another module -- all three of which can
+    be public and can round inward. Measured at ``dbde454``: a public
+    inward-rounding callable object plus a public inward-rounding
+    ``functools.partial``, both added to ``stelling.interval``, left that
+    tree's entire zero-dep suite green at its own ``2178 passed, 164
+    skipped``. No such object exists here today
+    -- the only public callables this filter skips are four classes
+    (``IntervalArray``, ``DotGeneralGeometry``, ``IntervalError``,
+    ``IndexOutOfBoundsError``) and three imports (``Fraction``,
+    ``NamedTuple``, ``dataclass``) -- so the population is complete as
+    written, and the claim that goes with it is about the FUNCTION shape.
+    Widening this to partials and callable objects is a build, and is
+    recorded in ``stelling-sweeps/SWEEP-CARRY-FORWARD.md`` rather than
+    half-done here.
     """
     return {
         name for name in dir(iv)
@@ -1063,7 +1128,7 @@ def _public_operations() -> set[str]:
 
 
 def test_every_public_operation_of_this_module_declares_a_discipline():
-    """A new operation FORCES a classification.
+    """A new public FUNCTION forces a classification.
 
     Measured on ``6387a34``: adding a public ``half()`` to
     ``stelling.interval`` that rounds both endpoints INWARD left the entire
@@ -1071,6 +1136,12 @@ def test_every_public_operation_of_this_module_declares_a_discipline():
     invariant a new operation added to this module has to preserve"* and
     nothing enforced it, in either direction -- neither that the new
     operation preserves it nor that anyone looked.
+
+    The word FUNCTION is the scope and it is not decoration:
+    :func:`_public_operations` enumerates by ``inspect.isfunction``, which
+    is every operation this module has and is not every shape a public
+    callable can take. What it does not reach is written there, with the
+    measurement.
     """
     ops = _public_operations()
     assert ops, "the population is empty, so this whole file measures nothing"
@@ -1211,16 +1282,121 @@ def _check(name: str, op: Op, cases) -> list[str]:
     return bad
 
 
-def _doc_blocks() -> list[str]:
-    """The docstring's paragraphs and top-level bullets, flattened.
+def _drive_recording(name: str, op: Op):
+    """Drive ``op`` with ``iv.<name>`` wrapped, and return what came back.
 
-    Split on blank lines AND on the top-level ``* `` marker, so that an
-    operation and the words naming its discipline have to be in the SAME
-    block for the block to count as saying anything about it. Wrapping and
-    emphasis are normalised away first, for the reason they always are here:
-    both of the guards this file replaces were defeated by one of them.
+    The wrapper records only calls whose IMMEDIATE caller is this module, so
+    an operation reached only from inside another operation -- ``dot_general``
+    calls ``mul``, ``join`` calls ``hull`` -- does not count as its own row
+    driving it. The attribute is restored in a ``finally``: nothing after
+    this sees the wrapper, and in particular :func:`_public_operations`
+    (which asks ``inspect.isfunction``) never does.
     """
-    raw = re.split(r"(?m)\n\s*\n|^\* ", iv.__doc__)
+    real = getattr(iv, name)
+    seen: list[object] = []
+
+    def recorder(*args, **kwargs):
+        out = real(*args, **kwargs)
+        if sys._getframe(1).f_globals.get("__name__") == __name__:
+            seen.append(out)
+        return out
+
+    setattr(iv, name, recorder)
+    try:
+        cases = op.drive()
+    finally:
+        setattr(iv, name, real)
+    return cases, seen
+
+
+def _has_endpoints(value, depth: int = 0) -> bool:
+    """True when ``value`` is, or carries, an :class:`iv.IntervalArray`.
+
+    The ``ieee_*`` kernels return ``(interval, made_nan)`` and
+    ``subnormal_haze`` returns a pair too, so a shallow walk of tuples and
+    lists is what "produces endpoints" has to mean here.
+    """
+    if isinstance(value, iv.IntervalArray):
+        return True
+    if depth < 3 and isinstance(value, (tuple, list)):
+        return any(_has_endpoints(v, depth + 1) for v in value)
+    return False
+
+
+def test_every_row_drives_the_operation_it_names():
+    """A row's CASE and the operation its row is filed under are tied.
+
+    THE HOLE THIS CLOSES, and it is the one under the reclassification
+    route below. ``NO_ROUNDING`` and ``NO_ENDPOINTS`` cases compare
+    hand-typed expectations -- most of the table, and that is fine for what
+    they are -- but nothing tied a row to the operation it names. A row
+    could have driven a different operation entirely, or none, and typed an
+    answer beside it; the population gate would still count the name as
+    classified and the drive would still be green.
+
+    So the operation is WRAPPED for the length of its own row's drive and
+    the row has to have called it. Two-sided on the endpoint question as
+    well, because that is the other half of what a bucket claims:
+    ``NO_ENDPOINTS`` means the operation returns no interval, which is read
+    off the value it actually returned rather than believed, and every other
+    discipline means it returns one.
+    """
+    bad: list[str] = []
+    for name in sorted(DISCIPLINE):
+        op = DISCIPLINE[name]
+        _cases, seen = _drive_recording(name, op)
+        if not seen:
+            bad.append(
+                f"{name}: its `drive` never calls `iv.{name}`, so whatever "
+                f"it measures is not this operation"
+            )
+            continue
+        produced = any(_has_endpoints(r) for r in seen)
+        if op.discipline == NO_ENDPOINTS and produced:
+            bad.append(
+                f"{name}: declared {NO_ENDPOINTS!r} and returned an "
+                f"IntervalArray. An operation with endpoints cannot be "
+                f"parked in the bucket for operations without them: give it "
+                f"the discipline its endpoints carry"
+            )
+        if op.discipline != NO_ENDPOINTS and not produced:
+            bad.append(
+                f"{name}: declared {op.discipline!r} and returned no "
+                f"IntervalArray at all, so no endpoint discipline can be "
+                f"true of it. It belongs in {NO_ENDPOINTS!r}"
+            )
+    assert not bad, (
+        "these rows do not measure the operation they are filed under:\n  "
+        + "\n  ".join(bad)
+        + "\n\nA row is a claim about ONE operation. Drive that operation "
+        "in its own `drive`, and let the bucket say what the value it "
+        "returns actually is."
+    )
+
+
+def _doc_blocks() -> list[str]:
+    """The docstring's paragraphs and bullets, at EVERY level, flattened.
+
+    Split on blank lines and on a bullet marker -- ``* `` at column 0 and
+    ``- `` at any indent -- so that an operation and the words naming its
+    discipline have to be in the SAME block for the block to count as saying
+    anything about it. Wrapping and emphasis are normalised away first, for
+    the reason they always are here: both of the guards this file replaces
+    were defeated by one of them.
+
+    **THE SUB-BULLET MARKER WAS MISSING AND THE MISS WAS LOAD-BEARING.**
+    Splitting on the top-level marker alone put the whole *kinds of
+    operation* list -- four ``  - `` items, no blank lines between them --
+    into ONE block, so the discipline words in the first item counted as
+    standing beside the operation named in the fourth. Measured: with the
+    rounding unchanged, deleting the discipline-list debt bullet for
+    ``scatter_add_rows`` left this file green at ``dbde454``'s own
+    ``46 passed``, because the surviving four-in-one block carried both
+    halves. The gate's promise -- *"a mention in the place
+    that says what the operation does"* -- was weaker than stated in exactly
+    the region the debt lives in.
+    """
+    raw = re.split(r"(?m)\n\s*\n|^\* |^[ \t]+- ", iv.__doc__)
     return [re.sub(r"\s+", " ", b).replace("**", "").replace("`", "")
             for b in raw if b.strip()]
 
@@ -1243,7 +1419,10 @@ def test_the_docstring_names_every_operation_a_reader_would_guess_wrong():
     that ALSO carries the words naming that discipline. Naming it anywhere
     would not do: the defect this is here for was an operation the text
     never mentioned, and the repair for that is not a mention, it is a
-    mention in the place that says what the operation does.
+    mention in the place that says what the operation does. *What counts as
+    "the place" is* :func:`_doc_blocks`, *and the marker it split on was
+    coarser than this sentence for one commit -- see there, with the
+    measurement.*
 
     That couples the discipline constants above to the docstring's own
     vocabulary, deliberately -- they are written to BE its vocabulary, and a
@@ -1278,6 +1457,153 @@ def test_the_docstring_names_every_operation_a_reader_would_guess_wrong():
         f"positively false -- and the pin at the time asked only that some "
         f"digits appear."
     )
+
+
+# --- the debt, anchored to the code and not to a label --------------------
+
+def _scatter_debt_evidence():
+    """``scatter_add_rows`` driven on ACCUMULATED elements whose exact real
+    total is representable, over every shape distinction its kernel makes.
+
+    Only accumulated elements: an element no index writes to is a copy of
+    the operand and is not bumped, by design, so counting one as evidence
+    that the debt is paid would be reading the wrong element.
+
+    The two axes are the two a partial fix can hide behind -- ``rowsz``,
+    which the kernel branches on, and the number of contributions folded
+    into one element, which decides how many bumps it spends. The question
+    asked of each is coarser than the one :data:`DISCIPLINE` asks and is the
+    one the debt is actually about: does the bracket contain nothing but the
+    exact total, or is it wider?
+    """
+    one = iv.scatter_add_rows(_vals((1,), [1.0]), _vals((1,), [1.0]), [0])
+    twice = iv.scatter_add_rows(_vals((1,), [0.0]),
+                                _vals((2,), [1.0, 1.0]), [0, 0])
+    wide = iv.scatter_add_rows(_vals((2, 2), [1.0, 2.0, 3.0, 4.0]),
+                               _vals((1, 2), [1.0, 2.0]), [1])
+    wide_twice = iv.scatter_add_rows(
+        _vals((2, 2), [1.0, 2.0, 3.0, 4.0]),
+        _vals((2, 2), [1.0, 2.0, 1.0, 2.0]), [1, 1])
+    costed = iv.scatter_add_rows(
+        iv.IntervalArray(shape=(1,), los=(0.0,), his=(0.0,)),
+        iv.IntervalArray(shape=(1,), los=(0.0,), his=(16.0,)), [0])
+    return [
+        ("rowsz 1, one contribution: [1] += [1]",
+         *_at(one, 0), Fraction(2), Fraction(2)),
+        ("rowsz 1, two contributions: [0] += [1] += [1]",
+         *_at(twice, 0), Fraction(2), Fraction(2)),
+        ("rowsz 2, one contribution: row 1 += [1,2], column 0",
+         *_at(wide, 2), Fraction(4), Fraction(4)),
+        ("rowsz 2, one contribution: row 1 += [1,2], column 1",
+         *_at(wide, 3), Fraction(6), Fraction(6)),
+        ("rowsz 2, two contributions: row 1 += [1,2] += [1,2], column 0",
+         *_at(wide_twice, 2), Fraction(5), Fraction(5)),
+        ("rowsz 2, two contributions: row 1 += [1,2] += [1,2], column 1",
+         *_at(wide_twice, 3), Fraction(8), Fraction(8)),
+        ("the costed case: [0,0] += [0,16]",
+         *_at(costed, 0), Fraction(0), Fraction(16)),
+    ]
+
+
+def test_the_scatter_add_rows_debt_is_the_one_the_code_owes():
+    """The self-destructing debt, anchored to the RUNNING CODE.
+
+    ``interval.__doc__`` carries two entries about ``scatter_add_rows`` --
+    the **A DEBT** entry in the scope block, and the discipline-list bullet
+    -- and both of them say, in as many words, to DELETE them when the
+    exact-``Fraction`` route lands. A debt that says that has one failure
+    mode above all others: becoming a stale carve-out, describing a defect
+    the code no longer has, or surviving one the code still does.
+
+    Everything else in this file reaches the docstring's debt entries
+    through ``scatter_add_rows``'s ROW -- its declared discipline decides
+    whether it is in :data:`MUST_BE_NAMED_IN_THE_DOCSTRING` at all -- and a
+    declared discipline is a string somebody types. Measured, with the
+    rounding unchanged: moving the row from ``ONE_ULP_BUMPED`` to
+    ``NO_ROUNDING`` with a hand-typed endpoint pair left this file green at
+    ``dbde454``'s own ``46 passed``, dropped the operation out of the
+    must-be-named set, and with it out of the docstring requirement --
+    after which BOTH debt entries could be deleted, still green. The debt was not defeated by
+    disproving it; it was defeated by refiling it.
+
+    So this gate does not read the row. It drives the operation and asks
+    whether the bracket is the exact total or wider, and then requires the
+    tree to agree with the answer, in three places at once: the row, the
+    scope entry, and the discipline-list bullet. When the fix lands, all
+    three come down together -- and this test goes red until they do, which
+    is what a self-destructing debt has to do to be one.
+    """
+    evidence = _scatter_debt_evidence()
+    assert evidence, "no case is driven, so this gate measures nothing"
+    exact = [c for c in evidence if _f(c[1]) == c[3] and _f(c[2]) == c[4]]
+    wider = [c for c in evidence if c not in exact]
+
+    assert not (exact and wider), (
+        f"`scatter_add_rows` returns the EXACT representable total for some "
+        f"shapes and a widened bracket for others, so it carries two "
+        f"endpoint disciplines at once and no single row in DISCIPLINE can "
+        f"be true of it:\n"
+        f"  exact: {[c[0] for c in exact]}\n"
+        f"  wider: {[c[0] for c in wider]}\n"
+        f"A fix applied to one shape is not the debt paid; it is the "
+        f"docstring's flat claim made false for the other half of them."
+    )
+
+    owed = bool(wider)
+    declared = DISCIPLINE["scatter_add_rows"].discipline
+    # TWO entries, and they are told apart by what each one carries. The
+    # discipline-list bullet POINTS AT the scope entry by name -- "the entry
+    # headed A DEBT in the scope block above" -- so a block that carries both
+    # the words `A DEBT` and the discipline words is that bullet, not the
+    # entry it points at. Keyed the other way, deleting the scope entry left
+    # this gate green while the pointer went dangling: measured.
+    blocks = _doc_blocks()
+    scope = [b for b in blocks if _names("scatter_add_rows", b)
+             and "A DEBT" in b and ONE_ULP_BUMPED not in b]
+    listed = [b for b in blocks
+              if _names("scatter_add_rows", b) and ONE_ULP_BUMPED in b]
+
+    if owed:
+        assert declared == ONE_ULP_BUMPED, (
+            f"`scatter_add_rows` still returns {wider[0][1]!r} where the "
+            f"exact total {wider[0][3]} is representable -- the "
+            f"unconditional bump, measured -- and its row declares "
+            f"{declared!r}. A row that files it anywhere else takes it out "
+            f"of MUST_BE_NAMED_IN_THE_DOCSTRING and takes the docstring's "
+            f"debt entries down with it, which is refiling the debt rather "
+            f"than paying it."
+        )
+        assert scope, (
+            "`scatter_add_rows` still bumps an exact representable total "
+            "and `interval.__doc__` has no block that names it and says "
+            "A DEBT. That entry carries the measurements and says who is "
+            "fixing it; the cost is measured rather than described because "
+            "a documented defect nothing drives is how M16 survived its own "
+            "fix the first time."
+        )
+        assert listed, (
+            f"`scatter_add_rows` still bumps an exact representable total "
+            f"and no block of `interval.__doc__` names it beside the words "
+            f"{ONE_ULP_BUMPED!r}. A reader of the discipline list would "
+            f"read it off the wrong bullet."
+        )
+    else:
+        assert declared != ONE_ULP_BUMPED, (
+            "`scatter_add_rows` now returns the exact total on every driven "
+            "shape, so the unconditional bump is gone and its row still "
+            "declares it. `interval.__doc__` says where the row goes: read "
+            "it off the *exact per step, not per result* bullet instead."
+        )
+        assert not scope and not listed, (
+            f"THE DEBT IS PAID AND THE DOCSTRING STILL OWES IT. "
+            f"`scatter_add_rows` returns the exact representable total on "
+            f"every driven shape, and `interval.__doc__` still carries "
+            f"{len(scope)} A DEBT block(s) and {len(listed)} discipline-list "
+            f"block(s) about it. Both say to delete them when this lands. "
+            f"Delete them, move the row to EXACT_PER_STEP, and flip "
+            f"`tests/test_scatter_add_row_gates.py`'s debt test to VERIFIED "
+            f"on both spellings."
+        )
 
 
 # Universal tightness claims, matched against a docstring with its
@@ -1370,18 +1696,57 @@ def test_the_docstring_makes_no_universal_tightness_claim():
     )
 
 
+def _quotes_the_pair(name: str, lo: float, hi: float, blocks) -> bool:
+    """True when some block of the docstring writes ``(lo, hi)`` -- BOTH
+    endpoints, in one bracket, in that order -- and names ``name`` too.
+
+    The pair and the block, rather than the endpoint and the file, and both
+    halves of that are load-bearing. See
+    :func:`test_the_measurements_the_docstring_quotes_are_the_ones_it_would_get`.
+    """
+    pair = re.compile(r"[(\[]\s*%s\s*,\s*%s\s*[)\]]"
+                      % (re.escape(repr(lo)), re.escape(repr(hi))))
+    token = DISCIPLINE[name].doc_token or name
+    return any(pair.search(b) and _names(token, b) for b in blocks)
+
+
 def test_the_measurements_the_docstring_quotes_are_the_ones_it_would_get():
     """The digits, kept honest and DERIVED.
 
     This is what the pin this file replaces did, and it was worth keeping --
-    just not on its own. Every endpoint quoted in the scope prose is
-    produced by the table above rather than typed beside it, so tightening
-    one of these operations reddens on the SCOPE and not only on the digit.
+    just not on its own. Every measurement quoted in the scope prose is
+    produced by the table above rather than typed beside it, so an operation
+    whose endpoints move reddens on the SCOPE and not only on the drive.
     ``mul``'s exact corner is in here: before this, ``grep -rn "0.0625"
     tests/`` was empty, and reverting ``mul`` to the unconditional bump left
     the whole pin green.
+
+    **IT READ ENDPOINT BY ENDPOINT, AS A SUBSTRING OF THE WHOLE DOCSTRING,
+    AND THAT MADE IT ONE-SIDED.** Widening an operation lengthens its
+    reprs, which do not occur -- caught. TIGHTENING one SHORTENS them, and a
+    shorter repr is very often already in the text, either as another
+    operation's measurement or as a prefix of this one's. Measured twice,
+    each with this gate GREEN and only the drive red:
+
+    * ``sqrt`` tightened to return an exact root gives ``(2.0, 2.0)``, and
+      ``"2.0"`` is in the docstring -- it is ``div``'s upper corner.
+    * the ``scatter_add_rows`` debt PAID gives ``(0.0, 16.0)``, and
+      ``"16.0"`` is a PREFIX of the debt entry's own
+      ``16.000000000000004``.
+
+    And this test's own docstring used to claim the opposite in as many
+    words, while ``eb61aac`` -- the commit that added it -- records under
+    ``MUT-5`` that tightening ``sqrt`` reddened the drive and nothing else.
+    The claim and the measurement shipped in the same commit.
+
+    So the match is a WHOLE PAIR in ONE BLOCK that also names the operation:
+    ``(lo, hi)`` as the text writes it, beside the operation it is a
+    measurement of. A shorter repr no longer helps, because both endpoints
+    have to be right and they have to be right together, and a coincidence
+    somewhere else in the text no longer counts, because it has to be in the
+    block that names the operation.
     """
-    doc = iv.__doc__
+    blocks = _doc_blocks()
     marked = {n: op.quoted for n, op in DISCIPLINE.items() if op.quoted}
     assert marked, "no case is marked as quoted, so this gate reads nothing"
     missing = []
@@ -1389,11 +1754,11 @@ def test_the_measurements_the_docstring_quotes_are_the_ones_it_would_get():
         cases = DISCIPLINE[name].drive()
         for i in indices:
             label, lo, hi, _elo, _ehi = cases[i]
-            for endpoint in (lo, hi):
-                if repr(endpoint) not in doc:
-                    missing.append(f"{name}: {label}: {endpoint!r}")
+            if not _quotes_the_pair(name, lo, hi, blocks):
+                missing.append(f"{name}: {label}: ({lo!r}, {hi!r})")
     assert not missing, (
         f"`stelling.interval.__doc__` scopes its tightness claim with "
-        f"endpoints this run does not reproduce: {missing}. Re-decide the "
-        f"SCOPE; do not retype the digit."
+        f"measurements this run does not reproduce -- no block of it writes "
+        f"these pairs beside the operation they belong to: {missing}. "
+        f"Re-decide the SCOPE; do not retype the digits."
     )
