@@ -1142,10 +1142,25 @@ def test_the_stamp_fence_rejects_an_untested_series():
 # nobody reads.
 #
 # So each entry below is a DECISION, per page, about the blocks this module
-# leaves alone: `(illustrative, unattached_fences)` and why. Keyed by file
-# and not by line, so ordinary editing does not churn it; a page that gains
-# an unrunnable block or a hand-written fence goes red until somebody writes
-# down which case it is.
+# leaves alone: `(illustrative, unattached_fences)` and why. Keyed by the
+# page's REPO-RELATIVE PATH and not by line, so ordinary editing does not
+# churn it; a page that gains an unrunnable block or a hand-written fence
+# goes red until somebody writes down which case it is.
+#
+# The path, not `path.name`: `_doc_files()` is the root `README.md` plus
+# `docs/*.md`, and `docs/README.md` EXISTS. Keyed by basename the two
+# collided, and the collision was silent in the direction that matters.
+# Measured on 5bbf52a, in this file's own population:
+#   * a pure addition to `docs/README.md` -- one illustrative block and one
+#     unattached fence -- reddened the TOTALS gate and left
+#     `test_every_page_outside_the_gate_has_been_decided_about` GREEN: the
+#     second `(1, 1)` overwrote the first and matched the record;
+#   * MOVING that same block and fence out of the root `README.md` into
+#     `docs/README.md` left all four inventory gates green AND the whole
+#     module green, while a page gained ungated content with no decision
+#     recorded and this dict's reason for `README.md` described content no
+#     longer in that file.
+# Both are red now, and both were re-driven after the change.
 #
 # The legitimate cases, and they are the whole list:
 #   NEEDS-A-DEPENDENCY   the block imports something this repo does not
@@ -1160,54 +1175,54 @@ def test_the_stamp_fence_rejects_an_untested_series():
 BLIND_SPOT = {
     "README.md": (1, 1, "READER-SUPPLIES: the jax-only int8 truncation demo "
                         "and its two-line reading, which need no stelling"),
-    "choosing-a-solver-backend.md": (
+    "docs/choosing-a-solver-backend.md": (
         0, 1, "NOT-A-TRANSCRIPT: the z3 tactic chain, written as a pipeline"),
-    "norms.md": (
+    "docs/norms.md": (
         0, 4, "NOT-A-TRANSCRIPT x3 (a four-line procedure, the cost table "
               "quoted from obligation.py, a subprocess sweep's output) plus "
               "one numpy-vs-lax sign reading that tests/test_tripwire_eager "
               "and the norm's own instance re-drive"),
-    "overflow-tripwire.md": (
+    "docs/overflow-tripwire.md": (
         5, 10, "B17's page. Its own module comment above EXPECTED_INVENTORY "
                "records each of these; not re-decided here"),
-    "preconditions.md": (
+    "docs/preconditions.md": (
         1, 0, "READER-SUPPLIES: the LibmBudget example takes the reader's own "
               "profile name and measurement"),
-    "proposed-declaration-dtype-check.md": (
+    "docs/proposed-declaration-dtype-check.md": (
         1, 0, "RAISES-BY-DESIGN: the refused declaration is the point"),
-    "proposed-decline-messages.md": (
+    "docs/proposed-decline-messages.md": (
         0, 10, "HISTORICAL: five Today/Proposed pairs. They are the argument, "
                "and both halves are pre-change by construction -- the shipped "
                "text is pinned by the tests each section names"),
-    "proposed-div-straddle-decline.md": (
+    "docs/proposed-div-straddle-decline.md": (
         0, 4, "HISTORICAL: measurements from before 32c6c56, kept as measured "
               "and marked. The LIVE reading is a compared block on the same "
               "page"),
-    "proposed-int-literal-convert.md": (
+    "docs/proposed-int-literal-convert.md": (
         2, 1, "READER-SUPPLIES x2 (jax_md's safe_mask body, a propagate.py "
               "excerpt) and HISTORICAL x1 (the pre-cbb1d60 fence). The live "
               "reading is a compared block on the same page"),
-    "proposed-tier-clause.md": (
+    "docs/proposed-tier-clause.md": (
         0, 2, "NOT-A-TRANSCRIPT: two gauge tables, laid out in columns. "
               "tests/test_tier_clause.py is what holds the rows down"),
-    "proposed-unit-mechanism.md": (
+    "docs/proposed-unit-mechanism.md": (
         0, 1, "NOT-A-TRANSCRIPT: a table from a study over a corpus that is "
               "not in this tree"),
-    "quickstart.md": (0, 1, "B17's page"),
-    "reading-a-verdict.md": (
+    "docs/quickstart.md": (0, 1, "B17's page"),
+    "docs/reading-a-verdict.md": (
         0, 4, "EXCERPT x3 and one byte-exact render. The page now says which "
               "is which, in as many words, above its own status table"),
-    "reproducing-a-witness.md": (
+    "docs/reproducing-a-witness.md": (
         4, 4, "NEEDS-A-DEPENDENCY x2 (maddening) and READER-SUPPLIES x2 (the "
               "two files the page tells you to write); the four fences are "
               "SHELL SESSIONS. The reader's path through them is executed by "
               "tests/test_reproduce_acceptance.py instead"),
-    "state-0.1.0.md": (
+    "docs/state-0.1.0.md": (
         1, 2, "NEEDS-A-DEPENDENCY x1 (jax_md) and HISTORICAL x2 (a stub run "
               "over a corpus that is not here, and the pre-cbb1d60 jnp.where "
               "reading whose live counterpart IS gated, on "
               "proposed-int-literal-convert.md)"),
-    "verdict-ledger.md": (
+    "docs/verdict-ledger.md": (
         0, 1, "NOT-A-TRANSCRIPT: the witness laid out for reading. Every "
               "value in it is asserted by tests/test_reproduce_acceptance.py"),
 }
@@ -1234,7 +1249,7 @@ def _blind_spot_now() -> dict[str, tuple[int, int]]:
             if lang == "" and n not in consumed
         )
         if illustrative or unattached:
-            out[path.name] = (illustrative, unattached)
+            out[str(path.relative_to(REPO))] = (illustrative, unattached)
     return out
 
 
@@ -1272,7 +1287,7 @@ def test_every_blind_spot_entry_carries_a_reason_from_the_closed_set():
         "NOT-A-TRANSCRIPT", "EXCERPT", "RAISES-BY-DESIGN",
     )
     # two pages belong to another batch and defer to its own record
-    deferred = {"overflow-tripwire.md", "quickstart.md"}
+    deferred = {"docs/overflow-tripwire.md", "docs/quickstart.md"}
     bad = {
         name: why for name, (_i, _u, why) in BLIND_SPOT.items()
         if name not in deferred and not any(c in why for c in cases)
