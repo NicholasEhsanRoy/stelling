@@ -19,17 +19,16 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                49
+    ```python blocks                                51
       marked illustrative — not run                 19
-      EXECUTED (exit 0 required)                    30
+      EXECUTED (exit 0 required)                    32
         marked run-only — output not compared        3
-        OUTPUT COMPARED against a fence             27
-    plain ``` fences                                70
-      consumed as an example's claimed output       27
+        OUTPUT COMPARED against a fence             29
+    plain ``` fences                                72
+      consumed as an example's claimed output       29
       HAND-WRITTEN, compared to nothing             43
-
-So the claim this file earns is: *every runnable example runs, and 27 of
-the 30 have their stdout compared byte for byte after a narrow
+So the claim this file earns is: *every runnable example runs, and 29 of
+the 32 have their stdout compared byte for byte after a narrow
 normalisation.* The 43 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
@@ -162,11 +161,21 @@ EXPECTED_INVENTORY = {
     # the eager detector armed it raises by design, and with it off it prints
     # nothing, so there is no output to compare either way; it is a record of
     # what jax does, which is what `illustrative` means.
-    "python_blocks": 49,
+    # B19 added two, both executed and compared, and both are a corrected
+    # `proposed-*.md` header paying for itself. `proposed-int-literal-convert.md`
+    # and `proposed-div-straddle-decline.md` each argued from a hand-written
+    # fence that had gone false under the commit that BUILT the thing they
+    # proposed (`cbb1d60`, `32c6c56`) — so each keeps its pre-change fence,
+    # marked as pre-change, and gains a block that prints the current reading
+    # here. Both are chosen to be path-free: they print interval endpoints and
+    # booleans, not a render, because the normaliser only rewrites a source-info
+    # line that begins the line and a fence carrying an inline temp path could
+    # not be byte-compared.
+    "python_blocks": 51,
     "illustrative": 19,
-    "executed": 30,
+    "executed": 32,
     "run_only": 3,
-    "compared": 27,
+    "compared": 29,
     # B15 added two: `docs/overflow-tripwire.md` now quotes the trace gate's
     # narrowed refusal and its NOT-FULLY-OBSERVED refusal side by side, which
     # is the whole point of that section — the two sentences have to be
@@ -189,7 +198,7 @@ EXPECTED_INVENTORY = {
     # which is the gap that program has in jax's DEFAULT configuration.
     # Measured, hand-written, attached to nothing;
     # `tests/test_tripwire_eager.py` re-drives every line of it.
-    "plain_fences": 70,
+    "plain_fences": 72,
     "plain_unattached": 43,
 }
 

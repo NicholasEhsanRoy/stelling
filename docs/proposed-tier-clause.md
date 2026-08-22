@@ -3,7 +3,22 @@ SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# A gauge clause for `TIER_EXACT` — PROPOSED, and it runs the OPPOSITE way round
+# A gauge clause for `TIER_EXACT` — **BUILT** (`9f9b8b7`)
+
+**Status: BUILT and shipped in `9f9b8b7`** ("A gauge clause for TIER_EXACT, on
+the confirming direction only"). The clause is `tests/test_tier_clause.py`,
+whose docstring restates the argument below — the `abs([-3, 3])`
+false-refutation history and the branch-boundary seeding included. It runs
+under jax and skips without it, so the count it reports is a property of the
+lane and not of this page; no digit is carried here for it to drift from.
+
+This page kept a `PROPOSED` header through the change that implemented it,
+which is the same defect `proposed-declaration-dtype-check.md` records and
+names: a claim divergence on a DOCUMENT. Corrected here rather than quietly
+retitled. **The title also said the clause "runs the OPPOSITE way round" —
+that was the finding this page was written to fix, and the correction below
+is what got built**; the scope section is still the accurate statement of
+what the clause does not cover.
 
 `TIER_EXACT` says the returned box **is the hull of the achievable image**, not
 merely a sound enclosure of it. The tier rides into the verdict stamp. It was

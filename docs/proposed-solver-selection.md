@@ -3,11 +3,60 @@ SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Exposing solver selection on `check()` — PROPOSED, NOT BUILT
+# Exposing solver selection on `check()` — **PARTLY BUILT** (`cbb1d60`)
 
-**Status: PROPOSED, NOT BUILT. Verdict: NEEDS-A-DECISION**, and the decision
-is not about plumbing. Everything below was measured against this tree; no
-code was changed for it.
+**Status: PARTLY BUILT.** Three of the five rows of the change table below
+landed in `cbb1d60` ("Phase-1 transfers: is_finite, int64->float64 point
+rule, solver kwarg"); **two did not**, and the two that did not are the
+residue this page is now most useful for. Pinned by
+`tests/test_phase1_transfers.py` (`test_check_solver_kwarg_validation`,
+`test_check_solver_kwarg_z3_records_only_z3`,
+`test_check_solver_kwarg_none_is_default`).
+
+**What shipped.** `check()` takes `solver=`, and it works:
+
+| driven | result |
+|---|---|
+| `check(h, …, solver=None)` | VERIFIED, the full portfolio — 2 invocations |
+| `check(h, …, solver="z3")` | VERIFIED, restricted — 1 invocation |
+| `check(h, …, solver="cvc5")` | VERIFIED, restricted — 1 invocation |
+| `check(h, …, solver="")` | `ValueError: solver must be None, 'z3', or 'cvc5', got ''` |
+| `check(h, …, solver="nope")` | `ValueError: … got 'nope'` |
+
+So rows 1, 2 and 4 of the table landed, and the eager validation this page
+asks for is there.
+
+**What did NOT ship, and a flipped header would have buried it.**
+
+* **`contracts.check_contract` was not threaded.** Measured:
+  `inspect.signature(check_contract)` is
+  `(contract, *, vacuity_mode, solver_timeout_ms=None, refine=None,
+  falsify=None)` — no `solver`. The contracts layer cannot restrict the
+  portfolio at all.
+* **The "refuse it when `solver_timeout_ms is None`" clause was not
+  implemented.** This page argues that combination is *"a caller error that
+  would otherwise ride silently"*. Measured, it rides silently:
+  `check(h, vacuity_mode="inputs-only", solver="z3")` with no timeout does
+  **not** raise — it returns a verdict decided by interval propagation alone,
+  with the restriction it was given having restricted nothing.
+* **The shape differs from the proposal.** This page describes
+  `SolverConfig.only`, a *subset* of `{"z3","cvc5"}`; what shipped is a single
+  string, so "both, in this order" is not expressible and passing a tuple
+  raises. `SolverConfig(only=…)` itself is still internal — see the note
+  under "The capability, and why it is unreachable", which remains accurate
+  about `SolverConfig` and is now inaccurate only about `check()`.
+
+**Verdict: the DECISION this page asked for was taken in part and not
+recorded.** The header said `NOT BUILT` through the commit that built most of
+it. That is the same claim divergence on a document that
+`proposed-declaration-dtype-check.md` records and names, and it cost more here
+than a wrong word: `check(solver=…)` shipped documented in **no** page under
+`docs/`, because the page that would have documented it said it did not exist.
+`docs/choosing-a-solver-backend.md` now names it.
+
+Everything below the change table was measured against the tree **before**
+`cbb1d60` and is kept as it was measured; the two rows that did not land are
+still open, and the argument for them is still the argument.
 
 *Source references on this page name a SYMBOL and a FILE and deliberately
 carry no line number. They used to carry sixteen. Resolved against `53f9f84`

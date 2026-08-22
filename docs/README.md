@@ -31,8 +31,19 @@ harness, a stamped verdict, in four files.
 | [Verdict ledger](verdict-ledger.md) | every recorded verdict that moved, and why |
 | [Gauge coverage](gauge-coverage.md) | which primitive faces are gauged, per face |
 
-`proposed-*.md` are design proposals in the state their headers declare
-(`BUILT`, or proposed and unbuilt); they are records, not user guides.
+`proposed-*.md` are design proposals and studies, each in the state its own
+header declares. The vocabulary is closed: `BUILT` or `APPLIED` (shipped, and
+the header names the commit and a test that pins it), `PARTLY BUILT` (some of
+the proposal landed and the page says which), `PROPOSED` / `PROPOSED, NOT
+BUILT` / `PROPOSED, NOT APPLIED` (written, not built), and `MEASURED` (a study,
+which may recommend building nothing). They are records, not user guides.
+
+`tests/test_proposed_page_headers.py` is what makes that sentence checkable: it
+requires every header to use a token from that set, every commit a status names
+to be an ancestor of `HEAD`, every test a page names to exist, every shipped
+status to name one — and this paragraph to mention every token the pages
+actually carry. It cannot tell that a page saying `NOT BUILT` is wrong; five
+did, for months, which is why the corrected direction is now load-bearing.
 
 ## Elsewhere in the repo
 
