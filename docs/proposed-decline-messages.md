@@ -5,11 +5,44 @@ SPDX-License-Identifier: Apache-2.0
 
 # Proposed decline messages — **APPLIED** (all five sections)
 
-**Status: APPLIED.** All five numbered sections below shipped. Each carries an
-**Applied** line naming the test that pins it, and
-`tests/test_doc_examples.py::test_this_page_s_numbered_sections_each_name_a_live_pinning_test`
-requires every one of those tests to exist and to name this page back — so a
-section cannot lose its pin without going red.
+**Status: APPLIED.** All five numbered sections below shipped, and each carries
+an **Applied** line naming the test that pins it —
+`tests/test_div_straddle_decline.py` (§1 and §2),
+`tests/test_unsupported_emission_message.py` (§3),
+`tests/test_budget_message.py` (§4) and
+`tests/test_constrained_refusal_message.py` (§5).
+
+**What holds that down is narrower than the paragraph above, so it is written
+out rather than left to be assumed.**
+`tests/test_proposed_page_headers.py::test_every_test_file_a_proposed_page_names_exists`
+requires every `tests/…py` this page names to be in the tree, so a pin that is
+deleted reddens; and
+`tests/test_proposed_page_headers.py::test_a_page_that_says_it_shipped_names_a_test_that_pins_it`
+requires this status block to name at least one. **Nothing checks more than
+that.** No test reads the numbered sections, so a section CAN lose its
+**Applied** line with nothing going red — measured, §4's block deleted, whole
+zero-dep suite `2180 passed, 164 skipped`. And nothing checks that a named
+test names this page back: that gate's own docstring records reciprocity as
+considered and NOT built, with the measurement showing it would not have
+caught the case it was considered for.
+
+*This header used to claim otherwise, and it claimed it by citing a test that
+does not exist.* It named a test called
+`test_this_page_s_numbered_sections_each_name_a_live_pinning_test`, said to
+live in `tests/test_doc_examples.py`, and said that test *"requires every one
+of those tests to exist and to name this page back — so a section cannot lose
+its pin without going red"*. **No such test has ever existed** — not in that
+file, not anywhere in the tree, on this branch or on `main` — and neither of
+the two things it was said to do is done by anything. The citation survived
+because the gate that reads this page extracts the `tests/…py` FILE from a
+citation and never the test id, and that file is real. A citation to a test
+that does not exist is a header outrunning the code one level down, on the
+page whose header was corrected for exactly that.
+
+The dead name is deliberately NOT rejoined to its file with `::` above: the
+citation checker reads that spelling as a live pointer, and a pointer to
+nothing should not be written in the syntax for one. It is kept, unjoined,
+because deleting it would leave the correction with nothing to correct.
 
 This page kept a `PROPOSED, NOT APPLIED` header through the changes that
 applied it, which is the defect `proposed-declaration-dtype-check.md` records
