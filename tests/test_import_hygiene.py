@@ -305,7 +305,7 @@ def test_importing_stelling_pulls_in_no_jax():
 
 
 def test_importing_the_conftest_pulls_in_no_jax_and_arms_nothing():
-    """``tests/conftest.py`` is imported by all 146 test files, zero-dep too.
+    """``tests/conftest.py`` is imported by every test file, zero-dep too.
 
     IT GREW A PERIMETER HELPER, and that is why this exists.
     :func:`conftest.lowered_perimeter` takes the dunder perimeter down for a

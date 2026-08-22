@@ -152,9 +152,9 @@ def _isolate():
     release, which is exactly the asymmetry ``perimeter.arm(owner=...)``
     exists to prevent, aimed at the session's own hold. Under
     ``--stelling-narrowing-perimeter=error`` the plugin arms under the
-    session's ``Config`` before any test runs; this file sorts **71 of 146**,
-    so its FIRST test unhooked that hold and the ~4,300 tests after it ran
-    unprotected with nothing red. Driven at ``e6968fe``, the documented
+    session's ``Config`` before any test runs; this file sorted **71 of 146**
+    when that was measured, so its FIRST test unhooked that hold and the ~4,300
+    tests after it ran unprotected with nothing red. Driven at ``e6968fe``, the documented
     dial-on command over the whole suite reported::
 
         NOT ARMED [detached] ... 0 integer literal(s) ... were checked

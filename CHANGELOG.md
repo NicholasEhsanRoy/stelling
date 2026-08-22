@@ -176,6 +176,7 @@ reaches it: Mode 2 is 0.2.0 development work throughout.
   function it patches and drives every construction route it claims, in both
   directions. Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#m2-020-06)
+
 ### The narrowing perimeter (Mode 3), DEFAULT-OFF
 
 A THIRD instrument, opt-in and switched on by nothing else. The detail is
@@ -307,13 +308,17 @@ is 0.2.0 development work throughout.
 
 - **The dial can be turned on over this repository's own suite, and the seven
   tests it refused are now declared.** With
-  `--stelling-narrowing-perimeter=error` the whole suite is **4404 passed, 10
-  skipped**, exit 0 — armed at the end, `1447 integer literal(s)` checked,
-  `11 narrowing(s) PERMITTED at 9 site(s)`, each printed with the reason its
-  author gave. With the seven declarations taken back out it is **7 failed, 4397
-  passed**, and the report reads `1455 ... checked; 15 do not exist`, `7 of
-  those NOT inside an expected_truncation region`, `8 PERMITTED at 6 site(s)`
-  -- which is the measurement they answer.
+  `--stelling-narrowing-perimeter=error` the whole suite passes with the dial
+  armed at the end, exit 0, every permitted narrowing printed with the reason
+  its author gave. The figures are a measurement of one tree and move when it
+  does: re-measured at `5ad906f` + B22 they read **4565 passed, 10 skipped**,
+  `1473 integer literal(s)` checked, `15 narrowing(s) PERMITTED at 9 site(s)`;
+  when this entry was written they read `4404 passed, 10 skipped`, `1447`
+  and `11 at 9`. With the seven declarations taken back out — measured at the
+  time, not re-driven since — it is **7 failed, 4397 passed**, and the report
+  reads `1455 ... checked; 15 do not exist`, `7 of those NOT inside an
+  expected_truncation region`, `8 PERMITTED at 6 site(s)` — which is the
+  measurement they answer.
 
   Three of the seven are new `expected_truncation` regions
   (`test_tripwire_arm.py`, and two in `test_tripwire_gate.py` where an
@@ -352,7 +357,7 @@ is 0.2.0 development work throughout.
   each site.
 
 - **The shared helper is inert where it is not used.** `tests/conftest.py` is
-  imported by all 146 test files, the zero-dep lane included, so
+  imported by every test file in this tree, the zero-dep lane included, so
   `test_import_hygiene.py` now pins that importing it pulls in **no jax and no
   numpy**, that it arms nothing (it is a plain function, not a fixture), and
   that entering the block with nothing armed is a no-op yielding `()`. Driven
@@ -362,9 +367,9 @@ is 0.2.0 development work throughout.
   therefore unmeasurable on the shipped tree.**
   `tests/test_narrowing_perimeter.py`'s autouse fixture restored
   unconditionally — the exact asymmetry `arm(owner=...)` exists to prevent,
-  aimed at the plugin's hold. That file sorts **71 of 146**, so its first test
-  took the perimeter out and roughly **4,300 later tests ran unprotected with
-  nothing red**; the documented dial-on command reported `NOT ARMED
+  aimed at the plugin's hold. That file sorted **71 of 146** when this was
+  measured, so its first test took the perimeter out and roughly **4,300 later
+  tests ran unprotected with nothing red**; the documented dial-on command reported `NOT ARMED
   [detached] ... 0 integer literal(s) ... were checked`. It now records what
   it found, lowers the hold for its own window only, and hands it back by
   identity through `arm()`, raising if it cannot.
@@ -462,9 +467,10 @@ is 0.2.0 development work throughout.
   trigonometry, a fractional `pow`, a non-square `sqrt`) inherently, and
   `dot_general`, `sort`, `cumsum`, `stack`, `rem`, `scatter` and
   `scatter-add` because this module's tables have no reading for them
-  yet. Three of the six live
-  fixtures in `tests/test_falsify_probe.py` are `scatter` and now decline;
-  they are listed there with the primitive that costs each one.
+  yet. Three of the six fixtures `tests/test_falsify_probe.py`'s live corpus
+  USED TO HOLD are `scatter` and now decline; they are listed there, in
+  `DECLINED_FOR_WANT_OF_AN_EXACT_READING`, with the primitive that costs each
+  one, so `LIVE` holds the three that remain.
 
   Every admission is also downstream of the point being **admitted by
   every assume**, and that gate is a reading of the program that can be

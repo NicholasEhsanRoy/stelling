@@ -1382,8 +1382,8 @@ def lowered_perimeter():
     refuses the reference defect), every other reading says ``armed`` — and
     the object a later ``disarm()`` restores is no longer jax's.
     """
-    # IMPORTED HERE AND NOT AT MODULE SCOPE. Every one of this tree's 146 test
-    # files imports this conftest, the zero-dep lane included, and
+    # IMPORTED HERE AND NOT AT MODULE SCOPE. Every test file in this tree
+    # imports this conftest, the zero-dep lane included, and
     # `perimeter.py` is only numpy-free because it binds the predicate lazily.
     # A module-scope import would still be safe today and would be a standing
     # invitation to stop being; this is also why this is a plain function and
