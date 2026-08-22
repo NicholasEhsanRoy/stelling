@@ -60,10 +60,16 @@ missing could not be silently absent from this file either — it would have
 to be listed with a reason, and there is nothing to list.
 
 **The limit, stated because it is real.** `src_sha256`, `src_span`,
-`src_lines`, `src_lines_not_carried` and `not_carried` are all claims about
-a file this tree no longer contains, and so are each section's
-`source_commit` and `source_span` — SEVEN columns, which is the unit the
-statement has to be in, because a list of scenarios is not the class.
+`src_lines_not_carried` and `not_carried` are all claims about a file this
+tree no longer contains, and so are each section's `source_commit` and
+`source_span` — SIX columns, which is the unit the statement has to be in,
+because a list of scenarios is not the class. `src_lines` was the seventh
+until 2026-08-22 and is not a claim about the source text at all: it is
+`src_span[1] - src_span[0] + 1`, both ends of which are in this file, and
+`test_every_block_declares_the_number_of_source_lines_its_span_holds`
+measures it with or without git. It was declared 72 times and read nowhere
+until then — driven, one value changed from `7` to `999` for `27 passed`
+with git present.
 They are verifiable — each section is re-derivable from
 `git show <source_commit>:CHANGELOG.md` with the same splitter the routing
 used — but only where git and that commit are present. In an sdist the

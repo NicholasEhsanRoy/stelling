@@ -72,11 +72,20 @@ quiet.
 * **NOT checked outside git, and this is the sharpest limit here.** The
   general statement, which is what a reader needs, is about COLUMNS and
   not about a list of scenarios: **every SOURCE-SIDE column of the
-  manifest is unverified outside git** — `src_span`, `src_lines`,
-  `src_sha256`, `src_lines_not_carried`, `not_carried`, and each section's
-  `source_commit` and `source_span`. A mutation confined to those columns
-  survives an sdist **whether or not it also touches a shipped file**. The
-  git leg is the SOLE guard over all of it.
+  manifest that names the SOURCE TEXT is unverified outside git** —
+  `src_span`, `src_sha256`, `src_lines_not_carried`, `not_carried`, and
+  each section's `source_commit` and `source_span`. A mutation confined to
+  those columns survives an sdist **whether or not it also touches a
+  shipped file**. The git leg is the SOLE guard over all of it.
+
+  **`src_lines` CAME OFF THAT LIST ON 2026-08-22, and it is the only one
+  that ever could.** Six columns now, and the change is a check rather
+  than a rewording: `src_lines` is arithmetic on `src_span`, both ends of
+  which are in the file, so
+  `test_every_block_declares_the_number_of_source_lines_its_span_holds`
+  measures it here, git or no git. It does not make `src_span` verified —
+  a span shrunk at BOTH ends with `src_lines` shrunk to match is still an
+  sdist-invisible mutation, and that is the residue this list is about.
 
   **NOT, HOWEVER, "BECAUSE NOTHING IN THE DESTINATION READS THEM", WHICH
   IS WHAT THIS SAID AND IS REFUTED BY ITS OWN NEXT PARAGRAPH.** The
@@ -175,32 +184,31 @@ quiet.
   `.git` removed on `SF-0.2.0-59`'s 367-line body, **`19 passed, 8
   skipped`**, and **`1 failed, 26 passed`** where git is present).
 
-  `src_lines` is in that list and is a WORSE case than any of these, which
-  is why it is named rather than dropped from a list that claims to be the
-  general statement: it is declared 72 times and READ NOWHERE. Measured,
+  `src_lines` WAS IN THAT LIST AND WAS A WORSE CASE THAN ANY OF THESE:
+  declared 72 times and READ NOWHERE. Measured at `844ba48`,
   `grep -rEn 'src_lines([^_]|$)'` over the whole checkout, `*.py` and
   `*.md`: 74 hits in `_soundness_routing_manifest.py` — the 72 values, the
   field's own declaration on `Block`, and one mention in that file's
-  docstring — and 6 in this file, of which 4 are in this docstring and 2
-  in the skip message below. No reader anywhere, in either file. So it is
-  unverified with git present as well as
-  without, and it is the one source-side column that COULD be checked
-  without git, against `src_span`. Recorded for the campaign's final sweep
-  and deliberately not fixed here.
+  docstring — and 6 in this file, none of them a reader. Driven the only
+  way an unread column can be: one `src_lines=7` changed to `999` ran
+  **`27 passed`, with git present**. All 72 values were correct, which is
+  the argument for measuring them rather than against it — a column
+  nothing reads is correct until the first edit, and nothing finds out
+  after that. It is measured now, in the file whose entire thesis is that
+  a declaration nothing measures is not a declaration.
 
   The skip messages carry the general statement too, so a reader who
   meets one there learns which columns are unverified and not merely that
   something is.
 
-  **AND UNTIL 2026-08-21 THEY CARRIED A DIFFERENT ONE.** This list names
-  SEVEN columns. `_LOST`, the string both skip messages are built from,
-  named SIX — and the one it left out was `src_lines`, the column this
-  list singles out as *"a WORSE case than any of these"*, in the same
-  paragraph as the claim that the skip messages carry the general
-  statement. Two statements of one general statement that differ by a
-  member are not one statement in two places, and the sdist reader, who
-  is the only reader either was written for, met the shorter one. Seven
-  and seven now.
+  **AND UNTIL 2026-08-21 THEY CARRIED A DIFFERENT ONE.** This list named
+  SEVEN columns; `_LOST`, the string both skip messages are built from,
+  named SIX, and the one it left out was `src_lines`. Two statements of
+  one general statement that differ by a member are not one statement in
+  two places, and the sdist reader, who is the only reader either was
+  written for, met the shorter one. They agreed at seven from 2026-08-21,
+  and they agree at SIX now that `src_lines` is measured — the same
+  member, leaving by the other door.
 * NOT checked: whether a one-liner's sentence is a *good* summary of its
   detail. It is not a summary — it is the block's own headline, moved,
   or a sentence written to stand alone in its place — but nothing here
@@ -420,9 +428,38 @@ def _lines_not_carried(src_text: str, dest_text: str) -> list[str]:
     Verbatim and line-for-line, leading whitespace included: a block that
     arrived re-wrapped or re-indented did not arrive, it was retyped, and
     this is the number `Block.src_lines_not_carried` is measured against.
+
+    IN ORDER, AND ONCE EACH. This was `ln not in set(dest.split())` until
+    2026-08-22 — set membership, so it was blind to ORDER and to
+    MULTIPLICITY. Driven at `de80ad8`: `SF-0.2.0-60`'s 124 destination lines
+    completely shuffled into nonsense, `dest_sha256` regenerated,
+    `src_lines_not_carried=0` and the edit count bumped, ran **`25 passed`**.
+    A destination holding the same 124 lines in a scrambled order is not the
+    block that left; every argument the source made in sequence is gone and
+    the check that exists to refuse a summarisation read it as a verbatim
+    arrival.
+
+    So the source's carried lines must appear in the destination as a
+    SUBSEQUENCE — a two-pointer scan, each destination line consumed at most
+    once, so a source line quoted twice needs the destination to carry it
+    twice. Driven, on `alpha/beta/gamma/delta` against the same four
+    reversed: `[]` under set membership, `['beta', 'gamma', 'delta']` here;
+    and `a/b/a` against `a/b`, `[]` under set membership and `['a']` here.
+    `test_the_lines_not_carried_scan_reads_ORDER_and_MULTIPLICITY` is the pin.
+
+    The real tree is unaffected: all 72 blocks arrived in order, so every
+    declared `src_lines_not_carried` reads the same under both.
     """
-    dest = set(dest_text.split("\n"))
-    return [ln for ln in src_text.split("\n") if ln.strip() and ln not in dest]
+    dest = dest_text.split("\n")
+    at, missing = 0, []
+    for ln in src_text.split("\n"):
+        if not ln.strip():
+            continue
+        try:
+            at = dest.index(ln, at) + 1
+        except ValueError:
+            missing.append(ln)
+    return missing
 
 
 def _detail_sections(soundness: str) -> dict[str, str]:
@@ -678,11 +715,11 @@ def _source_changelog(section: Section) -> str:
     `.git` removed against `1 failed, 26 passed` with git.
     """
     _LOST = (
-        "src_span, src_lines, src_sha256, src_lines_not_carried, "
-        "not_carried and the section's source_commit/source_span -- SEVEN "
-        "columns, the same seven this file's docstring lists, and "
-        "src_lines is one of them because a list that claims to be the "
-        "general statement may not omit a member of itself -- are ALL "
+        "src_span, src_sha256, src_lines_not_carried, "
+        "not_carried and the section's source_commit/source_span -- SIX "
+        "columns, the same six this file's docstring lists, and src_lines "
+        "is not one of them because it is arithmetic on src_span and is "
+        "measured with or without git -- are ALL "
         "unverified here, so "
         "any mutation confined to those columns survives -- one file or "
         "three, and whether or not a shipped file is touched. Measured, "
@@ -1016,6 +1053,76 @@ def test_nothing_was_dropped_and_every_edit_is_declared():
             assert block.src_lines_not_carried == 0
             assert not block.not_carried
             assert not block.edit_note
+
+
+def test_every_block_declares_the_number_of_source_lines_its_span_holds():
+    """`src_lines`, MEASURED — and it is the one source-side column that can
+    be, without git.
+
+    THE COLUMN WAS DECLARED 72 TIMES AND READ NOWHERE. Measured at
+    `844ba48`, `grep -rEn 'src_lines([^_]|$)'` over the whole checkout found
+    the 72 values, the field's declaration on `Block` and prose — and no
+    reader anywhere, in any file. Driven the way an unread column has to be
+    driven: one `src_lines=7` changed to `999` and the routing file ran
+    **`27 passed`**, WITH GIT PRESENT. Every other source-side column is
+    unverifiable without `git show`; this one is arithmetic on `src_span`,
+    which is right here, so it was the only member of that list that did not
+    have to be on it.
+
+    All 72 values were correct when this was written, which is the reason to
+    write it rather than a reason not to: a column nothing reads is correct
+    until the first time somebody edits it, and there is no later moment at
+    which anyone finds out.
+
+    `src_span` ITSELF IS NOT TAKEN ON TRUST EITHER, and this test is not
+    where that happens: `test_the_source_span_is_derived_and_not_trusted`
+    recomputes the section's span from the source, and
+    `test_the_splitter_partitions_the_source` holds every block's span to
+    where the splitter actually finds it. This is the arithmetic between the
+    two ends, which is the part that needs no history.
+    """
+    wrong = [
+        (block.id, block.src_lines, block.src_span)
+        for block in ROUTED
+        if block.src_lines != block.src_span[1] - block.src_span[0] + 1
+    ]
+    assert not wrong, (
+        f"block(s) whose `src_lines` is not the number of lines their "
+        f"`src_span` covers: {wrong}. The two are one measurement written "
+        f"twice — `hi - lo + 1` — and a column nothing reads is a column "
+        f"the next edit is free to invent."
+    )
+    # ... and it is not vacuous: the spans really do carry a range each, so
+    # the equality above is arithmetic and not `0 == 0` seventy-two times.
+    assert ROUTED and all(
+        b.src_span[1] >= b.src_span[0] >= 1 for b in ROUTED
+    ), "a routed block declares an empty or negative source span"
+
+
+def test_the_lines_not_carried_scan_reads_ORDER_and_MULTIPLICITY():
+    """`_lines_not_carried` directly, on the two blindnesses it had.
+
+    Set membership answers "does the destination contain this line
+    anywhere", which is not what "carried" means: a destination holding the
+    block's own lines shuffled into nonsense answered `not carried: 0`, and
+    a source line quoted twice was satisfied by one copy. Driven at
+    `de80ad8` through the manifest — `SF-0.2.0-60`'s 124 destination lines
+    shuffled, `dest_sha256` regenerated, `src_lines_not_carried=0` — for
+    `25 passed`.
+    """
+    src = "alpha\nbeta\n\ngamma\ndelta"
+    assert _lines_not_carried(src, src) == []
+    assert _lines_not_carried(src, "delta\ngamma\nbeta\nalpha") == [
+        "beta", "gamma", "delta"
+    ], "the destination holds every line, in reverse, and this reads clean"
+    assert _lines_not_carried(src, "alpha\nbeta\ndelta") == ["gamma"]
+    assert _lines_not_carried("a\nb\na", "a\nb") == ["a"], (
+        "a line the source carries twice is satisfied by one copy in the "
+        "destination, so half of a repeated argument can be dropped for free"
+    )
+    # and blank lines are not counted, which is what makes the declared
+    # counts comparable with `src_lines_not_carried`
+    assert _lines_not_carried("\n\n", "") == []
 
 
 @_SECTION
