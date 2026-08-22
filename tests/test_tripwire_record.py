@@ -2073,6 +2073,72 @@ def test_the_canary_and_the_workflow_agree_about_the_two_legs():
         )
 
 
+def test_the_nightly_runs_the_tests_OF_THE_HOOK_ON_A_PRIVATE_FUNCTION():
+    """The eager hook is the exposed one, and it was the one the nightly did
+    not test.
+
+    Both hooks attach to jax internals and the canary script drives both, so
+    both are covered for ATTACHING. What the tripwire's own test files add is
+    that a hook still FINDS, ATTRIBUTES and SUPPRESSES the right things — and
+    until 2026-08-22 the nightly ran those for the const-fold hook (`arm`,
+    `record`, `plugin`) and not for the eager one.
+
+    THE ASYMMETRY IS THE ARGUMENT. The const-fold hook installs an entry in a
+    private REGISTRY; the eager hook patches a module attribute on
+    `jax._src.lax.lax` — a private FUNCTION, with a signature and a set of
+    callers. A release that reorders `_convert_element_type`'s parameters, or
+    routes one construction spelling around it, changes what the hook sees
+    while leaving it attached, and `arm_eager()`'s own self-check is the only
+    other thing that would notice.
+
+    IT COULD NOT BE ADDED BEFORE THE CELL WAS GREEN. The step runs at
+    `JAX_ENABLE_X64: "1"`, and `tests/test_tripwire_eager.py` had EIGHT
+    failures there at `844ba48` — every one of them a subject that cannot be
+    present in that cell — so adding the file would have made the leg
+    permanently red.
+
+    NOT EVERY `test_tripwire_*.py` IS ON THAT STEP, and this does not ask for
+    them: `test_tripwire_xdist.py` needs `pytest-xdist`, which the nightly
+    does not install, and the two gate files drive the 35-route inventory
+    twice over. What is checked is that the file naming the hook on a private
+    FUNCTION is there, and that nothing on the step names a file that is not.
+    """
+    import re
+
+    root = _pathlib_for_canary()
+    workflow = (
+        root / ".github" / "workflows" / "nightly-jax-canary.yml"
+    ).read_text(encoding="utf-8")
+    steps = [
+        step for step in re.split(r"\n      - (?=name:|uses:|run:)", workflow)[1:]
+        # `run: |` puts the command on the FOLLOWING lines, so the match is
+        # over the step rather than over the `run:` line -- and it is anchored
+        # on a `run:` being there, so a step that merely mentions pytest in a
+        # comment is not one.
+        if re.search(r"^\s*run:", step, re.M) and "-m pytest" in step
+    ]
+    assert steps, (
+        "no step of the nightly workflow runs pytest at all, so the "
+        "tripwire's own tests are not run against the nightly by anything"
+    )
+    named = {
+        name for step in steps
+        for name in re.findall(r"tests/(test_[a-z0-9_]+\.py)", step)
+    }
+    assert "test_tripwire_eager.py" in named, (
+        f"the nightly runs the tripwire's own tests but not "
+        f"`tests/test_tripwire_eager.py`, whose hook is the one attached to a "
+        f"private jax FUNCTION rather than a private registry — the thing a "
+        f"nightly is most likely to break. Named: {sorted(named)}"
+    )
+    missing = [name for name in named if not (root / "tests" / name).is_file()]
+    assert not missing, (
+        f"the nightly step names test file(s) that are not in the tree: "
+        f"{sorted(missing)} — that leg runs nothing for them and pytest exits "
+        f"4 rather than saying so"
+    )
+
+
 def test_each_canary_leg_runs_the_sweep_IN_THE_CELL_IT_CAN_REDDEN_IN():
     """An alarm wired to a condition that cannot occur is not an alarm.
 
