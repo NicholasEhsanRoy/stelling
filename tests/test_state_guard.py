@@ -171,7 +171,8 @@ def test_an_exemption_licenses_exactly_its_own_test_and_entry():
     try:
         G.PINNED_EXEMPTIONS = (exemption,)
         assert G.offences("tests/test_x.py::test_y", before, after) == []
-        # a parametrisation of the same test inherits it ...
+        # an entry naming NO parametrisation licenses the whole family, which
+        # is what its author wrote when they left the suffix off ...
         assert G.offences("tests/test_x.py::test_y[3]", before, after) == []
         # ... and nothing else does
         assert G.offences("tests/test_x.py::test_y_other", before, after)
@@ -180,6 +181,27 @@ def test_an_exemption_licenses_exactly_its_own_test_and_entry():
         other = G.ENTRIES[1].name
         assert G.offences(
             "tests/test_x.py::test_y", before, {**before, other: 1}
+        )
+        # AND THE DIRECTION THE COMMENT ABOVE `PINNED_EXEMPTIONS` PROMISED AND
+        # THE CODE INVERTED. An entry that DOES name a parametrisation covers
+        # that case and no other: driven at `844ba48`, an exemption for
+        # `test_x[a]` licensed `test_x[b]` — `EXIT 0`, both keys leaked —
+        # under a comment saying the stripping existed so that *"a new
+        # parameter does not silently inherit somebody else's licence"*. A
+        # parameter added next to the one that earned the licence is a case
+        # nobody reviewed, which is what the list is for.
+        G.PINNED_EXEMPTIONS = (
+            G.Exemption("tests/test_x.py::test_y[a]", entry, "driven"),
+        )
+        assert G.offences("tests/test_x.py::test_y[a]", before, after) == []
+        assert G.offences("tests/test_x.py::test_y[b]", before, after), (
+            "an exemption written for one parametrisation licenses its "
+            "neighbours, so a new parameter inherits a licence nobody wrote "
+            "for it"
+        )
+        assert G.offences("tests/test_x.py::test_y", before, after), (
+            "an exemption for one parametrisation licenses the unparametrised "
+            "nodeid too"
         )
     finally:
         G.PINNED_EXEMPTIONS = original
@@ -472,8 +494,16 @@ def test_a_module_scoped_fixture_that_never_restores_is_named(tmp_path):
         f"the guard did not name the MODULE\n{proc.stdout}"
     )
     assert "env:STELLING_*/JAX_*" in proc.stdout, proc.stdout
-    assert "moved BETWEEN the tests of this module" in proc.stdout, (
+    assert "moved OUTSIDE every test of this module" in proc.stdout, (
         f"the report does not say where to look\n{proc.stdout}"
+    )
+    # THE HEADLINE SAYS "OUTSIDE" AND NOT "BETWEEN", and this plant is why:
+    # the fixture leaks at SETUP, so its move is BEFORE the first test rather
+    # than between two of them, and it is the commonest shape this altitude
+    # reports.
+    assert "changed process-global state OUTSIDE its tests" in proc.stdout, (
+        f"the module headline names a narrower place than the one the "
+        f"trajectory reads, and this leak is not in it\n{proc.stdout}"
     )
 
 
@@ -615,6 +645,189 @@ def test_a_module_leak_survives_an_XFAILING_polluter_in_the_same_module(tmp_path
         f"the xfailing test's own leak IS named somewhere now, so the LIMITS "
         f"entry in tests/_state_guard.py is stale\n{proc.stdout}"
     )
+
+
+# ── the module's move, folded PART-WISE and not whole ───────────────────────
+#
+# WHAT THESE FOUR REFUSE, and it is the one shape in which the trajectory
+# reported a test at the module's altitude. `_outside_a_test` used to write the
+# WHOLE current reading into `shadow` whenever any part of it had moved outside
+# a test — and an entry's reading covers many independently-movable parts
+# (`env:STELLING_*/JAX_*` is a prefix rule, not a key). So a module that moved
+# ANY prefixed variable at teardown re-folded the reading it found, a test's
+# leak included, and the module's report then named a key no module had
+# touched under a headline saying *"so no test of this module did it"*.
+#
+# Measured at `844ba48`, plant = a test leaking `STELLING_TEST_LEAK` and a
+# module fixture setting `STELLING_MODULE_LEAK` at TEARDOWN, so that the
+# module's move comes after the test's:
+#
+#     the module's report   () -> (('STELLING_MODULE_LEAK', '1'),
+#                                  ('STELLING_TEST_LEAK', '1'))
+#     the test's report     () -> (('STELLING_TEST_LEAK', '1'),)
+#
+# Three stated properties broke together, each driven and each one of these
+# tests: "named exactly once" (the leak arrives twice), "keeps an exemption
+# from being undone one scope out" (an exempted test's leak is still named at
+# module scope), and the LIMITS entry's "named NOWHERE" for an xfailing
+# polluter (named at module scope after all, whenever the module moves the same
+# entry). Every direction was a strict OVER-report, so nothing was hidden;
+# PINNED_EXEMPTIONS is empty, so nothing was licensed either. What was false
+# was the docstring.
+
+
+def test_a_module_move_AFTER_a_TESTS_leak_names_only_the_MODULES_leak(tmp_path):
+    """The double report, and it is the property the two altitudes rest on.
+
+    The module guard is supposed to be blind to what a test did, BY
+    CONSTRUCTION rather than by suppression. It is blind to the test's own
+    window; it was not blind to the test's CONTRIBUTION to a reading it folded
+    for its own reasons.
+    """
+    proc = _nested_module(
+        tmp_path,
+        setup="pass",
+        teardown='os.environ["STELLING_MODULE_LEAK"] = "1"',
+        body='os.environ["STELLING_TEST_LEAK"] = "1"',
+    )
+    assert proc.returncode != 0, (
+        f"neither altitude reported anything, so this plant has stopped "
+        f"reaching the mechanism\n{proc.stdout}"
+    )
+    # COUNT THE REPORTS, NOT THE ECHOES -- see the note in
+    # `test_a_TEST_that_pollutes_is_named_once_and_not_again_at_module_scope`.
+    body = proc.stdout.split("short test summary info", 1)[0]
+    module_report = body.split("OUTSIDE its tests", 1)
+    assert len(module_report) == 2, f"the module was not named\n{proc.stdout}"
+    module_report = module_report[1].split("Failed:", 1)[0]
+    assert "STELLING_MODULE_LEAK" in module_report, proc.stdout
+    assert "STELLING_TEST_LEAK" not in module_report, (
+        f"the MODULE's report names a key a TEST set, under a headline that "
+        f"says no test of this module did it. The offence is then reported "
+        f"twice and an exemption for the test does not reach the second "
+        f"report:\n{module_report}"
+    )
+    assert body.count("STELLING_TEST_LEAK") == 1, (
+        f"the test's leak is named {body.count('STELLING_TEST_LEAK')} times, "
+        f"not once:\n{proc.stdout}"
+    )
+
+
+def test_a_module_that_puts_ITS_OWN_key_back_is_silent_even_after_a_TEST_leak(
+    tmp_path,
+):
+    """The silent direction, which is the one a whole-reading fold got wrong.
+
+    The module sets `K` at setup and removes it at teardown — the ordinary
+    case, already covered by
+    `test_a_module_that_sets_a_global_FOR_ITS_OWN_DURATION_is_silent`. Here a
+    test leaks a DIFFERENT key in between, which is what made the teardown
+    reading differ from the last window's close and pulled the whole reading
+    into `shadow`. The module still put its own change back, so the module
+    altitude must still be silent about it.
+    """
+    proc = _nested_module(
+        tmp_path,
+        setup='os.environ["STELLING_MODULE_OWN"] = "1"',
+        teardown='del os.environ["STELLING_MODULE_OWN"]',
+        body='os.environ["STELLING_TEST_LEAK"] = "1"',
+    )
+    body = proc.stdout.split("short test summary info", 1)[0]
+    assert "OUTSIDE its tests" not in body, (
+        f"a module that put its own key back was reported at module scope "
+        f"because a test in it leaked a different one\n{proc.stdout}"
+    )
+    # ... and the test's own leak is still named, so this is not silence
+    # bought by turning the instrument off.
+    assert "test_planted.py::test_two changed process-global state" in body, (
+        f"the TEST's leak went unreported too, so this control is vacuous\n"
+        f"{proc.stdout}"
+    )
+
+
+def test_an_EXEMPTED_tests_leak_is_not_reported_when_the_MODULE_also_moves(
+    tmp_path,
+):
+    """The exemption property, in the shape that broke it.
+
+    `test_a_module_leak_survives_the_PINNED_EXEMPTION_of_a_test_in_it` plants
+    the module's leak at SETUP, before the test runs, so the module's only
+    fold happens before the test's leak exists. Move the module's own act to
+    TEARDOWN and the exempted key came back at an altitude with no exemption
+    list — the licence undone one scope out, which is exactly what the
+    trajectory replaced the entry-NAME filter to prevent.
+    """
+    proc = _nested_module(
+        tmp_path,
+        setup="pass",
+        teardown='os.environ["STELLING_MODULE_LEAK"] = "1"',
+        body='os.environ["STELLING_TEST_LEAK"] = "1"',
+        exempt=("test_planted.py::test_two", "env:STELLING_*/JAX_*"),
+    )
+    assert proc.returncode != 0, (
+        f"the module's own leak was not reported at all\n{proc.stdout}"
+    )
+    assert "STELLING_MODULE_LEAK" in proc.stdout, proc.stdout
+    assert "STELLING_TEST_LEAK" not in proc.stdout, (
+        f"an exempted TEST's key is named at MODULE scope, where "
+        f"PINNED_EXEMPTIONS cannot reach it\n{proc.stdout}"
+    )
+
+
+def test_an_XFAILING_polluters_leak_is_named_NOWHERE_even_if_the_module_moves(
+    tmp_path,
+):
+    """The LIMITS entry, held to being unconditional.
+
+    `tests/_state_guard.py` states that an xfail-marked test's own leak is
+    named at NEITHER altitude. That was conditional: it was named at module
+    scope whenever the module moved the same entry outside a test. The
+    sibling control
+    `test_a_module_leak_survives_an_XFAILING_polluter_in_the_same_module`
+    misses it for the same reason as the exemption one — its module acts at
+    setup.
+
+    If this ever goes red the LIMITS entry comes out; a limit that is wrong in
+    the SAFE direction is still wrong.
+    """
+    proc = _nested_module(
+        tmp_path,
+        setup="pass",
+        teardown='os.environ["STELLING_MODULE_LEAK"] = "1"',
+        one_mark='@pytest.mark.xfail(reason="driven: absorbs the guard\'s report")',
+        one_body=(
+            'os.environ["STELLING_TEST_LEAK"] = "1"\n'
+            "assert False"
+        ),
+    )
+    assert proc.returncode != 0, (
+        f"the module's own leak was not reported\n{proc.stdout}"
+    )
+    assert "STELLING_MODULE_LEAK" in proc.stdout, proc.stdout
+    assert "STELLING_TEST_LEAK" not in proc.stdout, (
+        f"the xfailing test's leak IS named somewhere now, so the LIMITS "
+        f"entry in tests/_state_guard.py is stale\n{proc.stdout}"
+    )
+
+
+def test_the_carry_is_part_wise_for_a_mapping_and_whole_for_anything_else():
+    """:func:`_state_guard._carry` directly, so the property is not only
+    driven through three subprocesses.
+
+    The four rows are the whole of it: a part the move did not touch keeps
+    whoever put it there, a part the move set or removed is written through,
+    and a reading that is not a mapping has one part and carries whole —
+    which is what keeps `ABSENT` and `Unreadable` values like any other.
+    """
+    # the module added M; the test's T is untouched by that move and stays out
+    assert G._carry({}, {"T": "1"}, {"T": "1", "M": "1"}) == {"M": "1"}
+    # the module removed its own K; the test's T is untouched and stays out
+    assert G._carry({"K": "1"}, {"K": "1", "T": "1"}, {"T": "1"}) == {}
+    # a part the move overwrote is written through, whoever had it before
+    assert G._carry({"K": "1"}, {"K": "1"}, {"K": "2"}) == {"K": "2"}
+    # not a mapping: one opaque part, carried whole
+    assert G._carry(G.ABSENT, G.ABSENT, False) is False
+    assert G._carry({"K": "1"}, G.ABSENT, {"K": "2"}) == {"K": "2"}
 
 
 def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_path):
@@ -779,7 +992,7 @@ def test_the_module_report_does_not_claim_a_restore_a_TEST_performed_never_happe
         f"put it back THERE; that is the report this altitude exists for\n"
         f"{proc.stdout}"
     )
-    assert "test_planted.py changed process-global state BETWEEN its tests" in proc.stdout, (
+    assert "test_planted.py changed process-global state OUTSIDE its tests" in proc.stdout, (
         f"the module was not named, or not in the terms it measured\n{proc.stdout}"
     )
     assert "STELLING_MODULE_SETS_IT" in proc.stdout, proc.stdout
