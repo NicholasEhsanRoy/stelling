@@ -636,6 +636,55 @@ The armed slot list is printed in the report on every run, and it is the whole
 perimeter rather than a summary of one: an operator missing from it is
 unwatched.
 
+### What it does NOT cover
+
+Mode 1 and Mode 2 each have a section like this one. Mode 3's limits lived
+only in `report.PERIMETER_UNCOVERED`, which is printed at the END of a
+session — after the decision to arm has already been made — and two of them
+are load-bearing enough to belong here, where that decision is.
+
+The same wrong threshold, in three spellings of the same harness, with all
+three instruments armed. Measured at `e6968fe`, jax 0.11.0, on CPU, and
+**identical in both x64 cells**:
+
+| the harness writes | this perimeter |
+|---|---|
+| `assert_(x <= 2**31 - 1)` | **REFUSED** — `NarrowingError` at that line |
+| `assert_(jnp.less_equal(x, 2**31 - 1))` | VERIFIED |
+| `assert_((x - (2**31 - 1)) <= 0.0)` | VERIFIED |
+
+All three are programs about `2147483648.0`. Two of them are certified.
+
+**1. A `jnp.*` FUNCTION form carries no Python operator, so no slot is
+entered.** `jnp.less_equal(x, N)` is a function call; there is no `__le__` on
+the way in and nothing for a dunder perimeter to attach to. This is not
+confined to comparisons and it is not quiet — measured in the same window,
+`jnp.add(x_int16, 40000)` returns `-25536` with no fire from any of the three
+instruments. Everything `x + 40000` is refused for is true of `jnp.add(x,
+40000)`, and this instrument does not see it. Hooking `jax.numpy`'s functions
+is a different mechanism from rebinding a type's slots and this tool does not
+do it.
+
+**2. The tracer face is COMPARISONS ONLY, so of the 39 armed slots only six
+can fire on a TRACED operand.** The array face's 33 arithmetic-and-comparison
+slots sit on the concrete array type, and inside a harness the operand is a
+tracer, not an array — so `x - N` in a traced harness passes through the
+tracer's `__sub__`, which this perimeter does not install, and the literal is
+converted with nothing watching. That is a **scope decision, not a jax
+limitation**: measured at the same commit, jax's tracer type owns all 27
+arithmetic slots and they could be installed. They are not, today, and a
+harness that does its narrowing in arithmetic rather than in a comparison is
+unwatched.
+
+Both are now bullets in the printed list too, so a run says them as well as
+this page. They were not, and the reason is worth one sentence: the list's
+last bullet already covered the function spelling *in general* — "any
+narrowing on a route with no Python operator on it at all" — and its three
+examples were all about tracing and caching, so a reader holding
+`jnp.less_equal(x, 2**31 - 1)` did not recognise their own program in it. A
+disclosure whose general clause is true and whose examples point elsewhere is
+read as the examples.
+
 ### If the narrowing is what you meant
 
 The error names the value the program actually uses, and the first answer is
@@ -652,6 +701,31 @@ it and observe the result — `stelling._tripwire.eager.expected_truncation(reas
 covers this instrument too. One declaration, both instruments; the reason is
 mandatory, and every narrowing a region permits is counted, sited and printed
 in the report with the reason its author gave.
+
+**"One declaration, both instruments" has a sharp edge, and it is worth
+knowing before you reach it.** If what your test is checking is that the
+*eager detector fires*, a region opened to quiet the perimeter silences the
+detector in the same breath — and the test then passes, or fails, for a
+reason that has nothing to do with what it is about. Where the subject is an
+instrument **underneath** the perimeter, take the perimeter down for that
+block rather than declaring the narrowing.
+
+This repository runs the dial over its own suite and has both shapes. With
+`--stelling-narrowing-perimeter=error`, at `e6968fe` + this fixup, jax 0.11.0,
+CPU, `JAX_ENABLE_X64=0`:
+
+```
+armed -- the dunder perimeter is live on tracer, array: 39 slot(s), 1 owner(s)
+1447 integer literal(s) ... were checked; 11 ... do not exist in the program jax would run
+11 narrowing(s) PERMITTED by an expected_truncation region, at 9 site(s)
+4404 passed, 10 skipped
+```
+
+Nine sites declare a region and print their reason. Four more tests take the
+perimeter down instead, because each of them exists to watch the eager
+detector fire and a region would have silenced it — measured: with a region
+there, one of them reads `'SILENT' == (200, -56)` and another reports every
+route its inventory calls `raises` as `silent`.
 
 ### It raises `BaseException`
 
@@ -958,6 +1032,13 @@ trace time, never of whether the plugin is installed.
 | `--stelling-narrowing-perimeter=error` | switch on the **narrowing perimeter**; an integer literal that does not survive the conversion into the dtype it meets raises, and the session **fails** if the perimeter cannot attach |
 | `--stelling-narrowing-perimeter=off` | off — the default, and neither dial above changes it |
 | *(nothing)* | all three off — the default |
+
+**Each dial's limits are in its own section above**, and for the narrowing
+perimeter they are load-bearing enough to name here as well: it does not see
+the `jnp.*` **function** spelling of an operator, and inside a traced harness
+only the six comparison slots are live. Both are printed at the end of every
+armed run; ["What it does NOT cover"](#what-it-does-not-cover) has the driven
+table.
 
 ### If your CI sets `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`
 

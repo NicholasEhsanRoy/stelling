@@ -4,7 +4,7 @@
 """The state guard's own controls: every entry is shown to FIRE.
 
 ``tests/_state_guard.py`` is an instrument, and an instrument nobody has seen
-move is a decoration. This file moves each of its four entries and asserts the
+move is a decoration. This file moves each of its five entries and asserts the
 guard names the test that moved it.
 
 **THE FIRING TESTS RUN A NESTED SESSION, and it is the real module they load.**
@@ -73,7 +73,7 @@ def test_no_reader_is_unreadable_in_this_environment():
     this file belongs to is about. :class:`_state_guard.Unreadable` exists so
     that such a reader is visible rather than silent, and this is what looks.
 
-    It asserts *readability*, not a value: with jax absent three of the four
+    It asserts *readability*, not a value: with jax absent four of the five
     read :data:`_state_guard.ABSENT`, which is legitimate and is what the
     zero-dep lane sees all session long.
     """
@@ -330,6 +330,57 @@ def test_the_tripwire_installation_entry_fires(tmp_path):
         """,
     )
     _assert_named(proc, "tripwire:installed")
+
+
+def test_the_perimeter_entry_fires(tmp_path):
+    """39 dunder slots rebound on two foreign C-extension types and left there.
+
+    This entry watches the state the 0.2.0 dunder perimeter installs, and it
+    was added after that batch shipped rather than with it: for the whole of
+    that batch, a test that armed the perimeter and did not release it moved
+    the most order-sensitive state in the tree past an inventory that had no
+    row for it. `ci.yml`'s `random-order` lane reads a shuffled failure the
+    guard did not name as "state outside that inventory", so the omission did
+    not just fail to report -- it made a true annotation say something false.
+    """
+    pytest.importorskip("jax")
+    _assert_named(
+        _nested(
+            tmp_path,
+            """
+            from stelling._tripwire import perimeter
+            status = perimeter.arm(("tracer",), owner="a test that never releases")
+            assert status.armed, status.explanation
+            """,
+        ),
+        "perimeter:installed",
+    )
+
+
+def test_the_perimeter_entry_is_silent_when_the_hold_is_RELEASED(tmp_path):
+    """The negative half, and it is not decoration.
+
+    The wrapper is a fresh closure on every `arm()`, so an entry that read the
+    wrapper's identity would fire on any test that armed and disarmed --
+    which is most of `tests/test_narrowing_perimeter.py` -- and an entry that
+    fires on well-behaved tests is one that gets suppressed rather than read.
+    """
+    pytest.importorskip("jax")
+    proc = _nested(
+        tmp_path,
+        """
+        from stelling._tripwire import perimeter
+        status = perimeter.arm(("tracer",), owner="A")
+        assert status.armed, status.explanation
+        assert perimeter.disarm("A") == "restored"
+        status = perimeter.arm(("tracer",), owner="A")
+        assert status.armed, status.explanation
+        assert perimeter.disarm("A") == "restored"
+        """,
+    )
+    assert proc.returncode == 0, (
+        f"arming and releasing twice was reported as a leak\n{proc.stdout}"
+    )
 
 
 # ── the module-scoped altitude, driven the same way ─────────────────────────

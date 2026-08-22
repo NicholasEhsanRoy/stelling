@@ -175,6 +175,10 @@ def pytest_addoption(parser):
             "on a float32 array, which jax runs as `<= 2147483648.0` -- "
             "raises stelling.NarrowingError at the line that wrote it. "
             "'error' fails the session if the perimeter cannot attach. "
+            "It does NOT see the jnp.* function spelling of an operator, and "
+            "inside a traced harness only the six comparison slots are live; "
+            "the whole list is printed at the end of every armed run and in "
+            "docs/overflow-tripwire.md. "
             "Default: off, and NOT turned on by --stelling-overflow."
         ),
     )

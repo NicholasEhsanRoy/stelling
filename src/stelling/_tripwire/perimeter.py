@@ -488,6 +488,14 @@ def arm(faces=FACES, owner=None):
     drives the reference defects through the live slots, in both directions,
     and refuses to arm on ``not-invoked`` (attached and blind) or
     ``cries-wolf`` (fires on a value that is fine).
+
+    AND THE FAILURE PATH IS OWNER-SCOPED TOO, which is the same discipline one
+    layer down. ``arm()`` may not raise, so it tidies up after a fault — and
+    it tidies up ``missing``, the faces THIS call installed, never
+    ``_installed``. Restoring everything installed is the session-scope defect
+    arriving through the exception door: a second owner's ``arm()`` faults and
+    the handler takes the first owner's perimeter out from under it, leaving
+    it registered, told ``armed``, and no longer refusing anything.
     """
     from stelling._tripwire import _adapter_jax as adapter
 
@@ -504,12 +512,15 @@ def arm(faces=FACES, owner=None):
     if unknown:
         return _status("no-face", f"this perimeter has no face named {unknown}")
 
+    # BOUND BEFORE THE `try`, because the handler at the bottom reads it and a
+    # handler that can raise `NameError` is a handler that does not run.
+    missing: list = []
     try:
         # ALREADY ARMED: register the owner, install nothing, and hand back a
         # status that says the state is real rather than one that says "0
         # slots" and leaves the caller to guess whether it is protected.
         already = [f for f in wanted if f in _installed]
-        missing = [f for f in wanted if f not in _installed]
+        missing[:] = [f for f in wanted if f not in _installed]
 
         for face in missing:
             located = adapter.perimeter_locate(face)
@@ -547,7 +558,17 @@ def arm(faces=FACES, owner=None):
         )
     except Exception as exc:  # noqa: BLE001 - a guardrail may not raise
         try:
-            for face in list(_installed):
+            # ONLY WHAT THIS CALL INSTALLED, which is `missing` and not
+            # `_installed`. Restoring everything installed is B8b's shape
+            # arriving through the exception door: OWNER-2's `arm()` faults,
+            # the handler tidies up OWNER-1's faces as well, and OWNER-1 is
+            # left registered over a perimeter that is no longer there --
+            # still holding, still believing, no longer refusing. Driven
+            # before the fix: "OWNER-1's perimeter is GONE: the reference
+            # defect was accepted", with OWNER-1 still in `_owners`. The
+            # faces this call found ALREADY armed are somebody else's and are
+            # left exactly as they were found.
+            for face in list(missing):
                 _restore_face(face)
         except Exception:  # noqa: BLE001  # pragma: no cover - defensive
             pass

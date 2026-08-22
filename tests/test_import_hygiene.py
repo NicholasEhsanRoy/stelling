@@ -304,6 +304,93 @@ def test_importing_stelling_pulls_in_no_jax():
         assert got["visible_when_forced"] is True, got
 
 
+def test_importing_the_conftest_pulls_in_no_jax_and_arms_nothing():
+    """``tests/conftest.py`` is imported by all 146 test files, zero-dep too.
+
+    IT GREW A PERIMETER HELPER, and that is why this exists.
+    :func:`conftest.lowered_perimeter` takes the dunder perimeter down for a
+    block and hands it back; it is entered by three files that all gate on
+    jax, but it lives in the one module every session imports **before
+    collection**, in every lane. Three properties, and none of them is
+    self-evident from reading it:
+
+    * importing the conftest imports **no jax and no numpy** — the helper
+      binds ``stelling._tripwire.perimeter`` inside the function body, and
+      that module is itself numpy-free by construction;
+    * importing it **arms nothing** — it is a plain function, not a fixture,
+      so nothing runs unless a caller enters the block;
+    * with nothing armed, entering the block is a **no-op** that yields
+      ``()`` — which is what every dial-off and zero-dep session does if it
+      reaches it at all.
+
+    Measured in a fresh interpreter with the tree's ``tests/`` on the path,
+    because this suite's own process has jax loaded long before this runs, and
+    with a positive control for exactly :func:`test_importing_stelling_pulls_
+    in_no_jax`'s reason.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(
+            """
+            import importlib.util, json, sys
+
+            import conftest
+
+            out = {
+                "file": conftest.__file__,
+                "heavy_modules": sorted(
+                    m for m in sys.modules
+                    if m.split(".")[0] in ("jax", "jaxlib", "numpy", "ml_dtypes")
+                ),
+                "jax_installed": importlib.util.find_spec("jax") is not None,
+            }
+            # entering the block with nothing armed must do nothing at all,
+            # and must not import anything heavy on the way
+            with conftest.lowered_perimeter() as lowered:
+                out["yielded"] = list(lowered)
+            out["heavy_after_entering"] = sorted(
+                m for m in sys.modules
+                if m.split(".")[0] in ("jax", "jaxlib", "numpy", "ml_dtypes")
+            )
+            from stelling._tripwire import perimeter
+            out["armed_faces"] = list(perimeter.armed_faces())
+            out["owners"] = perimeter.owners()
+            if out["jax_installed"]:
+                __import__("jax")
+                out["visible_when_forced"] = "jax" in sys.modules
+            print(json.dumps(out))
+            """
+        )],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join([str(REPO / "tests"), str(SRC)]),
+            "JAX_PLATFORMS": "cpu",
+        },
+    )
+    assert proc.returncode == 0, f"probe crashed:\n{proc.stdout}\n{proc.stderr}"
+    got = json.loads(proc.stdout.strip().splitlines()[-1])
+
+    assert Path(got["file"]).resolve().parent == REPO / "tests", got
+    assert got["heavy_modules"] == [], (
+        "importing tests/conftest.py pulled in " + ", ".join(got["heavy_modules"])
+        + ". Every test file in this tree imports it, the zero-dep lane "
+        "included, so anything it reaches at module scope is a dependency of "
+        "collection itself."
+    )
+    assert got["yielded"] == [], got
+    assert got["heavy_after_entering"] == [], (
+        "entering lowered_perimeter() with nothing armed imported "
+        + ", ".join(got["heavy_after_entering"])
+    )
+    assert got["armed_faces"] == [] and got["owners"] == 0, (
+        f"importing the conftest and entering the helper left state behind: {got}"
+    )
+    if got["jax_installed"]:
+        assert got["visible_when_forced"] is True, got
+
+
 def _module_level_statements(tree: ast.Module):
     """Module-level statements, descending through module-level compound
     statements (if/try/with/for/while) but never into function or class

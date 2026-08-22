@@ -24,13 +24,13 @@ Measured over ``README.md`` + ``docs/*.md``, and pinned by
       EXECUTED (exit 0 required)                    30
         marked run-only — output not compared        3
         OUTPUT COMPARED against a fence             27
-    plain ``` fences                                70
+    plain ``` fences                                71
       consumed as an example's claimed output       27
-      HAND-WRITTEN, compared to nothing             43
+      HAND-WRITTEN, compared to nothing             44
 
 So the claim this file earns is: *every runnable example runs, and 27 of
 the 30 have their stdout compared byte for byte after a narrow
-normalisation.* The 43 unattached fences — a render pasted into prose, a
+normalisation.* The 44 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
 
@@ -195,8 +195,15 @@ EXPECTED_INVENTORY = {
     # which is the gap that program has in jax's DEFAULT configuration.
     # Measured, hand-written, attached to nothing;
     # `tests/test_tripwire_eager.py` re-drives every line of it.
-    "plain_fences": 70,
-    "plain_unattached": 43,
+    #
+    # B17 fixup added one, same page and same reason: the narrowing
+    # perimeter's own section now quotes what the dial reports over THIS
+    # repository's suite -- armed, the denominator, the permitted count and
+    # the pass line. Hand-written from a measured run and attached to
+    # nothing; `tests/test_narrowing_perimeter.py` and the whole-suite drive
+    # in the commit message are what hold the figures down.
+    "plain_fences": 71,
+    "plain_unattached": 44,
 }
 
 _MARKER = re.compile(r"<!--\s*doc-example:\s*(illustrative|run-only)\s*-->")

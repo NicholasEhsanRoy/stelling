@@ -41,6 +41,7 @@ FIVE THINGS THIS FILE IS FOR, and they are five different failures:
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import hashlib
 import io
@@ -58,7 +59,11 @@ jnp = pytest.importorskip("jax.numpy")
 import numpy as np  # noqa: E402
 
 import stelling  # noqa: E402
-from conftest import deterministic_order_args, tripwire_plugin_args  # noqa: E402
+from conftest import (  # noqa: E402
+    deterministic_order_args,
+    lowered_perimeter,
+    tripwire_plugin_args,
+)
 from stelling import _tripwire  # noqa: E402
 from stelling._tripwire import _adapter_jax as adapter  # noqa: E402
 from stelling._tripwire import _probe, perimeter, prop_guard, report  # noqa: E402
@@ -81,23 +86,92 @@ EXACT = 1000
 
 @pytest.fixture(autouse=True)
 def _isolate():
-    """Never leave the perimeter armed for the rest of the suite.
+    """Give this test the perimeter to itself, and hand back WHAT IT FOUND.
 
     ``runpytest`` is in-process by default, so a nested session in this file
     arms slots in THIS interpreter; and a test that drives a refusal leaves
-    counters moved. Both are put back, and the slot identity is asserted on
-    the way out so that a leak in one test is reported by that test rather
-    than by whatever runs next.
+    counters moved. Both are put back.
+
+    **AND THE RESTORE IS CONDITIONAL, WHICH IS THIS BATCH'S OWN SUBJECT
+    TURNED ON THIS FILE.** It used to be ``for face in _installed:
+    _restore_face(face)`` beside ``_owners.clear()`` -- an unconditional
+    release, which is exactly the asymmetry ``perimeter.arm(owner=...)``
+    exists to prevent, aimed at the session's own hold. Under
+    ``--stelling-narrowing-perimeter=error`` the plugin arms under the
+    session's ``Config`` before any test runs; this file sorts **71 of 146**,
+    so its FIRST test unhooked that hold and the ~4,300 tests after it ran
+    unprotected with nothing red. Driven at ``e6968fe``, the documented
+    dial-on command over the whole suite reported::
+
+        NOT ARMED [detached] ... 0 integer literal(s) ... were checked
+
+    -- the beautiful zero, produced by this fixture rather than by the tree.
+
+    So the hold that was there on the way in is there again on the way out, by
+    identity, and the assertion at the bottom is against that rather than
+    against ``()``.
+
+    THE SESSION'S HOLD IS TAKEN DOWN FOR THE WINDOW rather than left standing
+    over the test, and that is a decision rather than an oversight: half of
+    this file asserts ``owners() == 0``, ``live_check() == "detached"`` or a
+    slot's identity against jax's own function, and every one of those is
+    false while an outer hold is live -- so left standing it would turn a file
+    about the module into a file about which flags the suite was run with. The
+    window is one test long and the hand-back goes through
+    ``conftest.lowered_perimeter``, which re-arms through the shipped
+    ``arm()`` with its self-check and RAISES if it cannot: a hand-back that
+    failed must be a red test here rather than a silent hole in everything
+    after it. That helper is shared with
+    ``tests/test_tripwire_gate_coverage.py`` so that this operation has one
+    implementation and not two hand-rolled ones.
     """
-    before = perimeter.armed_faces()
-    yield
-    for face in list(perimeter._installed):
-        perimeter._restore_face(face)
-    perimeter._owners.clear()
-    perimeter.reset_counters()
-    prop_guard.UNKNOWN_SLOTS.clear()
-    prop_guard.INTERNAL_DECLINES.clear()
-    assert perimeter.armed_faces() == before == ()
+    faces_before = perimeter.armed_faces()
+    owners_before = list(perimeter._owners)
+    counters_before = (
+        perimeter.CHECKS,
+        perimeter.FINDINGS,
+        perimeter.INTERNAL_ERRORS,
+        dict(perimeter.PERMITTED),
+    )
+    declines_before = collections.Counter(prop_guard.INTERNAL_DECLINES)
+    unknown_before = set(prop_guard.UNKNOWN_SLOTS)
+
+    with lowered_perimeter() as lowered:
+        assert lowered == faces_before
+        # ZEROED FOR THE WINDOW, and written back at the bottom -- the same
+        # save/run/write-back `selfcheck()` performs, for the same reason.
+        # These tests count their own fires (`assert perimeter.FINDINGS == 0`
+        # is how seven of them say "nothing was refused here"), and with the
+        # dial on they would otherwise start from whatever the 70 files before
+        # this one had accumulated. Zeroing only the window keeps both
+        # readings true: the test counts itself, and the session's denominator
+        # is not spent on it.
+        perimeter.reset_counters()
+        prop_guard.UNKNOWN_SLOTS.clear()
+        prop_guard.INTERNAL_DECLINES.clear()
+        try:
+            yield
+        finally:
+            # THE TEST'S OWN LEFTOVERS FIRST, so that the hand-back below is
+            # re-arming from nothing rather than over whatever this test left.
+            for face in list(perimeter._installed):
+                perimeter._restore_face(face)
+            del perimeter._owners[:]
+            perimeter.CHECKS = counters_before[0]
+            perimeter.FINDINGS = counters_before[1]
+            perimeter.INTERNAL_ERRORS = counters_before[2]
+            perimeter.PERMITTED.clear()
+            perimeter.PERMITTED.update(counters_before[3])
+            prop_guard.UNKNOWN_SLOTS.clear()
+            prop_guard.UNKNOWN_SLOTS.update(unknown_before)
+            prop_guard.INTERNAL_DECLINES.clear()
+            prop_guard.INTERNAL_DECLINES.update(declines_before)
+    assert perimeter.armed_faces() == faces_before, (
+        "this test did not hand the perimeter back as it found it"
+    )
+    assert [held is was for held, was in zip(perimeter._owners, owners_before)] == (
+        [True] * len(owners_before)
+    ), "the owner list came back holding different objects"
 
 
 def _tracer_type():
@@ -200,6 +274,92 @@ def test_the_in_repo_zero_size_comparison_stays_green_with_the_perimeter_armed()
     with perimeter.armed(("tracer",)) as status:
         assert status.armed, status.explanation
         assert bool(jnp.all(empty >= -3))
+
+
+def test_one_transient_fault_does_not_blind_the_guard_for_the_rest_of_the_process():
+    """The memo must not keep a value the call did not compute.
+
+    ``prop_guard._target_dtype`` caches on ``(dtype, is-float-slot, x64)`` and
+    used to write into that cache on **every** path, its own ``except`` branch
+    included. So one transient fault cached ``None`` for that key and the
+    guard was blind on it for the rest of the process, having counted the
+    failure exactly **once** -- which is worse than an uncounted failure,
+    because ``INTERNAL_DECLINES`` then says ``1`` and the report's "these
+    figures are a lower bound" sentence understates the hole by however long
+    the process lives.
+
+    **THE FAULT IS A PUBLIC, DOCUMENTED jax API AND NOT A MONKEYPATCH.** The
+    ``truediv`` branch asks jax for the promotion by allocating
+    ``jnp.zeros((0,), dt) / 1``; ``jax.transfer_guard("disallow")`` -- which
+    real code uses to catch stray host-to-device transfers -- makes that
+    allocation raise. Inside the window the guard declining is CORRECT: the
+    program itself cannot run there. The defect is entirely what happens after
+    the window closes, which is why the drive has three phases and the middle
+    one asserts a decline rather than a refusal.
+
+    Driven at ``e6968fe``, jax 0.11.0, CPU, ``JAX_ENABLE_X64=0``, with the
+    memo write as it was::
+
+        AFTER the window, the reference defect fires 0 of 20
+        declines: {'JaxRuntimeError': 1}   checks: 21   findings: 0
+        cache after window: {('float32', True, False): None}
+
+    -- twenty-one checks, one of them declined and counted, twenty of them
+    silently answered "nothing wrong" out of a memo, and a report whose
+    "partly unmeasured" sentence names **one**. With ``return None`` on that
+    branch, the same drive::
+
+        AFTER the window, the reference defect fires 20 of 20
+        declines: {'JaxRuntimeError': 1}   checks: 22   findings: 20
+        cache after window: {}
+    """
+    guarded = pytest.importorskip("jax").transfer_guard
+    x = jnp.zeros((3,), jnp.float32)
+    # 16777219 is the first odd integer above float32's 2**24 contiguity, so
+    # `x / 16777219` converts it to 16777220.0 -- a literal that does not
+    # exist in the program jax runs, on the one slot whose promotion is asked
+    # by ALLOCATING.
+    literal = 16777219
+
+    def fires() -> bool:
+        try:
+            x / literal
+        except perimeter.NarrowingError:
+            return True
+        except BaseException:  # noqa: BLE001 - jax's own refusal, not ours
+            return False
+        return False
+
+    with perimeter.armed(("array",)) as status:
+        assert status.armed, status.explanation
+        # 1 -- the control, before any fault: the guard is live on this key.
+        prop_guard._TARGET_CACHE.clear()
+        prop_guard.INTERNAL_DECLINES.clear()
+        assert fires(), "the reference defect did not fire before the fault"
+
+        # 2 -- one transient fault, through the public API. The DECLINE is
+        # correct here and is what makes phase 3 a test of the memo rather
+        # than of the guard.
+        prop_guard._TARGET_CACHE.clear()
+        prop_guard.INTERNAL_DECLINES.clear()
+        with guarded("disallow"):
+            assert not fires()
+        assert sum(prop_guard.INTERNAL_DECLINES.values()) == 1, (
+            f"the fault was not counted: {dict(prop_guard.INTERNAL_DECLINES)}"
+        )
+
+        # 3 -- the fault is CLEARED, and the guard must be live again. Twenty
+        # and not one: a single retry could pass on a cache that happened to
+        # be evicted, and the shipped defect was permanent rather than flaky.
+        assert sum(fires() for _ in range(20)) == 20, (
+            "a single transient fault blinded the guard for the rest of the "
+            f"process; the memo holds {prop_guard._TARGET_CACHE}"
+        )
+        # ...and nothing the call did not compute is in the memo.
+        assert None not in prop_guard._TARGET_CACHE.values()
+        # The decline is still counted exactly once, so the report's lower
+        # bound is a lower bound about ONE check and not about the run.
+        assert sum(prop_guard.INTERNAL_DECLINES.values()) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -655,6 +815,249 @@ def test_a_release_by_a_stranger_while_armed_is_refused():
     assert perimeter.disarm("stranger") == "not-an-owner"
     assert tracer.__dict__["__le__"] is wrapper
     assert perimeter.disarm("P") == "restored"
+
+
+def test_a_second_owners_arm_FAILING_does_not_take_the_first_owners_perimeter_out():
+    """B8b's shape arriving through the exception door, driven both ways.
+
+    ``arm()`` may not raise, so it has a handler that tidies up after itself.
+    That handler used to restore ``list(_installed)`` -- **everything
+    installed**, not what this call installed -- so a fault inside OWNER-2's
+    ``arm()`` took OWNER-1's faces out from under it. OWNER-1 stayed in
+    ``_owners``, ``arm()`` had already told it ``armed``, and nothing was red:
+    a holder that believes it is watched and is not, which is the whole
+    campaign in one handler.
+
+    Driven at ``e6968fe`` with the handler as it was::
+
+        OWNER-1 arm: armed | refusing: True
+        OWNER-2 arm: unexpected:RuntimeError
+        owners: ['OWNER-1'] faces: ()
+        OWNER-1 still refusing: False
+
+    The fault is injected into ``selfcheck`` because that is the one call
+    ``arm()`` makes AFTER the slots are installed -- which is what makes the
+    handler's restore reachable at all -- and because a fault anywhere in
+    there must have the same answer. What the fix asserts is not "no restore"
+    but "only what this call installed": the second half below faults an
+    ``arm()`` that installs the ARRAY face over an already-armed tracer face
+    and requires the array face to be gone and the tracer face to be intact.
+    """
+    tracer = _tracer_type()
+    original = tracer.__dict__["__le__"]
+
+    def _refuses() -> bool:
+        jax.clear_caches()
+        try:
+            jax.make_jaxpr(lambda z: z <= MOVED)(jnp.zeros((2,), jnp.float32))
+        except perimeter.NarrowingError:
+            return True
+        return False
+
+    assert perimeter.arm(("tracer",), owner="OWNER-1").armed
+    wrapper = tracer.__dict__["__le__"]
+    assert _refuses(), "the control did not fire before the fault"
+
+    def _boom(faces=()):
+        raise RuntimeError("FORCED: something inside arm() went wrong")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(perimeter, "selfcheck", _boom)
+        second = perimeter.arm(("tracer",), owner="OWNER-2")
+    assert second.code == "unexpected:RuntimeError", second
+    assert not second.armed
+
+    # OWNER-1 IS STILL WATCHING, and that is asserted as a REFUSAL rather than
+    # as a bookkeeping entry: a hold that survives in `_owners` while the slot
+    # is back to jax's own function passes every other assertion here.
+    assert perimeter.armed_faces() == ("tracer",)
+    assert tracer.__dict__["__le__"] is wrapper
+    assert perimeter.owners() == 1
+    assert _refuses(), "OWNER-1's perimeter was taken out by OWNER-2's fault"
+
+    # ...and the other direction: what the failing call DID install is gone.
+    array_type = _array_type()
+    array_original = array_type.__dict__["__add__"]
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(perimeter, "selfcheck", _boom)
+        third = perimeter.arm(("tracer", "array"), owner="OWNER-3")
+    assert third.code == "unexpected:RuntimeError", third
+    assert perimeter.armed_faces() == ("tracer",), "the array face was left behind"
+    assert array_type.__dict__["__add__"] is array_original
+    assert tracer.__dict__["__le__"] is wrapper
+    assert _refuses()
+
+    assert perimeter.disarm("OWNER-1") == "restored"
+    assert tracer.__dict__["__le__"] is original
+
+
+# ---------------------------------------------------------------------------
+# The lowering helper, which is now load-bearing for this whole file
+# ---------------------------------------------------------------------------
+#
+# `_isolate` takes the session's hold DOWN for each test's window and hands it
+# back. That makes the hand-back the thing every later test's protection rests
+# on, so it is driven here rather than trusted: three ways for it to come back
+# WRONG, each of which reads as "armed" to every check but one.
+
+
+def test_lowering_the_perimeter_with_nothing_armed_is_a_no_op():
+    """The zero-dep and dial-off shape, which is the common one.
+
+    Every test file in this tree imports ``conftest``, and the overwhelming
+    majority of sessions never arm anything. The helper must do nothing at all
+    in that case -- not arm, not disarm, not raise -- and yield ``()`` so a
+    caller can tell.
+    """
+    assert perimeter.armed_faces() == ()
+    with lowered_perimeter() as lowered:
+        assert lowered == ()
+        assert perimeter.armed_faces() == ()
+        assert perimeter.owners() == 0
+    assert perimeter.armed_faces() == ()
+    assert perimeter.owners() == 0
+
+
+def test_lowering_and_handing_back_returns_the_SAME_originals_and_owners():
+    """The positive control, and it is about identity rather than status.
+
+    Inside the block the slots are jax's own function -- that is what the
+    lowering is FOR -- and after it the hold is back under the same owner
+    objects, with the same saved originals. A helper that re-armed over
+    something else would satisfy ``armed_faces()``, ``owners()`` and
+    ``live_check()`` alike.
+    """
+    tracer, array_type = _tracer_type(), _array_type()
+    original = tracer.__dict__["__le__"]
+    owner = object()
+    assert perimeter.arm(perimeter.FACES, owner=owner).armed
+    wrapper = tracer.__dict__["__le__"]
+    assert wrapper is not original
+
+    with lowered_perimeter() as lowered:
+        assert lowered == perimeter.FACES
+        assert perimeter.armed_faces() == ()
+        assert perimeter.owners() == 0
+        assert tracer.__dict__["__le__"] is original, "the lowering left a wrapper"
+        assert array_type.__dict__["__add__"] is not None
+        # ...and it really is unwatched in here, which is the point of it
+        jax.clear_caches()
+        jax.make_jaxpr(lambda z: z <= MOVED)(jnp.zeros((2,), jnp.float32))
+
+    assert perimeter.armed_faces() == perimeter.FACES
+    assert perimeter.live_check() == "armed"
+    assert perimeter.owners() == 1
+    assert perimeter._owners[0] is owner, "a different owner object came back"
+    assert perimeter._installed["tracer"]["slots"]["__le__"][0] is original
+    jax.clear_caches()
+    with pytest.raises(perimeter.NarrowingError):
+        jax.make_jaxpr(lambda z: z <= MOVED)(jnp.zeros((2,), jnp.float32))
+    assert perimeter.disarm(owner) == "restored"
+    assert tracer.__dict__["__le__"] is original
+
+
+def test_a_hand_back_that_re_arms_over_an_INTERLOPER_is_refused():
+    """The silent partial, and the only reading that can see it.
+
+    Something binds over a slot while the perimeter is down. The hand-back's
+    ``arm()`` then captures THAT as the slot's original and succeeds --
+    including the self-check, because an interloper which delegates still
+    refuses the reference defect. ``status.armed`` is True, ``armed_faces()``
+    is right, ``live_check()`` says ``armed``, and the object a later
+    ``disarm()`` restores is no longer jax's: the interloper is installed for
+    the rest of the process with nothing red.
+
+    Driven both ways -- with the identity check removed, the block below
+    completes silently and ``tracer.__dict__["__le__"] is original`` is False
+    after the final disarm.
+    """
+    tracer = _tracer_type()
+    original = tracer.__dict__["__le__"]
+    owner = object()
+    assert perimeter.arm(("tracer",), owner=owner).armed
+
+    def interloper(a, b):
+        return original(a, b)
+
+    with pytest.raises(AssertionError) as caught:
+        with lowered_perimeter():
+            tracer.__le__ = interloper
+    assert "re-armed over a DIFFERENT object" in str(caught.value)
+    assert "unprotected" in str(caught.value)
+
+    # AND THE MESS IS LEFT VISIBLE RATHER THAN TIDIED. The helper's job is to
+    # refuse, not to guess which of the two objects the author wanted; this
+    # test puts jax's own function back itself, which is what a human would
+    # have to do.
+    perimeter.disarm(owner)
+    tracer.__le__ = original
+    assert tracer.__dict__["__le__"] is original
+
+
+def test_a_hand_back_that_re_arms_only_SOME_of_the_faces_is_refused(monkeypatch):
+    """One face back, the other not — and ``arm()`` saying ``armed`` to it.
+
+    ``status.armed`` is a statement about the faces that call asked for. A
+    hand-back that asked for one face when two were lowered gets a perfectly
+    honest ``armed`` back and leaves half a perimeter, which is not a smaller
+    perimeter but a hole.
+    """
+    owner = object()
+    assert perimeter.arm(perimeter.FACES, owner=owner).armed
+    real_arm = perimeter.arm
+    monkeypatch.setattr(
+        perimeter, "arm", lambda faces=perimeter.FACES, owner=None: real_arm(
+            ("tracer",), owner=owner
+        )
+    )
+    with pytest.raises(AssertionError) as caught:
+        with lowered_perimeter():
+            pass
+    assert "faces came back as ('tracer',)" in str(caught.value)
+    monkeypatch.undo()
+    perimeter.disarm(owner)
+
+
+def test_a_hand_back_that_cannot_re_arm_at_all_is_refused(monkeypatch):
+    """The total failure, which is the one ``status.armed`` already saw."""
+    owner = object()
+    assert perimeter.arm(("tracer",), owner=owner).armed
+    monkeypatch.setattr(adapter, "perimeter_locate", lambda face: "no-type")
+    with pytest.raises(AssertionError) as caught:
+        with lowered_perimeter():
+            pass
+    assert "arm() refused [no-type]" in str(caught.value)
+    monkeypatch.undo()
+
+
+def test_an_exception_INSIDE_the_block_still_hands_the_perimeter_back():
+    """There is no ``finally`` in a pair of calls, and this is the block's.
+
+    The block's own exception is what propagates -- a hand-back that swallowed
+    it would hide the failure the test was actually reporting -- and the hold
+    is back before it does.
+    """
+    tracer = _tracer_type()
+    owner = object()
+    assert perimeter.arm(("tracer",), owner=owner).armed
+    wrapper_before = tracer.__dict__["__le__"]
+
+    with pytest.raises(ZeroDivisionError):
+        with lowered_perimeter():
+            assert perimeter.armed_faces() == ()
+            raise ZeroDivisionError("something in the middle")
+
+    assert perimeter.armed_faces() == ("tracer",)
+    assert perimeter.live_check() == "armed"
+    assert perimeter.owners() == 1
+    assert perimeter._owners[0] is owner
+    assert tracer.__dict__["__le__"] is not wrapper_before, (
+        "the same wrapper came back, so nothing was actually lowered"
+    )
+    jax.clear_caches()
+    with pytest.raises(perimeter.NarrowingError):
+        jax.make_jaxpr(lambda z: z <= MOVED)(jnp.zeros((2,), jnp.float32))
+    assert perimeter.disarm(owner) == "restored"
 
 
 # ---------------------------------------------------------------------------

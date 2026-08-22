@@ -24,6 +24,7 @@ jax = pytest.importorskip("jax")
 jnp = pytest.importorskip("jax.numpy")
 
 from stelling import _tripwire  # noqa: E402
+from stelling._tripwire.eager import expected_truncation  # noqa: E402
 from stelling.harness import any_array, assert_  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
 
@@ -88,11 +89,24 @@ def test_verified_with_tripwire_armed_implies_no_narrowing():
 
 
 def test_gate_fires_on_narrowing():
-    """Direct: a harness with a narrowing returns UNKNOWN."""
+    """Direct: a harness with a narrowing returns UNKNOWN.
+
+    THE COMPARISON IS DECLARED FOR MODE 3, and it is a different narrowing
+    from the one under test. The subject here is ``x + 256`` on ``int8``,
+    which the gate sees in the jaxpr; the literal ``200`` in ``y < 200`` is a
+    second, incidental one -- ``y`` is ``int8`` and 200 is not in its range,
+    so the comparison the machine runs is ``y < -56``. The dunder perimeter is
+    right to refuse it and the region says why rather than moving the number,
+    because ``200`` is what makes the bound sit above the wrapped value.
+    """
     def bad():
         x = any_array((2,), jnp.int8, (-50, 50))
         y = x + 256
-        assert_(y < 200)
+        with expected_truncation(
+            "the int8 bound 200 is incidental to this test's subject and "
+            "runs as -56; the subject is the x + 256 the gate must see"
+        ):
+            assert_(y < 200)
 
     v = check(bad, vacuity_mode="inputs-only")
     assert v.status == "UNKNOWN"
@@ -185,7 +199,14 @@ def test_gate_inactive_when_tripwire_not_armed():
     def has_narrowing():
         x = any_array((2,), jnp.int8, (-50, 50))
         y = x + 256
-        assert_(y < 200)
+        # The same incidental int8 bound as `test_gate_fires_on_narrowing`,
+        # declared for the same reason: 200 runs as -56 and the subject of
+        # this test is that the GATE is transparent with the tripwire off.
+        with expected_truncation(
+            "the int8 bound 200 is incidental to this test's subject and "
+            "runs as -56; the subject is the gate being transparent"
+        ):
+            assert_(y < 200)
 
     v = check(has_narrowing, vacuity_mode="inputs-only")
     assert v.status != "UNKNOWN" or "trace unfaithful" not in (v.notes[0] if v.notes else "")
