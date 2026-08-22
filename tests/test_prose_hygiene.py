@@ -990,6 +990,20 @@ def test_every_bare_test_name_in_shipped_prose_resolves():
     reader following that citation would have found a test asserting the
     reverse of the claim it was offered as support for.
 
+    **AND HERE IS THE PIN FAILING, WHICH IS THE ONLY THING THAT MAKES IT A
+    PIN.** This file was dropped into a clean `5ad906f` checkout — the tree
+    this branch started from — with the three defect
+    names removed from :data:`_NAMES_DECLARED_ABSENT` and the other twelve
+    left in place. It reds, naming those three and **nothing else**:
+
+        SOUNDNESS.md:2923: `test_an_assume_after_the_assert_is_pinned_on_BOTH_legs`
+        SOUNDNESS.md:2925: `test_the_two_legs_do_not_yet_agree_on_assume_ordering`
+        SOUNDNESS.md:9980: `test_the_declaration_reader_is_a_FUNCTION_and_not_a_single_READ`
+
+    `1 failed, 6 passed`. So the twelve exemptions are the whole of the
+    false-positive surface on the tree this was written against, and the
+    three are the whole of what it catches there.
+
     **WHY THIS IS NOT A SECOND `path::name` CHECKER.** It resolves a NAME,
     against every test function and every test module under `tests/`, with no
     path to key on — which is the only thing that can read the form the prose
