@@ -6959,9 +6959,38 @@ and a count over entries that happened to say something is not a count.
   1-D contraction's box is checked against the exact rational image
   `2·[min corner, max corner]` — and, because every value in the pool is a
   small dyadic, is asserted EQUAL to it, not merely containing.
-  0 failures. The infinite-endpoint confinement is shared with `mul` by
+  0 failures. The infinite-endpoint rule is shared with `mul` by
   construction and pinned by one test that compares the two on the same
   operands.
+
+  *That read "the infinite-endpoint CONFINEMENT", and the thing it named
+  no longer exists.* At the time, an infinite endpoint anywhere in the
+  operand quadruple dropped all four corners onto the unconditional bump,
+  and "confinement" meant that `dot_general` confined it the same way
+  `mul` did. The gate is per CORNER now (`stelling.interval._mul_corner`):
+  an infinite operand costs only the corners it touches, and `0·±inf = 0`
+  names a point that takes no slack at all. What is unchanged, and what
+  the sentence was really about, is the SHARING — `dot_general` calls
+  `_mul_corners`, so it cannot drift from `mul` again the way it did in
+  B5-2. The test is
+  `tests/test_ieee_zero_divisor_and_mul_exact.py::test_dot_general_shares_muls_corner_boundary_wherever_it_is`,
+  renamed for exactly this reason: the point is the agreement, not where
+  the boundary sits.
+
+  **A SECOND LINE IS STALE FROM THE SAME CHANGE AND IS DELIBERATELY LEFT.**
+  The M16 entry under the heading *0.2.0 soundness-fix detail (routed from
+  CHANGELOG.md)* still says `mul` is "confined the same way (an infinite
+  endpoint keeps the bump, because `Fraction(inf)` raises and `0·±inf = 0`
+  is an endpoint convention)". That is now false in both clauses: the gate
+  is per corner, and the convention corner is returned as an exact
+  `Fraction(0)` precisely so it takes no bump. It sits INSIDE the
+  hash-pinned routed region, so correcting it costs a `dest_sha256` update
+  plus a declared `not_carried` edit against `CHANGELOG.md`'s own copy —
+  a routing amendment, in a commit whose subject is numeric rounding.
+  Deferred on that ground and recorded here so it is a known debt rather
+  than an unnoticed one. **The line above was NOT blocked by the routing
+  guard** — it is in `## Log`, outside the pinned region — and was simply
+  missed; that is why it is fixed and this one is not.
 
   **The interaction with B5-1, said plainly**: a `dot_general`-floored sum
   of squares now reaches the `div` transfer with a `[0, S]` box exactly as

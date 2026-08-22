@@ -107,21 +107,24 @@ _CROSS = f"{PROPERTY_DIR}/test_cross_series.py"
 # static registry check kept passing (the text existed) while the mutant
 # had stopped masking anything. A mutation that must stay live has to name
 # the code the control's own query executes.
-_MUL_CORNERS_OLD = """    if _exactable(alo, ahi, blo, bhi):
-        ex = [Fraction(x) * Fraction(y)
-              for x in (alo, ahi) for y in (blo, bhi)]
-        return _exact_down(min(ex)), _exact_up(max(ex))
-    products = (
-        _prod(alo, blo), _prod(alo, bhi), _prod(ahi, blo), _prod(ahi, bhi)
-    )
-    return _down(min(products)), _up(max(products))"""
+# THE MUTATION IS THE SAME ONE IT HAS ALWAYS BEEN -- interval
+# multiplication over the two SAME-CORNER products instead of all four,
+# which is non-monotone in the input box. Only the text it patches moved:
+# B23 made the exactness gate per-corner (`_mul_corner`) instead of asking
+# it of the whole operand quadruple, so `_mul_corners` no longer has two
+# arms to mutate. It has one, and the mutant drops the cross terms from it.
+#
+# Re-targeting a mutant is where a positive control quietly stops proving
+# anything, so this pair was re-driven and not merely re-typed: with
+# `_MUL_CORNERS_NEW` applied, `mul([-1, 0.5], [-1, 0.5])` returns
+# `(0.25, 1.0)` for an image that is `[-0.5, 1.0]` -- the cross term
+# `-1 * 0.5` gone, the box no longer containing it, and the non-monotone
+# behaviour both controls exist to catch back in the tree.
+_MUL_CORNERS_OLD = """    ex = [_mul_corner(x, y) for x in (alo, ahi) for y in (blo, bhi)]
+    return _extreme_down(min(ex)), _extreme_up(max(ex))"""
 
-_MUL_CORNERS_NEW = """    if _exactable(alo, ahi, blo, bhi):
-        ex = [Fraction(x) * Fraction(y)
-              for x, y in ((alo, blo), (ahi, bhi))]
-        return _exact_down(min(ex)), _exact_up(max(ex))
-    products = (_prod(alo, blo), _prod(ahi, bhi))
-    return _down(min(products)), _up(max(products))"""
+_MUL_CORNERS_NEW = """    ex = [_mul_corner(x, y) for x, y in ((alo, blo), (ahi, bhi))]
+    return _extreme_down(min(ex)), _extreme_up(max(ex))"""
 
 
 CONTROLS = (

@@ -594,14 +594,29 @@ _op("mul", CORRECTLY_ROUNDED,
     ],
     quoted=(0,))
 
+# The `[1,1] / [2,inf]` case is the HALF-INFINITE arm, and it is in this
+# row because it belongs to this discipline and used not to be treated as
+# though it did. The exactness gate asked about the whole operand quadruple,
+# so one infinite endpoint dropped ALL FOUR corners onto the unconditional
+# bump and this returned `(-5e-324, 0.5000000000000001)` for an image that
+# is exactly `[0, 1/2]` -- a strictly-positive quotient with a negative
+# lower endpoint. It fits this row's case shape because the infinity is in
+# the DIVISOR, where `x / +-inf` is exactly 0 in the limit, so the image is
+# finite at both ends and both ends are `Fraction`s; the arms whose image
+# REACHES infinity cannot be written here at all and are driven by
+# `test_a_half_infinite_operand_costs_only_the_corners_it_touches`, which
+# can express an infinite endpoint and this case shape cannot.
 _op("div", CORRECTLY_ROUNDED,
-    "exact Fraction quotients on the finite, non-straddling case",
+    "exact Fraction quotients on the non-straddling case, corner by corner",
     lambda: [
         ("[0.25,0.5] / [0.25,0.5]", *_e(iv.div(scalar(0.25, 0.5),
                                                scalar(0.25, 0.5))),
          Fraction(1, 2), Fraction(2)),
         ("1 / 3", *_e(iv.div(iv.point(1.0), iv.point(3.0))),
          Fraction(1, 3), Fraction(1, 3)),
+        ("[1,1] / [2,inf] (finite corner beside an infinite one)",
+         *_e(iv.div(iv.point(1.0), scalar(2.0, INF))),
+         Fraction(0), Fraction(1, 2)),
     ],
     quoted=(0,))
 
@@ -638,6 +653,9 @@ _op("boundary_div", CORRECTLY_ROUNDED,
          Fraction(1, 8), Fraction(1, 4)),
         ("1 / 3", *_e(iv.boundary_div(iv.point(1.0), iv.point(3.0))),
          Fraction(1, 3), Fraction(1, 3)),
+        ("[1,1] / [2,inf] (finite corner beside an infinite one)",
+         *_e(iv.boundary_div(iv.point(1.0), scalar(2.0, INF))),
+         Fraction(0), Fraction(1, 2)),
     ])
 
 
@@ -666,44 +684,6 @@ _op("pow_", ONE_ULP_BUMPED,
                                                scalar(3.0, 3.0))),
               Fraction(8), Fraction(8))],
     quoted=(0,))
-
-# THE MULTI-COLUMN CASES ARE NOT DECORATION. This row used to drive exactly
-# one shape -- `(1,)`, one index, one contribution -- and the kernel branches
-# on `rowsz`, so a fix applied only where `rowsz > 1` left the rank-1 shape
-# on the unconditional bump. Measured: `scatter_add_rows` then carried TWO
-# disciplines at once -- correctly directed-rounded for a multi-column row,
-# the unconditional bump for a rank-1 one -- falsifying both this row and the
-# docstring's flat claim for half the shapes, with that tree's whole zero-dep
-# suite green at its own `2178 passed, 164 skipped`. CONTRIBUTIONS is the
-# other axis a partial fix can hide behind, and a two-step fold spends two
-# bumps rather than one, so it cannot live in a row that declares a
-# ONE-ulp bump: `test_the_scatter_add_rows_debt_is_the_one_the_code_owes`
-# drives that axis with the coarser question -- exact total, or wider?
-def _scatter_row_cases():
-    one = iv.scatter_add_rows(_vals((1,), [1.0]), _vals((1,), [1.0]), [0])
-    wide = iv.scatter_add_rows(_vals((2, 2), [1.0, 2.0, 3.0, 4.0]),
-                               _vals((1, 2), [1.0, 2.0]), [1])
-    costed = iv.scatter_add_rows(
-        iv.IntervalArray(shape=(1,), los=(0.0,), his=(0.0,)),
-        iv.IntervalArray(shape=(1,), los=(0.0,), his=(16.0,)), [0])
-    return [
-        ("[1] +=[1]", *_e(one), Fraction(2), Fraction(2)),
-        ("[0,0] += [0,16]", *_e(costed), Fraction(0), Fraction(16)),
-        ("[[1,2],[3,4]] row 1 += [1,2], column 0 (rowsz 2)",
-         *_at(wide, 2), Fraction(4), Fraction(4)),
-        ("[[1,2],[3,4]] row 1 += [1,2], column 1 (rowsz 2)",
-         *_at(wide, 3), Fraction(6), Fraction(6)),
-    ]
-
-
-_op("scatter_add_rows", ONE_ULP_BUMPED,
-    "A DEBT, not a discipline: it folds like reduce_sum and its steps are "
-    "bumped unconditionally, so the ulp buys nothing but endpoint "
-    "representation -- the M16 defect one operation over. When the "
-    "exact-Fraction route lands, this entry moves to EXACT_PER_STEP and the "
-    "docstring's debt bullets are deleted",
-    _scatter_row_cases,
-    quoted=(0, 1))
 
 
 # ---- exact per step, not per result --------------------------------------
@@ -738,6 +718,57 @@ _op("dot_general", EXACT_PER_STEP,
         lambda a: iv.dot_general(a, _vals(a.shape, [1.0] * a.shape[0]),
                                  (((0,), (0,)), ((), ()))),
         "dot_general"))
+
+
+# THE MULTI-COLUMN CASES ARE NOT DECORATION. This row used to drive exactly
+# one shape -- `(1,)`, one index, one contribution -- and the kernel branches
+# on `rowsz`, so a fix applied only where `rowsz > 1` left the rank-1 shape
+# on the unconditional bump. Measured: `scatter_add_rows` then carried TWO
+# disciplines at once -- correctly directed-rounded for a multi-column row,
+# the unconditional bump for a rank-1 one -- falsifying both this row and the
+# docstring's flat claim for half the shapes, with that tree's whole zero-dep
+# suite green at its own `2178 passed, 164 skipped`. CONTRIBUTIONS is the
+# other axis a partial fix can hide behind, and it is now the axis that
+# separates this row's two halves: one contribution is EXACT, three need not
+# be. `test_the_scatter_add_rows_debt_is_the_one_the_code_owes` drives the
+# same two axes with the coarser question -- exact total, or wider?
+def _scatter_row_cases():
+    one = iv.scatter_add_rows(_vals((1,), [1.0]), _vals((1,), [1.0]), [0])
+    wide = iv.scatter_add_rows(_vals((2, 2), [1.0, 2.0, 3.0, 4.0]),
+                               _vals((1, 2), [1.0, 2.0]), [1])
+    costed = iv.scatter_add_rows(
+        iv.IntervalArray(shape=(1,), los=(0.0,), his=(0.0,)),
+        iv.IntervalArray(shape=(1,), los=(0.0,), his=(16.0,)), [0])
+    # THE HALF THAT MAKES THIS EXACT-PER-STEP AND NOT CORRECTLY ROUNDED, and
+    # it is `reduce_sum`'s own case folded through this kernel instead: three
+    # contributions into one element, whose exact total IS representable and
+    # is STRICTLY INSIDE both endpoints. Without it this row would be
+    # indistinguishable from `CORRECTLY_ROUNDED`, which is a claim about the
+    # RESULT and is false here for `n >= 3`.
+    folded = iv.scatter_add_rows(
+        iv.IntervalArray(shape=(1,), los=(0.0,), his=(0.0,)),
+        iv.IntervalArray(shape=(3,), los=(1.0, _EPS, _EPS),
+                         his=(1.0, _EPS, _EPS)), [0, 0, 0])
+    total = Fraction(1) + 2 * _f(_EPS)
+    return [
+        ("[1] +=[1]", *_e(one), Fraction(2), Fraction(2)),
+        ("[0,0] += [0,16]", *_e(costed), Fraction(0), Fraction(16)),
+        ("[[1,2],[3,4]] row 1 += [1,2], column 0 (rowsz 2)",
+         *_at(wide, 2), Fraction(4), Fraction(4)),
+        ("[[1,2],[3,4]] row 1 += [1,2], column 1 (rowsz 2)",
+         *_at(wide, 3), Fraction(6), Fraction(6)),
+        ("[0] += [1] += [2**-53] += [2**-53]", *_e(folded), total, total),
+    ]
+
+
+_op("scatter_add_rows", EXACT_PER_STEP,
+    "each accumulation step is reduce_sum's own -- `_add_lo`/`_add_hi`, "
+    "exact-when-representable -- so ONE contribution returns the exact "
+    "total unwidened and a fold of three need not. It bumped every step "
+    "UNCONDITIONALLY until B23, which was the M16 defect one operation "
+    "over and cost a verdict at the public API",
+    _scatter_row_cases,
+    quoted=(0, 4))
 
 
 # ---- outside the outward-ℝ claim -----------------------------------------
@@ -1438,6 +1469,36 @@ def test_the_docstring_names_every_operation_a_reader_would_guess_wrong():
     There is no count here now: the set is every ``NO_ROUNDING`` and
     ``NO_ENDPOINTS`` row of the table above, and the table is enumerated
     from the module on every run.)*
+
+    **AND HERE IS THE LIMIT THIS GATE HAS, STATED RATHER THAN DISCOVERED
+    AGAIN.** It is one-directional. It asks whether each operation that
+    needs a classification IS MENTIONED beside the words naming the
+    discipline it actually carries; it never asks whether a block that
+    mentions an operation is telling the truth about it. **A FALSE
+    CLASSIFICATION IS INVISIBLE HERE** -- an operation named in a block
+    claiming a discipline it does not have satisfies this gate exactly as
+    well as one named in the right block, and satisfies it even when both
+    blocks are in the same docstring saying opposite things.
+
+    Not hypothetical, and not old: ``interval.__doc__``'s ⊤-escapes bullet
+    filed *"an infinite operand under ``mul``'s ``0·±inf = 0`` rule"* under
+    a heading reading *"every one of them is wider"*, in the same commit
+    whose *exact-when-representable* entry said the convention *"names a
+    POINT, so it is exact and takes no slack"* -- and ``mul([0, 0],
+    [1, inf])`` is ``(0.0, 0.0)``, not wider by anything. Two entries of
+    one docstring contradicting each other, with this gate green, because
+    ``mul`` is ``CORRECTLY_ROUNDED`` and so is not in
+    :data:`MUST_BE_NAMED_IN_THE_DOCSTRING` at all -- it was never being
+    asked about. Extending the gate to catch it would mean deciding, from
+    prose, which operations a block is making a claim ABOUT rather than
+    merely referring to, and that is a different instrument than this one.
+    What the replacement bullet DID get is
+    :func:`test_the_measurements_the_docstring_quotes_are_the_ones_it_would_get`:
+    the saturation pair it now quotes is driven off :data:`_SATURATION`
+    rather than typed beside it, so a digit that stops being true reddens
+    there. That is a check on the DIGITS. It is not a check on the heading
+    they sit under, and nothing here is -- which is the paragraph above,
+    repeated where a reader editing the bullet will be standing.
     """
     blocks = _doc_blocks()
     unnamed = sorted(
@@ -1456,6 +1517,192 @@ def test_the_docstring_names_every_operation_a_reader_would_guess_wrong():
         f"bumping unconditionally, which made two of that text's sentences "
         f"positively false -- and the pin at the time asked only that some "
         f"digits appear."
+    )
+
+
+# --- the half-infinite arms, which the case shape above cannot express ----
+#
+# `DISCIPLINE`'s CORRECTLY_ROUNDED rows carry the exact image as a pair of
+# `Fraction`s, and `Fraction(inf)` raises -- so no row in that table can
+# state the image of `mul([1, inf], [2, 3])`, which is `[2, inf]`. That is
+# not a cosmetic limit: it is exactly the half of the input space where the
+# exactness gate was applied to the whole operand QUADRUPLE rather than to
+# one corner, and so it is exactly the half nothing in this file could see.
+#
+# Measured on `61de794`, with that file's `DISCIPLINE` table green:
+#
+#     mul([1, inf], [2, 3])      (1.9999999999999998, inf)   image [2, inf]
+#     mul([0, inf], [0, 3])      (-5e-324, inf)              image [0, inf]
+#     div([2, inf], [2, 2])      (0.9999999999999999, inf)   image [1, inf]
+#     boundary_div([1,1],[0,inf])(-5e-324, inf)              image [0, inf]
+#
+# The second is audit 0.2.0 M16's own symptom -- a non-negative product's
+# exactly-zero corner put BELOW zero -- inside `mul`, after M16's fix, in
+# the half of the input space the fix's gate excluded. `dot_general`
+# inherited it through `_mul_corners`.
+#
+# So the finite extremum is asserted to be the correctly directed rounding
+# of the exact real one, and the infinite extremum is asserted to keep the
+# saturation posture it has always had -- BOTH, because tightening the
+# finite side is the fix and tightening the infinite side would be a
+# different decision nobody has made.
+#
+# AND ONE MORE THING, WHICH THIS LIST DID NOT PIN WHEN IT WAS WRITTEN.
+# `_mul_corner`'s last line rescues the `0 * +-inf = 0` corner as the exact
+# rational `Fraction(0)` rather than the float `0.0` `_prod` hands back,
+# *because the convention names a POINT and a point needs no slack*. Delete
+# that rescue -- leave `return p` -- and `_extreme_down`/`_extreme_up` take
+# the `_down`/`_up` saturation branch on a float zero and bump it off zero.
+# Measured on `e3a6475` with the rescue deleted: the ENTIRE zero-dep suite
+# stayed green at `2181 passed, 164 skipped`, and `mul([-inf,-1],[-3,0])`
+# came back `(-5e-324, inf)` for an image whose infimum is exactly 0 --
+# M16's own symptom again, sign-mirrored.
+#
+# **The two pins that existed were both MASKED, and the masking is the part
+# worth reading.** `min`/`max` are FIRST-WINS on a tie, and `Fraction(0)`
+# compares equal to a float `0.0`. In `mul([0,0],[1,inf])` the corner list
+# is `[0*1, 0*inf, 0*1, 0*inf]` and in `mul([0,inf],[0,3])` -- the row
+# directly above -- it is `[0*0, 0*3, inf*0, inf*3]`: in both, a genuinely
+# exact `Fraction(0)` corner sits EARLIER than any convention corner, so
+# `min`/`max` return the exact one and the mutant is invisible. Neither row
+# is deleted, because each still pins what it was written for; what they do
+# not pin is the rescue. A pin on THAT has to put the convention corner
+# where no exact zero can be selected ahead of it, and the rows below do it
+# in two different ways.
+
+_HALF_INFINITE = [
+    # (label, result, exact finite endpoint as a Fraction or None, side)
+    ("mul([1,inf],[2,3])",
+     lambda: iv.mul(scalar(1.0, INF), scalar(2.0, 3.0)), Fraction(2), "lo"),
+    ("mul([0,inf],[0,3]) -- M16's zero corner",
+     lambda: iv.mul(scalar(0.0, INF), scalar(0.0, 3.0)), Fraction(0), "lo"),
+    # --- the `0 * +-inf = 0` corner AS the extremum, both signs ----------
+    #
+    # ORDER-DEPENDENT, and labelled so rather than trusted quietly: an
+    # exact `Fraction(0)` corner IS in each list (`(-1)*0`), and what hands
+    # the convention corner to `min`/`max` is that it sits at index 0 and
+    # ties go to the first. These two are the witnesses the audit named.
+    # They redden on the deleted rescue; they would stop reddening if the
+    # corner enumeration order in `_mul_corners` ever changed, which is
+    # exactly why the pair below is here too.
+    ("mul([-inf,-1],[-3,0]) -- the 0*-inf corner IS the infimum",
+     lambda: iv.mul(scalar(-INF, -1.0), scalar(-3.0, 0.0)),
+     Fraction(0), "lo"),
+    ("mul([-inf,-1],[0,3]) -- and the supremum, sign-mirrored",
+     lambda: iv.mul(scalar(-INF, -1.0), scalar(0.0, 3.0)),
+     Fraction(0), "hi"),
+    # ORDER-INDEPENDENT. BOTH endpoints of the second operand are infinite,
+    # so every one of the four corners is either a convention zero or a
+    # signed infinity and there is NO exact-zero corner anywhere in the
+    # list for a tie-break to reach. No enumeration order can mask these.
+    ("mul([0,1],[inf,inf]) -- no exact-zero corner to tie-break against",
+     lambda: iv.mul(scalar(0.0, 1.0), scalar(INF, INF)), Fraction(0), "lo"),
+    ("mul([-1,0],[inf,inf]) -- ditto, sign-mirrored",
+     lambda: iv.mul(scalar(-1.0, 0.0), scalar(INF, INF)), Fraction(0), "hi"),
+    ("dot_general([0,1].[inf,inf]) -- the rescue, through _mul_corners",
+     lambda: iv.dot_general(
+         iv.IntervalArray(shape=(1,), los=(0.0,), his=(1.0,)),
+         iv.IntervalArray(shape=(1,), los=(INF,), his=(INF,)),
+         (((0,), (0,)), ((), ()))), Fraction(0), "lo"),
+    ("mul([-inf,-1],[2,3])",
+     lambda: iv.mul(scalar(-INF, -1.0), scalar(2.0, 3.0)),
+     Fraction(-2), "hi"),
+    ("mul([0.5,inf],[0.25,0.5])",
+     lambda: iv.mul(scalar(0.5, INF), scalar(0.25, 0.5)),
+     Fraction(1, 8), "lo"),
+    ("mul([1,inf],[0.1,0.1]) -- inexact, so it must ROUND and not sit",
+     lambda: iv.mul(scalar(1.0, INF), iv.point(0.1)), _f(0.1), "lo"),
+    ("div([2,inf],[2,2])",
+     lambda: iv.div(scalar(2.0, INF), iv.point(2.0)), Fraction(1), "lo"),
+    ("div([-inf,-2],[2,2])",
+     lambda: iv.div(scalar(-INF, -2.0), iv.point(2.0)), Fraction(-1), "hi"),
+    ("boundary_div([1,1],[0,inf])",
+     lambda: iv.boundary_div(iv.point(1.0), scalar(0.0, INF)),
+     Fraction(0), "lo"),
+    ("boundary_div([-1,-1],[0,inf])",
+     lambda: iv.boundary_div(iv.point(-1.0), scalar(0.0, INF)),
+     Fraction(0), "hi"),
+    ("dot_general([0,inf].[0,3]) -- inherits _mul_corners",
+     lambda: iv.dot_general(
+         iv.IntervalArray(shape=(1,), los=(0.0,), his=(INF,)),
+         iv.IntervalArray(shape=(1,), los=(0.0,), his=(3.0,)),
+         (((0,), (0,)), ((), ()))), Fraction(0), "lo"),
+]
+
+# The saturation posture, asserted separately and in the same breath, so
+# that "the finite side got tighter" cannot be read as "the infinite side
+# did too". `_down(+inf)` is maxfloat and `_up(-inf)` is -maxfloat; an
+# infinite endpoint is not a real and there is nothing there to represent.
+_SATURATION = [
+    ("mul([inf,inf],[2,3])",
+     lambda: iv.mul(scalar(INF, INF), scalar(2.0, 3.0)),
+     (sys.float_info.max, INF)),
+    ("mul([-inf,-inf],[2,3])",
+     lambda: iv.mul(scalar(-INF, -INF), scalar(2.0, 3.0)),
+     (-INF, -sys.float_info.max)),
+    ("add([inf,inf],[1,1])",
+     lambda: iv.add(scalar(INF, INF), iv.point(1.0)),
+     (sys.float_info.max, INF)),
+]
+
+# The `_SATURATION` rows whose result `interval.__doc__` QUOTES, by index,
+# with the operation the quoting block has to name. `DISCIPLINE`'s `quoted`
+# mechanism cannot reach these: a CORRECTLY_ROUNDED row states its exact
+# image as a pair of `Fraction`s and `Fraction(inf)` raises, so a case with
+# an infinite endpoint cannot be a row of that table at all. The digits are
+# derived here for the same reason they are derived there -- the ⊤-escapes
+# bullet names this measurement, and a measurement typed into prose beside
+# a claim is how that bullet came to carry a false one.
+_DOC_QUOTED_SATURATION = [(0, "mul")]
+
+
+def test_a_half_infinite_operand_costs_only_the_corners_it_touches():
+    """Exactness is a property of ONE CORNER; the gate asked about four.
+
+    `mul`, `div` and `boundary_div` tested `_exactable(alo, ahi, blo, bhi)`
+    and, on a single infinite endpoint, dropped ALL FOUR corners onto the
+    unconditional `_down`/`_up` bump -- including corners that are two
+    finite doubles and whose product or quotient is an exact real.
+    `_add_lo`/`_add_hi` never had the defect, because they gate on their
+    own two operands, which is why `add([1, inf], [2, 3])` already returned
+    a lower endpoint of exactly 3.0 while `mul([1, inf], [2, 3])` returned
+    1.9999999999999998.
+
+    THE FINITE ENDPOINT IS THE CLAIM, and it is checked as the correctly
+    directed rounding of the exact real -- not merely as "outward", which a
+    bump also satisfies, and not merely as "equal to the exact value",
+    which would be false for the deliberately inexact `0.1` case below.
+    Both directions redden: a bump reddens, and so would an inward step.
+    """
+    bad = []
+    for label, drive, exact, side in _HALF_INFINITE:
+        r = drive()
+        lo, hi = r.los[0], r.his[0]
+        got = lo if side == "lo" else hi
+        want = _rounded_down(exact) if side == "lo" else _rounded_up(exact)
+        if got != want:
+            bad.append(
+                f"{label}: the FINITE {side} endpoint is {got!r}; the "
+                f"correctly directed rounding of the exact real {exact} is "
+                f"{want!r}. The bracket is ({lo!r}, {hi!r})")
+        other = hi if side == "lo" else lo
+        if other != (INF if side == "lo" else -INF):
+            bad.append(
+                f"{label}: the other endpoint is {other!r}, not the "
+                f"infinity this case exists to place beside a finite one")
+    for label, drive, want in _SATURATION:
+        r = drive()
+        if (r.los[0], r.his[0]) != want:
+            bad.append(
+                f"{label}: an INFINITE extremum returned "
+                f"({r.los[0]!r}, {r.his[0]!r}), not {want}. That is the "
+                f"saturation convention, and tightening it is a decision "
+                f"nobody has made -- it is not part of the corner fix")
+    assert not bad, (
+        "a half-infinite operand is costing corners it does not touch:\n  "
+        + "\n  ".join(bad)
+        + "\n\nExactness is a property of the CORNER. Gate it on that "
+        "corner's own two operands, as `_add_lo`/`_add_hi` always have."
     )
 
 
@@ -1867,6 +2114,26 @@ def test_the_measurements_the_docstring_quotes_are_the_ones_it_would_get():
     have to be right and they have to be right together, and a coincidence
     somewhere else in the text no longer counts, because it has to be in the
     block that names the operation.
+
+    **THE SATURATION MEASUREMENT IS READ THE SAME WAY**, through
+    :data:`_DOC_QUOTED_SATURATION`, because ``DISCIPLINE``'s own ``quoted``
+    mechanism structurally cannot reach it: an infinite endpoint has no
+    ``Fraction`` image, so no row of that table can state one. The
+    ⊤-escapes bullet is where a false classification shipped -- it filed
+    the ``0·±inf = 0`` convention, which widens by nothing, under a heading
+    saying every entry is wider -- and the measurement that replaced it is
+    derived here rather than typed there.
+
+    *What that leg catches, measured, and what it does not.* Tightening the
+    saturation posture so ``mul([inf, inf], [2, 3])`` returns
+    ``(FMAX, FMAX)`` reddens it: no block writes that pair. **Deleting the
+    pair from the ⊤-escapes bullet does NOT redden it** -- the same pair
+    stands beside ``mul`` in the discipline-list bullet, and this gate is
+    scoped to a block that names the OPERATION, not to one particular
+    bullet. So the leg holds the DIGITS current across the whole docstring;
+    it does not hold them in any one place. Driven both ways rather than
+    assumed, because assuming it was how the two ``mul`` pins one file over
+    came to be masked by a tie-break nobody had checked.
     """
     blocks = _doc_blocks()
     marked = {n: op.quoted for n, op in DISCIPLINE.items() if op.quoted}
@@ -1878,6 +2145,13 @@ def test_the_measurements_the_docstring_quotes_are_the_ones_it_would_get():
             label, lo, hi, _elo, _ehi = cases[i]
             if not _quotes_the_pair(name, lo, hi, blocks):
                 missing.append(f"{name}: {label}: ({lo!r}, {hi!r})")
+    assert _DOC_QUOTED_SATURATION, "the saturation leg reads nothing"
+    for i, name in _DOC_QUOTED_SATURATION:
+        label, drive, _want = _SATURATION[i]
+        r = drive()
+        lo, hi = r.los[0], r.his[0]
+        if not _quotes_the_pair(name, lo, hi, blocks):
+            missing.append(f"{name}: saturation: {label}: ({lo!r}, {hi!r})")
     assert not missing, (
         f"`stelling.interval.__doc__` scopes its tightness claim with "
         f"measurements this run does not reproduce -- no block of it writes "
