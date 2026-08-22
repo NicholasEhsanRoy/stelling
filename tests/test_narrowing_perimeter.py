@@ -171,18 +171,32 @@ FLOAT_OVERFLOW_HOST_WARNS = (
     # is a host cast all the same, so numpy does.
     ("jnp.full((2,), 100000, jnp.float16)",
      lambda: jnp.full((2,), 100000, jnp.float16)),
-    # ...and the three whose EAGER spelling is silent or x64-dependent, driven
-    # under `jit`, where the constant is embedded through the host cast at
-    # trace time. All three warn in all four cells this way, which is the
-    # point: a harness is traced.
+    # ...and the two whose EAGER spelling is silent or x64-dependent, driven
+    # under `jit`, where the LITERAL is embedded through the host cast at trace
+    # time. Both warn in all four cells this way, which is the point: a
+    # harness is traced, and tracing moves the narrowing onto the host.
     ("jit(x_f32 + 1e300)",
      lambda: jax.jit(lambda a: a + 1e300)(jnp.zeros((2,), jnp.float32))),
     ("jit(x_f16 + 70000.0)",
      lambda: jax.jit(lambda a: a + 70000.0)(jnp.zeros((2,), jnp.float16))),
-    ("jit(x.astype(jnp.float32)) on [1e300, 1e300]",
-     lambda: jax.jit(lambda a: a.astype(jnp.float32))(
-         jnp.asarray([1e300, 1e300], jnp.float64 if jax.config.jax_enable_x64
-                     else jnp.float32))),
+)
+
+#: THE SAME SOURCE LINE, HOST IN ONE CELL AND DEVICE IN THE OTHER -- which is
+#: the sharpest evidence that the axis is where the narrowing happens and not
+#: what it is written as. With x64 OFF the value is canonicalised to
+#: ``float32`` by numpy on the way in and the cast overflows there; with x64 ON
+#: it stays ``float64`` through the host and XLA does the narrowing.
+#:
+#: **This group exists because one of its members was in the WARNS group and
+#: was green for the wrong reason.** ``jit(a.astype(jnp.float32))`` on
+#: ``[1e300, 1e300]`` warned at x64=0 -- but from the ``asarray`` that built
+#: the operand, not from the ``astype`` the case was named for -- and went
+#: silent at x64=1, where the operand really is a ``float64`` array and the
+#: conversion really is on device. Driving all four cells is what found it.
+FLOAT_OVERFLOW_X64_DEPENDENT = (
+    ("x_f32 + 1e300", lambda: jnp.zeros((2,), jnp.float32) + 1e300),
+    ("jnp.asarray([1e300, 1e300]).astype(jnp.float32)",
+     lambda: jnp.asarray([1e300, 1e300]).astype(jnp.float32)),
 )
 
 #: ...and the residue that IS genuinely silent, which is smaller and sharper
@@ -192,6 +206,12 @@ FLOAT_OVERFLOW_HOST_WARNS = (
 #: warn about. Silent in all four cells under ``simplefilter("error")``.
 FLOAT_OVERFLOW_DEVICE_SILENT = (
     ("a * a on float32 1e30", lambda: _big_f32() * _big_f32()),
+    # EAGER, and the same line under `jit` is in the WARNS group above: the
+    # weak Python float canonicalises to float32 without overflowing, and the
+    # narrowing to float16 is then XLA's. Tracing is what moves it onto the
+    # host, and that is the whole distinction.
+    ("x_f16 + 70000.0 (eager)",
+     lambda: jnp.zeros((2,), jnp.float16) + 70000.0),
     ("a ** 2 on float32 1e30", lambda: _big_f32() ** 2),
     ("jit(a * a) on float32 1e30", lambda: jax.jit(lambda a: a * a)(_big_f32())),
     ("jnp.exp(float32 1000.0)",
@@ -981,6 +1001,30 @@ def test_a_float_VALUE_that_overflows_warns_on_the_HOST_and_is_silent_on_DEVICE(
             warnings.simplefilter("ignore", RuntimeWarning)
             got = np.asarray(build())
         assert np.isinf(got).all(), f"{label} is no longer inf: {got!r}"
+
+    # ---- (1b) THE SAME LINE, BOTH WAYS, decided by where the narrowing
+    #      happens rather than by how it is spelled. Asserted in the direction
+    #      this cell is in, so BOTH are pinned across the four-cell grid.
+    x64 = bool(jax.config.jax_enable_x64)
+    for label, build in FLOAT_OVERFLOW_X64_DEPENDENT:
+        jax.clear_caches()
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always")
+            got = np.asarray(build())
+        warned = any(
+            issubclass(w.category, RuntimeWarning)
+            and "overflow encountered in cast" in str(w.message) for w in seen
+        )
+        assert np.isinf(got).all(), f"{label} is no longer inf: {got!r}"
+        assert warned == (not x64), (
+            f"{label}: with x64 {'ON' if x64 else 'OFF'} numpy "
+            f"{'warned' if warned else 'did not warn'}, and this file declares "
+            f"the opposite. With x64 off the value is canonicalised to float32 "
+            f"on the HOST and overflows there; with x64 on it stays float64 "
+            f"through the host and XLA narrows it. If that stopped being true, "
+            f"docs/overflow-tripwire.md's host-versus-device paragraph is what "
+            f"has to change."
+        )
 
     # ---- (2) THE DEVICE HALF: the genuinely silent residue. No host cast
     #      runs, so there is nothing for `-W error::RuntimeWarning` to catch,

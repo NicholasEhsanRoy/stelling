@@ -155,33 +155,47 @@ opposite way round from what this section said before it was driven under
   `warnings.simplefilter("error")`, identical in all four cells:
   `jnp.full((2,), 1e300, jnp.float32)`, `jnp.full((2,), 70000.0, jnp.float16)`,
   `jnp.float16(70000.0)`, `jnp.array([1e300], jnp.float32)` and
-  `jnp.full((2,), 100000, jnp.float16)` each raise, and so does every one of
-  `x_f32 + 1e300`, `x_f16 + 70000.0` and
-  `jnp.asarray([1e300, 1e300]).astype(jnp.float32)` **inside `jit`**, because
-  a trace embeds its constants through that same host cast.
+  `jnp.full((2,), 100000, jnp.float16)` each raise, and so do `x_f32 + 1e300`
+  and `x_f16 + 70000.0` **inside `jit`** — because a trace embeds its
+  constants through that same host cast, and **a harness is traced**.
 * **What IS silent is the narrowing that happens on DEVICE**, and that is the
   smaller, sharper residue this page owes you. Once the value is inside a
   `jax.Array`, nothing on the host casts it and there is no warning to turn
   on. Measured under `warnings.simplefilter("error")`, silent in all four
   cells: `a * a` and `a ** 2` on a `float32` array of `1e30`, `jnp.exp` of a
-  `float32` `1000.0`, and `a.astype(jnp.float16)` /
-  `lax.convert_element_type(a, jnp.float16)` on that same array — each `inf`,
-  with 0 fires here, 0 truncations from the eager detector and no refusal from
-  the perimeter. **This is the case a numerical program actually produces**:
-  the overflow is computed, not written, so there is no literal for any of the
-  three to read. That is a scope boundary and not a hole — nothing on this
-  page claims a float — but it is the boundary, and `-W error::RuntimeWarning`
-  does not reach it.
+  `float32` `1000.0`, `a.astype(jnp.float16)` and
+  `lax.convert_element_type(a, jnp.float16)` on that same array, and
+  `x_f16 + 70000.0` run EAGERLY — each `inf`, with 0 fires here, 0
+  truncations from the eager detector and no refusal from the perimeter.
+  **This is the case a numerical program actually produces**: the overflow is
+  computed, not written, so there is no literal for any of the three to read.
+  That is a scope boundary and not a hole — nothing on this page claims a
+  float — but it is the boundary, and `-W error::RuntimeWarning` does not
+  reach it.
+* **The axis is WHERE the narrowing happens, not how the line is spelled**,
+  and two spellings prove it by changing sides between cells.
+  `x_f32 + 1e300` and `jnp.asarray([1e300, 1e300]).astype(jnp.float32)`, run
+  eagerly, **warn at `JAX_ENABLE_X64=0` and are silent at
+  `JAX_ENABLE_X64=1`** — with x64 off the value is canonicalised to `float32`
+  by numpy on the way in and overflows there; with x64 on it stays `float64`
+  through the host and XLA does the narrowing. Same source line, same result
+  (`inf`), opposite answer to "is there a warning to turn on". So read the two
+  bullets above as a rule about the ROUTE, and if you want the guarantee
+  rather than the coincidence, `-W error::RuntimeWarning` covers whatever
+  numpy touched and nothing else.
 * **An integer LITERAL that has no finite image in the float dtype it meets IS
   caught — by the third instrument, through an operator slot only.**
   `x_f16 <= 100000` runs as a comparison against `inf`, and
   [the narrowing perimeter](#the-third-door-a-literal-that-never-existed)
   refuses it. It is silent EAGER; **traced, `float16` is the one format where
   numpy's host cast warns**, so inside a `jit` this particular literal is also
-  reachable by `-W error::RuntimeWarning`. The seven `float8_*` formats
-  `jax.numpy` exposes are silent both ways — see
-  [the format list](#the-third-door-a-literal-that-never-existed) — and there
-  the perimeter is the only instrument that speaks. The same literal at a
+  reachable by `-W error::RuntimeWarning`. The other seven formats that can
+  lose a literal this way — seven of the eight `float8_*` names `jax.numpy`
+  exposes — are silent both ways, and there the perimeter is the only
+  instrument that speaks; they are tabulated under
+  [the third door](#the-third-door-a-literal-that-never-existed), with the
+  four whose comparison inverts to `False` rather than comparing against
+  `inf`. The same literal at a
   CONSTRUCTION site is not covered by the perimeter at all:
   `jnp.full((2,), 100000, jnp.float16)` is `[inf, inf]` with all three armed
   and 0 fires, because the eager detector below is integer→integer and there
@@ -804,9 +818,9 @@ narrowing is numpy's, and numpy says so. Driven under
 `jnp.full((2,), 1e300, jnp.float32)`, `jnp.full((2,), 70000.0, jnp.float16)`,
 `jnp.float16(70000.0)`, `jnp.array([1e300], jnp.float32)` and
 `jnp.full((2,), 100000, jnp.float16)` each raise `RuntimeWarning: overflow
-encountered in cast`, and so do `x_f32 + 1e300`, `x_f16 + 70000.0` and
-`jnp.asarray([1e300, 1e300]).astype(jnp.float32)` **when they are traced**,
-because a trace embeds its constants through the same host cast.
+encountered in cast`, and so do `x_f32 + 1e300` and `x_f16 + 70000.0` **when
+they are traced**, because a trace embeds its constants through the same host
+cast — and a harness is traced.
 **`pytest -W error::RuntimeWarning` fails on every one of those today**, with
 no new instrument, and this section previously told you the opposite.
 
@@ -814,11 +828,19 @@ no new instrument, and this section previously told you the opposite.
 it is both smaller and more important than what was claimed. Once the value is
 inside a `jax.Array` no host cast runs, so there is nothing to warn: measured
 under the same filter, silent in all four cells, `a * a` and `a ** 2` on a
-`float32` array of `1e30`, `jnp.exp` of a `float32` `1000.0`, and
+`float32` array of `1e30`, `jnp.exp` of a `float32` `1000.0`,
 `a.astype(jnp.float16)` / `lax.convert_element_type(a, jnp.float16)` on that
-array are each `inf` with no warning and no fire from any of the three. **That
-is the shape of a real float overflow** — computed rather than written — so
-there is no literal for this perimeter to read even in principle. The
+array, and `x_f16 + 70000.0` run EAGERLY are each `inf` with no warning and no
+fire from any of the three. **That is the shape of a real float overflow** —
+computed rather than written — so there is no literal for this perimeter to
+read even in principle.
+
+**And the line between them is the ROUTE, which two spellings demonstrate by
+changing sides.** `x_f32 + 1e300` and
+`jnp.asarray([1e300, 1e300]).astype(jnp.float32)`, run eagerly, warn at
+`JAX_ENABLE_X64=0` and are silent at `JAX_ENABLE_X64=1`: with x64 off numpy
+canonicalises the value to `float32` on the way in and overflows there, with
+x64 on it stays `float64` through the host and XLA narrows it. The
 `overflows-float` case above is the other side of the same line, and the
 difference is exactly what you wrote: an integer literal is watched, a value
 the program computed is not.

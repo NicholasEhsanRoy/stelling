@@ -451,11 +451,23 @@ is 0.2.0 development work throughout.
   once a value is inside a `jax.Array` no host cast runs and there is nothing
   to warn. Measured silent under the same filter in all four cells: `a * a`
   and `a ** 2` on a `float32` array of `1e30`, `jnp.exp` of a `float32`
-  `1000.0`, and `a.astype(jnp.float16)` / `lax.convert_element_type(a,
-  jnp.float16)` on that array — each `inf`, 0 fires from all three
-  instruments, and `-W error::RuntimeWarning` does not reach any of them. The
-  overflow there is *computed*, so there is no literal for a literal-watcher
-  to read even in principle.
+  `1000.0`, `a.astype(jnp.float16)` / `lax.convert_element_type(a,
+  jnp.float16)` on that array, and `x_f16 + 70000.0` run EAGERLY — each
+  `inf`, 0 fires from all three instruments, and `-W error::RuntimeWarning`
+  does not reach any of them. The overflow there is *computed*, so there is no
+  literal for a literal-watcher to read even in principle.
+
+  **The axis is the ROUTE, not the spelling**, and two lines change sides
+  between cells to prove it: `x_f32 + 1e300` and
+  `jnp.asarray([1e300, 1e300]).astype(jnp.float32)`, run eagerly, warn at
+  `JAX_ENABLE_X64=0` and are silent at `JAX_ENABLE_X64=1` — numpy
+  canonicalises to `float32` on the way in with x64 off, and XLA does the
+  narrowing with it on. They are a declared group in the gate, asserted in the
+  direction the running cell is in — and driving all four cells is what caught
+  a case this fixup had first filed under WARNS for the wrong reason
+  (`jit(a.astype(jnp.float32))` on `[1e300, 1e300]`, whose x64-off warning came
+  from the `asarray` that built the operand, not from the `astype` it was
+  named for).
 
 - **`overflows-float` fires on EIGHT of `jax.numpy`'s float formats, not the
   one the page claimed — and four of them run as `nan`.** The sentence said
@@ -467,7 +479,8 @@ is 0.2.0 development work throughout.
   `prop_guard` has no catalogue — it asks `ml_dtypes.finfo`, which is why F1
   exists and why its own self-test drives `float8_e5m2`. Measured disarmed
   under `simplefilter("error")`, identical in all four cells: `float16` plus
-  all seven `float8_*` formats lose an integer literal quietly, and
+  seven of the eight `float8_*` names it exposes lose an integer literal
+  quietly (`float8_e8m0fnu`'s range covers every `int64`), and
   `float8_e4m3fn`, `float8_e4m3b11fnuz`, `float8_e4m3fnuz` and
   `float8_e5m2fnuz` — which encode no infinity — run as **`nan`**, so
   `x <= N` **inverts to `False` everywhere** rather than comparing against

@@ -127,7 +127,8 @@ a comparison against a float array need not be out of *range* to be destroyed
 what you wrote, and it is a VERIFIED today. (It can also be destroyed by
 overflowing: `x <= 100000` on `float16` runs as `x <= inf` — silently when it
 runs eagerly — and this dial refuses that too, on `float16` and on the seven
-`float8_*` formats, four of which run as `nan` and invert the comparison to
+`float8_*` formats that have a range to overflow, four of which run as
+`nan` and invert the comparison to
 `False`. Those are losses of the literal you wrote, which is the only kind any
 of the three watches: a value the program COMPUTED and overflowed is outside
 all three, and where its narrowing happens on the host numpy still warns, so
