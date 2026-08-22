@@ -214,7 +214,9 @@ EXPECTED_INVENTORY = {
     # is visible: `no_assume` REFUTED against `not_honoured` UNKNOWN is what
     # makes the first row evidence rather than a comment. And a second block
     # PRINTS `check`'s signature from the object, because the typed one had
-    # published four of its nine parameters for six weeks.
+    # published four of its nine parameters. It was written against the
+    # object at 343ebe6 (2026-08-03) and four parameters landed under it
+    # between 08-12 and 08-19, while the page went on using one of them.
     #
     # B19: `docs/inductive-step.md` went from FOUR illustrative blocks and no
     # gate at all to four executed-and-compared ones. It was the page whose

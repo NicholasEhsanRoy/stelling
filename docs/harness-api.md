@@ -848,9 +848,11 @@ block is stable across the pair rather than lucky.
 
 `stelling.preconditions.check` is the front door. **Its signature is printed
 from the object rather than typed here**, because a typed one rotted: this page
-published four of its nine parameters for six weeks after the other five
-landed, while using one of the missing ones (`semantics="ieee"`) further down
-the same page.
+was written against the object at `343ebe6` (2026-08-03), and then four
+parameters landed under it — `solver` (`cbb1d60`, 08-12), `semantics`
+(`d6451cc`, 08-13), `libm_budget` (`c322cec`, 08-15) and `falsify`
+(`123ad75`, 08-19) — while this page went on using one of them,
+`semantics="ieee"`, further down. Nothing pinned the typed copy.
 
 ```python
 import inspect

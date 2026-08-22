@@ -161,7 +161,9 @@ def test_a_page_that_says_it_shipped_names_a_test_that_pins_it():
 
     A page that flips to BUILT with no pin is a header claiming what the
     old header claimed, in the other direction — and the old headers were
-    wrong for four months with the suite green.
+    wrong from their shipping commits (``9f9b8b7`` 2026-07-30, ``32c6c56``
+    and ``cbb1d60`` 2026-08-12) until this gate, with the suite green
+    throughout.
 
     Aggregated rather than parametrised, so the pages that do not claim to
     have shipped produce no skip: a per-page skip would put five entries
