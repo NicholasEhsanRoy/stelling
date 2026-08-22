@@ -6,11 +6,27 @@
 This is the one module where paranoia is the design: **a rounding bug here
 is a false VERIFIED**, which is the project's own thesis defect. The rules:
 
-* Every endpoint is rounded **OUTWARD**, and that — not a width — is this
-  module's one universal claim: the exact real result of the operation lies
-  inside the returned bracket, always. It is what the stamp
-  ``interval/f64/outward-1ulp`` names, a DIRECTION and a worst case, and it
-  is the invariant a new operation added to this module has to preserve.
+* Every endpoint of an **ℝ-mode** operation is rounded **OUTWARD**, and
+  that — not a width — is this module's one universal claim: under ℝ the
+  exact real result of the operation lies inside the returned bracket,
+  always. It is what the stamp ``interval/f64/outward-1ulp`` names, a
+  DIRECTION and a worst case, and it is the invariant a new ℝ-mode
+  operation added to this module has to preserve.
+
+  **ℝ-mode is the scoping word and it is load-bearing.** The ``ieee_*``
+  kernels, ``ieee_fma_hull`` and ``subnormal_haze``/``subnormal_haze_fmt``
+  serve ``semantics="ieee"``, where the thing being bracketed is the FLOAT
+  the compiled program computes and not a real, so they do not round
+  outward and this claim is not about them — driven:
+  ``ieee_add([0.1], [0.2])`` returns a bracket that EXCLUDES the exact real
+  ``0.1 + 0.2``, and ``ieee_sqrt([2])`` one that excludes √2. ``meet`` is
+  outside it for a different reason — it is an intersection, so it drops
+  points on purpose, and its own docstring opens *"No outward rounding,
+  deliberately."* The carve-out used to appear only in the ``ieee_*``
+  paragraph at the end of this docstring, which is a long way after the
+  word *always*. ``tests/test_interval.py``'s discipline table drives one
+  excluded value for every one of these.
+
   **How TIGHT the bracket is is per-operation and is NOT universal**, so
   the scope below travels with any claim about tightness.
 
@@ -23,20 +39,22 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   ``mul``, ``[0.5, 1.0]`` for ``add``, ``[-0.25, 0.25]`` for ``sub`` and
   ``[0.5, 2.0]`` for ``div``.
 
-  **Not correctly directed-rounded, and here is what that costs.** Three
-  kinds of operation are outside it, every one still sound and every one
-  wider:
+  **Not correctly directed-rounded, and here is what that costs.** These
+  kinds of operation are outside it — the list is not counted, because a
+  count is one more thing to get wrong — and every one of them is still
+  sound and every one is wider:
 
-  - the **unconditional one-ulp bump** — ``exp``, ``pow``, ``sqrt``, where
-    the ulp is paying for a libm assumption or a sqrt-fidelity margin
-    rather than for endpoint representation. Measured, on arguments whose
-    exact result is a small integer: ``sqrt([4, 4])`` is
-    ``(1.9999999999999998, 2.0000000000000004)``, ``exp([0, 0])`` is
-    ``(0.9999999999999999, 1.0000000000000002)`` and
+  - the **unconditional one-ulp bump, where the ulp buys something** —
+    ``exp``, ``pow``, ``sqrt``, where it is paying for a libm assumption or
+    a sqrt-fidelity margin rather than for endpoint representation.
+    Measured, on arguments whose exact result is a small integer:
+    ``sqrt([4, 4])`` is ``(1.9999999999999998, 2.0000000000000004)``,
+    ``exp([0, 0])`` is ``(0.9999999999999999, 1.0000000000000002)`` and
     ``pow_([2, 2], [3, 3])`` is ``(7.999999999999999, 8.000000000000002)``.
     Neither endpoint is the exact value, and nothing here collapses to it.
   - **multi-step reductions**, where each STEP is correctly directed-rounded
-    and the total is not. ``reduce_sum`` of ``[1, 2**-53, 2**-53]`` returns
+    and the total is not — ``reduce_sum`` and ``dot_general``.
+    ``reduce_sum`` of ``[1, 2**-53, 2**-53]`` returns
     ``(1.0, 1.0000000000000004)`` while the exact total,
     ``1.0000000000000002``, is representable and is *neither* endpoint —
     the single-op property that one endpoint equals ``fl(R)`` does not
@@ -45,6 +63,26 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
     at all: a divisor interval containing zero, ``inf/inf``, an infinite
     operand under ``mul``'s ``0·±inf = 0`` rule. Those widen deliberately
     and are named where they happen.
+  - **A DEBT, and the only entry here that nobody is defending:**
+    ``scatter_add_rows`` folds, like ``reduce_sum`` — and unlike
+    ``reduce_sum`` its steps are bumped **unconditionally**, so the ulp
+    buys nothing but endpoint representation, which is the reason the
+    first entry above exists to exclude. Measured, on operands whose exact
+    sum is representable: ``add([1], [1])`` is ``(2.0, 2.0)`` while
+    ``scatter_add_rows`` of the same two, accumulating row 0 into row 0,
+    is ``(1.9999999999999998, 2.0000000000000004)``; and accumulating one
+    ``[0, 16]`` update into a ``[0, 0]`` operand gives
+    ``(-5e-324, 16.000000000000004)`` where ``reduce_sum`` of the same
+    contributions floors at ``0.0``. **So the M16 divergence the next
+    paragraph records as fixed reproduces one operation over**:
+    ``jnp.sum(x*x)`` keeps its nonnegative floor and
+    ``zeros.at[i].add(x*x)`` does not, so a ``boundary_div`` fed the
+    scatter form DECLINES on a straddle where the ``reduce_sum`` form
+    verifies. The fix is the exact-``Fraction`` route ``mul`` and ``add``
+    already take and it is dispatched on its own, because it is a numeric
+    change in the soundness-critical module and this is a documentation
+    change. **When it lands, delete this entry**; the bullets around it are
+    true either way.
 
   So: *outward* is a claim about the module; *tight* is a claim about one
   operation, and the operation's own docstring is the authority for it.
@@ -59,17 +97,25 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   NARROWER than the code in the safe direction. It was then replaced by
   "**Every** arithmetic endpoint is correctly directed-rounded … when the
   exact result is representable, both endpoints ARE it and nothing is
-  bumped", which is BROADER than the code: the four measurements above are
+  bumped", which is BROADER than the code: the measurements above are
   counter-examples to it, and ``reduce_sum`` is a counter-example whose own
-  docstring said so sixty lines below. Nothing unsound rested on either —
-  what rests on it is every reader's model of how much slack a chain of
-  operations accumulates, and a reader told the bracket is tighter than it
-  is is the worse of the two errors. Nothing in the suite had ever read
-  this bullet, either time. ``tests/test_interval.py``'s
-  ``test_the_module_docstring_states_a_scope_and_the_counter_examples_hold``
-  now does: it re-drives all four measurements above and requires this text
-  to contain each endpoint, so tightening one of these operations reddens
-  on the SCOPE rather than passing quietly.
+  docstring said so all along — :func:`reduce_sum`, which is where a reader
+  should be sent. *That pointer read "sixty lines below". It was wrong, and
+  a hand-typed POSITION inside the bullet whose whole subject is hand-typed
+  numerals is that defect one level further down, so no distance is written
+  here at all: the cross-reference resolves and cannot rot.* Nothing
+  unsound rested on either wording — what rests on it is every reader's
+  model of how much slack a chain of operations accumulates, and a reader
+  told the bracket is tighter than it is is the worse of the two errors.
+
+  *And then a THIRD failure, of a different kind: the corrected bullet was
+  itself wider than the code.* It said the fold rule covered "any other
+  operation that folds" and that nothing merely-representational was left
+  in the bump group. ``scatter_add_rows`` — a registered, ``TIER_SOUND``
+  transfer — falsified both, in the tree the bullet shipped in. The pin
+  that was added with the correction could not have caught it: it drove
+  four operations named in this text and asked only that their endpoint
+  reprs appear here, so it measured the digits and not the scope.
 
   The stamp still reads ``interval/f64/outward-1ulp``. That string is a
   published surface and is not changed here; it names the guarantee's
@@ -109,8 +155,9 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   endpoint is the OBLIGATION ``arg ≥ 0`` failing and raises (the ``pow``
   out-of-domain posture), and the lower endpoint is floored at 0 so the
   ``sqrt(x) ≥ 0`` fact is produced rather than left to an outward bump.
-**TWO ENDPOINT DISCIPLINES LIVE HERE. They are not interchangeable and the
-call site does not say which one applies, so the rule is:**
+**SEVERAL ENDPOINT DISCIPLINES LIVE HERE — they are listed, not counted.
+They are not interchangeable and the call site does not say which one
+applies, so the rule is:**
 
 **This is not a census, and must not be read as one.** It names the
 operations whose discipline a reader is most likely to guess wrong; the
@@ -120,10 +167,11 @@ someone forgets to extend is exactly how the universal claim above went
 wrong, so nothing is inferred from an absence from it.
 
 * **exact-when-representable** — ``add``, ``sub``, ``mul``,
-  ``integer_pow``, and ``reduce_sum`` PER ACCUMULATION STEP (see the third
-  bullet below, and :func:`reduce_sum`, for why the step rule is not a rule
-  about the total). The endpoint is computed exactly (``Fraction``; a double
-  is a dyadic rational) and then rounded outward ONLY if the exact result
+  ``integer_pow``, and ``reduce_sum`` PER ACCUMULATION STEP (see the
+  *exact per step, not per result* bullet below, and :func:`reduce_sum`,
+  for why the step rule is not a rule about the total). The endpoint is
+  computed exactly (``Fraction``; a double is a dyadic rational) and then
+  rounded outward ONLY if the exact result
   is not representable. Sound because these are correctly-rounded ops whose
   slack was pure *endpoint-representation* conservatism. (``div`` belongs
   here for its finite, non-zero-straddling case; its two ⊤ escapes — a
@@ -133,25 +181,35 @@ wrong, so nothing is inferred from an absence from it.
   infinite endpoint, where ``Fraction`` cannot represent the operand and the
   ``0·±inf = 0`` convention is an endpoint rule rather than real
   arithmetic.)
-* **unconditional one-ulp bump** — ``exp``, ``pow``, ``sqrt``. **Do not
-  "optimise" these to the rule above**: in every one of them the ulp is
-  doing a second job. ``exp``/``pow`` carry the faithfully-rounded-libm
-  assumption (error ≤ 1 ulp, stamped into every verdict that uses them),
-  and ``sqrt``'s ulp is what keeps it sound on a platform whose ``sqrt`` is
-  merely faithfully rounded rather than correctly rounded. Nothing
-  merely-representational is left in this group — ``mul`` was the last, and
-  its bump was not free: it put the exactly-zero corner of a squared
-  quantity BELOW zero, which defeated ``reduce_sum``'s nonnegative clamp and
-  made ``x*x`` and ``x**2`` reach different verdicts on the same property
-  (audit 0.2.0 M16).
-* **exact per step, not per result** — ``reduce_sum``, and any other
-  operation that folds. Every step is exact-when-representable and rounds
-  outward only where THAT step is inexact, which is sound and is NOT the
-  first discipline: for an ``n``-element sum with ``n >= 3`` neither
-  endpoint need be a neighbour of the exact total. Measured, in float64:
-  ``reduce_sum`` of ``[1, 2**-53, 2**-53]`` is
-  ``(1.0, 1.0000000000000004)`` around an exact total of
-  ``1.0000000000000002`` that a double represents exactly.
+* **unconditional one-ulp bump, where the ulp buys something** — ``exp``,
+  ``pow``, ``sqrt``. **Do not "optimise" these to the rule above**: in
+  every one of them the ulp is doing a second job. ``exp``/``pow`` carry
+  the faithfully-rounded-libm assumption (error ≤ 1 ulp, stamped into every
+  verdict that uses them), and ``sqrt``'s ulp is what keeps it sound on a
+  platform whose ``sqrt`` is merely faithfully rounded rather than
+  correctly rounded. ``mul`` was converted OUT of this group and its bump
+  had not been free: it put the exactly-zero corner of a squared quantity
+  BELOW zero, which defeated ``reduce_sum``'s nonnegative clamp and made
+  ``x*x`` and ``x**2`` reach different verdicts on the same property (audit
+  0.2.0 M16).
+* **unconditional one-ulp bump paying for nothing but endpoint
+  representation** — ``scatter_add_rows``, and it is the M16 defect
+  surviving one operation over rather than a discipline anyone chose. See
+  the DEBT entry in the first bullet of this docstring for the
+  measurements and for who is fixing it. **When that lands, delete this
+  bullet** and read ``scatter_add_rows`` off the one below.
+* **exact per step, not per result** — ``reduce_sum`` and ``dot_general``.
+  Every step is exact-when-representable and rounds outward only where THAT
+  step is inexact, which is sound and is NOT the first discipline: for an
+  ``n``-element sum with ``n >= 3`` neither endpoint need be a neighbour of
+  the exact total. Measured, in float64: ``reduce_sum`` of
+  ``[1, 2**-53, 2**-53]`` is ``(1.0, 1.0000000000000004)`` around an exact
+  total of ``1.0000000000000002`` that a double represents exactly.
+  *This bullet read "``reduce_sum``, and any other operation that folds".
+  ``scatter_add_rows`` folds and its steps are not exact, so the
+  generalisation was false where the named operation was true — the same
+  shape of error, one level down, as the universal claim this docstring
+  opens by retracting.*
 
 * Endpoints may be ``±inf`` (overflow saturates outward; half-infinite
   sets are representable). Interval multiplication uses the ``0·±inf = 0``
