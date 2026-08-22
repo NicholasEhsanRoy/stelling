@@ -37,7 +37,25 @@ Every verdict object stamps, at minimum:
   exactly why it has to be readable by a person.
 - jax version used to trace the harness,
 - solver name and version, **and transport** — Python wheel vs. external
-  binary path; for an external cvc5, its `--show-config` feature set,
+  binary. **The wheel-vs-binary distinction is carried; the path and the
+  feature set are not, and this bullet is one requirement met by half.**
+  `SolverStamp.transport` holds one of three module constants
+  (`solvers.TRANSPORT_Z3_WHEEL`, `TRANSPORT_CVC5_WHEEL`, and
+  `TRANSPORT_CVC5_BINARY`, which is the fixed string
+  `"external-binary subprocess"`), so *which kind of* transport answered is
+  stamped and *which binary* is not — the path reaches only
+  `_Backend.label`, which composes notes and is not a stamp field.
+  And **once an `Environment` type exists: for an external cvc5, its
+  `--show-config` feature set**, because two builds of one version number
+  are two programs with different capabilities. That set is read in exactly
+  one place in the tree today — `stelling/__main__.py`'s configuration
+  report — and reaches no verdict; `DOCUMENTATION_ARCHITECTURE.md` §10.2
+  sketches the `Environment.solver_features` field that would carry it and
+  its Appendix E lists building that field as an **unchecked** box. Stated
+  as a split requirement rather than as a fact because it read as a fact
+  here while the architecture document read it as work outstanding, and a
+  reader who trusted this page would have looked for a feature set no
+  verdict has ever held,
 - **the exact solver options used**,
 - **the precision configuration the verdict assumes, and the device class
   of any concrete execution it relies on** (counterexample replay,
@@ -146,7 +164,32 @@ Every verdict object stamps, at minimum:
   at its own format's band**, and only where `interval._FORMAT_TARGET_FLUSHES`
   — one measured table — records a flush; and the note's flush sentence is
   `interval.measured_flush_clause()`, the same builder the `ieee` stamp uses,
-  so there is no second spelling of the fact to drift. Neither defect was
+  **so the tell's spelling of the fact cannot drift from the table.**
+
+  **THERE IS ONE OTHER SPELLING, IT IS DELIBERATE, AND IT IS THE COMMON
+  PATH.** This sentence read *"so there is no second spelling of the fact to
+  drift"*, and the comment block in `stelling.interval` that owns the
+  measured `_FORMAT_TARGET_FLUSHES` table — cited by symbol and not by line,
+  for the reason SF-0.2.0-14 gives — withdraws exactly that absolute in its
+  own words:
+  *"EVERY PARAMETRIC SENTENCE THIS PROJECT WRITES ABOUT THE FLUSH IS DERIVED
+  FROM HERE. The one exception is deliberate and is the common path:
+  `SUBNORMAL_INDETERMINACY_ASSUMPTION`, the binary64-only stamp that
+  predates the parametric builders, spells the fact out verbatim and is
+  returned unchanged for `()` and `("float64",)`. It is held to this table
+  by `test_the_flush_SENTENCE_is_the_ieee_stamps_own_sentence`, not by
+  derivation, and that is the whole of what 'no second spelling' means
+  here."* Driven: `iv.subnormal_indeterminacy_assumption(())` returns the
+  hard-coded *"measured jax 0.11.0 CPU binary64 flushes subnormals in
+  arithmetic, comparisons, and libm"* on the all-float64 path, which is the
+  ordinary one, while `iv.measured_flush_clause()` builds the parametric
+  four-format sentence the tell carries. Two spellings of one measured fact,
+  tied by a test rather than by derivation. `interval.py` withdrew the
+  absolute at `4189448`; this page went on carrying it, one file over, and
+  withdraws it here. The *derivation* claim — which is what the repair
+  actually bought, and which holds — is what stands.
+
+  Neither defect was
   reachable by the tests that shipped with the tell: they contained no
   float16, no bfloat16 and no mixed-dtype comparison, so a mutant for the
   band TEXT was guarding a layer below the claim being made. The suite now
@@ -177,10 +220,38 @@ Every verdict object stamps, at minimum:
   must replay, it must execute, **and every declared precondition must hold at
   the witness.** The third is not decorative: an `assume` whose predicate box
   is ⊤ is DROPPED rather than applied, and the query then answers the
-  unconditional question. Measured — `assume(jnp.all(x >= 0))` over
-  `x ∈ [-10, 10]^3` asserting `sum(x) >= 0` returns REFUTED with the
-  replay-confirmed witness `[0, 0, -1]`, which **violates the precondition the
-  author wrote**. The earlier claim that a witness-backed REFUTED "cannot
+  unconditional question. **Measured before the withholding fix** —
+  `assume(jnp.all(x >= 0))` over `x ∈ [-10, 10]^3` asserting `sum(x) >= 0`
+  returned REFUTED with the replay-confirmed witness `[0, 0, -1]`, which
+  **violates the precondition the author wrote**.
+
+  **Measured on this tree, that harness returns UNKNOWN with no witness**, and
+  the change is the point rather than a footnote to it: a dropped `assume`
+  means the query ran over a SUPERSET of the intended set, so a discharge over
+  the superset still discharges the intended set while a `sat` model may lie
+  wholly outside it — the disposition is one-sided and the refuting side is
+  withheld. Driven verbatim from the sentence above through
+  `preconditions.check(h, vacuity_mode="inputs-only", solver_timeout_ms=60_000)`:
+  `status UNKNOWN, witnesses ()`, with both solvers answering `sat` and the
+  verdict declining to mint a REFUTED out of either, in three cells — jax
+  0.11.0 with `JAX_ENABLE_X64` unset, jax 0.11.0 with it set, and jax 0.10.2.
+  The regression is
+  `tests/test_dropped_assume.py::test_the_reproducer_no_longer_refutes`,
+  whose module docstring carries the pre-fix measurement in the same words
+  this paragraph now dates, and the one-sidedness is
+  `tests/test_dropped_assume.py::test_a_verified_under_a_dropped_assume_is_STILL_RENDERED`
+  beside it.
+
+  **THIS SENTENCE STOOD IN THE PRESENT TENSE FOR TWENTY-FIVE DAYS AND
+  NOTHING IN THE TREE COULD SEE IT.** It was written at 19:51 on 2026-07-28;
+  the withholding fix landed at 20:03 the same day, twelve minutes later, on
+  a branch that is not an ancestor of the sentence's commit. Every citation,
+  identifier and path in it resolved throughout — what was false was the
+  verb, and a measured claim in the present tense is the one shape this
+  document's instruments do not reach. It is the `:6962` shape, in the
+  section a reviewer leans on hardest.
+
+  The earlier claim that a witness-backed REFUTED "cannot
   suffer this failure mode — a witness is a model, and interval arithmetic does
   not produce models" is true of the interval-discharge artifact it was written
   about, and **not true in general**; it is narrowed here rather than left to
@@ -198,27 +269,44 @@ Every verdict object stamps, at minimum:
   missing a param jax always supplies, rather than validating the answer:
   **an answer cannot reveal that it is to the wrong question,**
 
-  **A FOURTH way a declaration can be wrong, and the only one that mints a
-  REFUTED.** The other three cost a VERIFIED that means less than it looks —
-  deserialization corruption above, a dropped `assume` widening the question,
-  and a box correctly declared but never occupied. This one manufactures a
-  counterexample. `any_array` validated shape and bound ordering but not
-  bounds *against dtype*, so a `uint8` declaration of `(-3, -1)` — impossible
-  for the dtype, a set no execution can inhabit — was accepted, and `sign`
-  returned `[-1, -1]` on it at **100% coverage with no note**, yielding a
-  REFUTED whose witness the caller could not reproduce. **A false
-  counterexample is the output shape a user trusts most.**
+  **A FOURTH way a declaration can be wrong, and the second of the four that
+  MINTED a REFUTED.** The other two cost a VERIFIED that means less than it
+  looks — deserialization corruption above, and a box correctly declared but
+  never occupied. This one manufactures a counterexample. `any_array`
+  validated shape and bound ordering but not bounds *against dtype*, so a
+  `uint8` declaration of `(-3, -1)` — impossible for the dtype, a set no
+  execution can inhabit — was accepted, and `sign` returned `[-1, -1]` on it
+  at **100% coverage with no note**, yielding a REFUTED whose witness the
+  caller could not reproduce. **A false counterexample is the output shape a
+  user trusts most.**
 
-  **Correction, because the first version of this paragraph contradicted a
-  measurement twenty lines above it:** it is NOT the only one of the four that
-  mints a REFUTED. Way #2 does too, and this document already records the
-  instance — `assume(jnp.all(x >= 0))` over `x ∈ [-10,10]^3` returning REFUTED
-  with the replay-confirmed witness `[0,0,-1]` that violates the precondition
-  the author wrote. What distinguishes #4 is narrower and still worth stating:
-  the other three produce a verdict about a DIFFERENT question than the author
-  asked, while #4 produces one about **no question at all** — the declared set
-  is empty, so the witness cannot be constructed at any dtype. Found by a
-  blinded audit reading the claim, not by anything running.
+  **The tense in that heading is load-bearing, and it has been wrong in both
+  directions.** The heading first read *"and the only one that mints a
+  REFUTED"*, which was false when written: way #2 minted one too, and the
+  measurement was twenty lines above it. A **Correction** paragraph was
+  added here on 2026-07-29 saying so — and it restated way #2's REFUTED as a
+  live fact **a day after the withholding fix had already removed it**, so
+  the repair carried the same defect it was repairing, one day newer. Both
+  spellings are now dated rather than either being re-asserted:
+
+  * **As the two defects were found, #2 and #4 each minted a REFUTED.** The
+    Correction was right about that and its numeral stands.
+  * **On this tree neither does, and they are closed by different
+    mechanisms.** #2 is WITHHELD — the drop is detected and the refuting
+    side declines to a note-bearing UNKNOWN, measured above. #4 cannot
+    OCCUR — the empty box is refused at declaration time, before any
+    transfer sees it, so there is no run in which the false counterexample
+    could be built.
+  * **What distinguishes #4 is not the REFUTED and never was.** The other
+    three produce a verdict about a DIFFERENT question than the author
+    asked; #4 produces one about **no question at all** — the declared set
+    is empty, so the witness cannot be constructed at any dtype. That
+    clause is independent of which of them mints what, and it is the half
+    of the Correction worth keeping.
+
+  Found by a blinded audit reading the claim, not by anything running — and
+  the correction of the correction was found the same way, by a sweep that
+  re-drove the harness rather than re-reading the sentence.
 
   **The surface was a majority of the transfer set, not one entry point.**
   Driving that same box through every integer-accepting transfer, **the six
@@ -245,9 +333,47 @@ Every verdict object stamps, at minimum:
   subnormal), which reached a REFUTED at 100% coverage. No rule admits one and
   rejects the other, and admitting an empty point costs nothing while
   admitting the gap mints a false counterexample. `float64` is unaffected:
-  every python float IS a float64. Complex is admitted unconditionally. **Measured against
-  every literal declaration in the campaign corpus — 105 of them — zero are
-  refused,** and all 13 entry points close,
+  every python float IS a float64. Complex is admitted unconditionally.
+  **Measured against every literal declaration in the campaign corpus, zero
+  are refused** — the population and the count are printed by
+  `corpus/declaration_emptiness_sweep.py`, section 4, and the figure is
+  deliberately not retyped here.
+
+  **THE FIGURE IS NOT RETYPED AND THAT IS `docs/norms.md`'s RULE APPLIED TO
+  THE SENTENCE THAT BROKE IT.** This read *"105 of them"*. The instrument
+  prints **112** on this tree, and its census re-derived over `corpus/` as it
+  stood at `89413c2` — the commit that wrote the sentence, where the
+  instrument did not yet exist — gives **104**. The numeral reproduced at
+  neither revision, and
+  `docs/norms.md`'s *"A figure in a norm states the UNIT it counts"* — cited
+  by heading and not by line, for the reason SF-0.2.0-14 gives — records
+  *this exact figure* as the campaign's
+  own worked example of a mis-populated weld, in which *"105 float64
+  declarations"* and a literal-declaration total were the same number drawn
+  from **different populations**. That section then says *"the figures
+  themselves are not restated here, and that is this norm applied to
+  itself"* and sends the reader to the instrument. This page restated it
+  anyway, under the population norms.md says it did not come from. Run the
+  script and quote what it prints.
+
+  **The refusal half is what the sentence was for, and it drove clean.**
+  All of the corpus's literal declaration bound pairs, at the dtype
+  declared beside each, through `harness.any_array` under
+  `jax_enable_x64=True`: **zero refused**, at the count the instrument
+  reports.
+
+  **And the transfers close — the numeral that used to stand here did not
+  survive its own paragraph.** This read *"all 13 entry points close"*, and
+  both halves of that were already withdrawn in the paragraph it sits in:
+  that paragraph says *"the exact count depends on an operand convention that
+  was never stated, and neither number is robust"*, and it had been
+  rewritten to say *"the surface was a majority of the transfer set, not
+  one entry point"* — precisely to stop calling these transfers entry
+  points. The sentence was the originating commit message's wording
+  (`89413c2`: *"All 13 entry points close, and the other entry point closes
+  too"*), left standing when the paragraph above it was corrected. **What
+  closes them is not a count**: the box is refused at declaration time, so
+  no transfer of any count ever sees it,
 
 
 - the query's content hash (`stelling.ir.ClosedJaxpr.content_hash()`; the
@@ -325,6 +451,49 @@ verdicts:
   the verdict does not emit). A verdict whose provenance cannot be
   trusted is worse than no verdict — the differential principle, applied
   to the tool's own provenance.
+
+### What has been driven in this document, and what has not
+
+**This page's own claims were swept for accuracy on 2026-08-22 (0.2.0 D5),
+and the sweep's reach is written down here so a repaired page is not read as
+a cleared one.** Roughly 259 claims across both shipped documents were driven
+against the tree; fourteen findings came back, a fifteenth was found while
+repairing them, and the repairs are in place above and in
+`DOCUMENTATION_ARCHITECTURE.md`. **What that does NOT mean:**
+
+* **The `## Log` below was not read line by line.** It is 11,000-odd lines
+  and it was swept EXHAUSTIVELY BY INSTRUMENT — every `path::name` citation,
+  every backticked module-qualified identifier, every backticked path, every
+  markdown anchor, every `Versions:` field, every occurrence of "today" —
+  with only the flagged passages read. **A present-tense claim about current
+  code that carries none of those markers was not reached.** Both of the
+  defects the D5 pass found in the Log surfaced through an identifier scan,
+  which is the only reason either surfaced; there is no basis for believing
+  they are the only two of their shape in 11,000 lines.
+* **The large stamped measurement tables inside the two routed regions were
+  read but NOT re-derived** — SF-0.2.0-14's 20,424-cell partition and its
+  583,792-document product, SF-0.2.0-19's cost census, SF-0.2.0-51's timing
+  table, SF-0.2.0-55's and -48's harness corpora, SF-0.2.0-56's and -66's
+  per-hunk revert tables, SF-0.2.0-59's 81-cell partition, SF-0.2.0-63's
+  message-totality figures, SF-0.2.0-03's race and SF-0.2.0-05's timings.
+  Where such a table had a drivable PRESENT-TENSE consequence it was driven,
+  and two of the fourteen findings came out of exactly that. The historical
+  cells themselves are unchecked.
+* **`DOCUMENTATION_ARCHITECTURE.md` §12 and §13.1 were not attempted**, and
+  that file's own header already says why: its IEC 61508 / ISO 26262 /
+  DO-178C / DO-330 / EN 50128 claims are *"cited from working knowledge and
+  unverified"* and its IEC 62304 claims are *"paywalled and reported, not
+  verified"*. Its Appendix A landscape claims about other tools are likewise
+  out of reach of this tree.
+* **Three routed lines are known stale and are NOT repaired**, because
+  amending a hash-pinned block costs an edit to `CHANGELOG.md` as well —
+  measured, not assumed. They are recorded with their price in the
+  2026-08-15 `mul`/`dot_general` entry below, under *"THE DEFERRAL
+  STANDS"*.
+* **A green suite says nothing about any of this.** Every defect the pass
+  found was green on the day it was found, and the three renamed-test
+  defects were each *supported* by a test that passes — one of them by a
+  test asserting the opposite of the sentence citing it.
 
 ## Log
 
@@ -2919,13 +3088,29 @@ and a count over entries that happened to say something is not a count.
   direction is REFUTED → UNKNOWN and agrees with the ruling, but it
   arrived as a side effect of B's guard rather than as a decision, and it
   falsifies PREREG_REF1's scored C7 (see its re-scoring). All four cells
-  are now pinned by
-  `test_an_assume_after_the_assert_is_pinned_on_BOTH_legs`, and the
-  disagreement itself by
-  `test_the_two_legs_do_not_yet_agree_on_assume_ordering`, so the
-  forthcoming query-scoping change lands loudly wherever it touches.
+  are pinned by
+  `tests/test_vacuous_refutation.py::test_an_assume_after_the_assert_withholds_on_BOTH_legs`,
+  and the relation between the two legs by
+  `tests/test_vacuous_refutation.py::test_the_two_legs_now_agree_on_assume_ordering`.
   Constructions: `tests/test_vacuous_refutation.py`; pre-registration and
   outcomes: `scratchpad/PREREG_REF1.md`.
+
+  *This sentence named both tests by their ORIGINAL names —
+  `test_an_assume_after_the_assert_is_pinned_on_BOTH_legs` and
+  `test_the_two_legs_do_not_yet_agree_on_assume_ordering` — and said the
+  "forthcoming query-scoping change lands loudly wherever it touches". The
+  change has LANDED. The second rename is semantic and not cosmetic: this
+  sentence described the tree as pinning a **disagreement** between the two
+  legs, and the tree pins the **agreement**, under a section headed
+  `-- C: the ordering rule, and the two legs that now agree on it --`, with
+  an anti-vacuity control (delete the assume and each leg refutes on its
+  own). The four `_ORDERING_ROWS` cells survive the rename unchanged — still
+  four, still all `UNKNOWN` — so the substance was never in doubt, only the
+  claim about what holds it. Both names were written BARE, so
+  `tests/test_prose_hygiene.py::test_every_test_cited_in_core_prose_still_exists`
+  — which matches `tests/…py::test_…` — could not see either; they are
+  rewritten as full citations here, and the bare form now has a gate of its
+  own (see `test_every_bare_test_name_in_shipped_prose_resolves`).*
 
 - **2026-08-07 (pre-release): two sub-jaxpr defects closed — a REFUTED
   from a branch nothing certified is reachable, and an obligation the
@@ -6992,6 +7177,78 @@ and a count over entries that happened to say something is not a count.
   guard** — it is in `## Log`, outside the pinned region — and was simply
   missed; that is why it is fixed and this one is not.
 
+  **THE DEFERRAL STANDS, AND THE 0.2.0 D5 ACCURACY PASS MEASURED WHY RATHER
+  THAN REPEATING IT.** D5 set out to pay this debt — it was already amending
+  the manifest for two other routed findings, so a `dest_sha256` update and
+  a `not_carried` entry were sunk cost. **The cost is not confined to the
+  manifest, and that is the fact this note was missing.** Driven in a
+  worktree, on `SF-0.2.0-64` and reverted afterwards:
+
+  ```
+  edit one line inside a routed block, manifest untouched
+      -> 2 failed  (test_every_routed_block_arrives_in_soundness_md,
+                    test_the_source_hashes_reproduce_from_git[soundness])
+  ... then dest_sha256 updated, src_lines_not_carried=1, not_carried
+      quoted, edit_note written
+      -> 1 failed  test_the_record_says_how_many_blocks_were_edited_in_transit
+                   "`### Soundness fixes` says 3 block(s) were edited in
+                    transit and the manifest declares 4"
+  ```
+
+  Editing ANY routed block flips it into the `src_sha256 != dest_sha256`
+  partition, and `CHANGELOG.md`'s *"**Three blocks were edited in
+  transit**"* sentence is derived from the size of that partition and must
+  also NAME every block in it. So the true price of amending a routed line
+  is **three files**, one of which is `CHANGELOG.md` — deliberately, because
+  that count is the manifest's own guard against a routing quietly becoming
+  a summarisation, and it is doing exactly its job here. D5 owned
+  `SOUNDNESS.md`, `DOCUMENTATION_ARCHITECTURE.md` and the manifest, did not
+  own `CHANGELOG.md`, and a sibling batch was editing it; so the debt is
+  re-recorded with its measured price instead of being half-paid.
+
+  **TWO MORE ROUTED LINES ARE STALE AND ARE BLOCKED THE SAME WAY.** Both
+  were found by the D5 sweep, both re-driven here, and both are recorded
+  now so they are known debts rather than unnoticed ones. Neither is
+  unsound: each is a stale numeral or citation in a stamped historical
+  entry, and the claims they support hold.
+
+  * **`SF-0.2.0-62`'s container partition** says *"51 objects, 8 accepted,
+    43 refused, and the two faces partition identically"*. Re-running
+    `tests/test_shape_param_rule.py`'s own `_population()` through its own
+    oracle and its own `_door`/`_emission` probes gives **57 objects, 10
+    accepted, 47 refused, 0 faces split**. The partition claim — the part
+    that carries soundness — is the half that reproduces; the population
+    grew when `_lying_iter_candidates` and `_claiming_candidates` were
+    added, which is drift and not a bad original: the `321209d` version of
+    `_population()` against today's `stelling` still gives exactly 51. And
+    the sentence credits the pin with measuring the figures, which it does
+    not — `test_the_measured_partition_IS_the_documented_rule` asserts
+    floors (`>= 15` refused, `>= 4` accepted, `>= 2` unreadable) and never
+    the numerals.
+  * **`SF-0.2.0-64`'s element-count census** says `propagate` carries
+    **six** raw `n = 1; for d in shape: n *= d` products, **three** of them
+    over a shape read off an `ir.Aval`/`ir.Array` at the site, and quotes
+    four `propagate.py:NNN` line numbers. Re-running the entry's own AST
+    census on this tree gives **five and two** — `_refused_value_problem`
+    left the census at B8a item 1, where it began counting the extents
+    `iv.check_shape` returned — and all four cited lines now point at
+    unrelated code (`:814` at a dataclass field list, `:1180` inside
+    `_int_bracket`, `:6584` inside a convert transfer, `:10657` inside the
+    equation dispatch). **And its parenthetical about its own instrument is
+    false**: it says the census test *"reds naming this entry if a seventh
+    appears or one of these moves"*, and that test holds no line numbers at
+    all, has already been updated to the five, and requires only that the
+    two surviving `off_ir` names appear ANYWHERE in the entry text — so it
+    stays green while the entry says six and three. This is precisely the
+    shape SF-0.2.0-14 warns about 800 lines earlier: *"a line that still
+    exists and has become something else is exactly the claim nothing
+    checks."*
+
+  **Whoever pays this debt pays it once for all three**, since the
+  `**N blocks were edited in transit**` sentence has to move only once
+  however many blocks are amended in the same commit — which is an argument
+  for doing them together and not one at a time.
+
   **The interaction with B5-1, said plainly**: a `dot_general`-floored sum
   of squares now reaches the `div` transfer with a `[0, S]` box exactly as
   a `reduce_sum`-floored one does, so it meets the same certificate gate.
@@ -9976,14 +10233,27 @@ in place and marked.*
   THAN THE ROW IT COSTS.** The plugin's replica calls
   `self._binding_shape(atom)` in order to count, so on any document whose
   answer depends on HOW MANY TIMES the declaration is read, the
-  measurement is a second reader. The suite contains exactly one such
-  document — `test_the_declaration_reader_is_a_FUNCTION_and_not_a_single_
-  READ`, whose `shape` param is a `list` subclass that answers differently
-  between iterations — and it is the one and only replica/real mismatch in
-  the run (`reduce_sum`: replica predicted no decline, the real check
-  declined), and the one test that reds UNDER THE PLUGIN and nowhere else.
-  That is the F4 finding measuring itself: a reader that re-reads is a
+  measurement is a second reader. The suite held exactly one such document
+  at the commit measured — `test_the_declaration_reader_is_a_FUNCTION_and_
+  not_a_single_READ`, whose `shape` param is a `list` subclass that answers
+  differently between iterations — and it was the one and only replica/real
+  mismatch in the run (`reduce_sum`: replica predicted no decline, the real
+  check declined), and the one test that redded UNDER THE PLUGIN and nowhere
+  else. That is the F4 finding measuring itself: a reader that re-reads is a
   reader, including when the reader is the instrument.
+
+  *That test no longer exists, and this paragraph read "the suite contains"
+  in the present tense until the 0.2.0 D5 accuracy pass. It was written at
+  `30d4b04` (2026-08-16 05:26) and deleted at `f729d70` the same day
+  (13:56) — eight and a half hours — when audit 5 replaced it with
+  `tests/test_aval_lie_both_faces.py::test_the_DOOR_INSTALLS_the_shape_param_it_VALIDATED`
+  and
+  `tests/test_shape_param_rule.py::test_the_door_INSTALLS_what_it_VALIDATED_so_a_second_read_cannot_differ`,
+  which close the divergence at the door rather than measuring it. The
+  measurement above is a stamped historical one and is left standing as
+  such; what was wrong was the tense. This is the second instance in this
+  file of the `:6962` shape found by a bare-name resolution rather than by
+  any citation checker, and the reason a bare-name gate now exists.*
 
   The 2.85% of atoms the box witness cannot see are exactly the inner-scope
   ids — which is why the binding-site witness must be total in its own
