@@ -811,9 +811,9 @@ _op("meet", NOT_OUTWARD,
 # Selection, data movement, three-valued booleans and the constructors. Every
 # endpoint is a value that was already there, so the answer is asserted
 # EXACTLY: any widening at all reddens, which is the whole check these
-# operations need. (`abs_`, `maximum`, `minimum`, `hull`, `join`, `meet`'s
-# arithmetic-free siblings and `int_div` compute, but they compute with
-# `min`/`max`/truncation over doubles, which are exact.)
+# operations need. (`abs_`, `neg`, `maximum`, `minimum`, `hull`, `join` and
+# `int_div` DO compute -- with negation, `min`/`max` and truncation over
+# doubles, every one of which is exact, so there is no rounding to direct.)
 
 def _nr(label, r, los, his):
     return (label, r.los, r.his,
@@ -1043,7 +1043,7 @@ _ne_("measured_flush_clause", "the measured-target clause of that stamp",
                "jax 0.11.0 CPU" in iv.measured_flush_clause(), True)])
 
 
-# --- the four gates -------------------------------------------------------
+# --- the gates ------------------------------------------------------------
 
 def _public_operations() -> set[str]:
     """Every public function ``stelling.interval`` DEFINES.
@@ -1251,9 +1251,14 @@ def test_the_docstring_names_every_operation_a_reader_would_guess_wrong():
     stopped classifying them.
 
     The safe directions are deliberately not required: ``NO_ROUNDING`` and
-    ``NO_ENDPOINTS`` operations are absent from this requirement, because
-    demanding that the docstring list all forty of them would turn it into
-    the census it says, correctly, that it is not.
+    ``NO_ENDPOINTS`` operations are absent from this requirement -- a reader
+    who assumes ``slice_`` rounds is merely over-cautious -- because
+    demanding that the docstring list every one of them would turn it into
+    the census it says, correctly, that it is not. *(This read "all forty of
+    them", which was wrong, in a batch whose subject is hand-typed counts.
+    There is no count here now: the set is every ``NO_ROUNDING`` and
+    ``NO_ENDPOINTS`` row of the table above, and the table is enumerated
+    from the module on every run.)*
     """
     blocks = _doc_blocks()
     unnamed = sorted(

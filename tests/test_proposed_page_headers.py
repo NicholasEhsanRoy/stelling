@@ -240,9 +240,9 @@ def test_every_status_block_is_bounded_by_a_heading():
             continue                      # no status paragraph to bound
         block = _status_block(text)
         if block is None:
-            unbounded.append(path.name)
+            unbounded.append(str(path.relative_to(REPO)))
             continue
-        sizes[path.name] = block.count("\n")
+        sizes[path] = block.count("\n")
     assert sizes, (
         "no proposed-*.md has a bounded status block, so every gate in this "
         "file that reads one measured nothing"
@@ -254,8 +254,8 @@ def test_every_status_block_is_bounded_by_a_heading():
         f"header, in an argument -- would satisfy the header at the top. "
         f"Put the status paragraph above a heading."
     )
-    whole = {name: n for name, n in sizes.items()
-             if n >= (DOCS / name).read_text(encoding="utf-8").count("\n")}
+    whole = {str(p.relative_to(REPO)): n for p, n in sizes.items()
+             if n >= p.read_text(encoding="utf-8").count("\n")}
     assert not whole, (
         f"these status blocks are the whole page: {whole}. The narrowing is "
         f"what this gate is."
@@ -285,17 +285,21 @@ def test_a_page_that_says_it_shipped_names_a_test_that_pins_it():
     including why reciprocity would not have caught it either.
     """
     shipped = {
-        p.name: _status_of(_title_of(p)) for p in PAGES
+        p: _status_of(_title_of(p)) for p in PAGES
         if _status_of(_title_of(p)) in SHIPPED
     }
     assert shipped, (
         "no proposed-*.md claims to have shipped, so this gate measured "
         "nothing. Five of them did when it was written."
     )
+    # Keyed by PATH, not by `p.name`: `_pages()` is an rglob now, and
+    # `DOCS / p.name` does not resolve for a page in a subdirectory --
+    # a nested BUILT page would have raised FileNotFoundError out of this
+    # gate rather than being checked by it.
     unpinned = {
-        name: status for name, status in shipped.items()
+        str(p.relative_to(REPO)): status for p, status in shipped.items()
         if not _TESTFILE.findall(
-            _status_block((DOCS / name).read_text(encoding="utf-8")) or ""
+            _status_block(p.read_text(encoding="utf-8")) or ""
         )
     }
     assert not unpinned, (
