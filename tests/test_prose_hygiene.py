@@ -1030,11 +1030,12 @@ def test_every_bare_test_name_in_shipped_prose_resolves():
       different test that happens to share the name, in a different file
       from the one the sentence means. The `path::name` form does not have
       that gap, which is a reason to prefer writing citations that way.
-    * **The supersession licence carries `_SUPERSEDED_BY`'s residue**, and a
-      wider version of it: the window runs from the mention to the next bare
-      mention or the end of the paragraph, and bare mentions are commoner
-      than `path::name` ones, so the window is usually shorter here — but it
-      still asks only that the replacement RESOLVE, not that it be related.
+    * **The supersession licence carries `_SUPERSEDED_BY`'s residue**, in a
+      NARROWER window: it runs from the mention to the next bare mention or
+      the end of the paragraph, and bare mentions are commoner than
+      `path::name` ones, so the span a licence covers is usually shorter
+      here than there. Narrower is not closed — it still asks only that the
+      replacement RESOLVE, not that it be related to the name it replaces.
     * **`tests/` and `scratchpad/` stay out**, for the same reasons the
       `path::name` scan gives: three test modules write citation-shaped
       strings as plants, and `scratchpad/` is tracked evidence.
