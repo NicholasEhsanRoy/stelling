@@ -62,11 +62,39 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
     ``1.0000000000000002``, is representable and is *neither* endpoint —
     the single-op property that one endpoint equals ``fl(R)`` does not
     extend. :func:`reduce_sum`'s own docstring says the same thing.
-  - the **⊤ escapes and endpoint conventions** that are not real arithmetic
-    at all: a divisor interval containing zero, ``inf/inf``, an infinite
-    operand under ``mul``'s ``0·±inf = 0`` rule, and a negative
+  - the **⊤ escapes and saturating endpoints** that are not real
+    arithmetic at all: a divisor interval containing zero, ``inf/inf``,
+    the **saturation of an INFINITE extremum** (``mul([inf, inf], [2, 3])``
+    is ``(1.7976931348623157e+308, inf)`` — ``_down(+inf)`` is maxfloat,
+    and there is no real there to bracket), and a negative
     ``integer_pow`` exponent whose base bracket underflows to 0. Those
     widen deliberately and are named where they happen.
+
+    *This bullet read "an infinite operand under ``mul``'s ``0·±inf = 0``
+    rule" where it now names the saturation, and it was TRUE when it was
+    written* — an infinite endpoint anywhere in the operand quadruple then
+    dropped all four corners onto the unconditional bump, so the
+    convention's corner really did widen. *The corner fix falsified it and
+    left it standing*, which made it a FALSE CLASSIFICATION under a heading
+    reading *"every one of them is wider"*: the convention names a POINT, a
+    point needs no slack, and ``mul`` now gives it none. Measured,
+    ``mul([0, 0], [1, inf])`` is ``(0.0, 0.0)`` and ``mul([0, inf],
+    [0, 3])`` is ``(0.0, inf)`` — neither widened by anything. From that
+    same commit this docstring's *exact-when-representable* entry has said
+    the opposite of this bullet, in the same text. What an infinity does
+    still cost is the saturation named above.
+
+    **AND NOTHING CAUGHT IT, WHICH IS THE PART TO CARRY.** The gate over
+    this text asks whether an operation is MENTIONED beside the words
+    naming its discipline. A mention in a block claiming the WRONG
+    discipline satisfies that exactly as well as a mention in the right
+    one — and it satisfies it even when the two blocks are in this one
+    docstring contradicting each other. The limit is stated where the gate
+    is defined, in ``tests/test_interval.py``'s
+    ``test_the_docstring_names_every_operation_a_reader_would_guess_wrong``.
+    What the replacement bullet does get is the measurement gate: the
+    saturation pair above is DERIVED from the drive rather than typed
+    here.
 
   So: *outward* is a claim about the module; *tight* is a claim about one
   operation, and the operation's own docstring is the authority for it.
@@ -2207,12 +2235,23 @@ def scatter_add_rows(
     interval sum brackets it. Each accumulation step is
     :func:`reduce_sum`'s — :func:`_add_lo`/:func:`_add_hi`, the exact
     ``Fraction`` sum rounded outward ONLY where that step is inexact — so
-    an element whose accumulated total is representable comes back
+    a **single-contribution** element with a representable total comes back
     UNWIDENED, and untouched elements are copies of the operand's (no
     arithmetic, no rounding). This ℝ-associativity reasoning is exactly
     what float addition does not offer, so the ieee mode declines the
     primitive instead of reusing this kernel
     (:data:`SCATTER_ADD_IEEE_DECLINE`).
+
+    *That read "an element whose accumulated total is representable comes
+    back UNWIDENED", with no scope on the number of contributions, and the
+    very next paragraph has contradicted it since they were written —
+    the same shape of error as the one* :func:`reduce_sum` *records against
+    itself, in the commit that made this kernel exact-per-step. Measured:
+    ``[0] += [1, 2**-53, 2**-53]`` returns ``(1.0, 1.0000000000000004)``
+    around an exact total of ``1.0000000000000002`` that a double holds
+    exactly and that is STRICTLY inside both endpoints. The scoped claim is
+    the true one and is what stands above;* :func:`reduce_sum` *scopes its
+    own the same way — "a one-element reduction is exact".*
 
     **The discipline is per STEP and not per result**, exactly as it is for
     :func:`reduce_sum`, and that distinction is the one this kernel used to

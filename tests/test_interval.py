@@ -1469,6 +1469,36 @@ def test_the_docstring_names_every_operation_a_reader_would_guess_wrong():
     There is no count here now: the set is every ``NO_ROUNDING`` and
     ``NO_ENDPOINTS`` row of the table above, and the table is enumerated
     from the module on every run.)*
+
+    **AND HERE IS THE LIMIT THIS GATE HAS, STATED RATHER THAN DISCOVERED
+    AGAIN.** It is one-directional. It asks whether each operation that
+    needs a classification IS MENTIONED beside the words naming the
+    discipline it actually carries; it never asks whether a block that
+    mentions an operation is telling the truth about it. **A FALSE
+    CLASSIFICATION IS INVISIBLE HERE** -- an operation named in a block
+    claiming a discipline it does not have satisfies this gate exactly as
+    well as one named in the right block, and satisfies it even when both
+    blocks are in the same docstring saying opposite things.
+
+    Not hypothetical, and not old: ``interval.__doc__``'s ⊤-escapes bullet
+    filed *"an infinite operand under ``mul``'s ``0·±inf = 0`` rule"* under
+    a heading reading *"every one of them is wider"*, in the same commit
+    whose *exact-when-representable* entry said the convention *"names a
+    POINT, so it is exact and takes no slack"* -- and ``mul([0, 0],
+    [1, inf])`` is ``(0.0, 0.0)``, not wider by anything. Two entries of
+    one docstring contradicting each other, with this gate green, because
+    ``mul`` is ``CORRECTLY_ROUNDED`` and so is not in
+    :data:`MUST_BE_NAMED_IN_THE_DOCSTRING` at all -- it was never being
+    asked about. Extending the gate to catch it would mean deciding, from
+    prose, which operations a block is making a claim ABOUT rather than
+    merely referring to, and that is a different instrument than this one.
+    What the replacement bullet DID get is
+    :func:`test_the_measurements_the_docstring_quotes_are_the_ones_it_would_get`:
+    the saturation pair it now quotes is driven off :data:`_SATURATION`
+    rather than typed beside it, so a digit that stops being true reddens
+    there. That is a check on the DIGITS. It is not a check on the heading
+    they sit under, and nothing here is -- which is the paragraph above,
+    repeated where a reader editing the bullet will be standing.
     """
     blocks = _doc_blocks()
     unnamed = sorted(
@@ -1516,6 +1546,29 @@ def test_the_docstring_names_every_operation_a_reader_would_guess_wrong():
 # saturation posture it has always had -- BOTH, because tightening the
 # finite side is the fix and tightening the infinite side would be a
 # different decision nobody has made.
+#
+# AND ONE MORE THING, WHICH THIS LIST DID NOT PIN WHEN IT WAS WRITTEN.
+# `_mul_corner`'s last line rescues the `0 * +-inf = 0` corner as the exact
+# rational `Fraction(0)` rather than the float `0.0` `_prod` hands back,
+# *because the convention names a POINT and a point needs no slack*. Delete
+# that rescue -- leave `return p` -- and `_extreme_down`/`_extreme_up` take
+# the `_down`/`_up` saturation branch on a float zero and bump it off zero.
+# Measured on `e3a6475` with the rescue deleted: the ENTIRE zero-dep suite
+# stayed green at `2181 passed, 164 skipped`, and `mul([-inf,-1],[-3,0])`
+# came back `(-5e-324, inf)` for an image whose infimum is exactly 0 --
+# M16's own symptom again, sign-mirrored.
+#
+# **The two pins that existed were both MASKED, and the masking is the part
+# worth reading.** `min`/`max` are FIRST-WINS on a tie, and `Fraction(0)`
+# compares equal to a float `0.0`. In `mul([0,0],[1,inf])` the corner list
+# is `[0*1, 0*inf, 0*1, 0*inf]` and in `mul([0,inf],[0,3])` -- the row
+# directly above -- it is `[0*0, 0*3, inf*0, inf*3]`: in both, a genuinely
+# exact `Fraction(0)` corner sits EARLIER than any convention corner, so
+# `min`/`max` return the exact one and the mutant is invisible. Neither row
+# is deleted, because each still pins what it was written for; what they do
+# not pin is the rescue. A pin on THAT has to put the convention corner
+# where no exact zero can be selected ahead of it, and the rows below do it
+# in two different ways.
 
 _HALF_INFINITE = [
     # (label, result, exact finite endpoint as a Fraction or None, side)
@@ -1523,6 +1576,34 @@ _HALF_INFINITE = [
      lambda: iv.mul(scalar(1.0, INF), scalar(2.0, 3.0)), Fraction(2), "lo"),
     ("mul([0,inf],[0,3]) -- M16's zero corner",
      lambda: iv.mul(scalar(0.0, INF), scalar(0.0, 3.0)), Fraction(0), "lo"),
+    # --- the `0 * +-inf = 0` corner AS the extremum, both signs ----------
+    #
+    # ORDER-DEPENDENT, and labelled so rather than trusted quietly: an
+    # exact `Fraction(0)` corner IS in each list (`(-1)*0`), and what hands
+    # the convention corner to `min`/`max` is that it sits at index 0 and
+    # ties go to the first. These two are the witnesses the audit named.
+    # They redden on the deleted rescue; they would stop reddening if the
+    # corner enumeration order in `_mul_corners` ever changed, which is
+    # exactly why the pair below is here too.
+    ("mul([-inf,-1],[-3,0]) -- the 0*-inf corner IS the infimum",
+     lambda: iv.mul(scalar(-INF, -1.0), scalar(-3.0, 0.0)),
+     Fraction(0), "lo"),
+    ("mul([-inf,-1],[0,3]) -- and the supremum, sign-mirrored",
+     lambda: iv.mul(scalar(-INF, -1.0), scalar(0.0, 3.0)),
+     Fraction(0), "hi"),
+    # ORDER-INDEPENDENT. BOTH endpoints of the second operand are infinite,
+    # so every one of the four corners is either a convention zero or a
+    # signed infinity and there is NO exact-zero corner anywhere in the
+    # list for a tie-break to reach. No enumeration order can mask these.
+    ("mul([0,1],[inf,inf]) -- no exact-zero corner to tie-break against",
+     lambda: iv.mul(scalar(0.0, 1.0), scalar(INF, INF)), Fraction(0), "lo"),
+    ("mul([-1,0],[inf,inf]) -- ditto, sign-mirrored",
+     lambda: iv.mul(scalar(-1.0, 0.0), scalar(INF, INF)), Fraction(0), "hi"),
+    ("dot_general([0,1].[inf,inf]) -- the rescue, through _mul_corners",
+     lambda: iv.dot_general(
+         iv.IntervalArray(shape=(1,), los=(0.0,), his=(1.0,)),
+         iv.IntervalArray(shape=(1,), los=(INF,), his=(INF,)),
+         (((0,), (0,)), ((), ()))), Fraction(0), "lo"),
     ("mul([-inf,-1],[2,3])",
      lambda: iv.mul(scalar(-INF, -1.0), scalar(2.0, 3.0)),
      Fraction(-2), "hi"),
@@ -1563,6 +1644,16 @@ _SATURATION = [
      lambda: iv.add(scalar(INF, INF), iv.point(1.0)),
      (sys.float_info.max, INF)),
 ]
+
+# The `_SATURATION` rows whose result `interval.__doc__` QUOTES, by index,
+# with the operation the quoting block has to name. `DISCIPLINE`'s `quoted`
+# mechanism cannot reach these: a CORRECTLY_ROUNDED row states its exact
+# image as a pair of `Fraction`s and `Fraction(inf)` raises, so a case with
+# an infinite endpoint cannot be a row of that table at all. The digits are
+# derived here for the same reason they are derived there -- the ⊤-escapes
+# bullet names this measurement, and a measurement typed into prose beside
+# a claim is how that bullet came to carry a false one.
+_DOC_QUOTED_SATURATION = [(0, "mul")]
 
 
 def test_a_half_infinite_operand_costs_only_the_corners_it_touches():
@@ -2023,6 +2114,26 @@ def test_the_measurements_the_docstring_quotes_are_the_ones_it_would_get():
     have to be right and they have to be right together, and a coincidence
     somewhere else in the text no longer counts, because it has to be in the
     block that names the operation.
+
+    **THE SATURATION MEASUREMENT IS READ THE SAME WAY**, through
+    :data:`_DOC_QUOTED_SATURATION`, because ``DISCIPLINE``'s own ``quoted``
+    mechanism structurally cannot reach it: an infinite endpoint has no
+    ``Fraction`` image, so no row of that table can state one. The
+    ⊤-escapes bullet is where a false classification shipped -- it filed
+    the ``0·±inf = 0`` convention, which widens by nothing, under a heading
+    saying every entry is wider -- and the measurement that replaced it is
+    derived here rather than typed there.
+
+    *What that leg catches, measured, and what it does not.* Tightening the
+    saturation posture so ``mul([inf, inf], [2, 3])`` returns
+    ``(FMAX, FMAX)`` reddens it: no block writes that pair. **Deleting the
+    pair from the ⊤-escapes bullet does NOT redden it** -- the same pair
+    stands beside ``mul`` in the discipline-list bullet, and this gate is
+    scoped to a block that names the OPERATION, not to one particular
+    bullet. So the leg holds the DIGITS current across the whole docstring;
+    it does not hold them in any one place. Driven both ways rather than
+    assumed, because assuming it was how the two ``mul`` pins one file over
+    came to be masked by a tie-break nobody had checked.
     """
     blocks = _doc_blocks()
     marked = {n: op.quoted for n, op in DISCIPLINE.items() if op.quoted}
@@ -2034,6 +2145,13 @@ def test_the_measurements_the_docstring_quotes_are_the_ones_it_would_get():
             label, lo, hi, _elo, _ehi = cases[i]
             if not _quotes_the_pair(name, lo, hi, blocks):
                 missing.append(f"{name}: {label}: ({lo!r}, {hi!r})")
+    assert _DOC_QUOTED_SATURATION, "the saturation leg reads nothing"
+    for i, name in _DOC_QUOTED_SATURATION:
+        label, drive, _want = _SATURATION[i]
+        r = drive()
+        lo, hi = r.los[0], r.his[0]
+        if not _quotes_the_pair(name, lo, hi, blocks):
+            missing.append(f"{name}: saturation: {label}: ({lo!r}, {hi!r})")
     assert not missing, (
         f"`stelling.interval.__doc__` scopes its tightness claim with "
         f"measurements this run does not reproduce -- no block of it writes "

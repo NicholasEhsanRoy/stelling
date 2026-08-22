@@ -3300,8 +3300,17 @@ def _t_scatter_add(eqn, params, ins):
     so the transfer is the outward-rounded interval sum of the operand
     element and its contributing update elements — exact in ℝ, sound for
     every accumulation order at once (:func:`stelling.interval
-    .scatter_add_rows` carries the argument), one outward bump per real
-    addition, untouched elements copied exactly.
+    .scatter_add_rows` carries the argument), each step bumped outward
+    ONLY where that step is inexact, untouched elements copied exactly.
+
+    *That read "one outward bump per real addition", which was the rule
+    before the accumulation moved onto the exact-``Fraction`` route and is
+    not the rule now: a step whose exact sum is representable is not
+    bumped at all, so the number of bumps is a property of the DATA and
+    not of the number of contributions. Measured: a single ``[0] += [1]``
+    row comes back ``(1.0, 1.0)`` — one real addition, no bump.*
+    :func:`stelling.interval.reduce_sum` *retracts this same sentence
+    about itself, and this copy of it was left standing one module over.*
 
     Covered forms, exactly (:func:`_scatter_add_row_form`): the two
     measured static-row configurations. Everything else declines:
@@ -3570,15 +3579,31 @@ def _int_overflow_guard(eqn, prim: str, outs):
 
     The snap yields a POINT (and thereby definite equality verdicts) only
     where one double ulp at the result's magnitude spans at most one
-    integer — |result| < 2**53. At int64 magnitudes the arithmetic
-    kernels' outward bump itself spans many integers (measured, third
-    audit F6: an in-range ``2**62 + 0`` accumulate keeps the snapped
-    bracket ``[2**62 - 512, 2**62 + 1024]`` — one outward ulp each way
-    at that magnitude — and stays undecided, while ``2**62 + 2**62``
-    escapes the range and declines correctly), so "in-range integer
-    arithmetic keeps its exact result" is a magnitude-conditional claim:
-    exact below 2**53, a sound-but-wide in-range bracket above.
-    Deliberate: tightness is never bought at the price of the bracket.
+    integer — |result| < 2**53. Above that a result the double cannot
+    represent exactly keeps a bracket many integers wide (measured on an
+    int64 ``scatter-add``: an in-range ``2**62 + 1`` accumulate, whose
+    exact total needs 63 bits, keeps the snapped bracket
+    ``[2**62, 2**62 + 1024]`` — one binade's ulp, 1024 integers — and
+    stays undecided), so "in-range integer arithmetic keeps its exact
+    result" is a magnitude-conditional claim: exact below 2**53, a
+    sound-but-wide in-range bracket above. Deliberate: tightness is never
+    bought at the price of the bracket.
+
+    *This read the claim off ``2**62 + 0``, citing*
+    ``[2**62 - 512, 2**62 + 1024]`` *and "stays undecided", with*
+    ``2**62 + 2**62`` *beside it "escaping the range and declining
+    correctly". NEITHER HALF MEASURES WHAT IT SAYS ANY MORE. Adding zero
+    has an exact representable total, so it was never a witness for
+    magnitude at all: the 512 below it was the arithmetic kernel's
+    unconditional outward bump, and with the kernels on the
+    exact-``Fraction`` route that case now comes back exactly*
+    ``[2**62, 2**62]`` *and DISCHARGES —* ``2**62 + 1`` *replaces it
+    above, because its exact total genuinely needs 63 bits. And*
+    ``2**62 + 2**62`` *does still decline, but the class moved:
+    :data:`_INT_OVERFLOW_DECLINE` fired for it while the bracket carried a
+    bump, and* :data:`_INT_BRACKET_DECLINE` *fires now that it does not. So
+    "declines correctly" no longer means the overflow class — see the
+    width test below, whose calibration this citation was resting on.*
 
     A no-op for float dtypes, which are returned untouched.
     """
@@ -3619,6 +3644,32 @@ def _int_overflow_guard(eqn, prim: str, outs):
             # "the result genuinely escapes": at int64/uint64 magnitudes one
             # double ulp spans thousands of integers, and that is a bracket
             # limit rather than a demonstrated overflow
+            #
+            # KNOWN MISCALIBRATED, AND NOT FIXED HERE. The test below is a
+            # PROXY: it asks how far the escaping END is past the boundary
+            # and ignores where the bracket's OTHER end sits. A bracket
+            # that snapped to a single integer carries no slack at all, so
+            # its escape IS demonstrated however close to the boundary it
+            # lands -- and this test declines it as unresolvable anyway.
+            # The predicate that says what the comment above means is
+            # `lo > hi_b or hi < lo_b`: the WHOLE snapped bracket outside
+            # the representable range, which no amount of bracket width
+            # can explain away.
+            #
+            # Measured on `61de794`, before the scatter-add accumulation
+            # moved to the exact route: `add(2**62, 2**62)` on int64
+            # already declines here, under `_INT_BRACKET_DECLINE` and this
+            # same 2048-wide message, for an exact bracket of
+            # `[2**63, 2**63]` that exceeds int64's top by exactly 1. So
+            # this is not a consequence of any one operation getting
+            # tighter: it is reachable from ANY operation whose in-range
+            # bracket is exact, and `_add_lo`/`_add_hi` have been
+            # exact-when-representable since `1be900d`. Each later
+            # conversion only joins that set. Sound either way -- the
+            # verdict is a decline in both classes, and only the REASON is
+            # less informative than the truth. Left alone deliberately: it
+            # is an integer-overflow classification rule with its own
+            # soundness argument and its own callers, and its own dispatch.
             width = max(math.ulp(float(lo_b)), math.ulp(float(hi_b)))
             if width > 1 and (
                 (hi > hi_b and hi - hi_b < width)

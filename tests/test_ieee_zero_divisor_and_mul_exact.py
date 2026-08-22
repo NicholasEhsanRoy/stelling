@@ -728,8 +728,24 @@ def test_mul_exact_route_is_confined_per_corner_not_per_operand_quadruple():
     What an infinite endpoint still costs is the SATURATION of an infinite
     extremum, and that is asserted here too, so "the finite side got
     tighter" cannot be read as "the infinite side did".
+
+    **TWO OF THE ASSERTIONS BELOW DO NOT PIN WHAT THEIR COMMENTS SAY, AND
+    THEY ARE KEPT BESIDE ONES THAT DO.** `_mul_corner`'s convention-zero
+    rescue -- `Fraction(0) if p == 0.0 else p`, the line the comment *"the
+    convention names a POINT"* is about -- can be deleted and this file
+    stays green, along with the rest of the suite (measured on `e3a6475`:
+    zero-dep `2181 passed, 164 skipped`). `min`/`max` break a tie
+    FIRST-WINS and `Fraction(0) == 0.0`, so in both `mul([0,0],[1,inf])`
+    (corners `[0*1, 0*inf, 0*1, 0*inf]`) and `mul([0,inf],[0,3])` (corners
+    `[0*0, 0*3, inf*0, inf*3]`) an exact `Fraction(0)` corner is reached
+    before any convention corner and the extremum never sees the
+    difference. Both still pin what they were written for -- that the
+    convention yields 0 and not NaN, and that M16's shape does not recur --
+    so both stay; what is added is the case where the convention corner
+    IS the extremum with no exact zero available to be chosen ahead of it.
     """
-    # the `0 * +-inf = 0` convention names a POINT, so it is exact
+    # the `0 * +-inf = 0` convention names a POINT, so it is exact. NOTE:
+    # this does not discriminate the rescue -- see the docstring.
     r = iv.mul(s(0.0, 0.0), s(1.0, INF))
     assert (r.los[0], r.his[0]) == (0.0, 0.0)
 
@@ -738,9 +754,22 @@ def test_mul_exact_route_is_confined_per_corner_not_per_operand_quadruple():
     assert r2.his[0] == INF
     assert r2.los[0] == 6.0, "the exact infimum is 6 and it is representable"
 
-    # M16's own shape, which this used to permit
+    # M16's own shape, which this used to permit (also tie-masked)
     r3 = iv.mul(s(0.0, INF), s(0.0, 3.0))
     assert (r3.los[0], r3.his[0]) == (0.0, INF)
+
+    # THE POINT TAKES NO SLACK, and here that is the whole claim: every
+    # corner of `[0,0] x [-inf,inf]` is a `0 * +-inf` convention zero, so
+    # there is no exact-zero corner in the list at all and BOTH endpoints
+    # are the rescue's own value. Deleting the rescue gives
+    # `(-5e-324, 5e-324)` -- a point bracket turned into a straddle of it.
+    r6 = iv.mul(s(0.0, 0.0), s(-INF, INF))
+    assert (r6.los[0], r6.his[0]) == (0.0, 0.0)
+
+    # and one sign each way where the convention corner is the extremum
+    # beside an infinity rather than beside another convention corner
+    assert iv.mul(s(0.0, 1.0), s(INF, INF)).los[0] == 0.0
+    assert iv.mul(s(-1.0, 0.0), s(INF, INF)).his[0] == 0.0
 
     # still ROUNDED where the exact corner is not representable, and
     # DIRECTED: the endpoint is the double immediately below the exact

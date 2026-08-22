@@ -968,13 +968,32 @@ def test_f6_int64_magnitude_bracket_pinned_as_intended():
     **Sound, and the verdict is identical, but the decline got LESS
     informative** — the true integer result really is ``2**63`` and really
     does overflow. The guard's width test assumes the bracket carries at
-    least an ulp of slack, and B23 removed the slack it was calibrated
-    against. That is a finding about the guard in
-    `stelling.propagate`, not about `stelling.interval`, and it is
-    deliberately NOT fixed here: it is an integer-overflow classification
-    rule with its own soundness argument and its own callers, and changing
-    it inside a numeric-rounding commit would make this batch's failure
-    set unaccountable. Reported for its own dispatch. If it is fixed, this
+    least an ulp of slack, and an exact bracket has none.
+
+    *This paragraph attributed that to B23 — "B23 removed the slack it was
+    calibrated against" — and the attribution is wrong. MEASURED on*
+    ``61de794``, *this batch's own base:* ``add(2**62, 2**62)`` *on int64
+    ALREADY declines there, under* ``_INT_BRACKET_DECLINE`` *and this same
+    2048-wide message, for the exact bracket* ``[2**63, 2**63]``. *It has
+    to:* ``_add_lo``/``_add_hi`` *have been exact-when-representable since*
+    ``1be900d`` *("F1: exact-when-representable endpoints for
+    add/sub/reduce_sum"), which is older than M16's* ``mul`` *fix, and*
+    ``2**63`` *is a double. So the miscalibration is reachable from any
+    operation whose in-range bracket is exact, and B23 only added*
+    ``scatter-add`` *to that set. The dispatch below stands; what did not
+    survive is the claim that this change caused it.*
+
+    **The dispatch, in its sharper form.** The width test is a proxy: it
+    asks how far the escaping end lands past the boundary and ignores
+    where the bracket's OTHER end sits. The predicate that says what the
+    guard means is ``lo > hi_b or hi < lo_b`` — the whole snapped bracket
+    outside the representable range, which no bracket width can explain
+    away. That is a finding about the guard in `stelling.propagate`, not
+    about `stelling.interval`, and it is deliberately NOT fixed here: it
+    is an integer-overflow classification rule with its own soundness
+    argument and its own callers, and changing it inside a
+    numeric-rounding commit would make this batch's failure set
+    unaccountable. Reported for its own dispatch. If it is fixed, this
     assertion reddens and the fixer should read this paragraph.
     """
     big = 2**62

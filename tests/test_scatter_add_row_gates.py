@@ -180,7 +180,7 @@ def test_both_spellings_of_one_real_property_reach_the_same_verdict():
     made `x*x` and `x**2` reach different verdicts on the same property
     (audit 0.2.0 M16). `scatter_add_rows` went on bumping unconditionally,
     and the same defect stayed reachable through it -- so one real property,
-    written two ways that jax lower differently, got two verdicts:
+    written two ways that jax lowers differently, got two verdicts:
 
         jnp.sum(x*x)                    >= 0   VERIFIED
         zeros.at[0].add(jnp.sum(x*x))   >= 0   UNKNOWN
