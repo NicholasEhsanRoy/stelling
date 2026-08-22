@@ -262,9 +262,13 @@ Two measured instances, and the difference between them is the whole norm.
   the population `README.md` + `docs/*.md`; it then reads that figure back out
   of its own docstring and compares. **No digit is written here**, because
   that module recomputes both on every run and a copy of a derived number is
-  the defect this very page legislates against — the two that used to sit in
-  this sentence were `31` and `57` against a live `43` and `81`. So the page is
-  weakly guarded and says so, everywhere, whatever is installed.
+  the defect this very page legislates against. The sentence has now put two
+  pairs of digits here and both went stale: `31` and `57` before `f15c487`,
+  against a live 43 and 81 — and then 43 and 81 themselves, which were exact
+  at `f15c487` and four commits later were not. The figures are
+  `plain_unattached` and `plain_fences` in that module's
+  `EXPECTED_INVENTORY`; read them there, where they are derived. So the page
+  is weakly guarded and says so, everywhere, whatever is installed.
 - **`tests/test_any_pytree.py`'s two acceptance tests.** They hold the bar their
   own docstring sets — content-hash equality between an `any_pytree` sugar
   declaration and the hand-written original, against a real third-party
@@ -321,8 +325,15 @@ Two measured instances, and the difference between them is the whole norm.
   was measured under can be re-run; one that does not cannot. And then the
   six went stale as well: measured on this tree with jax and both solvers the
   suite reports ten skips, and with CI `test-jax`'s absent libraries hidden it
-  reports nineteen — of which the largest single block, seven `hypothesis`
-  gates over `tests/property/`, no version of this sentence ever mentioned.
+  reports nineteen — of which the largest single block, the `hypothesis`
+  gate, no version of this sentence ever mentioned. It is not all in one
+  directory: one gate per module in `tests/property/`, which
+  `tests/property/test_suite_disclosure.py` requires of every one of them,
+  plus a seventh that is item-level, in `tests/test_tripwire_gate.py`.
+  (This read "seven `hypothesis` gates over `tests/property/`". The total
+  is right and the attribution was not: six of the seven are in that
+  directory. `CONTRIBUTING.md`, describing the same set, said six — two
+  pages disagreeing about a number a `grep` settles.)
   A number that has been wrong three times, beside a test that computes it on
   every run, is the argument for the pointer.)*
 

@@ -222,9 +222,15 @@ EXPECTED_INVENTORY = {
     # is visible: `no_assume` REFUTED against `not_honoured` UNKNOWN is what
     # makes the first row evidence rather than a comment. And a second block
     # PRINTS `check`'s signature from the object, because the typed one had
-    # published four of its nine parameters. It was written against the
-    # object at 343ebe6 (2026-08-03) and four parameters landed under it
-    # between 08-12 and 08-19, while the page went on using one of them.
+    # gone four parameters out of date. Written against the object at
+    # 343ebe6 (2026-08-03), it listed `harness`, `vacuity_mode`,
+    # `solver_timeout_ms`, `refine` and `strict`; `solver`, `semantics`,
+    # `libm_budget` and `falsify` landed under it between 08-12 and 08-19,
+    # and the page went on using one of them, `semantics="ieee"`, further
+    # down. (This comment said the typed one "had published four of its nine
+    # parameters". It published five. Four were MISSING, which is the
+    # opposite reading of the same arithmetic, and the block below prints
+    # the list so neither number has to be typed again.)
     #
     # B19: `docs/inductive-step.md` went from FOUR illustrative blocks and no
     # gate at all to four executed-and-compared ones. It was the page whose

@@ -703,11 +703,20 @@ _LETTER_SELF = "tests/test_release_doc_claims.py"
 def test_no_norm_is_cited_by_a_letter_it_does_not_have():
     """``docs/norms.md`` carries no letters, and never did in this form.
 
-    Five references — three in the file itself, six more in ``tests/`` and
-    ``src/`` — pointed at *Norm C*, *D*, *E*, *G*, *I*, *J*. The scheme was
-    positional in the July file this one grew out of; the sections have since
-    been reordered and grown from 13 to 26, so every letter resolves to
-    nothing and a reader following one lands nowhere.
+    Citations of *Norm C*, *D*, *E*, *G*, *I*, *J* stood in that file
+    itself, elsewhere in ``docs/``, and across ``tests/`` and ``src/``. The
+    scheme was positional in the July file this one grew out of; the
+    sections have since been reordered and grown from 13 to 26, so every
+    letter resolves to nothing and a reader following one lands nowhere.
+
+    **No count of them is written here**, and the reason is that this
+    docstring carried three that disagreed with each other and with the
+    tree: *"Five references — three in the file itself, six more in
+    ``tests/`` and ``src/``"*, where 3 + 6 is 9 and not 5, while the commit
+    that added this gate said eleven. The clause also missed the citations
+    in ``docs/`` outside ``norms.md`` entirely. The only number this file
+    states about them is the one it ASSERTS, below, and it is zero — the one
+    figure that cannot go stale while the assertion passes.
 
     A title moves loudly — ``grep`` comes back empty — which is why the
     convention everywhere else in this file is the title.

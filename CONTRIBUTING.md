@@ -37,16 +37,23 @@ the whole mechanism cannot reach.
 >
 > *No absolute `passed` count is written here, deliberately.* It has been
 > restated twice — `2470`, then `3910` — and gone stale both times, and it
-> is read only by humans. `git rev-list --count 3482822..HEAD` is 52
-> commits, `git diff --stat 3482822..HEAD -- tests/` is 76 files changed
-> and 20,334 insertions, and a plain `pytest` on this tree passes well over
-> four thousand — in a configuration *smaller* than the one the figure
-> names, since hypothesis is absent and six `tests/property/` modules gate
-> at collection. The three parts that carry information — the exit status,
-> the xfail, and which pin is among the skips — do not move with the
-> suite's size. The dated figure is kept, with its sha, in
-> `.github/workflows/ci.yml`, where it is a record of one run rather than a
-> number a contributor checks a green line against.
+> is read only by humans. **How far the tree has moved since `3482822` is a
+> question you run, not one you read here:** `git rev-list --count
+> 3482822..HEAD` and `git diff --stat 3482822..HEAD -- tests/`. Both end at
+> `HEAD`, so any constant written beside them is un-pinnable by
+> construction — which this paragraph proved on itself. It carried three
+> fresh numerals of its own (`52` commits, `76` files, `20,334`
+> insertions); they were the values at `4e17d98`, and the tree was already
+> at `62`, `82` and `21,127` in `e850323`, the commit that shipped them.
+> A plain `pytest` passes well over four thousand — in a configuration
+> *smaller* than the one the figure names, since hypothesis is absent and
+> the `tests/property/` modules gate at collection — that is what
+> `tests/property/test_suite_disclosure.py` requires of them, so no count of
+> them is written here either. The three parts that carry information — the
+> exit status, the xfail, and which pin is among the skips — do not move
+> with the suite's size. The dated figure is kept,
+> with its sha, in `.github/workflows/ci.yml`, where it is a record of one
+> run rather than a number a contributor checks a green line against.
 >
 > Nothing is hidden from you: the
 > pin's *other* half, which checks every skip the session did see, still runs.
