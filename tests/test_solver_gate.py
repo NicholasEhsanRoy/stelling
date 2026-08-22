@@ -91,6 +91,20 @@ NARROW_BY_DECLARATION = {
 # rule holds by measurement, and this list is what stops a green run here
 # being read as "no such decision can exist".
 #
+# **EXCEPT THE LAST SPELLING, WHICH IS IN THIS TREE AND HAS BEEN ALL ALONG.**
+# `tests/test_skip_inventory.py`'s solver rules write
+# `legitimate=lambda: not (_wheel("z3") or _wheel("cvc5"))`, and `_wheel` is
+# `_optional.available` with a docstring on it — exactly the shape above, and
+# invisible here because `_calls` matches the NAME `available`. It is not a
+# defect there and that file argues why: the predicate exists only to call a
+# skip WRONG, so the narrow reading is the SAFE one — with an external cvc5
+# and no wheels it answers "no wheel", the gate it is judging did fire, and
+# no skip is accused. It is named here because *"NONE OF THEM IS IN THIS TREE
+# TODAY"* reads as "no invisible disjunction exists", and one does. The
+# residue is the class rather than the instance: a one-line wrapper of
+# `available` is the cheapest way to write the narrow question by accident,
+# and this scan will not report it.
+#
 # AND NOTHING ELSE WOULD CATCH ONE. The environment a narrow spelling
 # misbehaves in is an external `cvc5` with NEITHER wheel, and no lane in
 # `ci.yml` runs it: `test-jax-no-solvers` has no binary either, so the narrow

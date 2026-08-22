@@ -22,6 +22,9 @@ None of these needs the workflow to be RUN. They need it to be READ.
 
 from __future__ import annotations
 
+import dataclasses
+import pathlib
+
 import pytest
 
 import _lanes
@@ -184,6 +187,19 @@ def test_every_link_of_the_matrix_CHAIN_fails_closed_when_it_is_broken():
         "solver extra by a structure this parser does not model"
     )
     assert _lanes._classify(_NESTED_KEY_SUPPLIES_A_NEW_ONE).solvers is None
+    # ... and a nested SEQUENCE, which "ALL NESTING IS REFUSED, BY COLUMN" was
+    # not true of: the column rule read the KEY's column and not the `- `'s,
+    # so a deeper `- ` started a PHANTOM entry instead of ending the read.
+    # Measured at `844ba48`: three entries for the first body and two for the
+    # second, against the one and two their files really have.
+    assert _lanes._matrix_include(_NESTED_SEQUENCE_OF_MAPPINGS) == [], (
+        "a nested LIST of mappings flattens into extra entries: a `- ` at a "
+        "deeper column started a phantom entry rather than ending the read, "
+        "so this returned an entry list with a member ci.yml does not have"
+    )
+    assert _lanes._classify(_NESTED_SEQUENCE_OF_MAPPINGS).solvers is None
+    assert _lanes._matrix_include(_NESTED_SEQUENCE_OF_A_DIFFERENT_KEY) == []
+    assert _lanes._classify(_NESTED_SEQUENCE_OF_A_DIFFERENT_KEY).solvers is None
     # and the repeated-key check is still the one refusing a duplicate key at
     # the entry's OWN column, which no column rule can reach
     assert _lanes._matrix_include(_KEY_REPEATED_AT_THE_ENTRYS_OWN_COLUMN) == []
@@ -432,6 +448,32 @@ _NESTED_KEY_SUPPLIES_A_NEW_ONE = _MATRIX_JOB.format(
     entries=(
         '          - series: "0.10"\n            with:\n              extras: solvers\n'
         '          - series: floating\n            with:\n              extras: solvers\n'
+    )
+).splitlines()
+
+#: A nested SEQUENCE of mappings — the shape *"ALL NESTING IS REFUSED, BY
+#: COLUMN"* was not true of. A ``- `` line matched :data:`_lanes._MATRIX_ITEM`
+#: at any column, so a deeper one started a PHANTOM entry and reset the
+#: entry's key column to its own rather than ending the read. Measured at
+#: `844ba48`, on this exact body: three entries, where ``ci.yml``'s shape has
+#: two — an entry list with a member the file does not have, which is what
+#: :func:`_lanes._matrix_include`'s own *"never an entry list that happens to
+#: be short"* forbids in the other direction.
+_NESTED_SEQUENCE_OF_MAPPINGS = _MATRIX_JOB.format(
+    entries=(
+        '          - extras: jax\n            variants:\n'
+        '              - extras: solvers\n                pin: ""\n'
+        '          - extras: solvers\n            pin: "0.10"\n'
+    )
+).splitlines()
+
+#: The same shape with the nesting carrying a key the real entries do not, so
+#: that the phantom is the only entry that could supply one. Two entries at
+#: `844ba48`, one of them invented.
+_NESTED_SEQUENCE_OF_A_DIFFERENT_KEY = _MATRIX_JOB.format(
+    entries=(
+        '          - extras: solvers\n            variants:\n'
+        '              - name: a\n'
     )
 ).splitlines()
 
@@ -746,10 +788,82 @@ def test_every_supported_configuration_has_a_whole_suite_lane(config, job):
         f"a matrix whose entries this module cannot reduce to one series; "
         f"`matrix` is Lane.jax's can't-tell, not a reading"
     )
-    assert (lane.jax != "absent") == (config[0] == "jax"), (
+    assert _lanes.has_jax(lane) == (config[0] == "jax"), (
         f"{job} is meant to be the {config[0]} lane and ci.yml provisions it "
         f"the other way"
     )
+
+
+def test_no_reader_asks_whether_a_lane_HAS_JAX_by_comparing_the_STRING():
+    """`Lane.jax`'s can't-tell fails OPEN, so the spelling is what is closed.
+
+    ``"matrix"`` is a TRUTHY STRING in a field whose no-jax sentinel is also a
+    string, so ``lane.jax != "absent"`` answers YES for a job ci.yml has not
+    answered for. The declined alternative does not help — ``None !=
+    "absent"`` is True too — and a sentinel whose comparisons raise would
+    break ``==``, ``in`` and ``repr`` for the four consumers that
+    legitimately ask ``lane.jax == "matrix"``. **So the VALUE still fails
+    open. That is stated in the field's own comment rather than fixed.**
+
+    What can be closed is that nothing FORCED a consumer to refuse the
+    can't-tell. Nine did, by hand, correctly; the tenth would not have to.
+    :func:`_lanes.has_jax` raises on ``"matrix"`` and this refuses the bare
+    comparison anywhere under ``tests/``, so reaching the permissive answer
+    now costs deleting a test rather than forgetting a line.
+
+    AST, not grep: a comparison is a shape, and `# lane.jax != "absent"` in a
+    comment is prose about the rule rather than a use of it — which this
+    file's own docstrings are full of.
+    """
+    import ast
+
+    tests_dir = pathlib.Path(__file__).resolve().parent
+    offenders = []
+    for path in sorted(tests_dir.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover
+            continue
+        # The accessor's own body is the one place the comparison belongs.
+        # Named rather than line-ranged, so moving it up the file changes
+        # nothing here.
+        exempt = {
+            (n.lineno, n.end_lineno)
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "has_jax"
+        }
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            if any(lo <= node.lineno <= hi for lo, hi in exempt):
+                continue
+            left = node.left
+            if not (isinstance(left, ast.Attribute) and left.attr == "jax"):
+                continue
+            for comparator in node.comparators:
+                if (
+                    isinstance(comparator, ast.Constant)
+                    and comparator.value == "absent"
+                ):
+                    offenders.append(
+                        f"{path.relative_to(tests_dir.parent)}:{node.lineno}"
+                    )
+    assert offenders == [], (
+        f"these ask whether a lane has jax by comparing `Lane.jax` with "
+        f"`'absent'`: {offenders}. `matrix` is a truthy string in that field, "
+        f"so the comparison answers YES for a job whose provisioning ci.yml "
+        f"does not state. Use `_lanes.has_jax(lane)`, which raises on the "
+        f"can't-tell instead of guessing past it."
+    )
+    # ... and the accessor really does refuse it, rather than being a name
+    # for the same comparison.
+    absent = _lanes.Lane(job="j", jax="absent", solvers=None,
+                         whole_suite=False, random_order=False,
+                         verdict_channel=False)
+    assert _lanes.has_jax(absent) is False
+    assert _lanes.has_jax(dataclasses.replace(absent, jax="0.11")) is True
+    with pytest.raises(ValueError, match="CAN'T-TELL"):
+        _lanes.has_jax(dataclasses.replace(absent, jax="matrix"))
 
 
 def test_exactly_one_lane_runs_in_randomised_order():
