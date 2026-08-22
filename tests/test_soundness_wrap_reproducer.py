@@ -8,7 +8,7 @@ this repository whose failure mode is a user's wrong VERIFIED. Until this
 file, nothing ran it.
 
 **What was and was not protected.** ``tests/test_doc_examples.py``
-executes fenced blocks under ``README.md`` and ``docs/*.md``;
+executes fenced blocks under ``README.md`` and ``docs/**/*.md``;
 ``SOUNDNESS.md`` is at the repository root, so its one ```python fence —
 the four-line reproducer — was executed by nothing. Exactly one test read
 ``SOUNDNESS.md`` at all (``tests/test_release_doc_claims.py``, pinning a

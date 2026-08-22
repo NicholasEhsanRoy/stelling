@@ -259,16 +259,22 @@ Two measured instances, and the difference between them is the whole norm.
   `importorskip`s `maddening`. But the loss is **disclosed and asserted**.
   `tests/test_doc_examples.py` marks the blocks illustrative and counts the
   fence among the *plain fences, "HAND-WRITTEN, compared to nothing"*, over
-  the population `README.md` + `docs/*.md`; it then reads that figure back out
-  of its own docstring and compares. **No digit is written here**, because
-  that module recomputes both on every run and a copy of a derived number is
-  the defect this very page legislates against. The sentence has now put two
-  pairs of digits here and both went stale: `31` and `57` before `f15c487`,
-  against a live `43` and `81` — and then `43` and `81` themselves, exact at
-  `f15c487` and not four commits later. The figures are
+  the population `README.md` + every `.md` under `docs/`; it then reads that
+  figure back out of its own docstring and compares. **No digit is written
+  here**, because that module recomputes both on every run and a copy of a
+  derived number is the defect this very page legislates against. The
+  sentence has now put two pairs of digits here and both went stale — the
+  second pair was exact at
+  `f15c487` and already wrong at `a64dedc`, that commit's **immediate**
+  first-parent child. *(This read "not four commits later". It was one, so a
+  paragraph whose whole subject is stale numerals had understated its own
+  evidence by a factor of four — and six digits had accumulated under a
+  sentence that says none is written here, two of them added by the round
+  that wrote this correction. They are gone; the sentence is the claim, and
+  the figures are read where they are derived.)* Those figures are
   `plain_unattached` and `plain_fences` in that module's
-  `EXPECTED_INVENTORY`; read them there, where they are derived. So the page
-  is weakly guarded and says so, everywhere, whatever is installed.
+  `EXPECTED_INVENTORY`; read them there. So the page is weakly guarded and
+  says so, everywhere, whatever is installed.
 - **`tests/test_any_pytree.py`'s two acceptance tests.** They hold the bar their
   own docstring sets — content-hash equality between an `any_pytree` sugar
   declaration and the hand-written original, against a real third-party
@@ -330,12 +336,22 @@ Two measured instances, and the difference between them is the whole norm.
   one directory: the property modules under `tests/property/` each carry a
   module-level gate, which
   `tests/property/test_suite_disclosure.py::test_every_property_module_carries_the_hypothesis_gate`
-  requires of them, and one more gate is ITEM-level, in
-  `tests/test_tripwire_gate.py:61`. (This read *"seven `hypothesis` gates
-  over `tests/property/`"*. Seven is the total and is right; the
-  attribution was not — six are in that directory and the seventh is the
-  item-level one outside it. `CONTRIBUTING.md`, describing the same set,
-  said six, so two pages disagreed about a number a `grep` settles.)
+  requires of them, and one more gate is ITEM-level, inside
+  `tests/test_tripwire_gate.py`'s
+  `test_verified_with_tripwire_armed_implies_no_narrowing`. (This read
+  *"seven `hypothesis` gates over `tests/property/`"*. The total was right
+  and the ATTRIBUTION was not: they are not all in that directory, because
+  the item-level one is outside it. Its replacement then carried two fresh
+  hand-maintained constants of its own — a split of that total, and a
+  pointer to the item-level gate BY LINE NUMBER — and neither was pinned:
+  `test_no_shipped_page_cites_a_line_its_own_tree_does_not_have` checks a
+  citation past END OF FILE and nothing else, so a line inserted anywhere
+  above the cited one would have rotted the pointer in silence. Both are
+  gone. *"Cite the SYMBOL, not the line"* is that test's own failure
+  message, and a test name is greppable and moves with the code.
+  `CONTRIBUTING.md`, describing the same set, disagreed with the count this
+  page carried — which is what a `grep` settles and a page should not be
+  asserting at all.)
   A number that has been wrong three times, beside a test that computes it on
   every run, is the argument for the pointer.)*
 

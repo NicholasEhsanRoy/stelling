@@ -16,7 +16,7 @@ in the suite read a fenced block.
 **EXACTLY WHAT IS AND IS NOT CHECKED.** Stated with numbers because the
 first version of this file claimed "every documented example runs, and
 prints what the doc says it prints", which was wider than the mechanism.
-Measured over ``README.md`` + ``docs/*.md``, and pinned by
+Measured over ``README.md`` + ``docs/**/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
     ```python blocks                                58
@@ -1171,7 +1171,7 @@ def test_the_stamp_fence_rejects_an_untested_series():
 # goes red until somebody writes down which case it is.
 #
 # The path, not `path.name`: `_doc_files()` is the root `README.md` plus
-# `docs/*.md`, and `docs/README.md` EXISTS. Keyed by basename the two
+# every `.md` under `docs/`, and `docs/README.md` EXISTS. Keyed by basename the two
 # collided, and the collision was silent in the direction that matters.
 # Measured on 5bbf52a, in this file's own population:
 #   * a pure addition to `docs/README.md` -- one illustrative block and one
