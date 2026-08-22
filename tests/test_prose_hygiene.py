@@ -69,7 +69,71 @@ def test_core_lines_naming_libraries_carry_provenance_markers():
 # prefix. Both forms are resolved rather than one being skipped, because
 # skipping is how a citation stops being checked without anyone deciding to.
 _TEST_REF = re.compile(r"(tests/[A-Za-z0-9_./]+\.py)::(test_[A-Za-z0-9_]+)(\*?)")
+
+#: The same citation, allowing the IDENTIFIER to be wrapped. `SOUNDNESS.md`
+#: wraps nine of its eighteen citations mid-name, always after an underscore
+#: because that is where a long identifier breaks; a line-by-line scan sees
+#: `…::test_a_lying_` and calls it dangling. The continuation is tried only
+#: when the unwrapped name does NOT resolve, so this can never turn a live
+#: citation into a different one by swallowing the next word.
+_TEST_REF_WRAPPED = re.compile(
+    r"(tests/[A-Za-z0-9_./]+\.py)::(test_[A-Za-z0-9_]+)"
+    r"((?<=_)[ \t]*\n[ \t#*>]*[A-Za-z0-9_]+)?(\*?)"
+)
+
+#: A citation the SAME PARAGRAPH supersedes: `::<name>` with no path, naming
+#: the test the cited one became. `SOUNDNESS.md` records a closed finding by
+#: leaving the original sentence standing and annotating it — *"that test is
+#: now `::test_the_two_pairing_gates_…`"* — and rewriting the original would
+#: destroy the record this file exists to keep. A supersession only licenses
+#: the stale citation when the replacement it names RESOLVES, so it cannot be
+#: used to license nothing. THE RESIDUE, stated: a paragraph carrying a
+#: resolving `::name` licenses every stale citation in it, not only the one
+#: the annotation is about. One paragraph in the tree carries a supersession
+#: today, so the residue is one paragraph wide; a second would be worth
+#: keying the licence to the citation it annotates.
+_SUPERSEDED_BY = re.compile(r"(?<!\w)::(test_[A-Za-z0-9_]+)")
+
+#: Where a `path::name` citation is checked. Shipped prose and the scripts
+#: CI runs — everything a reader can follow a citation from.
+#:
+#: **`tests/` IS DELIBERATELY OUT**, and it is not an oversight: three test
+#: modules write citation-shaped SOURCE STRINGS as plants
+#: (`tests/test_x.py::test_y` in `tests/test_state_guard.py`,
+#: `tests/test_some_other_module.py::test_x` in `tests/test_skip_inventory.py`)
+#: and those files are supposed to name tests that do not exist. So is
+#: `scratchpad/`, which is tracked evidence rather than shipped prose.
+#:
+#: IT WAS `src/stelling` ALONE UNTIL 2026-08-22, which is 32 of the 70
+#: citations in the shipped set. The one it could not see:
+#: `.github/scripts/tripwire_canary.py` cited
+#: `tests/test_tripwire_record.py::test_the_nightly_workflow_still_runs_the_canary`,
+#: renamed away, in the paragraph explaining why `--no-sweep` is safe.
+_CITATION_ROOTS = ("src/", "docs/", "design/", ".github/")
 _TESTS = Path(__file__).resolve().parent
+_REPO_ROOT = _TESTS.parent
+
+
+def _citation_sources():
+    """`(relative path, text)` for every file a citation is checked in."""
+    for path in sorted(_REPO_ROOT.rglob("*")):
+        if not path.is_file() or path.suffix not in (".py", ".md", ".yml", ".txt"):
+            continue
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+        if rel.startswith(_CITATION_ROOTS) or (
+            "/" not in rel and rel.endswith(".md")
+        ):
+            try:
+                yield rel, path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):  # pragma: no cover
+                continue
+
+
+def _enclosing_paragraph(text: str, index: int) -> str:
+    start = text.rfind("\n\n", 0, index)
+    start = 0 if start < 0 else start + 2
+    end = text.find("\n\n", index)
+    return text[start:len(text) if end < 0 else end]
 
 
 def _defined_test_names(text):
@@ -141,6 +205,24 @@ def test_every_test_cited_in_core_prose_still_exists():
     """A COMMENT THAT NAMES A TEST IS A CLAIM ABOUT WHAT HOLDS IT SHUT, and a
     renamed test turns it into a claim about nothing.
 
+    THE SCAN IS THE SHIPPED SET, NOT `src/stelling` ALONE, from 2026-08-22.
+    It read `src/stelling` only — 32 of the 70 citations a reader can follow
+    — so a citation in `SOUNDNESS.md`, in `docs/`, in `design/` or in a
+    script CI runs was unchecked. Driven: `.github/scripts/tripwire_canary.py`
+    cited `tests/test_tripwire_record.py::test_the_nightly_workflow_still_
+    runs_the_canary`, renamed away, in the paragraph that explains why
+    `--no-sweep` is safe on that script. It was the ONLY dangling one in the
+    widened set, and the widening is what found it.
+
+    Two shapes had to be handled for the wider scan to mean anything, and
+    both are enumerated beside their patterns: a citation WRAPPED mid-name
+    (nine of `SOUNDNESS.md`'s eighteen are), and a citation the same
+    paragraph SUPERSEDES by naming the test it became — which is how the
+    ledger records a closed finding without rewriting the sentence it closed.
+    `tests/` and `scratchpad/` stay out, and `tests/` for a reason rather
+    than by omission: three test modules write citation-shaped source strings
+    as PLANTS, and are supposed to name tests that do not exist.
+
     `src/stelling` cites tests by `path::name` in nineteen places. Those
     citations are how a reader checks that a guard is pinned rather than
     asserted, and nothing kept them true: commit `218f969` renamed
@@ -169,27 +251,39 @@ def test_every_test_cited_in_core_prose_still_exists():
     collection — it reads the file and imports nothing — so the reason this
     docstring gives for avoiding collection costs nothing here.
     """
-    dangling = []
-    for path in sorted(_SRC.rglob("*.py")):
-        text = path.read_text(encoding="utf-8")
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            for rel, name, star in _TEST_REF.findall(line):
-                target = _TESTS.parent / rel
-                if not target.is_file():
-                    dangling.append(f"{path.name}:{lineno}: no such file {rel}")
-                    continue
-                defined = _defined_test_names(
-                    target.read_text(encoding="utf-8"))
-                if defined is None:
-                    dangling.append(
-                        f"{path.name}:{lineno}: {rel} does not parse, so it "
-                        f"defines no test at all")
-                    continue
-                found = (any(d.startswith(name) for d in defined) if star
-                         else name in defined)
-                if not found:
-                    dangling.append(
-                        f"{path.name}:{lineno}: {rel}::{name}{star}")
+    def resolves(defined, name, star):
+        return (any(d.startswith(name) for d in defined) if star
+                else name in defined)
+
+    dangling, seen = [], 0
+    for source, text in _citation_sources():
+        for m in _TEST_REF_WRAPPED.finditer(text):
+            rel, name, wrap, star = m.groups()
+            lineno = text.count("\n", 0, m.start()) + 1
+            seen += 1
+            target = _TESTS.parent / rel
+            if not target.is_file():
+                dangling.append(f"{source}:{lineno}: no such file {rel}")
+                continue
+            defined = _defined_test_names(target.read_text(encoding="utf-8"))
+            if defined is None:
+                dangling.append(
+                    f"{source}:{lineno}: {rel} does not parse, so it "
+                    f"defines no test at all")
+                continue
+            if resolves(defined, name, star):
+                continue
+            # ... then the wrapped spelling, and only then
+            if wrap and resolves(defined, name + wrap.split("\n")[1].strip(" \t#*>"), star):
+                continue
+            # ... and last, a supersession the same paragraph declares
+            para = _enclosing_paragraph(text, m.start())
+            if any(
+                resolves(defined, replacement, "")
+                for replacement in _SUPERSEDED_BY.findall(para)
+            ):
+                continue
+            dangling.append(f"{source}:{lineno}: {rel}::{name}{star}")
     assert not dangling, (
         "core prose cites test(s) that do not exist:\n  "
         + "\n  ".join(dangling)
@@ -197,15 +291,18 @@ def test_every_test_cited_in_core_prose_still_exists():
         "holds it; a renamed test silently turns it into a dead end. Repoint "
         "it, or drop the claim it was supporting."
     )
-    # ... and it is not vacuous: the citations really are there to check
-    cited = {
-        ref for path in _SRC.rglob("*.py")
-        for ref in _TEST_REF.findall(path.read_text(encoding="utf-8"))
-    }
-    assert len(cited) >= 5, (
-        f"only {len(cited)} test citation(s) found in src/stelling; the "
-        f"pattern has stopped matching how they are written"
+    # ... and it is not vacuous: the citations really are there to check.
+    # Measured at 70 across the shipped set on 2026-08-22, of which 32 are in
+    # `src/stelling` — the whole of what this used to read.
+    assert seen >= 40, (
+        f"only {seen} test citation(s) found across {list(_CITATION_ROOTS)} "
+        f"and the root pages; the pattern has stopped matching how they are "
+        f"written, or the scan has stopped reaching them"
     )
+    assert len({
+        source for source, text in _citation_sources()
+        if _TEST_REF_WRAPPED.search(text)
+    }) >= 10, "the citations have collapsed into one or two files"
     # ... and the RESOLVER is not satisfied by text that only LOOKS like a
     # definition. These are the three rows that were green at `faefc48`,
     # written out rather than described, plus the honest shape it must accept

@@ -668,8 +668,11 @@ def _eager_sweep_row(armed, enabled=True) -> tuple[str, tuple[str, str] | None]:
     check which reason produced which status, and paying for twelve identical
     sweeps to learn nothing new is waste. It is DEFAULT-ON, so a workflow that
     says nothing gets it, and
-    ``tests/test_tripwire_record.py::test_the_nightly_workflow_still_runs_the_canary``
-    asserts neither leg passes it.
+    ``tests/test_tripwire_record.py::test_the_canary_and_the_workflow_agree_about_the_two_legs``
+    asserts neither leg passes it. (That check was called
+    ``test_the_nightly_workflow_still_runs_the_canary`` when this paragraph
+    was written, and this citation kept the old name after the rename --
+    invisible because the citation resolver read ``src/stelling`` only.)
     """
     if not enabled:
         return "not run -- --no-sweep", None

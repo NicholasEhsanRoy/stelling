@@ -5499,21 +5499,36 @@ def test_no_source_text_presents_the_ODD_q_ARM_as_a_live_case():
         )
 
     root = pathlib.Path(__file__).resolve().parent.parent
+    # PER GLOB, AND A FLOOR ON EACH, because one total is not four claims.
+    # This read `assert scanned > 20` over the four globs summed — and
+    # `tests/*.py` alone is 156 files, so the floor was satisfied whatever
+    # happened to the other three. Driven at `844ba48`: move all 21 of
+    # `docs/*.md` away and this test runs `1 passed`, reporting a clean tree
+    # over prose it never opened. The floors below are measured (26, 156, 21,
+    # 7 today) and set well under, so an ordinary deletion does not trip them
+    # and a whole family going missing does.
+    globs = {
+        "src/stelling/*.py": 15,
+        "tests/*.py": 80,
+        "docs/*.md": 12,
+        "*.md": 4,
+    }
     scanned, hits = 0, []
-    for path in sorted(
-        list(root.glob("src/stelling/*.py"))
-        + list(root.glob("tests/*.py"))
-        + list(root.glob("docs/*.md"))
-        + list(root.glob("*.md"))
-    ):
-        text = path.read_text(encoding="utf-8")
-        scanned += 1
-        for pattern in _ODD_Q_AS_A_LIVE_CASE:
-            for m in pattern.finditer(text):
-                line = text[: m.start()].count("\n") + 1
-                hits.append(f"{path.relative_to(root)}:{line}: {m.group(0)}")
-    # ANTI-VACUITY: a glob that matched nothing would report a clean tree
-    assert scanned > 20, f"only {scanned} files scanned — the globs are wrong"
+    for glob, floor in globs.items():
+        paths = sorted(root.glob(glob))
+        assert len(paths) >= floor, (
+            f"only {len(paths)} file(s) matched `{glob}` and this scan claims "
+            f"a clean tree over all of them; the floor is {floor}. A glob "
+            f"that stops matching reports the same thing as prose with no "
+            f"live case in it."
+        )
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            scanned += 1
+            for pattern in _ODD_Q_AS_A_LIVE_CASE:
+                for m in pattern.finditer(text):
+                    line = text[: m.start()].count("\n") + 1
+                    hits.append(f"{path.relative_to(root)}:{line}: {m.group(0)}")
     assert any(
         "pow_exponent_rational" in p.read_text(encoding="utf-8")
         for p in root.glob("src/stelling/*.py")
