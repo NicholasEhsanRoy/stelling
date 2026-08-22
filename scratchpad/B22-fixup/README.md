@@ -31,7 +31,11 @@ shipped code. Run any driver as:
 APPLIED (`git diff --quiet` after) before believing any result, and restores
 with `git checkout --` afterwards.
 
-`cells3.sh` runs the full suite in the three non-default cells.
+`cells3.sh` runs the full suite in ALL FOUR cells. It takes the worktree as
+its argument (defaulting to its own), verifies `stelling.__file__` resolves
+there before believing any cell, and returns pytest's exit status rather than
+a `grep`'s. As committed at `725edc3` it did none of those and, with its
+hard-coded `WT=` pointing at a deleted worktree, ran pytest zero times.
 
 ## MEASURED FIGURES (all four cells = jax 0.10.2 / 0.11.0 x x64 off/on)
 
