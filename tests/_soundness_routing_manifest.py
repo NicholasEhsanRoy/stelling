@@ -838,13 +838,13 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(2596, 2962),
         src_lines=367,
         src_sha256="d3581e50075343e79b60c8f20f4337f69e6bbae7ee912c42ccce895f040d3ef9",
-        dest_sha256="d80f028b90596ef175aacb7e1b561b4d664305ac5a46432b83bb5cca2ac2bfb9",
+        dest_sha256="e02837127521bf9f37c67d878ee8ecd78a11b0c2044c47837423a77a4a805b6b",
         src_lines_not_carried=2,
         not_carried=(
             "  `dff95fc` and on `main` at `198a2b5` (both hashing to `64a0ce8d\u2026`) and",
             "  is a `TranscriptionError` here. The refusal is right \u2014",
         ),
-        edit_note="replaces an unreproducible hash literal with the property it was standing for, re-derived across the two trees. No behaviour change.",
+        edit_note="replaces an unreproducible hash literal with the property it was standing for, re-derived across the two trees; and states the CELL and the `return` the recipe omitted. No behaviour change.",
     ),
     Block(
         id="SF-0.2.0-60",

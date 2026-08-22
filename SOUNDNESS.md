@@ -13879,8 +13879,9 @@ was measured on a B6-free tree unless it says otherwise.
   the property, and it is what a reader can re-derive: this sentence
   pinned a hash literal (`64a0ce8d…`) instead, and a hash literal is
   meaningless without the document that produced it, which was never
-  published. Re-derived 2026-08-20 over a traced `any_array((2,),
-  float64, (0.0, 1.0))` with `assert_(x >= 0.0)`, persisted through
+  published. Re-derived 2026-08-20 at `JAX_ENABLE_X64=1` over a traced
+  `any_array((2,), float64, (0.0, 1.0))` whose harness ends
+  `return assert_(x >= 0.0)`, persisted through
   JSON with the declaration's `dtype` param set to `null`: `dff95fc`
   and `198a2b5` both accept and both return the identical hash, and
   this tree refuses. Twenty other shapes of the same document were
@@ -13891,6 +13892,23 @@ was measured on a B6-free tree unless it says otherwise.
   `b'float64'` produces — but it is a compatibility change and the
   enumeration beside the code (`b'float64'`, `0`, `('float64',)`) did not
   contain it.
+
+  **That recipe named neither the cell nor the `return`, and both are part
+  of it** — corrected 2026-08-22, under a fixup whose own headline in
+  `src/stelling/ir.py` was *"THE CELL IS PART OF THE RECIPE AND THIS
+  SENTENCE OMITTED IT"* while this copy of the same recipe went on omitting
+  it. The `JAX_ENABLE_X64=1` some ninety lines below belongs to the cost
+  paragraph and not to this one. Two harnesses satisfy the sentence as it
+  was written — `return assert_(x >= 0.0)` and `assert_(x >= 0.0); return
+  x` — and they trace documents that differ in the jaxpr's outvars, so each
+  has its own `content_hash` in each cell; that ambiguity is why two
+  contexts re-derived this recipe and got two different pairs, each correct
+  for the harness it typed. `src/stelling/ir.py` carries the measurement.
+  **The property is indifferent to all four documents**: driven at both
+  commits, in both cells, under both readings, `dff95fc` and `198a2b5`
+  accept every one of them and this tree refuses every one of them — which
+  is the whole of why the property is the measurement and the literal was
+  not.
 
   **Cost, measured on this tree** (jax 0.11.0, python 3.12.3,
   `/home/nick/venvs/stelling-jax`, best of 9, three `git clone --shared`

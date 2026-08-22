@@ -50,6 +50,7 @@ import array as _arraymod
 import base64
 import binascii
 import dataclasses
+import collections
 import pathlib
 import re
 import struct
@@ -1225,6 +1226,109 @@ def test_the_canonicalization_list_is_written_once_and_the_prose_points_at_it():
         )
 
 
+# The prose this rule is about, and until 2026-08-22 it was five markdown
+# files and nothing else. `src/` SHIPS PROSE TOO — this repository's modules
+# are more comment than code by design — and a 16-hex literal planted in
+# `src/stelling/ir.py`, in the very paragraph explaining an earlier literal's
+# removal, left the whole suite green while the same literal planted in
+# `SOUNDNESS.md` reddened. That is how a pair of `content_hash` literals came
+# to stand in `ir.py` for a day inside the paragraph whose entire subject is
+# that a figure nobody can re-derive is not a measurement. A rule applied
+# where somebody was told and nowhere else is a rule with a hole in the shape
+# of wherever nobody looked.
+_HASH_LITERAL_RECORDS = ("CHANGELOG.md", "SOUNDNESS.md", "README.md",
+                         "ARCHITECTURE.md", "DOCUMENTATION_ARCHITECTURE.md")
+
+# THE TRUNCATED LITERALS THIS TREE CARRIES, FROZEN. The exact-length rule
+# below (16 or 64 hex) matches NOTHING anywhere in this repository — measured
+# — and the pair that actually landed was eight hex digits and an ellipsis,
+# which is this tree's own spelling for a hash prefix and is unrecomputable
+# BY CONSTRUCTION: a reader cannot check digits that have been cut off. So
+# the truncated form is scanned too, and because seven such tokens predate
+# the rule it is a RATCHET rather than a ban: the inventory found must equal
+# this one exactly, so a new literal anywhere in scope reds, and removing one
+# reds until it is struck from here.
+#
+# Each entry, and why it is here rather than fixed:
+#
+#   `64a0ce8d…` x2 in `SOUNDNESS.md`, x3 in `src/stelling/ir.py` — the
+#     RETRACTION of that literal, in both places that retract it. A
+#     retraction has to be able to name what it retracts, and every one of
+#     those sentences exists to say the figure was unreproducible. (One of
+#     the three is `` ``content_hash 64a0ce8d…`` ``, and a pattern anchored
+#     on the backtick could not see it — see `_BACKTICKED`.)
+#   `3c15c4f5…`, `4dc49e99…` (`SOUNDNESS.md`) — query hashes pinned as
+#     "byte-identical at base and tip on both series" in the 0.11-bump entry.
+#     These ARE the defect this rule names: no document is published with
+#     them. Owed, not exempted.
+#   `628a25ef…`, `f32f4860…` (`SOUNDNESS.md`) — the quickstart's query hash
+#     on the two series. `tests/test_doc_examples.py` runs that block, so
+#     unlike the two above there IS a document; the prose does not say so.
+#
+# THE INVENTORY IS ALSO THE REACH CONTROL. Two of its entries come from
+# `src/stelling/ir.py`, so a scan that stopped seeing `src/` could not match
+# it — the widening cannot silently un-widen, which is the failure the five
+# hand-listed files had no guard against.
+_TRUNCATED_HASH_LITERALS = {
+    ("SOUNDNESS.md", "3c15c4f5"): 1,
+    ("SOUNDNESS.md", "4dc49e99"): 1,
+    ("SOUNDNESS.md", "628a25ef"): 1,
+    ("SOUNDNESS.md", "64a0ce8d"): 2,
+    ("SOUNDNESS.md", "f32f4860"): 1,
+    ("src/stelling/ir.py", "64a0ce8d"): 3,
+}
+
+#: A backticked span, RST's double form first so ``x`` is one span and not
+#: two empty ones. THE HEX NEED NOT TOUCH THE BACKTICK, and requiring it to
+#: was a hole the plant test below found in this very commit: the literals
+#: that landed in `src/stelling/ir.py` were written ``content_hash a037be6d…``
+#: — the digits are a word inside the span, not the whole of it, and a
+#: pattern anchored on the delimiter walks straight past the only spelling
+#: the defect has ever actually taken.
+_BACKTICKED = re.compile(r"``([^`]+)``|`([^`\n]+)`")
+
+#: Exactly 16 or 64 lowercase-hex characters, as a word. A git SHA is 7 or 40
+#: and does not match; a longer hex run does not match a 16-character window
+#: inside itself; the decimal digit runs these files are full of
+#: (`4028234663852886e38`) are 19 and do not match either.
+_HASH_LITERAL_EXACT = re.compile(
+    r"(?<![0-9a-z])([0-9a-f]{16}|[0-9a-f]{64})(?![0-9a-z])"
+)
+
+#: ...and a hash PREFIX: eight or more hex digits WITH THE CUT MARKED. The
+#: ellipsis is what makes this unrecomputable by construction and it is also
+#: what keeps a git short sha out without asking git: `dff95fc` and
+#: `a1521744` are written whole because they ARE whole. A hash prefix with no
+#: ellipsis is outside this rule and is said so rather than silently missed.
+_HASH_LITERAL_TRUNCATED = re.compile(r"(?<![0-9a-z])([0-9a-f]{8,})(?:\.\.\.|…)")
+
+
+def _hash_literals(pattern, text):
+    """Every match of ``pattern`` INSIDE A BACKTICKED SPAN of ``text``.
+
+    Two filters, and each has been the difference between a hit and a miss.
+    The span filter is what makes this about typeset figures rather than
+    about any hex-looking word in a sentence. The letter test is what keeps a
+    decimal run out: a token of pure digits is a number somebody wrote, not a
+    digest.
+    """
+    found = []
+    for span in _BACKTICKED.finditer(text):
+        inner = span.group(1) or span.group(2)
+        found += [
+            m.group(1) for m in pattern.finditer(inner)
+            if any(c in "abcdef" for c in m.group(1))
+        ]
+    return found
+
+
+def _hash_literal_scan_paths(root):
+    """The five record files and every shipped module, in that order."""
+    return [root / name for name in _HASH_LITERAL_RECORDS] + sorted(
+        root.glob("src/**/*.py")
+    )
+
+
 def test_the_record_does_not_pin_a_hash_LITERAL_in_prose():
     """AUDIT 0.2.0 B6 AUDIT 6, F5. `CHANGELOG.md` pinned a 16-character
     `content_hash()` literal for "the canonical `shape=(2,)` declaration",
@@ -1236,16 +1340,12 @@ def test_the_record_does_not_pin_a_hash_LITERAL_in_prose():
     A hash in PROSE is a figure no reader can recompute and no test holds.
     A hash inside an executed doc example is a different thing entirely —
     `tests/test_doc_examples.py` runs the block and compares the output —
-    so this scan is over the record files only, and it is exact about what
-    it looks for: a backticked token that is 16 or 64 lowercase-hex
-    characters with at least one letter in it. A git SHA is 7 or 40 and
-    does not match; the decimal digit runs these files are full of
-    (`4028234663852886e38`) do not either."""
+    so this scan is over the shipped record and the shipped modules, and it
+    is exact about what it looks for. See `_HASH_LITERAL_RECORDS` for the
+    scope this had until 2026-08-22 and what a plant in `src/` measured, and
+    `_TRUNCATED_HASH_LITERALS` for the eight-hex-and-ellipsis form the
+    exact-length rule alone never could have caught."""
     root = pathlib.Path(__file__).resolve().parent.parent
-    tok = re.compile(r"`([0-9a-f]{16}|[0-9a-f]{64})[.…]*`")
-    found = []
-    records = ("CHANGELOG.md", "SOUNDNESS.md", "README.md",
-               "ARCHITECTURE.md", "DOCUMENTATION_ARCHITECTURE.md")
     # ABSENCE IS NOT COMPLIANCE, and this guard used to `continue` past a
     # missing file. Driven: move `CHANGELOG.md`, `SOUNDNESS.md` and
     # `README.md` out of the tree and it reported `1 passed` — a scan over
@@ -1253,7 +1353,9 @@ def test_the_record_does_not_pin_a_hash_LITERAL_in_prose():
     # B8c declared (`SF-0.2.0-59`: an unreproducible hash literal removed
     # from the record), so "the files are not here" has to be the loudest
     # thing it can say and not the quietest.
-    missing = [name for name in records if not (root / name).is_file()]
+    missing = [
+        name for name in _HASH_LITERAL_RECORDS if not (root / name).is_file()
+    ]
     assert not missing, (
         f"the record files {missing} are not in this tree, so this scan "
         f"read no prose at all. A hash-literal check that passes because "
@@ -1261,16 +1363,68 @@ def test_the_record_does_not_pin_a_hash_LITERAL_in_prose():
         f"closing: it would go green on a tree that had deleted the record "
         f"the literal was removed from."
     )
-    for name in records:
-        path = root / name
+    paths = _hash_literal_scan_paths(root)
+    modules = [p for p in paths if p.suffix == ".py"]
+    assert modules, (
+        "this scan found no module under `src/` to read, so its widening to "
+        "shipped code is doing nothing — which is the state it was in when a "
+        "pair of `content_hash` literals stood in `src/stelling/ir.py` for a "
+        "day with the whole suite green"
+    )
+
+    found = []
+    inventory = collections.Counter()
+    for path in paths:
+        name = path.relative_to(root).as_posix()
         for i, line in enumerate(path.read_text().splitlines(), 1):
-            for m in tok.finditer(line):
-                if any(c in "abcdef" for c in m.group(1)):
-                    found.append(f"{name}:{i}: {m.group(0)}")
+            for digits in _hash_literals(_HASH_LITERAL_EXACT, line):
+                found.append(f"{name}:{i}: `{digits}`")
+            for digits in _hash_literals(_HASH_LITERAL_TRUNCATED, line):
+                inventory[(name, digits)] += 1
     assert not found, (
         "the record pins a content-hash literal in prose, which no reader "
         "can recompute and no test holds:\n  " + "\n  ".join(found)
     )
+    moved = sorted(
+        k for k in set(inventory) & set(_TRUNCATED_HASH_LITERALS)
+        if inventory[k] != _TRUNCATED_HASH_LITERALS[k]
+    )
+    assert dict(inventory) == _TRUNCATED_HASH_LITERALS, (
+        f"the truncated hash literals in the shipped record and modules are "
+        f"no longer the frozen inventory. Added: "
+        f"{sorted(set(inventory) - set(_TRUNCATED_HASH_LITERALS))}; gone: "
+        f"{sorted(set(_TRUNCATED_HASH_LITERALS) - set(inventory))}; counts "
+        f"that moved: "
+        f"{moved}. "
+        f"A hash prefix is a figure a reader cannot even partly check; if a "
+        f"new one is right, publish the document beside it and strike the "
+        f"digits, and if an old one has gone, take it out of the inventory "
+        f"in the same commit"
+    )
+
+
+def test_the_hash_literal_scan_SEES_A_PLANT_IN_EVERY_FORM_IT_CLAIMS():
+    """The scan above is an absence claim, and an absence claim needs a plant.
+
+    Every form is driven against the finder rather than asserted about it:
+    the two lengths the exact rule names, the truncated form that landed in
+    `src/stelling/ir.py`, and the three things that must NOT match — a git
+    short sha, a git long sha, and a decimal run.
+    """
+    for text, exact, trunc in [
+        ("`a037be6dfc050ff5`", ["a037be6dfc050ff5"], []),
+        ("`" + "a" * 64 + "`", ["a" * 64], []),
+        ("`a037be6dfc050ff5…`", ["a037be6dfc050ff5"], ["a037be6dfc050ff5"]),
+        ("`a037be6d…`", [], ["a037be6d"]),
+        ("`a037be6d...`", [], ["a037be6d"]),
+        ("``content_hash a037be6d…``", [], ["a037be6d"]),
+        ("`dff95fc`", [], []),                      # a git short sha
+        ("`a1521744c6dc074443fe549f19f48d7197abf759`", [], []),   # 40, a sha
+        ("`4028234663852886e38`", [], []),          # a decimal run
+        ("`0123456789012345`", [], []),             # 16, but no letter
+    ]:
+        assert _hash_literals(_HASH_LITERAL_EXACT, text) == exact, text
+        assert _hash_literals(_HASH_LITERAL_TRUNCATED, text) == trunc, text
 
 
 def test_every_canonicalization_the_record_names_is_DEMONSTRATED():
