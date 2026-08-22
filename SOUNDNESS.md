@@ -488,21 +488,26 @@ repairing them, and the repairs are in place above and in
   Where such a table had a drivable PRESENT-TENSE consequence it was driven,
   and two of the fourteen findings came out of exactly that. The historical
   cells themselves are unchecked.
-* **`DOCUMENTATION_ARCHITECTURE.md` §12 and §13.1 were not attempted**, and
-  that file's own header already says why: its IEC 61508 / ISO 26262 /
-  DO-178C / DO-330 / EN 50128 claims are *"cited from working knowledge and
-  unverified"* and its IEC 62304 claims are *"paywalled and reported, not
-  verified"*. Its Appendix A landscape claims about other tools are likewise
-  out of reach of this tree.
+* **`DOCUMENTATION_ARCHITECTURE.md`'s standards claims were not attempted**,
+  and that file's own header already says why for two of the three: §12's
+  IEC 61508 / ISO 26262 / DO-178C / DO-330 / EN 50128 claims are *"cited
+  from working knowledge and unverified"*, and §13.1's IEC 62304 claims are
+  *"paywalled and reported, not verified"*. §13.2's FDA claims say they were
+  verified against a PDF read on 2026-07-16, and that verification was not
+  repeated. Its Appendix A landscape claims about Kani, CBMC, Astrée and the
+  rest are likewise out of reach of this tree.
 * **Three routed lines are known stale and are NOT repaired**, because
   amending a hash-pinned block costs an edit to `CHANGELOG.md` as well —
   measured, not assumed. They are recorded with their price in the
   2026-08-15 `mul`/`dot_general` entry below, under *"THE DEFERRAL
   STANDS"*.
 * **A green suite says nothing about any of this.** Every defect the pass
-  found was green on the day it was found, and the three renamed-test
-  defects were each *supported* by a test that passes — one of them by a
-  test asserting the opposite of the sentence citing it.
+  found was green on the day it was found, and two of them are sharper than
+  that: one sentence cited, as its pin, a test that now asserts the
+  OPPOSITE of what the sentence describes — and that test passes; another
+  credits a live test with reding on exactly the drift the entry has, and
+  that test passes too, because what it actually checks is not what the
+  entry says it checks.
 
 ## Log
 

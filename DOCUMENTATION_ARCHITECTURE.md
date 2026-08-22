@@ -1139,9 +1139,9 @@ tool is that you stop looking after one.**
 
 Commitment 5 gives three tiers — `design/founding.md`'s *"Transfer tiers.
 Exact / sound / heuristic declared per transfer function"* — and this document
-does not get to
-amend a design commitment. ⊤ is reported as `sound` with `precision: none` and
-a `defaulted: true` flag rather than as a tier of its own.
+does not get to amend a design commitment. ⊤ is reported as `sound` with
+`precision: none` and a `defaulted: true` flag rather than as a tier of its
+own.
 
 **THE TREE'S THREE ARE NOT THIS THREE, AND THIS SECTION FORECLOSED THE
 QUESTION WRONGLY.** `stelling.propagate` declares `TIER_EXACT = "exact"`,
