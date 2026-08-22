@@ -264,8 +264,8 @@ Two measured instances, and the difference between them is the whole norm.
   that module recomputes both on every run and a copy of a derived number is
   the defect this very page legislates against. The sentence has now put two
   pairs of digits here and both went stale: `31` and `57` before `f15c487`,
-  against a live 43 and 81 — and then 43 and 81 themselves, which were exact
-  at `f15c487` and four commits later were not. The figures are
+  against a live `43` and `81` — and then `43` and `81` themselves, exact at
+  `f15c487` and not four commits later. The figures are
   `plain_unattached` and `plain_fences` in that module's
   `EXPECTED_INVENTORY`; read them there, where they are derived. So the page
   is weakly guarded and says so, everywhere, whatever is installed.
@@ -326,14 +326,16 @@ Two measured instances, and the difference between them is the whole norm.
   six went stale as well: measured on this tree with jax and both solvers the
   suite reports ten skips, and with CI `test-jax`'s absent libraries hidden it
   reports nineteen — of which the largest single block, the `hypothesis`
-  gate, no version of this sentence ever mentioned. It is not all in one
-  directory: one gate per module in `tests/property/`, which
-  `tests/property/test_suite_disclosure.py` requires of every one of them,
-  plus a seventh that is item-level, in `tests/test_tripwire_gate.py`.
-  (This read "seven `hypothesis` gates over `tests/property/`". The total
-  is right and the attribution was not: six of the seven are in that
-  directory. `CONTRIBUTING.md`, describing the same set, said six — two
-  pages disagreeing about a number a `grep` settles.)
+  gate, no version of this sentence ever mentioned. It does not all sit in
+  one directory: the property modules under `tests/property/` each carry a
+  module-level gate, which
+  `tests/property/test_suite_disclosure.py::test_every_property_module_carries_the_hypothesis_gate`
+  requires of them, and one more gate is ITEM-level, in
+  `tests/test_tripwire_gate.py:61`. (This read *"seven `hypothesis` gates
+  over `tests/property/`"*. Seven is the total and is right; the
+  attribution was not — six are in that directory and the seventh is the
+  item-level one outside it. `CONTRIBUTING.md`, describing the same set,
+  said six, so two pages disagreed about a number a `grep` settles.)
   A number that has been wrong three times, beside a test that computes it on
   every run, is the argument for the pointer.)*
 
