@@ -513,9 +513,24 @@ def test_select_n_negative_selector_clamps_to_first_case():
 # `test_ieee_marker_overflow_times_zero_does_not_discharge` and
 # `test_ieee_marker_top_output_leq_inf_does_not_discharge` in
 # tests/test_ieee_semantics.py, which assert the flips. The real-mode tests
-# below stay byte-identical and keep pinning the ℝ side of the dial. The
-# ⊤-widening vacuity guard still fences the r ≤ ∞ shape out of any count
-# (it discharges under ⊤, hence tautological).
+# below stay byte-identical and keep pinning the ℝ side of the dial.
+#
+# THIS BLOCK ALSO SAID THE ⊤-WIDENING VACUITY GUARD "STILL FENCES THE
+# r ≤ ∞ SHAPE OUT OF ANY COUNT". WITHDRAWN 2026-08-21 AS FALSE, with the
+# ledger clause it came from (SOUNDNESS.md, second-audit entry;
+# design/soundness-audit.md, finding-1/2 row). The guard's predicate is
+# whole-obligation, so it fences these shapes where the obligation is a
+# tautology entire — and fences other things besides, so "only where" would
+# be a false universal in its own right: `widen()` rewrites `stelling_any`
+# bounds only, so an `assume` survives it and `assume(3 <= x <= 4);
+# assert_(x*x <= 16)` — false at x = 5, hence no tautology — makes the guard
+# FIRE (driven, both x64 cells). What matters here is the other direction:
+# `r <= +inf` ALONE over a ⊤ while output is VERIFIED
+# and the guard fires, but the same `r`, times 0.0 and conjoined with
+# `x >= 0` over [0.5, 1.0], is VERIFIED with "no obligation discharges
+# with the declared bounds widened" while jax is False at 25 of 25 grid
+# points. The ieee dial is the only thing that catches it, and that is
+# what the ieee companions below pin.
 
 
 def test_R_gap_marker_overflow_times_zero_discharges_in_R():
@@ -560,8 +575,10 @@ def test_R_gap_marker_top_output_leq_inf_discharges_and_is_tautological():
         (out,),
     )
     # ⊤ = [−∞, ∞] contains every REAL; r ≤ +∞ is an ℝ-tautology, and it
-    # discharges even though r fell to ⊤ — which also means it survives
-    # ⊤-widening, so the vacuity guard voids any count that leaned on it.
+    # discharges even though r fell to ⊤. THIS OBLIGATION, STANDING ALONE,
+    # also survives ⊤-widening, so the vacuity guard fires on IT — but that
+    # is a property of the whole obligation being a tautology, not of the
+    # shape, and it is NOT a fence around the shape (block comment above).
     # The ieee companion asserting the flip (⊤ under ieee is maybe-NaN):
     # test_ieee_semantics.test_ieee_marker_top_output_leq_inf_does_not_discharge
     assert propagate(q).obligations[0].status == "discharged"

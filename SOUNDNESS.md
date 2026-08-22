@@ -102,6 +102,56 @@ Every verdict object stamps, at minimum:
   declining is safe under both readings while admitting is safe under only
   one; closing that divergence is a mode-wide decision, not a two-row fix.
 
+  **THE `gt` ROW ABOVE IS UNCHANGED AND NOW SAYS SO IN THE VERDICT
+  (2026-08-21).** The mode question is still open, the comparison rows still
+  answer in ℝ, and the `sign`/`rem` departure was deliberately NOT extended
+  to them — but a real-mode comparison that answers DEFINITELY while an
+  operand box reaches into the subnormal band of its own dtype now writes a
+  note into the verdict, naming that dtype's own smallest normal, what the
+  measured target does instead (DAZ), and that the claim is an ℝ one rather
+  than a statement about the hardware. It fires on `x > 0.0` over float64
+  `[1e-320, 1e-300]` — VERIFIED at 100% coverage, no decline, no ⊤, and
+  before this nothing in the verdict distinguished it from a
+  hardware-compliance claim — and it is silent on `x < 1.0` over that same
+  box, where the flush changes no answer, and on `[-10, 10]`, which merely
+  CONTAINS the band. It is a difference between two runs of the same row,
+  not a size test on the box: `propagate._subnormal_flush_tell`, both
+  directions in `tests/test_subnormal_tell.py`. **It adds no judgement** —
+  same status, same boxes, same coverage, same tiers; the `ieee` dial
+  remains the only thing that decides this shape differently.
+
+  **AMENDED (2026-08-22): THE TRIGGER IS PER OPERAND AND PER FORMAT, AND AS
+  FIRST WRITTEN IT WAS NEITHER.** The paragraph above says *"an operand box
+  reaches into the subnormal band of its own dtype"* and *"what the measured
+  target does instead"*. Both were false of the code that shipped under it,
+  and both are now driven, both x64 cells:
+
+  - **The flush is per format, and this target does not flush float16.**
+    Measured on jax 0.11.0 CPU, eager and under `jit`: `x > 0` is True at
+    every subnormal float16 magnitude — float16 keeps gradual underflow —
+    while bfloat16, float32 and float64 flush. A float16 `[1e-6, 1e-5]`
+    nevertheless got the note, and the note quoted `5e-324`, a **float64**
+    denormal, at it as evidence. **The `ieee` stamp on the same run said the
+    opposite and said it correctly**, so one run's two faces contradicted
+    each other on a measured fact.
+  - **The band was the widest in the equation, not the operand's own.**
+    `_ieee_cmp_get_min_normal` returns the maximum over the operand formats.
+    That is RIGHT for the `ieee` haze — the haze HULLS, so a wider band costs
+    precision and never soundness — and WRONG for an assertion, which a wider
+    band makes false: a **normal** float64 `[1e-10, 1e-9]`, 298 decades clear
+    of its own band, fired when compared against a `float16` zero, and the
+    note's own first clause was false on that run.
+
+  Repaired at the root rather than patched: the trigger hazes **each operand
+  at its own format's band**, and only where `interval._FORMAT_TARGET_FLUSHES`
+  — one measured table — records a flush; and the note's flush sentence is
+  `interval.measured_flush_clause()`, the same builder the `ieee` stamp uses,
+  so there is no second spelling of the fact to drift. Neither defect was
+  reachable by the tests that shipped with the tell: they contained no
+  float16, no bfloat16 and no mixed-dtype comparison, so a mutant for the
+  band TEXT was guarding a layer below the claim being made. The suite now
+  carries all three axes, each red on a mutant.
+
   **The campaign's strongest result met this question before it was named, and
   answered it by withholding.** The flagship declares `float32` and its
   recorded verdicts are REFUTED with a witness that EXECUTES — safe under
@@ -362,13 +412,40 @@ and a count over entries that happened to say something is not a count.
   measured clamp. Two further constructions — `(x+x)·0` on a finite box
   and `r ≤ +∞` over a ⊤ loop output — discharge correctly **under the
   registered ℝ semantics** and are false in IEEE (overflow→NaN); they are
-  not code defects under the declared dial, are pinned as marker tests
-  that must flip if the dial ever moves, and the ⊤-widening vacuity
-  guard already excludes the second shape from every count. The
-  "monotone arithmetic is float-conservative" scope claim is corrected:
-  outward rounding guards rounding divergence, not overflow→NaN
-  existence divergence. No shipped verdict flipped — re-verified by
-  re-running every recorded harness after the fixes. 119 tests green.
+  not code defects under the declared dial and are pinned as marker tests
+  that must flip if the dial ever moves. The "monotone arithmetic is
+  float-conservative" scope claim is corrected: outward rounding guards
+  rounding divergence, not overflow→NaN existence divergence. No shipped
+  verdict flipped — re-verified by re-running every recorded harness
+  after the fixes. 119 tests green.
+
+  **A THIRD MITIGATION CLAIMED IN THIS ENTRY IS FALSE AND IS WITHDRAWN
+  (2026-08-21).** It read: *"…and the ⊤-widening vacuity guard already
+  excludes the second shape from every count."* The same claim stood at
+  `design/soundness-audit.md`'s finding-1/2 row and is struck there too.
+  The guard's predicate is a property of the WHOLE obligation — does it
+  still discharge with every declared bound widened to (−inf, +inf)? — so
+  it fences an obligation that is a tautology *entire*, and fences nothing
+  once the same ℝ-true/IEEE-false sub-expression sits inside an obligation
+  whose envelope is load-bearing. Driven with a control, one run, both x64
+  cells (jax 0.11.0, `vacuity_mode="inputs-only"`), the same in both:
+
+      construction (declared box)             verdict   guard   jax true
+      r ≤ +∞ over a ⊤ while output  (0, 1)    VERIFIED  FIRES     25 / 25
+      the same r, ×0.0, ∧ x ≥ 0    (0.5, 1)   VERIFIED  silent     0 / 25
+      max(sqrt x, x·x) ≥ 1         (−2, −1)   VERIFIED  silent     0 / 25
+
+  The middle row **is** the withdrawn clause's own shape — `r ≤ +∞` over a
+  ⊤ loop output, with the first construction's 0·∞ convention beside it —
+  and it counts: the stamp reads *"no obligation discharges with the
+  declared bounds widened"* while the program is false at every point of
+  the declared box. The third reaches ⊤ by a different road, `sqrt`'s own
+  decline, quoted in the same verdict at 83% coverage. **What catches all
+  three is the `semantics="ieee"` dial** — UNKNOWN on each, measured in
+  the same run — which is this entry's first disclosure and is now its
+  only one: there is no second, independent protection here. The two
+  marker tests in `tests/test_audit_findings.py` carried the same
+  sentence in their comments and no longer do.
 
   *Versions: 0.1.0 pre-release builds only.*
 
