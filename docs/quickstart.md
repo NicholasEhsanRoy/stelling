@@ -124,7 +124,11 @@ And a third dial, for a narrowing neither of those two can see at all:
 `pytest --stelling-narrowing-perimeter=error`. An integer literal written in
 a comparison against a float array need not be out of *range* to be destroyed
 — `x <= 2**31 - 1` on `float32` runs as `x <= 2147483648.0`, one greater than
-what you wrote, and it is a VERIFIED today. This raises
+what you wrote, and it is a VERIFIED today. (It can also be destroyed by
+overflowing: `x <= 100000` on `float16` runs as `x <= inf`, silently, and this
+dial refuses that too. That is the only float loss any of the three watches,
+and it is about the literal you wrote — a value that is already a float and
+overflows is outside all three.) This raises
 `stelling.NarrowingError` at the line that wrote the literal. Off by default,
 and neither dial above turns it on.
 

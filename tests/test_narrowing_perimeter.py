@@ -48,6 +48,7 @@ import io
 import json
 import pathlib
 import re
+import warnings
 
 import pytest
 
@@ -82,6 +83,59 @@ MOVED = 2**31 - 1
 MOVED_IMAGE = 2147483648.0
 ALSO_MOVED = 16777219
 EXACT = 1000
+
+#: THE OTHER HALF OF THE FLOAT STORY, and it had no acceptance case until
+#: B22. ``MOVED`` is out of REPRESENTABILITY; this one is out of RANGE for the
+#: float format itself, which is ``prop_guard.REASONS``' fourth entry
+#: ``overflows-float`` -- and the FORMAT matters, because that is what decides
+#: whether the door is silent. Every ``int64`` value is finite in ``float32``
+#: and ``bfloat16``, so among the four catalogued formats only ``float16``
+#: has a finite range an integer literal can leave QUIETLY: measured disarmed
+#: in both x64 cells, ``x_f16 <= 100000`` is ``[True, True, True]`` and the
+#: comparison that runs is against ``inf``. Written large enough to overflow
+#: ``float32`` the literal is also too large for jax to convert at all and jax
+#: raises ``OverflowError`` on its own, so a ``float32`` case here would be a
+#: test that the perimeter beats jax to a defect jax already reports.
+OVERFLOWING_FMT = "float16"
+OVERFLOWS = 100000
+OVERFLOWS_IMAGE = float("inf")
+
+#: And the case NOTHING in this release sees, which is the same sentence's
+#: other side: a value that is ALREADY a float. Only ``type(b) is int``
+#: reaches the predicate (``report.PERIMETER_UNCOVERED``'s second bullet) and
+#: the other two instruments are integer-to-integer throughout, so a finite
+#: double becoming ``inf`` raises no alarm anywhere. That is a scope boundary
+#: rather than a hole, and it is now stated on the page instead of being
+#: inferable from the fact that every example on it happened to be an int --
+#: which is what ``docs/overflow-tripwire.md``, a page NAMED for overflow,
+#: left a reader to do.
+#: The failure message for the test below, in one place because it is the
+#: whole point of the test: this pin exists to keep a DISCLOSURE true, so
+#: going red means the PAGE is now wrong, not that the code is.
+_LOUDER_THAN_THE_PAGE = (
+    "{label} is now caught ({exc}). That is better news than this test "
+    "records, and it makes docs/overflow-tripwire.md wrong in two places: the "
+    "'And it is integers, all the way down' bullets under 'What it does NOT "
+    "find', and bullet 3 of the narrowing perimeter's 'What it does NOT "
+    "cover'. Both say a value that is already a float raises no alarm "
+    "anywhere in this release. Rewrite them, then move this case out of "
+    "FLOAT_VALUES_NOTHING_SEES."
+)
+
+FLOAT_VALUES_NOTHING_SEES = (
+    ("jnp.full((2,), 1e300, jnp.float32)", lambda: jnp.full((2,), 1e300, jnp.float32)),
+    ("jnp.full((2,), 70000.0, jnp.float16)", lambda: jnp.full((2,), 70000.0, jnp.float16)),
+    ("jnp.float16(70000.0)", lambda: jnp.float16(70000.0)),
+    ("x_f32 + 1e300", lambda: jnp.zeros((2,), jnp.float32) + 1e300),
+    ("x_f16 + 70000.0", lambda: jnp.zeros((2,), jnp.float16) + 70000.0),
+    ("jnp.asarray([1e300, 1e300]).astype(jnp.float32)",
+     lambda: jnp.asarray([1e300, 1e300]).astype(jnp.float32)),
+    # The integer literal that IS refused through an operator, at a
+    # CONSTRUCTION site instead -- where no operator exists and the eager
+    # detector is integer-to-integer, so nothing sees it either.
+    ("jnp.full((2,), 100000, jnp.float16)",
+     lambda: jnp.full((2,), 100000, jnp.float16)),
+)
 
 
 @pytest.fixture(autouse=True)
@@ -409,6 +463,119 @@ def test_check_returns_verified_disarmed_and_refuses_armed(
     # ...and the door is open again afterwards, which is what makes the
     # perimeter an instrument rather than a permanent change to jax.
     assert _verdict_or_raise(harness) == ("verdict", "VERIFIED")
+
+
+def test_the_float_OVERFLOW_literal_is_refused_and_the_door_was_silent():
+    """``overflows-float``, driven both ways -- the page's float answer, half one.
+
+    ``docs/overflow-tripwire.md`` is NAMED for overflow and, until B22, every
+    route it enumerated was an integer route. The question a reader arrives
+    with -- *a finite value became* ``inf``*, does this see it?* -- had no
+    answer on the page in either direction, and the page had to be able to
+    give one that is true of the RELEASE rather than of one instrument,
+    because ``prop_guard`` carries ``overflows-float`` while the other two
+    instruments are integer-to-integer throughout.
+
+    So both halves are pinned. This is the half the release DOES catch: an
+    integer literal with no finite image in the float dtype it meets. The
+    disarmed assertion is the load-bearing one -- it is what makes this a
+    silent door rather than a jax error the perimeter merely relabels, and it
+    is why the format is ``float16`` (see :data:`OVERFLOWING_FMT`).
+    """
+    x = jnp.zeros((3,), getattr(jnp, OVERFLOWING_FMT))
+
+    # DISARMED: silent, and the comparison that runs is against `inf`.
+    assert (x <= OVERFLOWS).tolist() == [True, True, True]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        image = float(np.asarray(OVERFLOWS).astype(OVERFLOWING_FMT))
+    assert image == OVERFLOWS_IMAGE
+
+    with perimeter.armed(("array",)) as status:
+        assert status.armed, status.explanation
+        with pytest.raises(perimeter.NarrowingError) as caught:
+            _ = x <= OVERFLOWS
+    finding = caught.value.finding
+    assert finding.reason == "overflows-float", finding
+    assert finding.literal == OVERFLOWS
+    assert finding.narrowed_to == OVERFLOWS_IMAGE
+    assert finding.target_dtype == OVERFLOWING_FMT
+    # ...and the neighbouring reason on the same format, so that a predicate
+    # that collapsed the two would not pass this file.
+    with perimeter.armed(("array",)):
+        with pytest.raises(perimeter.NarrowingError) as inexact:
+            _ = x <= 65505
+    assert inexact.value.finding.reason == "inexact", inexact.value.finding
+
+    # the door is open again
+    assert (x <= OVERFLOWS).tolist() == [True, True, True]
+
+    # AND THE SENTENCES ARE READ. This batch's whole subject is a page that
+    # measured nothing wrong and simply said nothing, so a behaviour pin with
+    # no reader is only half the repair: both pages that now answer the float
+    # question have to be naming the case this test drives.
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    for rel in ("docs/overflow-tripwire.md", "docs/quickstart.md"):
+        page = (repo / rel).read_text(encoding="utf-8")
+        assert f"`x_f16 <= {OVERFLOWS}`" in page or f"`x <= {OVERFLOWS}`" in page, (
+            f"{rel} no longer names the comparison this test drives, so its "
+            f"float-overflow answer has stopped being about a measured case"
+        )
+        assert OVERFLOWING_FMT in page, f"{rel} no longer names {OVERFLOWING_FMT}"
+
+
+def test_a_float_VALUE_that_overflows_is_seen_by_NOTHING_in_this_release():
+    """The other half, and it is a scope boundary that is now written down.
+
+    A value that is already a float is outside all three instruments: only
+    ``type(b) is int`` reaches this predicate, and the const-fold tripwire and
+    the eager detector are integer-to-integer (``intentional_wrap`` refuses
+    every non-integer dtype by name, asserted below so that "integer to
+    integer" is measured here rather than repeated).
+
+    **This test exists to keep a DISCLOSURE true, not to keep a detector
+    working**, and the direction it fails in says so: if a future release
+    starts catching one of these, this goes red and the page's paragraph is
+    what has to change. Widening the detector to floats is out of scope; a
+    page that says nothing while a neighbouring instrument says
+    ``overflows-float`` is the defect this replaces.
+    """
+    from stelling._tripwire import eager as _eager
+
+    tw_status, recorder = _tripwire.arm()
+    eager_status = _eager.arm()
+    try:
+        assert tw_status.armed, tw_status.explanation
+        assert eager_status.armed, eager_status.explanation
+        with perimeter.armed(("tracer", "array")) as status:
+            assert status.armed, status.explanation
+            before = (recorder.fires, _eager.TRUNCATIONS, perimeter.FINDINGS)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                for label, build in FLOAT_VALUES_NOTHING_SEES:
+                    # A refusal is caught rather than allowed to escape, so
+                    # that a release which starts catching one of these fails
+                    # with the sentence a maintainer needs and not with a
+                    # traceback out of a jax operator slot.
+                    try:
+                        got = np.asarray(build())
+                    except BaseException as exc:  # noqa: BLE001
+                        pytest.fail(_LOUDER_THAN_THE_PAGE.format(
+                            label=label, exc=type(exc).__name__))
+                    assert np.isinf(got).all(), f"{label} is no longer inf: {got!r}"
+            after = (recorder.fires, _eager.TRUNCATIONS, perimeter.FINDINGS)
+        assert after == before, _LOUDER_THAN_THE_PAGE.format(
+            label=f"one of them (tripwire/eager/perimeter {before} -> {after})",
+            exc="a counter moving",
+        )
+    finally:
+        _eager.disarm()
+        _tripwire.disarm()
+
+    # ...and the reason the other two cannot be the ones that catch it.
+    for dtype in ("float16", "bfloat16", "float32", "float64"):
+        with pytest.raises(ValueError, match="not one of the integer dtypes"):
+            stelling.intentional_wrap(1, dtype)
 
 
 def test_the_refusal_names_the_line_that_wrote_the_literal():

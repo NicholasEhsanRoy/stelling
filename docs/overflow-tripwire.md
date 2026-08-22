@@ -136,6 +136,33 @@ does it not see", because that is what it is for. Every row was measured with a
 live control in the same process, on both tested series with x64 on and off,
 and **the value wraps in every UNCOVERED row**.
 
+**And it is integers, all the way down — so here is the float answer, which
+this page is named for and did not give.** Every row below is an integer route,
+because both instruments in this section are integer→integer: this tripwire
+watches integer RANGE, the eager detector watches integer CONSTRUCTION, and
+`stelling.intentional_wrap` refuses every non-integer dtype by name. Two
+different things get called float overflow, and the release answers them
+differently:
+
+* **A value that is already a FLOAT and overflows the format it is converted
+  into is seen by nothing.** A finite double becoming `inf` raises no alarm
+  anywhere in this release. Measured with all three instruments armed and
+  identical in both x64 cells: `jnp.full((2,), 1e300, jnp.float32)`,
+  `jnp.full((2,), 70000.0, jnp.float16)`, `jnp.float16(70000.0)`,
+  `x_f32 + 1e300`, `x_f16 + 70000.0` and
+  `jnp.asarray([1e300, 1e300]).astype(jnp.float32)` are each `inf`, with 0
+  fires here, 0 truncations from the eager detector and no refusal from the
+  perimeter. That is a scope boundary and not a hole: nothing on this page
+  claims a float, and closing it would be a different instrument.
+* **An integer LITERAL that has no finite image in the float dtype it meets IS
+  caught — by the third instrument, through an operator slot only.**
+  `x_f16 <= 100000` runs as a comparison against `inf`, silently, and
+  [the narrowing perimeter](#the-third-door-a-literal-that-never-existed)
+  refuses it. The same literal at a CONSTRUCTION site is not covered by
+  anything: `jnp.full((2,), 100000, jnp.float16)` is `[inf, inf]` with all
+  three armed and 0 fires, because the eager detector below is
+  integer→integer and there is no operator for the perimeter to sit in.
+
 | door | status | measured |
 |---|---|---|
 | `x + N`, `x * N`, `x >= N`, `x.at[i].set(N)`, `jnp.maximum(x, N)`, `jnp.minimum(x, N)` under a trace | **covered** | fires |
@@ -636,11 +663,37 @@ The armed slot list is printed in the report on every run, and it is the whole
 perimeter rather than a summary of one: an operator missing from it is
 unwatched.
 
+**Two kinds of loss, and the second one is this release's only float-overflow
+answer.** The literal at the top of this section MOVES: `2147483647` has a
+nearest `float32` and it is not the one written. A literal can also VANISH:
+`65504` is `float16`'s largest finite value, so `x_f16 <= 100000` is a
+comparison against `inf` — and it is silent, measured disarmed in both x64
+cells. The perimeter refuses both at the line that wrote the literal and names
+which it is, `inexact` for the first and `overflows-float` for the second.
+Those are two of the four in `prop_guard.REASONS`; the other two
+(`out-of-range`, `negative-into-unsigned`) are the integer ones.
+
+**Where `overflows-float` can fire silently is narrower than it sounds, and
+the reason is arithmetic rather than policy.** Every `int64` value is finite in
+`float32` and in `bfloat16`, so among the four catalogued formats only
+`float16` has a finite range an integer literal can leave quietly. Written
+larger than that, the literal does not reach jax intact either way: at
+`JAX_ENABLE_X64=1`, `x_f32 <= 10**40` raises jax's own `OverflowError`
+disarmed, and armed the perimeter gets there first and refuses it as
+`overflows-float` with the site named — a better message for the same defect,
+not a door that was open. At `JAX_ENABLE_X64=0` the literal is canonicalised
+from `int32`, so `x_f32 <= 10**18` raises there and is merely `inexact` with
+x64 on.
+
+That is the ONLY float loss any of the three instruments sees, and it is a
+statement about the LITERAL you wrote. A value that is already a float is
+covered by nothing here — bullet 3 below.
+
 ### What it does NOT cover
 
 Mode 1 and Mode 2 each have a section like this one. Mode 3's limits lived
 only in `report.PERIMETER_UNCOVERED`, which is printed at the END of a
-session — after the decision to arm has already been made — and two of them
+session — after the decision to arm has already been made — and three of them
 are load-bearing enough to belong here, where that decision is.
 
 The same wrong threshold, in three spellings of the same harness, with all
@@ -676,9 +729,27 @@ arithmetic slots and they could be installed. They are not, today, and a
 harness that does its narrowing in arithmetic rather than in a comparison is
 unwatched.
 
-Both are now bullets in the printed list too, so a run says them as well as
-this page. They were not, and the reason is worth one sentence: the list's
-last bullet already covered the function spelling *in general* — "any
+**3. A value that is ALREADY A FLOAT is covered by nothing on this page.** The
+perimeter checks a written literal, and only `type(b) is int` reaches the
+predicate — `report.PERIMETER_UNCOVERED`'s second bullet. So a float that
+overflows the format it is converted into becomes `inf` in silence. Measured
+with all three instruments armed, identical in both x64 cells:
+`jnp.full((2,), 1e300, jnp.float32)`, `jnp.full((2,), 70000.0, jnp.float16)`,
+`jnp.float16(70000.0)`, `x_f32 + 1e300`, `x_f16 + 70000.0` and
+`jnp.asarray([1e300, 1e300]).astype(jnp.float32)` are each `inf`, with 0 fires
+from the tripwire, 0 truncations from the eager detector and no refusal here.
+The other two instruments are integer→integer by construction —
+`stelling.intentional_wrap` refuses every non-integer dtype by name — so this
+is a boundary of the release rather than a hole in one instrument. The
+`overflows-float` case above is the same shape from the other side, and the
+difference is exactly what you wrote: an integer literal is watched, a float
+value is not.
+
+The first two are now bullets in the printed list too, so a run says them as
+well as this page; the third always was one, and this page is where it was
+missing — the same defect facing the other way. They were not, and the reason
+is worth one sentence: the list's last bullet already covered the function
+spelling *in general* — "any
 narrowing on a route with no Python operator on it at all" — and its three
 examples were all about tracing and caching, so a reader holding
 `jnp.less_equal(x, 2**31 - 1)` did not recognise their own program in it. A
