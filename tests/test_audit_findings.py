@@ -519,8 +519,13 @@ def test_select_n_negative_selector_clamps_to_first_case():
 # r ≤ ∞ SHAPE OUT OF ANY COUNT". WITHDRAWN 2026-08-21 AS FALSE, with the
 # ledger clause it came from (SOUNDNESS.md, second-audit entry;
 # design/soundness-audit.md, finding-1/2 row). The guard's predicate is
-# whole-obligation, so it fences these shapes only where the obligation is
-# a tautology entire: `r <= +inf` ALONE over a ⊤ while output is VERIFIED
+# whole-obligation, so it fences these shapes where the obligation is a
+# tautology entire — and fences other things besides, so "only where" would
+# be a false universal in its own right: `widen()` rewrites `stelling_any`
+# bounds only, so an `assume` survives it and `assume(3 <= x <= 4);
+# assert_(x*x <= 16)` — false at x = 5, hence no tautology — makes the guard
+# FIRE (driven, both x64 cells). What matters here is the other direction:
+# `r <= +inf` ALONE over a ⊤ while output is VERIFIED
 # and the guard fires, but the same `r`, times 0.0 and conjoined with
 # `x >= 0` over [0.5, 1.0], is VERIFIED with "no obligation discharges
 # with the declared bounds widened" while jax is False at 25 of 25 grid

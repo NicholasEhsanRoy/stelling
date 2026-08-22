@@ -120,6 +120,38 @@ Every verdict object stamps, at minimum:
   same status, same boxes, same coverage, same tiers; the `ieee` dial
   remains the only thing that decides this shape differently.
 
+  **AMENDED (2026-08-22): THE TRIGGER IS PER OPERAND AND PER FORMAT, AND AS
+  FIRST WRITTEN IT WAS NEITHER.** The paragraph above says *"an operand box
+  reaches into the subnormal band of its own dtype"* and *"what the measured
+  target does instead"*. Both were false of the code that shipped under it,
+  and both are now driven, both x64 cells:
+
+  - **The flush is per format, and this target does not flush float16.**
+    Measured on jax 0.11.0 CPU, eager and under `jit`: `x > 0` is True at
+    every subnormal float16 magnitude — float16 keeps gradual underflow —
+    while bfloat16, float32 and float64 flush. A float16 `[1e-6, 1e-5]`
+    nevertheless got the note, and the note quoted `5e-324`, a **float64**
+    denormal, at it as evidence. **The `ieee` stamp on the same run said the
+    opposite and said it correctly**, so one run's two faces contradicted
+    each other on a measured fact.
+  - **The band was the widest in the equation, not the operand's own.**
+    `_ieee_cmp_get_min_normal` returns the maximum over the operand formats.
+    That is RIGHT for the `ieee` haze — the haze HULLS, so a wider band costs
+    precision and never soundness — and WRONG for an assertion, which a wider
+    band makes false: a **normal** float64 `[1e-10, 1e-9]`, 298 decades clear
+    of its own band, fired when compared against a `float16` zero, and the
+    note's own first clause was false on that run.
+
+  Repaired at the root rather than patched: the trigger hazes **each operand
+  at its own format's band**, and only where `interval._FORMAT_TARGET_FLUSHES`
+  — one measured table — records a flush; and the note's flush sentence is
+  `interval.measured_flush_clause()`, the same builder the `ieee` stamp uses,
+  so there is no second spelling of the fact to drift. Neither defect was
+  reachable by the tests that shipped with the tell: they contained no
+  float16, no bfloat16 and no mixed-dtype comparison, so a mutant for the
+  band TEXT was guarding a layer below the claim being made. The suite now
+  carries all three axes, each red on a mutant.
+
   **The campaign's strongest result met this question before it was named, and
   answered it by withholding.** The flagship declares `float32` and its
   recorded verdicts are REFUTED with a witness that EXECUTES — safe under

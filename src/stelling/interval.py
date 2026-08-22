@@ -222,6 +222,94 @@ _FORMAT_MIN_NORMAL_TEXT = {
     "float64": "2**-1022",
 }
 
+# -- WHICH FORMATS THE MEASURED TARGET FLUSHES: the one table ----------------
+#
+# THE FLUSH IS PER-FORMAT AND IT IS MEASURED, NOT ASSUMED. Driven on this
+# target in both x64 cells, eager AND under `jit`, by asking `x > 0` at
+# magnitudes strictly inside each format's OWN subnormal band — each stored
+# and read back nonzero first, so the question really is the comparison's:
+#
+#     format    magnitudes asked          `x > 0` reads True   verdict
+#     float16   2**-24 … 3.05e-05 (5)     5 of 5, both ways    KEEPS GRADUAL
+#                                                              UNDERFLOW
+#     bfloat16  9.18e-41 … 1e-39  (4)     0 of 4, both ways    flushes
+#     float32   1.4e-45 … 1e-39   (4)     0 of 4, both ways    flushes
+#     float64   5e-324 … 1e-310   (3)     0 of 3, both ways    flushes
+#
+# The control on the float64 row: 1e-300, a NORMAL float64, reads True in the
+# same run, so the row is measuring the band and not the dtype.
+#
+# EVERY SENTENCE THIS PROJECT WRITES ABOUT THE FLUSH IS DERIVED FROM HERE,
+# and there is deliberately no second spelling of it anywhere. The reason is
+# a defect this table was added to close (0.2.0 B18 fixup): the real-mode
+# subnormal tell carried its OWN hard-coded float64 sentence — *"the
+# measured one does (jax 0.11.0 CPU reads 5e-324 > 0 as False)"* — and
+# stamped it on float16 runs, where it is FALSE and where the `ieee` face of
+# the very same run said so correctly. Two faces of one run contradicting
+# each other on a measured fact is exactly what one source of truth is for.
+#
+# A format ABSENT from this table has not been measured. Callers that must
+# assert something about the target read :func:`target_flushes_subnormals`
+# and get ``None``, which is not ``False``: ieee mode's haze covers both
+# behaviours regardless (it HULLS), so an unmeasured format costs the haze
+# nothing, while an assertion about the target must simply stay silent.
+_TARGET_MEASURED = "jax 0.11.0 CPU"
+
+_FORMAT_TARGET_FLUSHES = {
+    "float16": False,
+    "bfloat16": True,
+    "float32": True,
+    "float64": True,
+}
+
+if set(_FORMAT_TARGET_FLUSHES) != set(_FORMAT_MIN_NORMAL_TEXT):  # pragma: no cover
+    # `raise`, not `assert`: a module-level assert is stripped under -O, and
+    # a census that stops being enforced in an optimised deployment is not a
+    # census (tests/test_optimize_mode_guards.py).
+    raise RuntimeError(
+        "the measured-flush table and the band table must describe the "
+        "same formats: a format with a band and no measurement would be "
+        "hazed with no evidence, and a format with a measurement and no "
+        "band could not be hazed at all — "
+        f"{sorted(set(_FORMAT_TARGET_FLUSHES) ^ set(_FORMAT_MIN_NORMAL_TEXT))}"
+    )
+
+_COUNT_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}
+
+
+def target_flushes_subnormals(dtype: str):
+    """Does the MEASURED target flush subnormals of ``dtype``?
+
+    ``True``/``False`` for a measured format, ``None`` for one that is not
+    in :data:`_FORMAT_TARGET_FLUSHES`. ``None`` is NOT ``False`` — it is
+    "no measurement on file", and a caller asserting something about the
+    hardware must treat it as a reason to say nothing.
+    """
+    return _FORMAT_TARGET_FLUSHES.get(dtype)
+
+
+def _measured_format_names(flushes: bool) -> str:
+    return "/".join(
+        sorted(f for f, v in _FORMAT_TARGET_FLUSHES.items() if v is flushes)
+    )
+
+
+def measured_flush_clause() -> str:
+    """*"measured jax 0.11.0 CPU, bfloat16/float32/float64 flush subnormals
+    in arithmetic, comparisons and libm while float16 keeps gradual
+    underflow"* — the one sentence, DERIVED from
+    :data:`_FORMAT_TARGET_FLUSHES` rather than written out beside it.
+
+    Used by :func:`subnormal_indeterminacy_assumption` (the `ieee` stamp)
+    and by the real-mode subnormal tell in :mod:`stelling.propagate`, so
+    the two faces of a run cannot disagree about which formats flush.
+    """
+    return (
+        f"measured {_TARGET_MEASURED}, {_measured_format_names(True)} flush "
+        f"subnormals in arithmetic, comparisons and libm while "
+        f"{_measured_format_names(False)} keeps gradual underflow"
+    )
+
 
 def _format_list(formats) -> str:
     fs = tuple(formats)
@@ -268,18 +356,19 @@ def subnormal_indeterminacy_assumption(formats=()) -> str:
     bands = ", ".join(
         f"{f}: 0 < |x| < {_FORMAT_MIN_NORMAL_TEXT.get(f, '?')}" for f in fs
     )
+    n_measured = _COUNT_WORDS.get(
+        len(_FORMAT_TARGET_FLUSHES), str(len(_FORMAT_TARGET_FLUSHES))
+    )
     return (
         f"subnormal indeterminacy: whether the target flushes subnormals "
-        f"(FTZ/DAZ) is device/compiler-dependent — measured jax 0.11.0 CPU, "
-        f"bfloat16/float32/float64 flush subnormals in arithmetic, "
-        f"comparisons and libm while float16 keeps gradual underflow, and "
-        f"strict IEEE-754 keeps it for all four. ieee-mode intervals "
-        f"touching the open subnormal band OF THEIR OWN FORMAT ({bands}) "
-        f"are hulled with 0, making verdicts sound for both semantics; "
-        f"subnormal-band outcomes are treated as indeterminate, never "
-        f"definite. float16's band is wider than this target needs, which "
-        f"costs precision and never soundness (the haze HULLS, it does not "
-        f"replace)"
+        f"(FTZ/DAZ) is device/compiler-dependent — {measured_flush_clause()}"
+        f", and strict IEEE-754 keeps it for all {n_measured}. ieee-mode "
+        f"intervals touching the open subnormal band OF THEIR OWN FORMAT "
+        f"({bands}) are hulled with 0, making verdicts sound for both "
+        f"semantics; subnormal-band outcomes are treated as indeterminate, "
+        f"never definite. {_measured_format_names(False)}'s band is wider "
+        f"than this target needs, which costs precision and never soundness "
+        f"(the haze HULLS, it does not replace)"
     )
 
 # A precision boundary of the mode, disclosed because it is real and

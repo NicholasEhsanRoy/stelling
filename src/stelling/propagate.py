@@ -5842,10 +5842,44 @@ def _ieee_cmp_get_min_normal(eqn) -> float:
 _SUBNORMAL_TELL_ROWS = frozenset({"lt", "gt", "le", "ge", "eq", "ne"})
 
 
+def _subnormal_tell_band(dtype):
+    """The band the TELL applies to ONE operand, or ``None`` for "say
+    nothing about this operand".
+
+    Three ways to get ``None``, and they are three different silences:
+    the operand is not a float (no band exists); the measured target is not
+    known to flush that format (:func:`stelling.interval.
+    target_flushes_subnormals` returns ``False`` or ``None`` — the second
+    being "not measured", which is not "does not flush"); or the format has
+    no entry in :data:`_FLOAT_FORMATS` and therefore no band on file.
+
+    **PER OPERAND, AT ITS OWN FORMAT'S BAND — NOT the widest band in the
+    equation.** :func:`_ieee_cmp_get_min_normal` takes the maximum over the
+    operands, and that is RIGHT for the `ieee` haze, where the haze HULLS
+    and a band wider than an operand needs costs precision and never
+    soundness. It is WRONG here, because this function does not widen a
+    box: it decides whether to ASSERT that the target's flush removes an
+    answer. Over-hazing an assertion makes it false. Measured (0.2.0 B18
+    fixup): a float64 ``[1e-10, 1e-9]``, 298 decades clear of its own band,
+    compared against a `float16` zero was hazed at float16's ``2**-14`` and
+    fired — with the note's own first clause, *"an operand box reaches into
+    the subnormal band of its own format"*, false on that very run.
+    """
+    if not dtype or "float" not in dtype:
+        return None
+    if iv.target_flushes_subnormals(dtype) is not True:
+        return None
+    fmt = _FLOAT_FORMATS.get(dtype)
+    if fmt is None:
+        return None
+    return _ieee_format_min_normal(fmt)
+
+
 def _subnormal_flush_tell(eqn, params, ins, out):
     """Would the target's DAZ flush take this real-mode comparison's
-    definite answer away? ``(lost, min_normal, float_dtypes)`` if it would,
-    ``None`` if it would not.
+    definite answer away? ``(lost, fired)`` if it would, ``None`` if it
+    would not, where ``fired`` is the sorted ``(dtype, min_normal)`` pairs
+    of the operands the flush actually moved.
 
     ``lost`` counts elements answered DEFINITELY in ℝ whose answer is not
     established once the operands are read the way the measured target reads
@@ -5859,20 +5893,31 @@ def _subnormal_flush_tell(eqn, params, ins, out):
     carries, against the row's answer over operands hulled with 0 across the
     subnormal band of their own format. The haze is
     :func:`stelling.interval.subnormal_haze_fmt`, the DAZ model ieee mode
-    already carries, applied at the band :func:`_ieee_cmp_get_min_normal`
-    picks — so the tell and the ieee face read the same band off the same
-    dtypes, and there is no second spelling of either to drift. The row is
-    fetched from :data:`TRANSFERS` rather than re-derived, for the same
-    reason.
+    already carries. The row is fetched from :data:`TRANSFERS` rather than
+    re-derived, for the same reason.
+
+    **THE HAZE IS PER OPERAND AND ONLY WHERE THE TARGET IS MEASURED TO
+    FLUSH.** Both halves are load-bearing and both were wrong for one
+    commit; see :func:`_subnormal_tell_band` for the band half. The flush
+    half: whether the target flushes is a PER-FORMAT measured fact, and on
+    this one float16 keeps gradual underflow while the other three flush
+    (:data:`stelling.interval._FORMAT_TARGET_FLUSHES`, the one table every
+    sentence about the flush is derived from — including the `ieee` stamp's,
+    so the two faces of a run cannot disagree about it). A float16 box
+    strictly inside float16's band is a box the target reads exactly as
+    written, and a tell there would be asserting a flush that does not
+    happen.
 
     So it is SILENT wherever the flush cannot change an answer, which is
     where the ordinary harness lives:
 
-      * a box clear of the band — the haze is the identity;
+      * a box clear of the band OF ITS OWN FORMAT — the haze is the
+        identity;
       * a box that already contains 0 — the haze is the identity too, which
         is why a declaration like ``[-10, 10]`` never reaches this, and why
         ⊤ never does;
       * an integer or bool comparison — no subnormal band exists;
+      * a float16 operand — the measured target does not flush it;
       * a claim the flush does not decide differently — ``[1e-320, 1e-300]
         < 1.0`` is still definitely true with the low end read as ``0.0``.
 
@@ -5882,39 +5927,36 @@ def _subnormal_flush_tell(eqn, params, ins, out):
     statement about the running program. Both directions are pinned in
     tests/test_subnormal_tell.py; a tell that cannot fire and a tell that
     fires on everything are the same defect, and neither is caught by an
-    example that only fires.
+    example that only fires — nor by one that only ever uses float64, which
+    is how the two defects above shipped.
 
-    **THE ``moved`` EXIT IS A FAST PATH AND NOT A GUARD, and it is written
+    **THE ``fired`` EXIT IS A FAST PATH AND NOT A GUARD, and it is written
     down that way because a comment claiming otherwise is the failure this
     file is full of warnings about.** When the haze is the identity on every
     operand the hazed answer IS the ℝ answer, so ``lost`` is 0 and the
-    function returns ``None`` by the last gate anyway. Measured: with the
-    ``moved`` exit deleted, tests/test_subnormal_tell.py is still 20 passed
-    — no test moves, because no OUTCOME moves. What it buys is that an
-    ordinary program does not pay for a second transfer call at every
-    comparison it contains.
+    function returns ``None`` by the last gate anyway. Measured: with that
+    exit deleted, tests/test_subnormal_tell.py is unchanged — no test moves,
+    because no OUTCOME moves. What it buys is that an ordinary program does
+    not pay for a second transfer call at every comparison it contains.
     """
     if eqn.primitive not in _SUBNORMAL_TELL_ROWS:
         return None
-    floats = sorted(
-        {d for d in (v.aval.dtype or "" for v in eqn.invars) if "float" in d}
-    )
-    if not floats:
-        return None
-    try:
-        min_normal = _ieee_cmp_get_min_normal(eqn)
-    except iv.IntervalError:
-        # A float format with no band on file. Silence here means the tell
-        # was not AVAILABLE, never that the flush is absent — and the row it
-        # would have annotated is unchanged either way, because this
-        # function only ever returns a message.
-        return None
-    hazed, moved = [], False
-    for x in ins:
-        h, changed = iv.subnormal_haze_fmt(x, min_normal)
+    hazed, fired = [], {}
+    for v, x in zip(eqn.invars, ins):
+        band = _subnormal_tell_band(v.aval.dtype)
+        if band is None:
+            # not a float, not measured to flush, or no band on file. The
+            # operand goes through unhazed: silence about an operand is
+            # never a claim that it is clear of its band, and hazing it
+            # anyway would put a flush the target does not perform into an
+            # assertion about the target.
+            hazed.append(x)
+            continue
+        h, changed = iv.subnormal_haze_fmt(x, band)
         hazed.append(h)
-        moved = moved or changed
-    if not moved:
+        if changed:
+            fired[v.aval.dtype] = band
+    if not fired:
         return None
     try:
         flushed = TRANSFERS[eqn.primitive][0](eqn, params, hazed)[0]
@@ -5929,33 +5971,47 @@ def _subnormal_flush_tell(eqn, params, ins, out):
     )
     if not lost:
         return None
-    return lost, min_normal, floats
+    return lost, tuple(sorted(fired.items()))
 
 
-def _subnormal_tell_text(eqn, where, lost, min_normal, floats, provenance):
+def _subnormal_tell_text(eqn, where, lost, fired, provenance):
     """The tell's sentence. Split out from the walk so a test can read it
-    without driving a whole propagation, and so the band it names is the
-    band :func:`_subnormal_flush_tell` measured with."""
-    bands = ", ".join(
-        f"{d}: 0 < |x| < {iv._FORMAT_MIN_NORMAL_TEXT.get(d, '?')}"
-        for d in floats
+    without driving a whole propagation, and so the bands it names are the
+    bands :func:`_subnormal_flush_tell` measured with — ``fired`` is that
+    function's own list of the operand formats the flush moved, so the
+    sentence cannot name a format the run did not haze.
+
+    **THE FLUSH CLAIM IS DERIVED, NOT RE-WRITTEN.** Which formats this
+    target flushes comes from :func:`stelling.interval.
+    measured_flush_clause`, the same builder the `ieee` stamp uses. For one
+    commit this sentence carried its own hard-coded float64 evidence
+    (*"reads 5e-324 > 0 as False"*) and stamped it on float16 runs, where
+    the `ieee` face of the SAME run said the opposite and said it correctly.
+    A second spelling of a measured fact is a second thing to be wrong.
+    """
+    bands = "; ".join(
+        f"{d}: 0 < |x| < {iv._FORMAT_MIN_NORMAL_TEXT.get(d, '?')} = "
+        f"{mn!r}, and {iv._TARGET_MEASURED} reads "
+        f"{_ieee_format_min_positive(_FLOAT_FORMATS[d])!r} > 0 as False"
+        for d, mn in fired
     )
     return (
         f"SUBNORMAL-SENSITIVE DEFINITE ANSWER: {eqn.primitive!r} at {where} "
         f"answers definitely for {lost} element(s) under semantics='real', "
         f"which judges the declared set in exact real arithmetic — and an "
-        f"operand box reaches into the subnormal band of its own format "
-        f"({bands}; the band applied here is the widest of them, "
-        f"{min_normal!r}). Whether the target flushes subnormals is "
-        f"device/compiler-dependent, and the measured one does (DAZ on "
-        f"operands: jax 0.11.0 CPU reads 5e-324 > 0 as False), so it "
-        f"answers from 0.0 where ℝ reads a nonzero value — and {lost} of "
-        f"those element(s) then have no definite answer at all. THE VERDICT "
-        f"IS UNCHANGED AND IS AN ℝ CLAIM over the declared set, which is the "
-        f"registered posture of this mode; it is NOT a claim about what the "
-        f"hardware computes. semantics='ieee' is the dial that models the "
-        f"flush — it hazes these same operands at this same band and does "
-        f"not answer these element(s) definitely{provenance}"
+        f"operand box reaches into the subnormal band of its own format, in "
+        f"a format this target is MEASURED to flush ({bands}). Whether a "
+        f"target flushes subnormals is device/compiler-dependent AND "
+        f"PER-FORMAT — {iv.measured_flush_clause()} — so on the formats "
+        f"named above it answers from 0.0 where ℝ reads a nonzero value, "
+        f"and {lost} of those element(s) then have no definite answer at "
+        f"all. THE VERDICT IS UNCHANGED AND IS AN ℝ CLAIM over the declared "
+        f"set, which is the registered posture of this mode; it is NOT a "
+        f"claim about what the hardware computes. semantics='ieee' is the "
+        f"dial that models the flush — it hazes these same operands at a "
+        f"band at least this wide (it takes the widest band in the "
+        f"equation, which only ever hulls more) and does not answer these "
+        f"element(s) definitely{provenance}"
     )
 
 
@@ -10562,14 +10618,13 @@ class _Propagator:
             # `_subnormal_flush_tell`'s.
             tell = _subnormal_flush_tell(eqn, params, ins, outs[0])
             if tell is not None:
-                lost, min_normal, floats = tell
+                lost, fired = tell
                 self.notes.append(_subnormal_tell_text(
                     eqn,
                     eqn.source_info[-1] if eqn.source_info
                     else "unknown location",
                     lost,
-                    min_normal,
-                    floats,
+                    fired,
                     self._operand_provenance(eqn),
                 ))
         self.counter.record_known(eqn.primitive)

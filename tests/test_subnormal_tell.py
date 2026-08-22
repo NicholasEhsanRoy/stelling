@@ -23,8 +23,22 @@ does not decide differently, the same comparison one ulp above the band, and
 a declaration that merely CONTAINS the band the way an ordinary ``[-10, 10]``
 does.
 
+**AND IT IS PER FORMAT, WHICH IS THE LAYER THE FIRST CUT HAD NOTHING FOR.**
+The band this file guards was per-dtype from the start; the CLAIM the band
+supports was not. Section 2b is the repair: whether the measured target
+flushes a format at all is itself a per-format measured fact — on this one
+float16 keeps gradual underflow while the other three flush — and the band
+applied to an operand must be that operand's OWN, not the widest in the
+equation, because over-hazing a HAZE only costs precision while over-hazing
+an ASSERTION makes it false. A file containing no float16, no bfloat16 and
+no mixed-dtype comparison could not have caught either, whatever its band
+mutants said.
+
 Hand-built IR, so the whole file runs in the zero-dep lane; the jax leg at
-the bottom is `importorskip`ed and is the end-to-end one.
+the bottom is `importorskip`ed and is the end-to-end one, and
+`test_the_measured_flush_table_still_matches_the_TARGET` is the one test
+here that pins the TABLE against the machine rather than the code against
+the table.
 """
 
 from __future__ import annotations
@@ -38,6 +52,8 @@ from stelling.propagate import propagate
 
 F64 = ir.Aval(kind="ShapedArray", shape=(), dtype="float64")
 F32 = ir.Aval(kind="ShapedArray", shape=(), dtype="float32")
+F16 = ir.Aval(kind="ShapedArray", shape=(), dtype="float16")
+BF16 = ir.Aval(kind="ShapedArray", shape=(), dtype="bfloat16")
 I32 = ir.Aval(kind="ShapedArray", shape=(), dtype="int32")
 BOOL = ir.Aval(kind="ShapedArray", shape=(), dtype="bool")
 
@@ -49,6 +65,16 @@ TELL_HEAD = "SUBNORMAL-SENSITIVE DEFINITE ANSWER"
 # measured and the weaker precondition for the tell.
 MIN_NORMAL_F64 = 2.0**-1022
 SUB_LO, SUB_HI = 1e-320, 1e-300
+
+# The same shape in the three narrow formats. float16's band is by far the
+# widest in absolute terms (2**-14 is 6.1e-05), which is exactly why a
+# float16 operand hazed at SOMEONE ELSE'S band, or at its own band on a
+# target that does not flush it, is the loud failure mode and not a corner.
+MIN_NORMAL_F16 = 2.0**-14
+MIN_NORMAL_F32 = 2.0**-126  # bfloat16 shares this emin
+SUB_F16 = (1e-6, 1e-5)          # strictly inside float16's band
+SUB_F32 = (1.4e-45, 1e-40)      # strictly inside float32's band
+SUB_BF16 = (1e-40, 1e-39)       # strictly inside bfloat16's band
 
 
 def var(i, aval=F64):
@@ -70,15 +96,21 @@ def close(eqns, outvars):
     )
 
 
-def cmp_query(prim, lo, hi, rhs, *, dtype="float64", aval=F64):
-    """``assert_(x <prim> rhs)`` over a declared ``[lo, hi]``."""
+def cmp_query(prim, lo, hi, rhs, *, dtype="float64", aval=F64, rhs_aval=None):
+    """``assert_(x <prim> rhs)`` over a declared ``[lo, hi]``.
+
+    ``rhs_aval`` defaults to the declared operand's own aval; passing a
+    different one builds the MIXED-dtype comparison that hand-built and
+    deserialized IR routinely carries (a narrow value against a wider
+    literal, or the reverse).
+    """
     x, pred, out = var(0, aval), var(1, BOOL), var(2, BOOL)
     return close(
         [
             any_eqn(x, lo, hi, dtype),
             ir.JaxprEqn(
                 primitive=prim,
-                invars=(x, ir.Literal(val=rhs, aval=aval)),
+                invars=(x, ir.Literal(val=rhs, aval=rhs_aval or aval)),
                 outvars=(pred,),
             ),
             ir.JaxprEqn(primitive="stelling_assert", invars=(pred,), outvars=(out,)),
@@ -244,6 +276,212 @@ def test_silent_on_a_top_operand():
     p = propagate(q)
     assert p.obligations[0].status == "discharged"
     assert tells(p) == []
+
+
+# --------------------------------------------------------------------------
+# 2b. THE FLUSH IS PER FORMAT, AND SO IS THE BAND — the layer above the band
+# --------------------------------------------------------------------------
+#
+# THE HOLE THESE CLOSE, NAMED. The first cut of this file made the BAND
+# per-dtype and guarded it with a mutant, and then had nothing at all in it
+# for the layer above: whether the target flushes that format, and whether
+# the band applied to an operand is its OWN. It contained zero occurrences of
+# float16, of bfloat16, and of a mixed-dtype comparison, so both defects
+# shipped green:
+#
+#   float16 [1e-6, 1e-5] > 0.0   fired, citing 5e-324 — a float64 denormal —
+#                                as evidence, while the target reads x > 0 as
+#                                True at EVERY subnormal float16 magnitude,
+#                                eager and jit (asked of jax itself in
+#                                test_the_measured_flush_table_still_matches
+#                                _the_TARGET below);
+#   gt(float64 [1e-10, 1e-9], float16 0.0)
+#                                fired on a NORMAL float64 box 298 decades
+#                                clear of its own band, because the band came
+#                                from the widest operand.
+#
+# A mutant for the band text is not a mutant for the claim the text makes.
+
+
+def test_silent_on_float16_which_this_target_keeps_gradual_underflow_on():
+    """THE CASE THE FIRST CUT GOT WRONG. float16's subnormal band is the
+    widest of the four in absolute terms, and this target does NOT flush it:
+    `x > 0` is True at every subnormal float16 magnitude, eager and jit. A
+    tell here would assert a flush that does not happen."""
+    assert iv.target_flushes_subnormals("float16") is False
+    p = propagate(cmp_query("gt", *SUB_F16, 0.0, dtype="float16", aval=F16))
+    assert p.obligations[0].status == "discharged"
+    assert tells(p) == []
+
+
+def test_silent_on_float16_at_the_very_bottom_of_its_band():
+    """Not an artefact of where in the band the box sits: the same silence
+    one exponent below the smallest normal, which is where a size test would
+    be loudest."""
+    p = propagate(
+        cmp_query(
+            "gt", MIN_NORMAL_F16 / 2.0, MIN_NORMAL_F16, 0.0,
+            dtype="float16", aval=F16,
+        )
+    )
+    assert p.obligations[0].status == "discharged"
+    assert tells(p) == []
+
+
+def test_bfloat16_and_float32_DO_fire_and_name_their_own_band():
+    """The other side of the same table: bfloat16 and float32 are measured to
+    flush, so the tell is loud on them — and names 2**-126, never 2**-1022.
+    Without this row, silencing float16 by silencing every narrow format
+    would pass."""
+    for dtype, aval, box in (
+        ("bfloat16", BF16, SUB_BF16),
+        ("float32", F32, SUB_F32),
+    ):
+        assert iv.target_flushes_subnormals(dtype) is True
+        p = propagate(cmp_query("gt", *box, 0.0, dtype=dtype, aval=aval))
+        assert p.obligations[0].status == "discharged"
+        assert len(tells(p)) == 1, (dtype, p.notes)
+        note = tells(p)[0]
+        assert f"{dtype}: 0 < |x| < 2**-126" in note
+        assert repr(MIN_NORMAL_F32) in note
+        assert "2**-1022" not in note
+
+
+def test_silent_on_a_MIXED_comparison_where_no_operand_reaches_its_own_band():
+    """THE SECOND CASE THE FIRST CUT GOT WRONG. `_ieee_cmp_get_min_normal`
+    takes the WIDEST operand band, which is right for the ieee haze (hulling
+    wider only costs precision) and wrong for an assertion (hazing wider
+    makes it false). A normal float64 box 298 decades clear of 2**-1022,
+    compared against a float16 zero, must be silent."""
+    p = propagate(
+        cmp_query("gt", 1e-10, 1e-9, 0.0, dtype="float64", aval=F64,
+                  rhs_aval=F16)
+    )
+    assert p.obligations[0].status == "discharged"
+    assert tells(p) == []
+    # the same shape one format down, and the control that the query really
+    # is mixed: the widest band in it is float16's, which sits 15.8 decades
+    # ABOVE the top of the box, while the box's own float32 band is 7.9
+    # decades BELOW its bottom
+    q = cmp_query("gt", 1e-30, 1e-20, 0.0, dtype="float32", aval=F32,
+                  rhs_aval=F16)
+    assert P._ieee_cmp_get_min_normal(q.jaxpr.eqns[1]) == MIN_NORMAL_F16
+    assert tells(propagate(q)) == []
+
+
+def test_a_MIXED_comparison_fires_on_the_operand_that_DOES_reach_its_band():
+    """And the control for that control. Same mixed pair, but now the float64
+    operand is genuinely inside float64's band: the tell fires, and it names
+    float64 — the format that reached its band and that the target flushes —
+    and not float16, which supplied neither."""
+    p = propagate(
+        cmp_query("gt", SUB_LO, SUB_HI, 0.0, dtype="float64", aval=F64,
+                  rhs_aval=F16)
+    )
+    assert p.obligations[0].status == "discharged"
+    assert len(tells(p)) == 1
+    note = tells(p)[0]
+    assert "float64: 0 < |x| < 2**-1022" in note
+    assert "float16: 0 < |x| <" not in note
+
+
+def test_the_band_helper_answers_per_dtype_and_says_nothing_off_the_table():
+    """The trigger's band is read off the operand's OWN dtype, and a format
+    with no measurement returns None — which is not False, and is a reason to
+    stay silent rather than to assume gradual underflow."""
+    assert P._subnormal_tell_band("float64") == MIN_NORMAL_F64
+    assert P._subnormal_tell_band("float32") == MIN_NORMAL_F32
+    assert P._subnormal_tell_band("bfloat16") == MIN_NORMAL_F32
+    assert P._subnormal_tell_band("float16") is None  # measured: no flush
+    assert P._subnormal_tell_band("int32") is None
+    assert P._subnormal_tell_band("float8_e4m3fn") is None
+    assert iv.target_flushes_subnormals("float8_e4m3fn") is None
+
+
+def test_the_flush_SENTENCE_is_the_ieee_stamps_own_sentence():
+    """ONE SOURCE OF TRUTH, DRIVEN. The tell's claim about which formats this
+    target flushes is the very string the `ieee` stamp carries — not a second
+    copy of it that can drift. The first cut wrote its own, hard-coded to
+    float64 (*"reads 5e-324 > 0 as False"*), and stamped it on float16 runs
+    where the `ieee` face of the SAME run said the opposite, correctly."""
+    clause = iv.measured_flush_clause()
+    assert "float16 keeps gradual underflow" in clause
+    assert "bfloat16/float32/float64 flush" in clause
+    note = tells(propagate(cmp_query("gt", SUB_LO, SUB_HI, 0.0)))[0]
+    assert clause in note
+    stamp = iv.subnormal_indeterminacy_assumption(("float16", "float64"))
+    assert clause in stamp
+    # and the ONE sentence deliberately kept verbatim — the binary64-only
+    # stamp, which is the common run and predates the parametric builders —
+    # must still be saying what the table says about binary64.
+    assert iv.target_flushes_subnormals("float64") is True
+    assert "binary64 flushes subnormals" in iv.SUBNORMAL_INDETERMINACY_ASSUMPTION
+
+
+def test_the_tell_only_ever_fires_on_a_format_the_table_calls_flushing():
+    """The invariant behind every row above, stated once and swept over the
+    whole table: whatever the tell names as flushed, the table agrees."""
+    boxes = {
+        "float16": (SUB_F16, F16),
+        "bfloat16": (SUB_BF16, BF16),
+        "float32": (SUB_F32, F32),
+        "float64": ((SUB_LO, SUB_HI), F64),
+    }
+    fired = set()
+    for dtype, (box, aval) in boxes.items():
+        p = propagate(cmp_query("gt", *box, 0.0, dtype=dtype, aval=aval))
+        if tells(p):
+            fired.add(dtype)
+            assert f"{dtype}: 0 < |x| <" in tells(p)[0]
+    assert fired == {
+        d for d, v in iv._FORMAT_TARGET_FLUSHES.items() if v
+    }, fired
+
+
+def test_the_two_format_tables_describe_the_same_formats():
+    """A format with a band and no measurement would be hazed with no
+    evidence; a format measured and bandless could not be hazed at all.
+    interval.py raises at import if they part company — this is that guard
+    said out loud, so deleting it is a test failure and not a silence."""
+    assert set(iv._FORMAT_TARGET_FLUSHES) == set(iv._FORMAT_MIN_NORMAL_TEXT)
+    assert set(iv._FORMAT_TARGET_FLUSHES) == set(P._FLOAT_FORMATS)
+
+
+def test_the_measured_flush_table_still_matches_the_TARGET():
+    """THE ROOT GUARD, and the one that would have caught this at the source.
+    Every other test here pins the code against the table; this one pins the
+    TABLE against the machine. For each format, ask jax the question the
+    table answers — `x > 0` at magnitudes strictly inside that format's own
+    subnormal band, eager AND under jit — and require the answers to agree
+    with the entry."""
+    jax = pytest.importorskip("jax")
+    import jax.numpy as jnp
+
+    probes = {
+        "float16": [2.0**-24, 2.0**-20, MIN_NORMAL_F16 / 2.0, 1e-6, 1e-5],
+        "bfloat16": [1e-40, 1e-39, 2.0**-130],
+        "float32": [1.4e-45, 1e-40, 1e-39],
+        "float64": [5e-324, 1e-320, 1e-310],
+    }
+    gt0 = lambda v: v > 0  # noqa: E731
+    gt0_jit = jax.jit(gt0)
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        for dtype, vals in probes.items():
+            flushes = iv.target_flushes_subnormals(dtype)
+            for v in vals:
+                a = jnp.asarray(v, dtype)
+                # the value really is subnormal in that format: stored, and
+                # stored as something other than zero
+                assert float(a) != 0.0, (dtype, v)
+                assert abs(float(a)) < float(
+                    jnp.finfo(jnp.dtype(dtype)).tiny
+                ), (dtype, v)
+                for reads_positive in (bool(gt0(a)), bool(gt0_jit(a))):
+                    assert reads_positive is not flushes, (dtype, v, flushes)
+    finally:
+        jax.config.update("jax_enable_x64", old)
 
 
 # --------------------------------------------------------------------------
