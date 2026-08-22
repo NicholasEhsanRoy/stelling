@@ -935,10 +935,48 @@ def test_f5b_int64_index_narrowing_boundary_both_sides():
 
 def test_f6_int64_magnitude_bracket_pinned_as_intended():
     """F6: 'in-range exact snapped results' is a magnitude-conditional
-    claim — pinned as INTENDED behavior, not accident. At 2**62 the
-    outward ulps span many integers: the in-range accumulate keeps the
-    snapped bracket [2**62 - 512, 2**62 + 1024] and stays undecided;
-    2**62 + 2**62 escapes the range and declines with it quoted."""
+    claim — pinned as INTENDED behavior, not accident.
+
+    **THE WITNESS CHANGED WITH B23 AND THE CLAIM DID NOT.** This used to
+    read the claim off ``x += 0`` at 2**62, where the bracket was
+    ``[2**62 - 512, 2**62 + 1024]`` and the obligation stayed undecided.
+    That was the wrong witness: adding zero has an exact representable
+    total, and the 512 below it was `scatter_add_rows`'s UNCONDITIONAL
+    outward bump — endpoint-representation slack, not magnitude. With the
+    accumulation on the exact-``Fraction`` route the same case comes back
+    exactly ``[2**62, 2**62]`` and DISCHARGES.
+
+    So the magnitude claim is now driven by a case that is actually about
+    magnitude: ``x += 1`` at 2**62, where the exact total ``2**62 + 1``
+    needs 63 bits and no double holds it. The bracket is
+    ``[2**62, 2**62 + 1024]`` — one binade's ulp wide, spanning 1024
+    integers — and the obligation stays undecided because it genuinely
+    must. Both cases are asserted, because the pair is the claim: exact
+    where the total is representable, magnitude-limited where it is not.
+
+    ``2**62 + 2**62`` still escapes the int64 range and still declines to
+    ⊤ — but the REASON CLASS it declines under moved, and that is recorded
+    here rather than papered over. On `61de794` the bumped bracket reached
+    ``2**63 + 2048``, which exceeds int64's top by 2049 — more than the
+    2048-wide double ulp at that magnitude — so
+    `propagate._INT_OVERFLOW_DECLINE` fired: a DEMONSTRATED overflow. The
+    exact bracket is ``[2**63, 2**63]``, which exceeds it by exactly 1, and
+    `propagate`'s anti-false-alarm guard (*"a one-ulp bump cannot
+    masquerade as an overflow"*) reads that as unresolvable and fires
+    `_INT_BRACKET_DECLINE` instead.
+
+    **Sound, and the verdict is identical, but the decline got LESS
+    informative** — the true integer result really is ``2**63`` and really
+    does overflow. The guard's width test assumes the bracket carries at
+    least an ulp of slack, and B23 removed the slack it was calibrated
+    against. That is a finding about the guard in
+    `stelling.propagate`, not about `stelling.interval`, and it is
+    deliberately NOT fixed here: it is an integer-overflow classification
+    rule with its own soundness argument and its own callers, and changing
+    it inside a numeric-rounding commit would make this batch's failure
+    set unaccountable. Reported for its own dispatch. If it is fixed, this
+    assertion reddens and the fixer should read this paragraph.
+    """
     big = 2**62
 
     def q(op_val, up_val):
@@ -958,14 +996,33 @@ def test_f6_int64_magnitude_bracket_pinned_as_intended():
             [ob],
         )
 
-    closed = q(big, 0)
-    p = propagate(closed)
-    assert p.obligations[0].status == "unknown"  # bracket too wide for eq
-    box = interval_env(closed)[2]
-    assert (box.los[0], box.his[0]) == (float(big - 512), float(big + 1024))
+    # the total IS representable, so the accumulate is exact and decides
+    exact = q(big, 0)
+    assert propagate(exact).obligations[0].status == "discharged"
+    box = interval_env(exact)[2]
+    assert (box.los[0], box.his[0]) == (float(big), float(big))
+
+    # the total is NOT representable: one binade's ulp at 2**62 is 1024,
+    # so the bracket spans 1024 integers and eq stays undecided. This is
+    # the magnitude claim, and it is not the bump.
+    wide = q(big, 1)
+    assert propagate(wide).obligations[0].status == "unknown"
+    box = interval_env(wide)[2]
+    assert (box.los[0], box.his[0]) == (float(big), float(big + 1024))
+
     p2 = propagate(q(big, big))
     assert p2.obligations[0].status == "unknown"
-    assert any("outside the representable range" in n for n in p2.notes)
+    notes = p2.notes
+    assert any("9223372036854775807" in n for n in notes), notes
+    assert any("BRACKET limit, not a demonstrated overflow" in n
+               for n in notes), (
+        "the int64 escape is no longer declining under the bracket-limit "
+        "class. If `propagate`'s width guard was taught that a bracket "
+        "which snapped to a SINGLE integer carries no slack -- so an escape "
+        "from it IS demonstrated -- that is the improvement this test's "
+        "docstring asks for, and the assertion above should become "
+        "`_INT_OVERFLOW_DECLINE`'s wording again.\n" + "\n".join(notes)
+    )
 
 
 def test_f4d_empty_updates_identity_exact():

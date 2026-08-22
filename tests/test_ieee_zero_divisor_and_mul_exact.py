@@ -704,16 +704,56 @@ def test_reduce_sum_of_products_keeps_its_nonnegative_floor():
     assert r.los == iv.reduce_sum(iv.integer_pow(X, 2), (0,)).los
 
 
-def test_mul_exact_route_is_confined_to_finite_endpoints():
-    """An infinite endpoint keeps the unconditional bump and the
-    closed-interval `0 * +-inf = 0` convention: `Fraction(inf)` raises, and
-    the convention is an endpoint rule rather than real arithmetic. Same
-    confinement `add` and `div` use."""
+def test_mul_exact_route_is_confined_per_corner_not_per_operand_quadruple():
+    """An infinite endpoint costs the corners it TOUCHES, and nothing else.
+
+    This test used to assert the opposite, in as many words: *"an infinite
+    endpoint keeps the unconditional bump ... same confinement `add` and
+    `div` use"*, with `assert r2.los[0] < 6.0  # bumped, not exact`. It was
+    a true description of the code and a false description of the rule, and
+    the confinement it named was not the one `add` uses at all --
+    `_add_lo`/`_add_hi` gate on their OWN two operands, so
+    `add([1, inf], [2, 3])` returned a lower endpoint of exactly 3.0 the
+    whole time. `mul` asked `_exactable(alo, ahi, blo, bhi)` about all four
+    endpoints and dropped all four corners onto the bump if any one of them
+    was infinite.
+
+    Measured at `61de794`, with this pin GREEN: `mul([2, inf], [3, 4])`
+    returned `(5.999999999999999, inf)` for an image whose infimum is
+    exactly 6, and `mul([0, inf], [0, 3])` returned `(-5e-324, inf)` -- a
+    NON-NEGATIVE product with a negative lower endpoint, which is audit
+    0.2.0 M16's own symptom inside `mul` itself, in the half of the input
+    space M16's fix did not reach.
+
+    What an infinite endpoint still costs is the SATURATION of an infinite
+    extremum, and that is asserted here too, so "the finite side got
+    tighter" cannot be read as "the infinite side did".
+    """
+    # the `0 * +-inf = 0` convention names a POINT, so it is exact
     r = iv.mul(s(0.0, 0.0), s(1.0, INF))
-    assert r.los[0] <= 0.0 <= r.his[0]
+    assert (r.los[0], r.his[0]) == (0.0, 0.0)
+
+    # a finite corner beside an infinite one is exact real arithmetic
     r2 = iv.mul(s(2.0, INF), s(3.0, 4.0))
     assert r2.his[0] == INF
-    assert r2.los[0] < 6.0  # bumped, not exact — the infinite-endpoint route
+    assert r2.los[0] == 6.0, "the exact infimum is 6 and it is representable"
+
+    # M16's own shape, which this used to permit
+    r3 = iv.mul(s(0.0, INF), s(0.0, 3.0))
+    assert (r3.los[0], r3.his[0]) == (0.0, INF)
+
+    # still ROUNDED where the exact corner is not representable, and
+    # DIRECTED: the endpoint is the double immediately below the exact
+    # real, not the exact real and not two steps away. Tightening this to
+    # the round-to-nearest double would be unsound and reddens here.
+    r4 = iv.mul(s(0.1, INF), s(0.1, 0.1))
+    exact = Fraction(0.1) * Fraction(0.1)
+    assert Fraction(r4.los[0]) < exact
+    assert Fraction(math.nextafter(r4.los[0], INF)) > exact
+
+    # and an INFINITE extremum keeps the saturation posture, unchanged
+    r5 = iv.mul(s(INF, INF), s(2.0, 3.0))
+    assert (r5.los[0], r5.his[0]) == (FMAX, INF)
 
 
 def test_mul_saturates_outward_at_overflow():
@@ -827,17 +867,34 @@ def test_dot_general_containment_on_a_battery():
     assert checked == 1296
 
 
-def test_dot_general_keeps_the_bump_where_mul_does():
-    """The confinement is shared too: an infinite endpoint takes the
-    unconditional-bump route in both, because `Fraction(inf)` raises and the
-    `0 * ±inf = 0` convention is an endpoint rule. One implementation, one
-    boundary."""
+def test_dot_general_shares_muls_corner_boundary_wherever_it_is():
+    """The boundary is shared, and the point is the SHARING and not where
+    it sits.
+
+    This asserted `r.los[0] < 6.0  # bumped` and its docstring called the
+    infinite-endpoint case "the unconditional-bump route in both". Both
+    halves moved together when the gate became per-corner, which is the
+    property that actually matters: `dot_general` calls `_mul_corners`, so
+    it cannot drift from `mul` again the way it did in audit 0.2.0 B5-2,
+    when it carried an inlined copy and M16 converted only the original.
+
+    So what is pinned is the AGREEMENT plus the value, not the value alone:
+    the last assertion is the one that survives any future re-decision of
+    where the boundary is.
+    """
     a_box = iv.IntervalArray(shape=(1,), los=(2.0,), his=(INF,))
     b_box = iv.IntervalArray(shape=(1,), los=(3.0,), his=(4.0,))
     r = _contract_1d(a_box, b_box)
     assert r.his[0] == INF
-    assert r.los[0] < 6.0  # bumped, exactly as `mul` is on the same operands
+    assert r.los[0] == 6.0, "the exact infimum is 6 and it is representable"
     assert r.los[0] == iv.mul(a_box, b_box).los[0]
+
+    # M16's shape, through the contraction: `jnp.dot(x, x)` must keep the
+    # floor `jnp.sum(x*x)` keeps, on a half-infinite box too
+    z = iv.IntervalArray(shape=(1,), los=(0.0,), his=(INF,))
+    t = iv.IntervalArray(shape=(1,), los=(0.0,), his=(3.0,))
+    assert _contract_1d(z, t).los[0] == 0.0
+    assert _contract_1d(z, t).los[0] == iv.mul(z, t).los[0]
 
 
 def test_ieee_mul_deliberately_keeps_the_native_float_product():

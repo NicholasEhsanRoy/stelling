@@ -171,35 +171,40 @@ def test_present_none_combiner_box_contains_the_executed_truth():
         )
 
 
-def test_the_scatter_add_rows_bump_costs_a_verdict_and_this_is_the_debt():
-    """The M16 divergence, reproduced ONE OPERATION OVER, end to end.
+def test_both_spellings_of_one_real_property_reach_the_same_verdict():
+    """The M16 divergence, closed at the operation it had reproduced in.
 
     `stelling.interval.mul` was converted to the exact-Fraction route
     because its unconditional bump put the exactly-zero corner of a squared
     quantity BELOW zero, which defeated `reduce_sum`'s nonnegative clamp and
     made `x*x` and `x**2` reach different verdicts on the same property
-    (audit 0.2.0 M16). `scatter_add_rows` still bumps unconditionally, and
-    the same defect is still reachable through it -- so one real property,
-    written two ways that jax lowers differently, gets two verdicts:
+    (audit 0.2.0 M16). `scatter_add_rows` went on bumping unconditionally,
+    and the same defect stayed reachable through it -- so one real property,
+    written two ways that jax lower differently, got two verdicts:
 
         jnp.sum(x*x)                    >= 0   VERIFIED
         zeros.at[0].add(jnp.sum(x*x))   >= 0   UNKNOWN
 
-    with the decline naming a lower endpoint of `-5e-324` -- one ulp below
-    an exact zero the `reduce_sum` form floors at `0.0`. `zeros.at[0].add`
+    with the decline naming a lower endpoint of `-5e-324`, one ulp below an
+    exact zero the `reduce_sum` form floored at `0.0`. `zeros.at[0].add`
     lowers to a `scatter-add` equation (measured on jax 0.11.0), which
     routes to `_t_scatter_add` at `TIER_SOUND` and to
     `stelling.interval.scatter_add_rows`.
 
-    **THIS TEST PINS A DEBT, AND IT IS SUPPOSED TO BE DELETED.** The fix --
-    giving `scatter_add_rows` the exact-`Fraction` directed rounding `mul`
-    and `add` already use -- is a numeric change in the soundness-critical
-    module and is dispatched on its own. When it lands, this UNKNOWN becomes
-    VERIFIED and this test goes red; the right response is to assert
-    VERIFIED for both spellings and delete the debt entries from
-    `stelling.interval.__doc__`, which say so in as many words. Until then
-    the cost is measured rather than described, because a documented defect
-    nothing drives is how M16 survived its own fix the first time.
+    **THIS TEST USED TO PIN THAT DEBT AND SAY IT WAS SUPPOSED TO BE
+    DELETED.** B23 gave `scatter_add_rows` the exact-`Fraction` route --
+    `_add_lo`/`_add_hi`, `reduce_sum`'s own accumulation step -- so the
+    UNKNOWN became VERIFIED and the debt entries came out of
+    `stelling.interval.__doc__` in the same commit.
+
+    **WHAT IS PINNED NOW IS THE AGREEMENT, NOT EITHER VERDICT ALONE.** Both
+    spellings are asserted VERIFIED, which is a two-sided claim: the scatter
+    form regressing to UNKNOWN reddens here, and so does the `reduce_sum`
+    form regressing, which is what stops the divergence being "closed" by
+    the other side falling to meet it. The lower endpoint of the scatter
+    form's box is asserted to be exactly `0.0` as well, because that -- not
+    the verdict, which a solver could reach for other reasons -- is the
+    thing the fix actually changed.
     """
     def h_sum():
         x = any_array((4,), jnp.float64, (0.0, 2.0))
@@ -214,15 +219,48 @@ def test_the_scatter_add_rows_bump_costs_a_verdict_and_this_is_the_debt():
     assert v_sum.status == "VERIFIED", v_sum.render()
 
     v_scatter = check(h_scatter, vacuity_mode="inputs-only")
-    assert v_scatter.status == "UNKNOWN", (
-        "the scatter spelling now agrees with the reduce_sum one. If "
-        "`scatter_add_rows` took the exact-Fraction route, that is the "
-        "debt being PAID: assert VERIFIED here for both spellings and "
-        "delete the debt entries from `stelling.interval.__doc__`.\n"
-        + v_scatter.render()
+    assert v_scatter.status == "VERIFIED", (
+        "the two spellings of one real property have diverged again. This "
+        "is audit 0.2.0 M16: `scatter_add_rows` accumulating with an "
+        "unconditional outward bump puts the exactly-zero corner of a "
+        "sum of squares below zero, and the `reduce_sum` spelling floors "
+        "at 0.0 while the scatter one declines.\n" + v_scatter.render()
     )
-    text = v_scatter.render()
-    assert "-5e-324" in text, (
-        "the scatter form no longer declines at one ulp below zero; "
-        "re-measure the debt rather than retyping this digit.\n" + text
+    assert "-5e-324" not in v_scatter.render(), (
+        "the scatter form is declining at one ulp below zero again -- the "
+        "bump is back.\n" + v_scatter.render()
+    )
+
+
+def test_the_scatter_add_box_floors_at_exactly_zero():
+    """The solver-free face of the test above, and the sharper one.
+
+    A verdict is a solver's answer and can move for reasons that have
+    nothing to do with this module. The BOX is what B23 changed, so the box
+    is what is read: accumulate a non-negative sum of squares into a zero
+    row and the lower endpoint must be exactly `0.0`, not `-5e-324`.
+
+    Needs no solver, no emission and no replay -- propagate and read the
+    endpoint.
+    """
+    from stelling._jax_compat import transcribe
+    from stelling.propagate import interval_env
+
+    def build():
+        x = any_array((4,), jnp.float64, (0.0, 2.0))
+        s = jnp.zeros((1,)).at[0].add(jnp.sum(x * x))
+        return (assert_(s >= 0.0),)
+
+    cj = transcribe(jax.make_jaxpr(build)())
+    env = interval_env(cj)
+    boxes = [env.get(e.outvars[0].id) for e in cj.jaxpr.eqns
+             if "scatter" in str(e.primitive)]
+    assert boxes and boxes[0] is not None, "no box for the scatter equation"
+    box = boxes[0]
+    assert (box.los[0], box.his[0]) == (0.0, 16.0), (
+        f"the scatter-add box is [{box.los[0]!r}, {box.his[0]!r}]; the "
+        f"exact real image of accumulating [0, 16] into [0, 0] is exactly "
+        f"[0, 16]. A lower endpoint below zero is the unconditional bump "
+        f"back in `stelling.interval.scatter_add_rows`, and it is what "
+        f"cost this property its verdict before B23."
     )

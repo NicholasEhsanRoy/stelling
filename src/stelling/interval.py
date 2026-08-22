@@ -55,49 +55,18 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
     ``exp([0, 0])`` is ``(0.9999999999999999, 1.0000000000000002)`` and
     ``pow_([2, 2], [3, 3])`` is ``(7.999999999999999, 8.000000000000002)``.
     Neither endpoint is the exact value, and nothing here collapses to it.
-  - **multi-step reductions**, where each STEP is correctly directed-rounded
-    and the total is not — ``reduce_sum`` and ``dot_general``.
-    ``reduce_sum`` of ``[1, 2**-53, 2**-53]`` returns
+  - **multi-step folds**, where each STEP is correctly directed-rounded
+    and the total is not — ``reduce_sum``, ``dot_general`` and
+    ``scatter_add_rows``. ``reduce_sum`` of ``[1, 2**-53, 2**-53]`` returns
     ``(1.0, 1.0000000000000004)`` while the exact total,
     ``1.0000000000000002``, is representable and is *neither* endpoint —
     the single-op property that one endpoint equals ``fl(R)`` does not
     extend. :func:`reduce_sum`'s own docstring says the same thing.
   - the **⊤ escapes and endpoint conventions** that are not real arithmetic
     at all: a divisor interval containing zero, ``inf/inf``, an infinite
-    operand under ``mul``'s ``0·±inf = 0`` rule. Those widen deliberately
-    and are named where they happen.
-  - **A DEBT, and the only entry here that nobody is defending:**
-    ``scatter_add_rows`` folds, like ``reduce_sum`` — and unlike
-    ``reduce_sum`` its steps are bumped **unconditionally**, so the ulp
-    buys nothing but endpoint representation, which is the reason the
-    first entry above exists to exclude. Measured, on operands whose exact
-    sum is representable: ``add([1], [1])`` is ``(2.0, 2.0)`` while
-    ``scatter_add_rows`` of the same two, accumulating row 0 into row 0,
-    is ``(1.9999999999999998, 2.0000000000000004)``; and accumulating one
-    ``[0, 16]`` update into a ``[0, 0]`` operand gives
-    ``(-5e-324, 16.000000000000004)`` where ``reduce_sum`` of the same
-    contributions floors at ``0.0``. **So the M16 divergence the next
-    paragraph records as fixed reproduces one operation over, and it costs
-    a verdict.** Driven end to end in
-    ``tests/test_scatter_add_row_gates.py``'s
-    ``test_the_scatter_add_rows_bump_costs_a_verdict_and_this_is_the_debt``,
-    over ``x`` declared in ``[0, 2]``: ``jnp.sum(x*x) >= 0`` is **VERIFIED**
-    and ``zeros.at[0].add(jnp.sum(x*x)) >= 0`` is **UNKNOWN**, declining on
-    a lower endpoint of ``-5e-324`` — one real property, two spellings jax
-    lowers differently, two verdicts. The fix is the exact-``Fraction``
-    route ``mul`` and ``add`` already take and it is dispatched on its own,
-    because it is a numeric change in the soundness-critical module and this
-    is a documentation change. **When it lands, delete this entry** and flip
-    that test to VERIFIED on both spellings; the bullets around this one are
-    true either way. **That deletion is not on trust, and neither is this
-    entry's survival:** ``tests/test_interval.py``'s
-    ``test_the_scatter_add_rows_debt_is_the_one_the_code_owes`` drives this
-    operation on every shape its kernel distinguishes — rank-1 and
-    multi-column, one contribution and several — and requires THIS entry,
-    the discipline-list bullet below and that file's ``DISCIPLINE`` row to
-    agree with what it measured. The entry cannot outlive the defect, cannot
-    be deleted before it, and cannot be refiled around: the gate reads the
-    running code, not the classification.
+    operand under ``mul``'s ``0·±inf = 0`` rule, and a negative
+    ``integer_pow`` exponent whose base bracket underflows to 0. Those
+    widen deliberately and are named where they happen.
 
   So: *outward* is a claim about the module; *tight* is a claim about one
   operation, and the operation's own docstring is the authority for it.
@@ -203,20 +172,35 @@ someone forgets to extend is exactly how the universal claim above went
 wrong, so nothing is inferred from an absence from it.
 
 * **exact-when-representable** — ``add``, ``sub``, ``mul``,
-  ``integer_pow``, and ``reduce_sum`` PER ACCUMULATION STEP (see the
-  *exact per step, not per result* bullet below, and :func:`reduce_sum`,
-  for why the step rule is not a rule about the total). The endpoint is
-  computed exactly (``Fraction``; a double is a dyadic rational) and then
-  rounded outward ONLY if the exact result is not representable. Sound
-  because these are correctly-rounded ops whose slack was pure
-  *endpoint-representation* conservatism. (``div`` belongs
-  here for its finite, non-zero-straddling case; its two ⊤ escapes — a
-  divisor interval containing 0, and ``inf/inf`` — are untouched, which is
-  what keeps ``integer_pow``'s negative-exponent use of the zero discipline
-  exactly as it was. ``mul`` keeps the bump on the same confinement: an
-  infinite endpoint, where ``Fraction`` cannot represent the operand and the
-  ``0·±inf = 0`` convention is an endpoint rule rather than real
-  arithmetic.)
+  ``integer_pow``, and ``reduce_sum``/``scatter_add_rows`` PER
+  ACCUMULATION STEP (see the *exact per step, not per result* bullet
+  below, and :func:`reduce_sum`, for why the step rule is not a rule about
+  the total). The endpoint is computed exactly (``Fraction``; a double is
+  a dyadic rational) and then rounded outward ONLY if the exact result is
+  not representable. Sound because these are correctly-rounded ops whose
+  slack was pure *endpoint-representation* conservatism. (``div`` and
+  ``boundary_div`` belong here for their non-zero-straddling case; the ⊤
+  escapes — a divisor interval containing 0, and ``inf/inf`` — are
+  untouched, which is what keeps ``integer_pow``'s negative-exponent use
+  of the zero discipline exactly as it was.)
+
+  **EXACTNESS IS A PROPERTY OF ONE CORNER, and gating it on the operand
+  QUADRUPLE was this rule half-applied.** ``mul``, ``div`` and
+  ``boundary_div`` asked whether ALL FOUR endpoints were finite and, if
+  any was not, dropped ALL FOUR corners onto the unconditional bump — so
+  ``mul([1, inf], [2, 3])`` returned ``(1.9999999999999998, inf)`` for an
+  image whose infimum is exactly 2, and ``mul([0, inf], [0, 3])`` put a
+  non-negative product's exactly-zero corner at ``-5e-324``, which is
+  audit 0.2.0 M16's own symptom inside ``mul`` itself, in the half of the
+  input space M16's fix did not reach. ``add``/``sub`` never had it:
+  ``_add_lo``/``_add_hi`` gate on their own two operands. The gate is now
+  per corner (:func:`_mul_corner`, :func:`_div_corner`), an infinite
+  operand makes only the corners it touches non-real, and those are
+  extended-real limits — ``0 * ±inf = 0`` and ``finite / ±inf = 0`` name
+  POINTS, so they are exact and take no slack. What an infinity still
+  costs is the saturation posture on an INFINITE extremum, which is
+  unchanged: ``mul([inf, inf], [2, 3])`` is
+  ``(1.7976931348623157e+308, inf)``.
 * **unconditional one-ulp bump, where the ulp buys something** — ``exp``,
   ``pow``, ``sqrt``. **Do not "optimise" these to the rule above**: in
   every one of them the ulp is doing a second job. ``exp``/``pow`` carry
@@ -228,25 +212,28 @@ wrong, so nothing is inferred from an absence from it.
   BELOW zero, which defeated ``reduce_sum``'s nonnegative clamp and made
   ``x*x`` and ``x**2`` reach different verdicts on the same property (audit
   0.2.0 M16).
-* **unconditional one-ulp bump paying for nothing but endpoint
-  representation** — ``scatter_add_rows``, and it is the M16 defect
-  surviving one operation over rather than a discipline anyone chose. The
-  entry headed **A DEBT** in the scope block above carries the
-  measurements and says who is fixing it. **When that lands, delete this
-  bullet** and read ``scatter_add_rows`` off the *exact per step, not per
-  result* one instead.
-* **exact per step, not per result** — ``reduce_sum`` and ``dot_general``.
-  Every step is exact-when-representable and rounds outward only where THAT
-  step is inexact, which is sound and is NOT the first discipline: for an
-  ``n``-element sum with ``n >= 3`` neither endpoint need be a neighbour of
-  the exact total. Measured, in float64: ``reduce_sum`` of
-  ``[1, 2**-53, 2**-53]`` is ``(1.0, 1.0000000000000004)`` around an exact
-  total of ``1.0000000000000002`` that a double represents exactly.
+* **exact per step, not per result** — ``reduce_sum``, ``dot_general``
+  and ``scatter_add_rows``. Every step is exact-when-representable and
+  rounds outward only where THAT step is inexact, which is sound and is
+  NOT the first discipline: for an ``n``-element sum with ``n >= 3``
+  neither endpoint need be a neighbour of the exact total. Measured, in
+  float64: ``reduce_sum`` of ``[1, 2**-53, 2**-53]`` is
+  ``(1.0, 1.0000000000000004)`` around an exact total of
+  ``1.0000000000000002`` that a double represents exactly, and
+  ``scatter_add_rows`` accumulating ``[1, 2**-53, 2**-53]`` into a zero
+  row is ``(1.0, 1.0000000000000004)`` for the same reason. A SINGLE
+  contribution is exact: ``scatter_add_rows`` of ``[1]`` into ``[1]`` is
+  ``(2.0, 2.0)``.
+
   *This bullet read "``reduce_sum``, and any other operation that folds".
-  ``scatter_add_rows`` folds and its steps are not exact, so the
-  generalisation was false where the named operation was true — the same
-  shape of error, one level down, as the universal claim this docstring
-  opens by retracting.*
+  ``scatter_add_rows`` folded and its steps were NOT exact — they took an
+  unconditional ``_down``/``_up`` bump — so the generalisation was false
+  where the named operation was true: the same shape of error, one level
+  down, as the universal claim this docstring opens by retracting. It has
+  since been made true rather than narrowed. The steps are
+  :func:`_add_lo`/:func:`_add_hi` now, and the operation is named here
+  because it earns the discipline and not because the sentence generalised
+  onto it.*
 
 * Endpoints may be ``±inf`` (overflow saturates outward; half-infinite
   sets are representable). Interval multiplication uses the ``0·±inf = 0``
@@ -726,12 +713,14 @@ def _up(x: float) -> float:
 
 
 def _exactable(*xs: float) -> bool:
-    """True when every endpoint is finite, so ``Fraction`` can represent it.
+    """True when every argument is finite, so ``Fraction`` can represent it.
 
-    ``Fraction(inf)`` raises, and the closed-interval ``0 * ±inf = 0``
-    convention is an endpoint rule rather than a real-arithmetic one, so the
-    exact route is confined to the finite case and the unconditional bump
-    stays in force everywhere else.
+    ``Fraction(inf)`` raises, so the exact route is confined to the finite
+    case. **ASK IT ABOUT ONE CORNER'S OPERANDS, NOT ABOUT A WHOLE
+    QUADRUPLE.** Exactness is a property of the corner being computed;
+    asking it of all four endpoints at once is what dropped three exact
+    corners onto a bump because a fourth was infinite. See the note above
+    :func:`_extreme_down`.
     """
     return all(x == x and x != _INF and x != -_INF for x in xs)
 
@@ -772,6 +761,80 @@ def _prod(a: float, b: float) -> float:
     ):
         return 0.0
     return a * b
+
+
+# -- corners: EXACT PER CORNER, not per operand quadruple ---------------------
+#
+# THE GATE IS A PROPERTY OF ONE CORNER AND WAS APPLIED TO ALL FOUR. `mul`,
+# `div` and `boundary_div` asked `_exactable(alo, ahi, blo, bhi)` — the whole
+# quadruple — and dropped ALL FOUR corners onto float arithmetic and the
+# unconditional bump the moment ANY endpoint was infinite. But exactness is a
+# property of the corner: in `[1, inf] x [2, 3]` the corner `1*2` is two
+# finite doubles and its product is the exact real 2, and nothing about the
+# other operand's `inf` makes it less exact. `_add_lo`/`_add_hi` never had
+# this defect, because they gate on their OWN two operands and not on the
+# other endpoint's — which is why `add([1, inf], [2, 3])` already returned a
+# lower endpoint of exactly 3.0 while `mul([1, inf], [2, 3])` returned
+# 1.9999999999999998 for an image whose infimum is exactly 2.
+#
+# Measured on `61de794`, before this: `mul([0, inf], [0, 3])` returned
+# `(-5e-324, inf)` — the exactly-zero corner of a NON-NEGATIVE product put
+# BELOW ZERO. That is audit 0.2.0 M16's own symptom, inside `mul` itself,
+# surviving M16's fix in the half of the input space the fix's gate excluded;
+# `dot_general` inherited it through `_mul_corners` and `boundary_div`
+# returned `5e-324` for a quotient whose supremum is exactly 0.
+#
+# So a corner is now an EXTENDED RATIONAL: a `Fraction` when it is real
+# arithmetic on two finite doubles, and a float `±inf` when an infinite
+# operand puts it at an extended-real limit. `min`/`max` compare the two
+# kinds correctly, and the single directed rounding at the end is exact on a
+# `Fraction` and keeps `_down`/`_up`'s saturation posture on an infinity.
+
+
+def _extreme_down(v) -> float:
+    """Round an extended-rational corner extremum outward, downward.
+
+    A ``Fraction`` extremum is real arithmetic and gets CORRECT directed
+    rounding — unchanged when representable. A ``±inf`` extremum is not a
+    real at all; it keeps exactly the saturation :func:`_down` has always
+    applied here (``+inf`` down to maxfloat, ``-inf`` left alone), because
+    that is an endpoint convention and not a bracket of a real result.
+    """
+    return _exact_down(v) if isinstance(v, Fraction) else _down(v)
+
+
+def _extreme_up(v) -> float:
+    """Round an extended-rational corner extremum outward, upward."""
+    return _exact_up(v) if isinstance(v, Fraction) else _up(v)
+
+
+def _mul_corner(x: float, y: float):
+    """One corner of an interval product, as an extended rational.
+
+    Both finite: the EXACT real product. Otherwise :func:`_prod`'s
+    extended-real value — and where that is the ``0 * ±inf = 0``
+    convention's zero, it is returned as the exact rational 0, because the
+    convention names a POINT and a point needs no slack.
+    """
+    if _exactable(x, y):
+        return Fraction(x) * Fraction(y)
+    p = _prod(x, y)
+    return Fraction(0) if p == 0.0 else p
+
+
+def _div_corner(x: float, y: float):
+    """One corner of an interval quotient, as an extended rational.
+
+    Callers must already have excluded a divisor endpoint of zero (both
+    :func:`div` and :func:`boundary_div` do, via the zero-straddle test)
+    and the ``±inf/±inf`` indeterminate. Three cases remain: both finite
+    (the EXACT real quotient), an infinite dividend (``±inf``), and an
+    infinite divisor, whose extended-real limit is exactly 0.
+    """
+    if _exactable(x, y):
+        return Fraction(x) / Fraction(y)
+    q = x / y
+    return Fraction(0) if q == 0.0 else q
 
 
 @dataclass(frozen=True)
@@ -1140,21 +1203,17 @@ def _mul_corners(
     do with a product's corners. Only the corners bumped. Sharing the code
     is what stops the next reader from having to notice that again.
 
-    Finite endpoints: the four corner products are exact rationals, so the
-    extremum is exact and the single directed rounding leaves it UNCHANGED
-    whenever it is representable. An infinite endpoint keeps the
-    unconditional bump — ``Fraction(inf)`` raises, and :func:`_prod`'s
-    closed-interval ``0 * ±inf = 0`` is an endpoint convention rather than
-    real arithmetic.
+    Each corner is EXACT WHERE ITS OWN TWO OPERANDS ARE (:func:`_mul_corner`),
+    so the extremum is exact and the single directed rounding leaves it
+    UNCHANGED whenever it is representable. An infinite operand makes only
+    the corners it touches inexact-in-principle, and those are extended-real
+    limits rather than rounded reals; the corners beside them stay exact.
+    Gating on the whole quadruple instead put ``mul([0, inf], [0, 3])``'s
+    exactly-zero infimum at ``-5e-324`` — see the note above
+    :func:`_extreme_down`.
     """
-    if _exactable(alo, ahi, blo, bhi):
-        ex = [Fraction(x) * Fraction(y)
-              for x in (alo, ahi) for y in (blo, bhi)]
-        return _exact_down(min(ex)), _exact_up(max(ex))
-    products = (
-        _prod(alo, blo), _prod(alo, bhi), _prod(ahi, blo), _prod(ahi, bhi)
-    )
-    return _down(min(products)), _up(max(products))
+    ex = [_mul_corner(x, y) for x in (alo, ahi) for y in (blo, bhi)]
+    return _extreme_down(min(ex)), _extreme_up(max(ex))
 
 
 def mul(a: IntervalArray, b: IntervalArray) -> IntervalArray:
@@ -1183,10 +1242,17 @@ def mul(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     Clamping the sign of a zero corner would have been a bandaid: it
     leaves `[2,3]×[2,3]` inexact, and the inexactness is the defect.
 
-    An infinite endpoint keeps the unconditional bump: ``Fraction(inf)``
-    raises, and the closed-interval ``0 * ±inf = 0`` convention in
-    :func:`_prod` is an endpoint rule rather than real arithmetic, so it
-    stays where it already lived. Same confinement as `add` and `div`.
+    An infinite endpoint costs only the corners it touches, and it costs
+    them a VALUE and not a bump: ``Fraction(inf)`` raises, so those corners
+    are extended-real limits — ``0 * ±inf = 0`` in :func:`_prod`, an
+    endpoint convention naming a POINT — and a point takes no slack. The
+    corners beside them stay exact. This gate used to read the whole
+    operand quadruple, which left `mul([0, inf], [0, 3])` returning
+    `-5e-324` for an exactly-zero infimum: M16's own symptom, inside `mul`,
+    in the half of the input space M16's fix did not reach. What an
+    infinity still costs is the saturation of an INFINITE extremum
+    (`_down(inf)` is maxfloat), which is unchanged. Same per-operand
+    confinement `add` has always had.
 
     The rule itself lives in :func:`_mul_corners`, which
     :func:`dot_general` also calls — the sharing is the fix, not tidiness
@@ -1206,43 +1272,34 @@ def div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
                 if (x == _INF or x == -_INF) and (y == _INF or y == -_INF):
                     # inf/inf is indeterminate; widen fully outward.
                     return -_INF, _INF
-        if _exactable(alo, ahi, blo, bhi):
-            # The zero-straddle test above has already established that
-            # neither divisor endpoint is 0, so these rational divisions are
-            # total. Fraction division is EXACT, so no corner is inexact and
-            # there is nothing to taint per-corner: take the extrema of four
-            # exact rationals and round outward ONCE, and not at all when the
-            # extremum is representable. `0.0 / x` is exactly 0 and survives,
-            # which is what lets a sum-of-squares residual keep its floor
-            # through the division that follows it.
-            ex = [Fraction(x) / Fraction(y)
-                  for x in (alo, ahi) for y in (blo, bhi)]
-            return _exact_down(min(ex)), _exact_up(max(ex))
-        # An infinite endpoint is in play: `Fraction(inf)` raises, and
-        # `finite/±inf -> ±0.0` is an endpoint convention rather than real
-        # arithmetic, so the unconditional bump stays in force here.
-        quotients = [x / y for x in (alo, ahi) for y in (blo, bhi)]
-        return _down(min(quotients)), _up(max(quotients))
+        # The zero-straddle test above has already established that neither
+        # divisor endpoint is 0, so these divisions are total. Each corner
+        # is EXACT where its own two operands are finite (`_div_corner`):
+        # Fraction division is exact, so nothing is tainted per-corner —
+        # take the extrema and round outward ONCE, and not at all when the
+        # extremum is representable. `0.0 / x` is exactly 0 and survives,
+        # which is what lets a sum-of-squares residual keep its floor
+        # through the division that follows it; and `x / ±inf` is exactly 0
+        # in the limit, which used to be bumped to `∓5e-324` for no reason
+        # but its representation.
+        ex = [_div_corner(x, y) for x in (alo, ahi) for y in (blo, bhi)]
+        return _extreme_down(min(ex)), _extreme_up(max(ex))
 
     return _binary(a, b, f)
 
 
 def _boundary_div_lo(num: float, den: float) -> float:
-    """Sound lower endpoint for a single finite boundary-div quotient."""
+    """Sound lower endpoint for a single boundary-div quotient."""
     if num == 0.0:
         return 0.0
-    if not _exactable(num, den):
-        return _down(num / den)
-    return _exact_down(Fraction(num) / Fraction(den))
+    return _extreme_down(_div_corner(num, den))
 
 
 def _boundary_div_hi(num: float, den: float) -> float:
-    """Sound upper endpoint for a single finite boundary-div quotient."""
+    """Sound upper endpoint for a single boundary-div quotient."""
     if num == 0.0:
         return 0.0
-    if not _exactable(num, den):
-        return _up(num / den)
-    return _exact_up(Fraction(num) / Fraction(den))
+    return _extreme_up(_div_corner(num, den))
 
 
 def boundary_div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
@@ -1292,13 +1349,10 @@ def boundary_div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
                     return -_INF, _INF
         b_contains_zero = blo <= 0.0 <= bhi
         if not b_contains_zero:
-            # Normal division (no zero in divisor)
-            if _exactable(alo, ahi, blo, bhi):
-                ex = [Fraction(x) / Fraction(y)
-                      for x in (alo, ahi) for y in (blo, bhi)]
-                return _exact_down(min(ex)), _exact_up(max(ex))
-            quotients = [x / y for x in (alo, ahi) for y in (blo, bhi)]
-            return _down(min(quotients)), _up(max(quotients))
+            # Normal division (no zero in divisor): `div`'s rule, verbatim,
+            # corner by corner.
+            ex = [_div_corner(x, y) for x in (alo, ahi) for y in (blo, bhi)]
+            return _extreme_down(min(ex)), _extreme_up(max(ex))
         # One-sided boundary: zero at exactly one end
         if blo == 0.0:
             # b = [0, hi], hi > 0: divisor approaches 0 from above
@@ -2150,13 +2204,28 @@ def scatter_add_rows(
     Sound under ℝ for EVERY accumulation order at once: real addition is
     associative and commutative, so the true value of each output element
     is one number whatever order the contributions combine in, and the
-    interval sum brackets it. Each accumulation step is bumped one ulp
-    outward — ``n`` contributions spend the ``n`` bumps their ``n`` real
-    additions earn — and untouched elements are copies of the operand's
-    (no arithmetic, no bump). This ℝ-associativity reasoning is exactly
+    interval sum brackets it. Each accumulation step is
+    :func:`reduce_sum`'s — :func:`_add_lo`/:func:`_add_hi`, the exact
+    ``Fraction`` sum rounded outward ONLY where that step is inexact — so
+    an element whose accumulated total is representable comes back
+    UNWIDENED, and untouched elements are copies of the operand's (no
+    arithmetic, no rounding). This ℝ-associativity reasoning is exactly
     what float addition does not offer, so the ieee mode declines the
     primitive instead of reusing this kernel
     (:data:`SCATTER_ADD_IEEE_DECLINE`).
+
+    **The discipline is per STEP and not per result**, exactly as it is for
+    :func:`reduce_sum`, and that distinction is the one this kernel used to
+    get wrong in the other direction. An element folding ``n >= 3``
+    contributions can put a representable exact total STRICTLY inside both
+    endpoints; only the single-step case is guaranteed to return it.
+
+    *These steps were bumped UNCONDITIONALLY, with ``_down``/``_up``
+    straight onto a double sum.* That ulp bought nothing but endpoint
+    representation — the audit 0.2.0 M16 defect surviving one operation
+    past its own fix — and it cost a verdict: ``jnp.sum(x*x) >= 0``
+    verified while ``zeros.at[0].add(jnp.sum(x*x)) >= 0`` declined at a
+    lower endpoint of ``-5e-324``, one real property spelled two ways.
 
     ``updates`` must have shape ``(len(ks), *a.shape[1:])``; each ``k``
     must be an in-range row. Violations raise :class:`IntervalError` (the
@@ -2187,8 +2256,8 @@ def scatter_add_rows(
         for t in range(rowsz):
             oi = k * rowsz + t
             ui = j * rowsz + t
-            los[oi] = _down(los[oi] + updates.los[ui])
-            his[oi] = _up(his[oi] + updates.his[ui])
+            los[oi] = _add_lo(los[oi], updates.los[ui])
+            his[oi] = _add_hi(his[oi], updates.his[ui])
     return IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))
 
 
