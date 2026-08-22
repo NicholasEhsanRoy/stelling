@@ -223,6 +223,30 @@ FLOAT_OVERFLOW_DEVICE_SILENT = (
 )
 
 
+#: The failure message for the DEVICE half, in one place because it is the
+#: whole point of that half: the pin exists to keep a DISCLOSURE true, so
+#: going red means the PAGE is now wrong, not that the code is.
+#:
+#: **AND IT IS A MODULE CONSTANT BECAUSE IT WAS REFERENCED AND NOT DEFINED.**
+#: An assertion message and a ``pytest.fail`` argument are both evaluated only
+#: on the failing path, so a missing name here is invisible while the test
+#: passes and turns the intended sentence into a ``NameError`` at exactly the
+#: moment a maintainer needs to read it.
+#: :func:`test_the_failure_message_for_the_silent_half_is_reachable` evaluates
+#: it, because "this message renders" is not something a green run shows.
+_LOUDER_THAN_THE_PAGE = (
+    "{label} is now caught ({exc}). That is better news than this test "
+    "records, and it makes docs/overflow-tripwire.md wrong in two places: the "
+    "'And it is integers, all the way down' bullets under 'What it does NOT "
+    "find', and bullet 3 of the narrowing perimeter's 'What it does NOT "
+    "cover'. Both say that a float value narrowed ON DEVICE reaches none of "
+    "the three instruments and raises no warning either -- which is the "
+    "genuinely silent residue, after B22's fixup corrected the claim that the "
+    "whole class was silent. Rewrite them, then move this case out of "
+    "FLOAT_OVERFLOW_DEVICE_SILENT."
+)
+
+
 def _big_f32():
     """A ``float32`` array whose SQUARE overflows -- built without overflowing.
 
@@ -836,6 +860,35 @@ def test_the_float_OVERFLOW_literal_is_refused_and_the_door_was_silent():
             f"occurrence rot behind the other."
         )
         assert OVERFLOWING_FMT in page, f"{rel} no longer names {OVERFLOWING_FMT}"
+
+
+def test_the_failure_message_for_the_silent_half_is_reachable():
+    """Render the message the test above only ever renders when it FAILS.
+
+    A green run never evaluates an ``assert``'s message or the argument to a
+    ``pytest.fail`` it does not reach, so a name that is referenced there and
+    not defined is invisible for as long as the test passes -- and then
+    replaces the sentence a maintainer needs with a ``NameError``, at the one
+    moment it matters. That happened here: :data:`_LOUDER_THAN_THE_PAGE` was
+    referenced twice while its definition had been edited away, and every
+    test in this file was green.
+
+    So the message is rendered on the passing path, with both call shapes, and
+    checked for the two things a reader of a red run needs from it: the page
+    it names and the tuple to move the case out of.
+    """
+    rendered = [
+        _LOUDER_THAN_THE_PAGE.format(label="jnp.exp(...)", exc="RuntimeWarning"),
+        _LOUDER_THAN_THE_PAGE.format(label="one of them (0, 0, 0) -> (1, 0, 0)",
+                                     exc="a counter moving"),
+    ]
+    for text in rendered:
+        assert "docs/overflow-tripwire.md" in text, text
+        assert "FLOAT_OVERFLOW_DEVICE_SILENT" in text, text
+        assert "{" not in text and "}" not in text, (
+            f"an unfilled placeholder survived formatting: {text!r}"
+        )
+    assert rendered[0] != rendered[1]
 
 
 def test_the_quiet_float_formats_are_enumerated_not_borrowed():
