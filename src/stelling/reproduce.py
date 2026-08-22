@@ -60,14 +60,22 @@ set.
   node was stepped with no boundary inputs, and this node echoes its own
   boundaries, so from zeros it stays zero forever.
 * ``RigidBody`` — a velocity span of ``[-1.962, 0]`` was measured over
-  200 steps and recorded as the reachable set. ``200 × 0.001 × 9.81 =
-  1.962`` exactly: a free-fall artifact of the trajectory length that was
-  chosen. At 100 000 steps, ``dt`` held at ``0.001``, the same node spans
-  ``[-981.0, 0]`` — the same law, five hundred times the trajectory.
-  (This read ``[-9805.9, 0]``, which is a ``dt = 0.01`` figure: the
-  sentence's own arithmetic gives ``100000 × 0.001 × 9.81 = 981.0``, and
-  the larger number silently changed the ``dt`` the clause before it
-  states. The point — that the span is a property of the trajectory and
+  200 steps and recorded as the reachable set. It is a free-fall artifact
+  of the trajectory length that was chosen, and driving the node says so:
+  stepped from its own ``initial_state()`` with no boundary inputs, 200
+  steps at ``dt = 0.001`` span ``[-1.9619957208633423, 0]`` and 100 000
+  steps at the same ``dt`` span ``[-981.4652709960938, 0]`` — the same
+  law, five hundred times the trajectory.
+  (This clause has now been wrong twice, in opposite ways. It read
+  ``[-9805.9, 0]``, which is a ``dt = 0.01`` figure — 100 000 steps at
+  ``dt = 0.01`` drive to ``[-9805.8662109375, 0]`` — so the larger number
+  silently changed the ``dt`` the clause before it states. It was then
+  replaced by ``[-981.0, 0]``, which is what ``100000 × 0.001 × 9.81``
+  comes to and is NOT what the node reaches: the velocity accumulates in
+  float32, and the driven span runs about half a unit past it. An
+  arithmetic answer substituted for a measured one, in the paragraph whose
+  whole subject is that substitution. Every span above is driven, not
+  computed. The point — that the span is a property of the trajectory and
   not of the node — is unchanged, and is stronger when only one variable
   moves.) Velocity
   there is a pure accumulator — no drag, no clamp, no collision — so
@@ -1475,12 +1483,26 @@ from fractions import Fraction
 # silent file, which is the same family of defect as a wrong one.
 #
 # APPENDED, never prepended. sys.path[0] stays this file's own directory
-# and every other entry keeps its position, so no import that resolved
-# before this line existed resolves to anything different now: the only
-# effect is that a name which previously resolved to NOTHING can now
-# resolve in the working directory. Run from somewhere the target is not
-# and the file still stops with the same honest "could not be imported"
-# detail it stopped with before.
+# and every other entry keeps its position, so a name that resolved to a
+# MODULE or a REGULAR PACKAGE before this line existed resolves to the same
+# one now, and the intended effect is that a name which previously resolved
+# to NOTHING can resolve in the working directory. Run from somewhere the
+# target is not and the file still stops with the same honest "could not be
+# imported" detail it stopped with before.
+#
+# It is NOT true that position on the path settles every case, and this
+# said it was. Under PEP 420 the finder scans the WHOLE path before
+# settling for a namespace package: portions accumulated from earlier
+# entries lose to a regular module or package found at any later entry.
+# Measured in one process -- a directory `zzportion/` with no `__init__.py`
+# on an earlier entry, a `zzportion.py` in the cwd -- `import zzportion`
+# gives a namespace package (`__file__` None) before the append and the
+# regular module after it. So a namespace package assembled from earlier
+# entries CAN be displaced by a same-named module in the working directory.
+# The impact here is very low: a reproducer runs one named target beside a
+# program the author is debugging. It is narrowed rather than deleted
+# because the sentence was an absolute in shipped source, and this file is
+# the one that emits evidence.
 _CWD = os.getcwd()
 if _CWD not in sys.path:
     sys.path.append(_CWD)

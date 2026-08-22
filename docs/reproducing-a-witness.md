@@ -343,9 +343,14 @@ read as "the node never occupies the envelope"; a *driven* trajectory
 reaches the box entirely, and the degenerate span came from stepping the
 node with no boundary inputs. `RigidBody`: a velocity span of
 `[-1.962, 0]` was measured over 200 steps and reported as the reachable
-set; `200 × 0.001 × 9.81 = 1.962` exactly, and at 100 000 steps — `dt` held at
-`0.001` — the same node spans `[-981.0, 0]`. A measured span is "reachable under the
-trajectory I ran", never "reachable in all operation".
+set; driven from the node's own `initial_state()` with no boundary inputs,
+200 steps at `dt = 0.001` span `[-1.9619957208633423, 0]` and 100 000 steps
+at the same `dt` span `[-981.4652709960938, 0]`. (`100000 × 0.001 × 9.81`
+is 981.0, and that is not the figure: the velocity accumulates in float32
+and the driven span runs past it. This sentence carried the arithmetic
+answer, which is the error the sentence is about.) A measured span is
+"reachable under the trajectory I ran", never "reachable in all
+operation".
 
 So `Subject` requires exactly one of `precondition` /
 `no_precondition_reason`, a declared precondition must carry its
