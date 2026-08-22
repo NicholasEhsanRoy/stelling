@@ -527,8 +527,8 @@ expected, that `inspect.signature`'s first two parameters are still
 `operand` and `new_dtype` and still passable positionally, and then **drives
 every construction route it claims, in both directions**. If one route stops
 reaching the site — the silent failure a jax release actually produces — it
-reports `route-blind:<route>` and does not attach. Keeping five routes and
-losing one quietly is not a trade the tool makes on your behalf.
+reports `route-blind:<route>` and does not attach. Losing one of the seven
+construction routes quietly is not a trade the tool makes on your behalf.
 
 Arming also drives **the attribution itself**, which the route probes cannot:
 they swap in a collector, so they never reach the function that decides whether
@@ -885,8 +885,8 @@ two parameters moved, which a presence check would pass; and
 `route-blind:<route>` is the one that matters — the function is there, the hook
 is installed, and jax has stopped sending one construction route through it.
 That last failure is silent, it is what a jax release actually produces, and
-the detector refuses to attach rather than watching five routes and quietly
-losing the sixth.
+the detector refuses to attach rather than quietly dropping one of the seven
+construction routes it claims.
 
 The last three belong to the **narrowing perimeter**, which rebinds operator
 slots on a jax type: `no-type` is that type no longer being findable through

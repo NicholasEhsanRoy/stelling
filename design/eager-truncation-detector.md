@@ -52,8 +52,8 @@ Measured, not assumed. `jnp.full is not jax.lax.full`, and patching both of
 those public names gets **0 hits** on `jnp.full_like` and on
 `jnp.stack`-of-`full`. Every caller inside jax reaches the narrowing by MODULE
 ATTRIBUTE — there are zero `from … import _convert_element_type` in the
-installed tree — so one attribute patch covers all six routes and nothing
-public covers any of them completely.
+installed tree — so one attribute patch covers all seven construction routes
+and nothing public covers any of them completely.
 
 That is the same shape of finding the const-fold hook already rests on, one
 layer over, and it is why the second hook lives in `_adapter_jax.py` rather
@@ -564,8 +564,8 @@ So arming does four things and refuses on any of them:
 3. **every route, positively** — all seven construction spellings the detector
    claims, across the two different jax branches (`type(operand) is int` and
    the NumPy-scalar path). One going blind is `route-blind:<route>` and it does
-   not attach. Keeping five routes and losing one quietly is not a trade the
-   tool makes on a user's behalf;
+   not attach. Losing one of the seven construction routes quietly is not a
+   trade the tool makes on a user's behalf;
 4. **the negative direction** — an in-range value must not be reported
    (`cries-wolf`), and the array jax actually built must hold the value this
    tool's own arithmetic predicts (`mis-attributed`).

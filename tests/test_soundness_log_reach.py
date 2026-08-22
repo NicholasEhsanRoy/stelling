@@ -103,6 +103,22 @@ def _numeral(word: str) -> int | None:
     return int(word) if word.isdigit() else _NUMBER_WORD.get(word.lower())
 
 
+#: The preamble — everything between `## Log` and its first entry — is prose
+#: about what the fields mean, so it is not an entry and is not counted. It is
+#: not UNBOUNDED either: an unbounded preamble is a place an entry can be
+#: grown where no per-entry check looks. Sixty non-blank lines, the same
+#: ceiling and the same argument as `tests/test_soundness_routing.py`'s
+#: `_PREAMBLE_MAX_LINES` on the changelog side; today's is 20, so this admits
+#: an explanation and refuses an entry.
+_PREAMBLE_MAX_LINES = 60
+
+#: A list item at column 0. `- ` is an entry; `* ` and `+ ` are the other two
+#: markdown spellings of the same thing and are what an entry hidden in the
+#: preamble would be written as, since a `- ` there would simply become the
+#: first entry and be counted.
+_PREAMBLE_BULLET = re.compile(r"^[-*+] ", re.M)
+
+
 def log_bullets() -> list[tuple[int, str]]:
     """`(line, text)` for every top-level bullet of `SOUNDNESS.md`'s `## Log`.
 
@@ -110,6 +126,25 @@ def log_bullets() -> list[tuple[int, str]]:
     `tests/test_soundness_routing.py::split_blocks` uses on the changelog,
     for the same reason: a nested bullet is part of its parent's argument
     and is not an entry.
+
+    **THE PREAMBLE IS HELD SHUT HERE AND NOT IN A TEST BESIDE IT**, because
+    every count in this file is derived from what this function returns and a
+    section that can hide an entry above the first bullet makes all of them
+    wrong at once. Until 2026-08-22 everything before the first column-0
+    `- ` was unread and unbounded: driven, a fully-formed reaching entry
+    inserted there as a `*` bullet gave **`8 passed`** with the derived count
+    still reading seven while eight entries declared reach, and the same
+    thing shaped as a paragraph did too. The commit that wrote this file
+    closed this exact shape on the CHANGELOG side, with
+    `_PREAMBLE_MAX_LINES = 60` and the sentence *"an unbounded preamble is a
+    place an entry can be re-grown where no per-entry check looks"*, and did
+    not apply it here.
+
+    Three legs, because a ceiling alone bounds the size of the hole rather
+    than closing it: no reach FIELD may stand in the preamble (that is the
+    marker an entry is identified by, and prose about the fields quotes them
+    in backticks rather than writing one), no column-0 list marker of any
+    spelling may either, and the whole preamble is bounded.
     """
     lines = SOUNDNESS.read_text(encoding="utf-8").split("\n")
     lo = next(i for i, line in enumerate(lines, 1) if line.rstrip() == "## Log")
@@ -118,11 +153,93 @@ def log_bullets() -> list[tuple[int, str]]:
     )
     starts = [i for i in range(lo + 1, hi) if lines[i - 1].startswith("- ")]
     assert starts, "SOUNDNESS.md's `## Log` holds no top-level bullet"
+    preamble = lines[lo:starts[0] - 1]
+    text = "\n".join(preamble)
+    declared = [field for field in REACH_FIELDS if field in text]
+    assert not declared, (
+        f"`## Log`'s preamble (lines {lo + 1}-{starts[0] - 1}) carries a "
+        f"reach field, {declared}. Everything above the first column-0 `- ` "
+        f"is outside every per-entry check here and outside the derived "
+        f"count, so an entry written there declares a release reached and is "
+        f"counted nowhere."
+    )
+    stray = [line for line in preamble if _PREAMBLE_BULLET.match(line)]
+    assert not stray, (
+        f"`## Log`'s preamble holds a column-0 list item: {stray[:3]}. An "
+        f"entry belongs below the first `- `, where it is counted; a `* ` or "
+        f"`+ ` above it is an entry the count cannot see."
+    )
+    body = [line for line in preamble if line.strip()]
+    assert len(body) <= _PREAMBLE_MAX_LINES, (
+        f"`## Log`'s preamble is {len(body)} non-blank lines and the ceiling "
+        f"is {_PREAMBLE_MAX_LINES}. It is the one place in this section prose "
+        f"can grow without any per-entry check here seeing it."
+    )
     out = []
     for n, s in enumerate(starts):
         e = (starts[n + 1] - 1) if n + 1 < len(starts) else hi - 1
         out.append((s, "\n".join(lines[s - 1:e])))
     return out
+
+
+def test_an_ENTRY_CANNOT_BE_HIDDEN_IN_THE_LOGS_PREAMBLE():
+    """The three legs of :func:`log_bullets`'s preamble rule, driven.
+
+    `log_bullets()` starts at the first column-0 `- ` after `## Log`, so
+    everything above it was unread and unbounded until 2026-08-22. Driven on
+    the real file: a fully-formed reaching entry inserted there — as a `*`
+    bullet, and again as a paragraph — ran **`8 passed`**, with the derived
+    reached-release count still reading seven while eight entries declared
+    reach. The count is the whole point of this file.
+
+    Each leg is exercised on a synthetic section rather than by editing
+    `SOUNDNESS.md`, because a test that mutates the file it reads is a test
+    that can leave the tree changed.
+    """
+    def preamble_verdict(preamble: str):
+        lines = ["## Log", ""] + preamble.split("\n") + [
+            "- **an entry.** body.",
+            "",
+            f"  {REACHES_V010}",
+            "",
+            "## After",
+        ]
+        starts = [i for i in range(3, len(lines) + 1) if lines[i - 1].startswith("- ")]
+        body = lines[1:starts[0] - 1]
+        text = "\n".join(body)
+        return (
+            [f for f in REACH_FIELDS if f in text],
+            [line for line in body if _PREAMBLE_BULLET.match(line)],
+            len([line for line in body if line.strip()]),
+        )
+
+    fields, bullets, size = preamble_verdict(
+        "* **a planted entry.** body.\n"
+        f"  {REACHES_V010}"
+    )
+    assert fields and bullets, (
+        "a `*` bullet carrying a reach field in the preamble is caught by "
+        "neither the field leg nor the bullet leg"
+    )
+    fields, bullets, size = preamble_verdict(
+        f"**a planted entry, as a paragraph.** body. {REACHES_V010}"
+    )
+    assert fields, (
+        "a paragraph carrying a reach field in the preamble is invisible, so "
+        "the ceiling is the only thing between the section and an entry"
+    )
+    assert not bullets
+    fields, bullets, size = preamble_verdict("\n".join(
+        [f"line {n} of a preamble nobody bounded" for n in range(_PREAMBLE_MAX_LINES + 1)]
+    ))
+    assert not fields and not bullets
+    assert size > _PREAMBLE_MAX_LINES, (
+        "the ceiling does not measure non-blank lines, so a preamble can be "
+        "grown past it with blank ones"
+    )
+    # ... and the real preamble passes all three, which is what makes the
+    # rule a rule rather than a thing that would have to be relaxed at once.
+    assert log_bullets(), "the real `## Log` no longer parses"
 
 
 def test_every_log_bullet_answers_the_reach_question_exactly_once():

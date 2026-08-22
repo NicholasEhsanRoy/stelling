@@ -1770,8 +1770,8 @@ def eager_selfcheck() -> str:
         design turns on: the attribute is still there, the wrapper is still
         installed, and jax has stopped routing one construction spelling
         through it. It is silent, it is what a jax release actually produces,
-        and a presence check cannot see it. **It refuses to arm.** Keeping five
-        routes and losing one quietly is not a trade this tool gets to make on
+        and a presence check cannot see it. **It refuses to arm.** Losing one
+        of the seven construction routes quietly is not a trade this tool gets to make on
         a user's behalf -- the whole value of Mode 2 is that a program either
         cannot contain an undeclared truncation or the tool says it is not
         watching.

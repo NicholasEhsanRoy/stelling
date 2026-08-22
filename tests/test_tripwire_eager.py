@@ -1797,11 +1797,32 @@ _JIT_QUALIFIED_PAGES = (
 
 #: The claims that are true of `jit` ON and false of `jit` off. Written as
 #: fragments because every page wraps them differently.
+#:
+#: WHITESPACE-TOLERANT AT EVERY JOINT, and it was not until 2026-08-22. The
+#: scan below used `text.find(claim)`, a LITERAL substring over file text, so
+#: a page that wrapped the sentence between two of its words was invisible to
+#: it. These files wrap at ~76 columns and a rewrap is routine maintenance,
+#: not an attack. Driven: `This detector does not reach eager execution.`
+#: planted unqualified in `docs/quickstart.md` reds; the same sentence with a
+#: newline between `eager` and `execution` runs `1 passed`.
+#:
+#: The commit that wrote this check made `_FALSE_SENTENCE` in
+#: `tests/test_canonicalization_routes.py` whitespace-tolerant for exactly
+#: this reason, in the same diff, and did not apply it here.
 _JIT_DEPENDENT_CLAIM = (
     "does not reach eager execution",
     "not touch the INLINE door",
     "not reach the inline door",
     "sees 0 conversions",
+)
+
+#: Each fragment above, with every run of whitespace allowed to be any run of
+#: whitespace -- which is what a wrap is. Derived from the tuple rather than
+#: written out, so a fragment added there cannot be added here in the narrow
+#: form by accident.
+_JIT_CLAIM_RE = tuple(
+    (claim, re.compile(r"\s+".join(re.escape(w) for w in claim.split())))
+    for claim in _JIT_DEPENDENT_CLAIM
 )
 
 
@@ -1887,6 +1908,16 @@ def test_every_claim_about_what_this_does_not_reach_names_its_jit_mode():
     and is not in :data:`_JIT_QUALIFIED_PAGES` fails, because a page list
     is only as wide as its list; a listed file that has stopped making the
     claim fails too, because that is how a disclosure goes quiet.
+
+    AND THE CLAIM IS MATCHED ACROSS A WRAP. This was a literal substring
+    search until 2026-08-22, so a page that broke the sentence over two lines
+    -- which these files do at ~76 columns, as maintenance -- made it and was
+    never examined. See :data:`_JIT_CLAIM_RE`.
+
+    THE SCOPE IS THE WRAPPED ONE TOO: `_claim_scope` reads the physical LINE
+    for a table row and the paragraph otherwise, so a claim wrapped inside a
+    paragraph gets the paragraph (correct), and a table row cannot wrap in
+    markdown without ceasing to be one.
     """
     here = pathlib.Path(__file__).resolve().relative_to(_REPO).as_posix()
     found: dict[str, list] = {}
@@ -1895,11 +1926,9 @@ def test_every_claim_about_what_this_does_not_reach_names_its_jit_mode():
         # construction and says nothing about the project's prose.
         if rel == here:
             continue
-        for claim in _JIT_DEPENDENT_CLAIM:
-            start = 0
-            while (i := text.find(claim, start)) >= 0:
-                start = i + 1
-                scope = _claim_scope(text, i)
+        for claim, pattern in _JIT_CLAIM_RE:
+            for m in pattern.finditer(text):
+                scope = _claim_scope(text, m.start())
                 found.setdefault(rel, []).append(
                     (claim, bool(_JIT_CONFIG.search(scope)), scope[:200])
                 )
@@ -2469,8 +2498,9 @@ def test_arming_twice_hands_back_the_recorder_that_is_ACTUALLY_recording(armed):
 def test_the_route_list_the_selfcheck_drives_covers_the_routes_this_file_drives():
     """The self-check's claim and the test's claim are the same claim.
 
-    A self-check that drove one route while the tool advertised six would be
-    exactly the "attached but blind" failure it exists to catch, one level up.
+    A self-check that drove one route while the tool claimed all seven
+    construction routes would be exactly the "attached but blind" failure it
+    exists to catch, one level up.
     """
     driven = {name for name, _ in adapter._eager_routes()}
     assert {"jnp.full", "jnp.full_like", "lax.full", "lax.full_like",
@@ -2509,9 +2539,9 @@ def test_a_route_going_blind_refuses_to_attach_and_names_the_route(unarmed):
     """The failure this design turns on, and the only one that is silent.
 
     A jax release that stopped routing one construction spelling through the
-    site leaves the attribute there and the wrapper installed. Keeping five
-    routes and losing one quietly is not a trade this tool makes on a user's
-    behalf.
+    site leaves the attribute there and the wrapper installed. Losing one of
+    the seven construction routes quietly is not a trade this tool makes on a
+    user's behalf.
     """
     status = _tripwire.arm_eager()
     if not status.armed:  # pragma: no cover - environment

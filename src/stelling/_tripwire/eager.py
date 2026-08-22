@@ -1154,8 +1154,9 @@ def arm():
 
     So the self-check drives **every route this detector claims**, positively,
     at arm time, and refuses to arm if any one of them stops reaching the hook.
-    Losing five routes quietly to keep one is not a trade this tool gets to
-    make on a user's behalf; the status code names which route went blind.
+    Losing one of the seven construction routes quietly to keep the rest is
+    not a trade this tool gets to make on a user's behalf; the status code
+    names which route went blind.
     """
     from stelling import _tripwire
     from stelling._tripwire import _adapter_jax as adapter

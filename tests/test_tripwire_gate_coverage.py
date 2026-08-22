@@ -877,15 +877,22 @@ _FRACTION_RE = re.compile(
 )
 
 #: THE CENSUS, the other shape the same numbers are written in:
-#: `N routes -- 17 `watched`, 9 `unwatched`, 3 `loud`, 6 `deferred``. It is
+#: `35 routes -- 17 `watched`, 9 `unwatched`, 3 `loud`, 6 `deferred``. It is
 #: a different sentence from the fraction and a check on one is not a check
 #: on the other -- driven in the B8c fixup, enrolling `lax.select`-of-`full`
 #: moved the fraction in every file that stated it AND left the census
 #: stale in `SOUNDNESS.md`'s `SF-0.2.0-07` block, which the fraction
 #: pattern does not match. Both shapes are read now.
+#: THE NOUN AND THE PUNCTUATION ARE BOTH WIDER THAN THEY WERE. The second
+#: branch wanted the exact word `routes` followed by a comma or a dash, so
+#: obvious re-spellings of the same sentence walked past it -- `34 rows: 16
+#: watched, ...` states the census in every way that matters and matched
+#: nothing. A pattern that reads one phrasing of a claim is a partition over
+#: that phrasing rather than over the claim, and the file that carries it is
+#: free to reword itself out of the check.
 _CENSUS_RE = re.compile(
-    r"(?P<total>\d+)\s*\**\s*(?:constant-)?construction\s+routes|"
-    r"(?P<total2>\d+)\s+routes\s*[,—-]",
+    r"(?P<total>\d+)\s*\**\s*(?:constant-)?construction\s+(?:routes|rows)|"
+    r"(?P<total2>\d+)\s+(?:routes|rows)\s*[,:;—–-]",
     re.S,
 )
 _BUCKET_RE = re.compile(
@@ -900,10 +907,23 @@ _NUMERALS = {
 }
 
 #: Every file that states the CENSUS. A partition, like the fraction's.
+#:
+#: THIS FILE IS ON THE LIST, AND UNTIL 2026-08-22 IT WAS NOT — for the one
+#: reason a partition can be quietly incomplete: it did not state the census
+#: in a form `_CENSUS_RE` could match. Both sites above wrote the total as a
+#: literal `N`, so the pattern (which wants a numeral) never matched, the file
+#: fell out of `found_censuses()`, and the set equality below was satisfied by
+#: a list that omitted the checker's own file. Driven: move a route between
+#: buckets and both of this file's censuses went on reading `17/9/3/6` while
+#: every listed page was corrected. `_FRACTION_SITES` records having corrected
+#: exactly this for itself two lists up, in a comment that ends *"so 'move all
+#: six' would have left the instruction's own file stale"* — and the census
+#: half of the same argument had not been applied.
 _CENSUS_SITES = (
     "SOUNDNESS.md",
     "docs/overflow-tripwire.md",
     "design/eager-truncation-detector.md",
+    "tests/test_tripwire_gate_coverage.py",
 )
 
 #: Every file that states the fraction. This is a partition and not a
@@ -1068,7 +1088,7 @@ def _live_fractions(text: str) -> list[tuple[str, str]]:
 def found_censuses() -> dict[str, list[tuple[int, dict[str, int]]]]:
     """`{file: [(total, {bucket: n}), …]}` for every live census in the tree.
 
-    A census is a sentence of the form `N construction routes — 17
+    A census is a sentence of the form `35 construction routes — 17
     `watched`, 9 `unwatched`, 3 `loud`, 6 `deferred``, and it is a
     DIFFERENT sentence from the fraction: the fraction names two of the
     buckets and the census names the size of the dict and all four. A
@@ -1177,6 +1197,101 @@ def test_the_documented_fraction_is_the_measured_one():
         f"is the sentence that read *\"six of the SEVEN\"* against a dict "
         f"holding eight, in six files at once, for as long as it took "
         f"someone to do the arithmetic in it."
+    )
+
+
+#: HOW MANY CONSTRUCTION ROUTES THE EAGER SELF-CHECK CLAIMS, as a page writes
+#: it: `one of the N construction routes` and `all N construction
+#: routes/spellings`, both naming the TOTAL -- which is the point. The
+#: sentence used to be *"Keeping five routes and losing one quietly"*, which
+#: names `total - 1`, and it survived `_eager_routes()` growing to seven in
+#: five places across four files. A sentence carrying the derived quantity
+#: rather than the total is a sentence nobody can check without doing
+#: arithmetic first, so the sentences were rewritten to name the total and
+#: this reads them.
+#:
+#: Own-file mentions are skipped: this file DEFINES the pattern, so it matches
+#: by construction and would say nothing about the project's prose. That is
+#: the same carve-out `test_every_claim_about_what_this_does_not_reach_names
+#: _its_jit_mode` makes, for the same reason.
+_ROUTE_TOTAL_RE = re.compile(
+    r"\b(?:one\s+of\s+the|all)\s+(?P<n>[A-Za-z]+)\s+construction\s+"
+    r"(?:routes|spellings)\b",
+    re.S | re.I,
+)
+
+#: Every file that states how many construction routes the detector claims.
+#: A partition, read exactly the way `_FRACTION_SITES` and `_CENSUS_SITES`
+#: are.
+_ROUTE_TOTAL_SITES = (
+    "design/eager-truncation-detector.md",
+    "docs/overflow-tripwire.md",
+    "src/stelling/_tripwire/_adapter_jax.py",
+    "src/stelling/_tripwire/eager.py",
+    "tests/test_tripwire_eager.py",
+)
+
+
+def found_route_totals() -> dict[str, list[str]]:
+    """`{file: [numeral, ...]}` for every live statement of the route total."""
+    here = "tests/test_tripwire_gate_coverage.py"
+    out: dict[str, list[str]] = {}
+    for rel, text in read_text_files():
+        if rel == here:
+            continue
+        quoted = [q.span() for q in _QUOTED.finditer(text)]
+        for m in _ROUTE_TOTAL_RE.finditer(text):
+            if any(qs <= m.start() and m.end() <= qe for qs, qe in quoted):
+                continue
+            out.setdefault(rel, []).append(m.group("n"))
+    return out
+
+
+def test_the_number_of_construction_routes_in_the_prose_is_the_number_DRIVEN():
+    """`_eager_routes()` returns SEVEN, and the pages said five.
+
+    THE COUNT IS DERIVED FROM THE TUPLE, not typed beside it. The self-check
+    drives every entry of `_adapter_jax._eager_routes()` positively and
+    refuses to arm if one stops reaching the hook, so that tuple IS the claim
+    the pages are making — and until 2026-08-22 the pages made a different
+    one. *"Keeping five routes and losing one quietly"* stood in five places
+    across four files, and
+    `design/eager-truncation-detector.md` said *"all seven construction
+    spellings the detector claims"* THREE LINES ABOVE its own "five". A sixth
+    site in a fifth file, `tests/test_tripwire_eager.py`, carried the same
+    sentence and a seventh said the tool "advertised six"; the record of this
+    finding named five sites in four files, so the sweep that produced it was
+    itself short by two.
+
+    Both directions, over the whole checkout, like the fraction and the
+    census: a file that states the total and is not listed fails as loudly as
+    a listed file that has stopped stating it.
+    """
+    from stelling._tripwire import _adapter_jax as adapter
+
+    total = len(adapter._eager_routes())
+    assert total > 1, "the route tuple is empty or a single route"
+    found = found_route_totals()
+    assert set(found) == set(_ROUTE_TOTAL_SITES), (
+        f"the number of construction routes the detector claims is stated in "
+        f"{sorted(found)} and `_ROUTE_TOTAL_SITES` lists "
+        f"{sorted(_ROUTE_TOTAL_SITES)}. States it and is not listed: "
+        f"{sorted(set(found) - set(_ROUTE_TOTAL_SITES))}; listed and no "
+        f"longer states it: "
+        f"{sorted(set(_ROUTE_TOTAL_SITES) - set(found))}."
+    )
+    wrong = [
+        (rel, numeral)
+        for rel, numerals in sorted(found.items())
+        for numeral in numerals
+        if (int(numeral) if numeral.isdigit() else _NUMERALS.get(numeral.lower()))
+        != total
+    ]
+    assert not wrong, (
+        f"`_eager_routes()` drives {total} construction routes and these "
+        f"sites say otherwise: {wrong}. The tuple is the claim; a numeral "
+        f"beside it that nothing derives is a numeral that goes stale the "
+        f"next time a route is added, which is exactly what happened."
     )
 
 
