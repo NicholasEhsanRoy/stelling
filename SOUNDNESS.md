@@ -3122,7 +3122,7 @@ and a count over entries that happened to say something is not a count.
   four, still all `UNKNOWN` — so the substance was never in doubt, only the
   claim about what holds it. Both names were written BARE, so
   `tests/test_prose_hygiene.py::test_every_test_cited_in_core_prose_still_exists`
-  — which matches `tests/…py::test_…` — could not see either; they are
+  — which matches `tests/….py::test_…` — could not see either; they are
   rewritten as full citations here, and the bare form now has a gate of its
   own (see `test_every_bare_test_name_in_shipped_prose_resolves`).*
 

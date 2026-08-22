@@ -533,12 +533,12 @@ useful single artifact in this document. Six readings of it:
   `lax.DotAlgorithm`, and `DotAlgorithm`'s docstring says *"Support for these
   algorithms is platform dependent, and using an unsupported algorithm will
   **raise a Python exception when the computation is compiled**"*. `F32_F32_F32`
-  is a real member of the preset enum. *(The quotation was attributed to*
-  `DotAlgorithmPreset`*'s own docstring here and is not in it, on either pinned
-  series — 0.10.2 and 0.11.0 both put it on* `DotAlgorithm` *and give the preset
-  enum a docstring that points at it. Driven on both. The conclusion survives
-  and only the attribution was wrong, which is why this is a citation repair and
-  not a retraction.)* So the constraint of use
+  is a real member of the preset enum. *(That quotation was attributed here to
+  the preset enum's own docstring, and it is not in it, on either pinned series:
+  0.10.2 and 0.11.0 both carry it on the base class and give the preset enum a
+  docstring that points at the base class. Driven on both. The conclusion
+  survives and only the attribution was wrong, which is why this is a citation
+  repair and not a retraction.)* So the constraint of use
   is not "prefer HIGHEST" — it is **"state the algorithm, not the preference, and
   let it fail loudly on a device that cannot honour it."** Link 7's Planned-defence
   cell is not *Nothing*.
@@ -1855,21 +1855,21 @@ Applied to: the harness API (`any_array`, `any_pytree`, `assume`, `assert_`,
 `nonvacuity`), the verdict artifact schema, `stelling.ir`, and the evidence
 schemas.
 
-*This list read* `any_array`, `any_scalar`, `assume`, `assert_` *and was wrong
-in both directions. It named* `any_scalar`*, which* `design/founding.md`
-*sketched and nobody built — the string occurs in this file, in that one, and
-in no Python anywhere — and it omitted* `any_pytree` *and* `nonvacuity`*, which
-ship. This is the section that assigns semver stability levels, so a reader
-takes it for an inventory of the surface rather than a plan, and an inventory
-that names an absent function while missing two live ones is the wrong kind of
-wrong here.*
+*This list read `any_array`, `any_scalar`, `assume`, `assert_`, and it was
+wrong in both directions. It named `any_scalar`, which `design/founding.md`
+sketched and nobody built — the string occurs in this file, in that one, and in
+no Python anywhere — and it omitted `any_pytree` and `nonvacuity`, which ship.
+This is the section that assigns semver stability levels, so a reader takes it
+for an inventory of the surface rather than a plan, and an inventory that names
+an absent function while missing two live ones is the wrong kind of wrong
+here.*
 
-*The two further occurrences of* `any_scalar` *in §9's positive-control example
-sit inside a sketch of a PROPOSED idiom —* `@stelling.harness`*,*
-`@stelling.control`*, an* `assume=` *keyword — none of which exists either, and
+*The two further occurrences of `any_scalar`, in §9's positive-control example,
+sit inside a sketch of a PROPOSED idiom — `@stelling.harness`,
+`@stelling.control`, an `assume=` keyword — none of which exists either, and
 which that section presents as a remedy to build. They are left alone: a sketch
-may name what it proposes; it is this section, the stability inventory, that
-may not.*
+may name what it proposes; it is this section, the stability inventory, that may
+not.*
 
 **The schemas are the stable surface that matters.** A user's pipeline reads
 `verdict.json` and `soundness.yaml`; an assessor reads them years later. They get
