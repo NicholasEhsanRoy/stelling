@@ -176,6 +176,248 @@ reaches it: Mode 2 is 0.2.0 development work throughout.
   function it patches and drives every construction route it claims, in both
   directions. Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#m2-020-06)
+### The narrowing perimeter (Mode 3), DEFAULT-OFF
+
+A THIRD instrument, opt-in and switched on by nothing else. The detail is
+inline here rather than routed to `SOUNDNESS.md`: routing is for text that
+LEFT this file and is pinned by the sha256 of what it left as
+(`tests/_soundness_routing_manifest.py`), and none of this was ever here.
+
+*Versions.* `v0.1.0` is the only release and nothing here reaches it: Mode 3
+is 0.2.0 development work throughout.
+
+- **The defect it closes.** `x <= 2**31 - 1` on a `float32` array is a
+  program about `2147483648.0` — the literal has no `float32` and jax
+  converts it to the next one up, so the comparison that runs is one greater
+  than the one written. `stelling.preconditions.check` returned **VERIFIED**
+  about that harness, correctly, with every layer below it doing its job: the
+  trace is faithful and the moved constant really is in the jaxpr. The
+  written number simply never existed. Neither instrument that shipped before
+  this can see it — the const-fold tripwire watches integer RANGE, and
+  `2147483647` is out of range for nothing; the eager detector watches array
+  CONSTRUCTION, and no array is being constructed. Under
+  `--stelling-narrowing-perimeter=error` it raises `stelling.NarrowingError`
+  at the line that wrote the literal. Driven both ways in
+  `tests/test_narrowing_perimeter.py`: VERIFIED disarmed, refused armed, in
+  the same process, for `2**31 - 1` and for `16777219`, with `1000`
+  unaffected in both directions.
+
+- **The second face, and the door it closes.** The arithmetic and comparison
+  slots on the concrete array type — the EAGER spelling, before any trace
+  exists. Measured on this tree with **everything stelling ships armed** and
+  `jit` warm: `jnp.full((3,), 40000, int16)` is refused by the eager detector
+  in the same window, and `x_int16 + 40000` is `-25536` with no fire from any
+  instrument, cold or warm, as is `40000 + x_int16` and
+  `x_float32 <= 2**31 - 1`. The eager detector watches CONSTRUCTION and
+  nothing is being constructed here, so the two are not substitutes. Driven
+  both ways with all three instruments armed.
+
+- **The array face's slot list is NOT uniform, and the hole is measured.**
+  `__pow__` is not installed: jax lowers `x ** k` to `integer_pow[y=k]` and
+  keeps `k` a Python int in the program's own structure, so the written
+  integer survives exactly and a guard there is a pure false-positive
+  generator (4,647 corpus checks, zero fires under two independent guards).
+  `__rpow__` IS installed — `40000 ** x_int16` runs as `(-25536) ** x`. Both
+  halves are driven through the installed slots and not only at the
+  predicate, because the exclusion is enforced in two independent places.
+  `__matmul__`/`__rmatmul__` are installed although jax refuses a scalar
+  matmul today; "jax still refuses" is a canary row, not an assumption. No
+  in-place slot exists on either face, so `y += 40000` falls back to
+  `__add__` and is covered — also a canary row.
+
+- **What it attaches to.** The six comparison slots on jax's tracer type,
+  which is the face verification runs through: inside a harness the operand
+  is a `DynamicJaxprTracer` and **not** a concrete array, so an array-only
+  perimeter never fires during `check()` at all. Six slots and not two,
+  because Python maps `N >= x` onto `x.__le__(N)` and `N > x` onto
+  `x.__lt__(N)` — a spelling and its reflection share a slot, while a
+  spelling and its opposite do not, and users write both. The type is FOUND
+  rather than named: the adapter asks jax for a traced value and walks its
+  `__mro__` for the class that owns the slots, so a rename is a refusal at
+  arm time rather than a hard-coded private import.
+
+- **The predicate is vendored, not written.** `stelling/_tripwire/prop_guard.py`
+  is the artefact of the 0.2.0 dunder-perimeter fuzz round, copied in with
+  four import-route edits and no others, its self-test and its provenance
+  comment intact. (A fifth edit, one line and answer-preserving on the scored
+  corpus, lands in this batch's fixup below.) Its 24 cases run in this repository's suite. **The evidence
+  behind it is two kinds and they are not interchangeable**: a 482,691-check
+  real-corpus census with zero false positives, which establishes that the
+  predicate is not trigger-happy on code people write — and a
+  204,300-evaluation property census, which is what the thirteen individual
+  mitigations are answerable to. The corpus is not evidence about the
+  individual rules: `__pow__` carried 4,647 checks with no fires, truediv
+  421, bfloat16 214, float16 130, complex64 5, complex128 6, bool 3, there
+  was no int4/uint4/float8 or extended-dtype traffic at all, and 14 of the 34
+  slots carried none. `docs/overflow-tripwire.md` states that distinction
+  where a reader meets the zero.
+
+- **Arm and disarm are SESSION-scoped.** `arm()` takes an owner and `disarm()`
+  restores only when the last owner releases. Without that, an idempotent arm
+  beside an unconditional disarm means a nested in-process pytest session
+  unhooks its parent — the inner session installs nothing (correctly), its
+  teardown restores everything (catastrophically), and every remaining outer
+  test runs unprotected with **nothing red**. The plugin's owner is the
+  session's `Config`, so a nested session is a different owner by
+  construction. All four lifecycles are driven — double arm, arm/disarm/arm,
+  a raise between the two, and a real nested session — with the original slot
+  object's identity asserted at the end of each, and with the counterfactual
+  (an anonymous release DOES unhook) driven beside the nested one.
+
+- **It perturbs `source_info`, and that is disclosed rather than denied.**
+  Every equation built through an armed slot carries one extra traceback
+  frame. `content_hash`, `consts`, `to_dict(include_metadata=False)`, that
+  document's `eqns`, the StableHLO text and `check()`'s status and notes are
+  byte-identical armed and disarmed; `str(jaxpr)`,
+  `to_dict(include_metadata=True)` and any raw `repr()` carrying
+  `source_info` are **not**. Do not byte-compare a persisted document across
+  an armed boundary. `source_info_util.register_exclusion` does not fix this
+  — driven — and has no un-register API, so it is not used.
+
+- **`stelling.NarrowingError` is public and inherits `BaseException`**, so an
+  ordinary `except Exception:` cannot swallow a soundness alarm — and, one
+  reason further than Mode 2's, because an `Exception` raised inside a
+  binary-operator slot can be caught by the operator protocol and turned into
+  a silent retry of the reflected operation. The vendored predicate's own
+  `OverflowError` subclass is untouched and unused by this module.
+
+- **The escape is the one Mode 2 already has.** `intentional_wrap(value,
+  dtype)` needs no support from the perimeter — it returns a value already in
+  range, so nothing is left to detect — and `expected_truncation(reason)`
+  covers this instrument too, counting, siting and printing every narrowing
+  it permits with the reason its author gave. The refusal message also names
+  the value the program actually uses, which is the first answer.
+
+- **The report carries the predicate's two decline counters.** A run
+  reporting zero refusals with a non-zero decline count is not a clean run,
+  it is an unmeasured one, and the terminal section says so in those words.
+  The armed slot list is printed with them, as the whole perimeter rather
+  than a summary of one.
+
+- **Fail-closed, and the nightly canary keys on the facts it rests on.**
+  Arming drives the reference defect through the live slots in **both**
+  directions and refuses on `not-invoked` or `cries-wolf`; a missing slot is
+  `no-slot`, a moved type is `no-type`. The canary asserts positively that
+  the type is still a heap type, still owns the slots, still rebinds and
+  restores by identity, that a **warm** traced operation still enters Python,
+  and that no in-place slot has appeared — plus the predicate's promotion
+  identity against the dtype jax actually converts a literal into. Three
+  injected faults are driven against those rows. A displaced perimeter now
+  also reaches `_tripwire.displaced()`, which the trace gate consults.
+
+- **The dial can be turned on over this repository's own suite, and the seven
+  tests it refused are now declared.** With
+  `--stelling-narrowing-perimeter=error` the whole suite is **4404 passed, 10
+  skipped**, exit 0 — armed at the end, `1447 integer literal(s)` checked,
+  `11 narrowing(s) PERMITTED at 9 site(s)`, each printed with the reason its
+  author gave. With the seven declarations taken back out it is **7 failed, 4397
+  passed**, and the report reads `1455 ... checked; 15 do not exist`, `7 of
+  those NOT inside an expected_truncation region`, `8 PERMITTED at 6 site(s)`
+  -- which is the measurement they answer.
+
+  Three of the seven are new `expected_truncation` regions
+  (`test_tripwire_arm.py`, and two in `test_tripwire_gate.py` where an
+  incidental `int8` bound of `200` runs as `-56`). **The other four could not
+  use one, and that is measured rather than argued.** `expected_truncation`
+  is a single declaration covering BOTH runtime instruments by design — which
+  is right for code whose subject is a narrowing and exactly wrong for a test
+  whose subject is *Mode 2 firing on* a narrowing. Driven with a region
+  there: `assert fired["a + 200"] == (200, -56)` reads
+  `'SILENT' == (200, -56)`, and `test_tripwire_gate_coverage.py`'s eager
+  inventory reports every `raises` route as `silent` — a detector reported
+  blind by the declaration added to keep it running. Those four take Mode 3
+  DOWN for the block instead, through `conftest.lowered_perimeter`, exactly
+  as that file already detaches Mode 2 when the subject is the unpatched
+  program. The helper hands the hold back through the shipped `arm()` with
+  its self-check and **raises on a PARTIAL hand-back, not only a total one** —
+  a lowering that comes half-way back reads exactly like one that came all the
+  way back. Four things are checked and `status.armed` sees only the first:
+  `arm()` agreed, every face is installed again, `live_check()` says every
+  slot IS the live binding, and each slot's SAVED ORIGINAL is the object that
+  was lowered. The last has no other witness. Driven with only `status.armed`
+  checked: something binding over a slot while the perimeter is down becomes
+  the "original" the next `arm()` captures, the self-check still passes,
+  `armed_faces()`, `live_check()` and `owners()` all read `armed` — and after
+  the next `disarm()` the live slot is the interloper, permanently, with
+  nothing red.
+
+  **Every declaration is narrow, and that is measured rather than asserted.**
+  With each declaration replaced by a recorder, the three regions cover
+  exactly **one check and one narrowing each**, at the line they are written
+  on. The four lowerings cover 1, 1, 8 and 8 narrowings — and each of the
+  eight is one of `GATE_COVERAGE`'s own enumerated routes (`x + N`, `N + x`,
+  `x - N`, `x * N`, `x < N`, `x & N`, `x // N`, `x % N` at `OVER` on
+  `DTYPE`), which is the table those two tests exist to walk. Nothing outside
+  a declaration's own subject is covered by it; the counts are recorded beside
+  each site.
+
+- **The shared helper is inert where it is not used.** `tests/conftest.py` is
+  imported by all 146 test files, the zero-dep lane included, so
+  `test_import_hygiene.py` now pins that importing it pulls in **no jax and no
+  numpy**, that it arms nothing (it is a plain function, not a fixture), and
+  that entering the block with nothing armed is a no-op yielding `()`. Driven
+  in a genuinely jax-less interpreter as well as under the probe.
+
+- **`_isolate` used to unhook the session's own hold, and the dial was
+  therefore unmeasurable on the shipped tree.**
+  `tests/test_narrowing_perimeter.py`'s autouse fixture restored
+  unconditionally — the exact asymmetry `arm(owner=...)` exists to prevent,
+  aimed at the plugin's hold. That file sorts **71 of 146**, so its first test
+  took the perimeter out and roughly **4,300 later tests ran unprotected with
+  nothing red**; the documented dial-on command reported `NOT ARMED
+  [detached] ... 0 integer literal(s) ... were checked`. It now records what
+  it found, lowers the hold for its own window only, and hands it back by
+  identity through `arm()`, raising if it cannot.
+
+- **`prop_guard._target_dtype` no longer memoises a fault.** It cached the
+  `None` produced inside its own `except` branch, so one transient failure
+  blinded the guard for that dtype for the rest of the process while
+  `INTERNAL_DECLINES` recorded exactly **1**. Reachable through public API:
+  the `truediv` branch asks jax for the promotion by allocating
+  `jnp.zeros((0,), dt) / 1`, and `jax.transfer_guard("disallow")` makes that
+  raise. Driven — after the window closed the reference defect fired **0 times
+  in 20**, over a run of 21 checks whose report named exactly one decline
+  while twenty more were answered out of the memo. The branch now returns
+  instead of caching; the same drive fires **20 of 20**. This is the
+  **fifth** edit to the vendored predicate and the only one that touches
+  behaviour; it is
+  answer-preserving on the scored corpus, whose `INTERNAL_DECLINES` was empty
+  in all nine configurations, so the branch was never taken during scoring.
+
+- **`arm()`'s exception handler no longer restores faces another owner
+  holds.** It restored everything installed rather than what that call
+  installed — B8b's shape through the exception door. Driven: OWNER-1 armed
+  both faces, OWNER-2's `arm()` faulted, and OWNER-1's perimeter was gone
+  while OWNER-1 was still registered and still believed armed.
+
+- **The state guard now watches the perimeter.**
+  `tests/_state_guard.py::ENTRIES` had four entries and none covered
+  `perimeter._installed`, `_owners`, the 39 live slot bindings or the
+  predicate's lazy module caches — while `ci.yml`'s `random-order` lane reads
+  a shuffled failure the guard did not name as "state outside that
+  inventory". A fifth entry, `perimeter:installed`, reads the saved original
+  by identity and the live binding as *which* of the three known objects it
+  is, which is stable under a restore-to-equivalent and fires on an
+  installation, a release or a foreign patch that outlives a test.
+
+- **Two more `does NOT see` bullets, and Mode 3 now has a "what it does not
+  cover" section like Modes 1 and 2.** Its limits lived only in
+  `report.PERIMETER_UNCOVERED`, which prints at the END of a session — after
+  the decision to arm. Driven with all three instruments armed, the same
+  moved `2**31 - 1` threshold in three spellings of one harness:
+  `assert_(x <= 2**31 - 1)` is **REFUSED**, `assert_(jnp.less_equal(x, 2**31
+  - 1))` is **VERIFIED** and `assert_((x - (2**31 - 1)) <= 0.0)` is
+  **VERIFIED** — identical in both x64 cells. Two causes, neither previously
+  named: a `jnp.*` FUNCTION form carries no Python operator at all, so no
+  slot is entered (`jnp.add(x_int16, 40000)` is `-25536` in silence); and the
+  tracer face carries the six comparisons only, so of the 39 armed slots just
+  those six can fire on a traced operand — `x - N` inside a harness goes
+  through `Tracer.__sub__`, which is not installed. The second is a **scope
+  decision, not a jax limitation**: measured, jax's tracer type owns all 27
+  arithmetic slots. The printed list's last bullet did cover the function
+  form *in general*, and its three examples were all about tracing and
+  caching, which is how a true disclosure gets read as the examples.
+
 ### Verification pipeline
 
 - **`check(..., falsify="sample")` — the falsification probe, DEFAULT-OFF

@@ -184,6 +184,7 @@ cannot be a static read of the tree.
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import os
 import pathlib
@@ -1335,3 +1336,141 @@ def deterministic_order_args() -> tuple[str, ...]:
     environment and therefore no answer to get wrong.
     """
     return ("-p", "no:randomly")
+
+
+@contextlib.contextmanager
+def lowered_perimeter():
+    """The dunder perimeter DOWN for this block, and back exactly as found.
+
+    Yields the faces that were armed on the way in — ``()`` when there was
+    nothing to lower, in which case this does nothing at all.
+
+    **WHY THIS EXISTS RATHER THAN A REGION.** ``expected_truncation`` is one
+    declaration covering BOTH runtime instruments, by design. That is right
+    for code whose subject is a narrowing, and it is exactly wrong for a test
+    whose subject is *the eager detector firing on* a narrowing: a region
+    opened to permit Mode 3's refusal silences Mode 2 in the same breath, and
+    the inventory in ``tests/test_tripwire_gate_coverage.py`` then reads every
+    ``raises`` row as ``silent`` — a detector reported blind by the very
+    declaration added to keep it running. So where an instrument UNDER the
+    perimeter is the subject, the perimeter is taken out of the way instead,
+    exactly as that file's ``detached()`` takes Mode 2 out of the way when the
+    subject is the unpatched program.
+
+    **AND WHY IT IS HERE RATHER THAN WRITTEN OUT FIVE TIMES.** Three files
+    call it — the perimeter's own autouse fixture, and two places in the eager
+    inventories — and hand-rolled surgery on ``perimeter._installed`` and ``._owners``
+    is precisely what this batch was faulted for: the unconditional restore in
+    ``tests/test_narrowing_perimeter.py::_isolate`` unhooked the session's own
+    hold and left ~4,300 tests running unprotected with nothing red. One
+    implementation, which hands the hold back through the shipped ``arm()``
+    with its self-check, restores the owner list BY IDENTITY, and **raises**
+    if it cannot — a lowering that fails to re-arm must be a red test here and
+    not a silent hole in everything after it.
+
+    **AND IT RAISES ON A PARTIAL HAND-BACK, NOT ONLY A TOTAL ONE**, which is
+    the failure worth designing for: a lowering that comes half-way back reads
+    exactly like one that came all the way back. Four things are checked and
+    ``status.armed`` sees only the first — that ``arm()`` agreed, that every
+    face is installed again, that ``live_check()`` says every slot IS the live
+    binding, and that each slot's SAVED ORIGINAL is the same object that was
+    lowered. The last has no other witness: something that binds over a slot
+    while the perimeter is down becomes the "original" the next ``arm()``
+    captures, the self-check still passes (an interloper that delegates still
+    refuses the reference defect), every other reading says ``armed`` — and
+    the object a later ``disarm()`` restores is no longer jax's.
+    """
+    # IMPORTED HERE AND NOT AT MODULE SCOPE. Every one of this tree's 146 test
+    # files imports this conftest, the zero-dep lane included, and
+    # `perimeter.py` is only numpy-free because it binds the predicate lazily.
+    # A module-scope import would still be safe today and would be a standing
+    # invitation to stop being; this is also why this is a plain function and
+    # not a fixture -- nothing here runs, arms or collects anything unless a
+    # caller enters the block.
+    from stelling._tripwire import perimeter
+
+    faces = perimeter.armed_faces()
+    if not faces:
+        yield ()
+        return
+    # AN OWNERLESS INSTALL IS POSSIBLE and is not this helper's to diagnose:
+    # `arm()` registers its owner only after the self-check passes, so a
+    # `BaseException` between the two leaves faces installed with `_owners`
+    # empty. Re-arming under a fresh token puts the SLOTS back, which is what
+    # everything after this block depends on, and leaves the owner list as
+    # empty as it was found.
+    owners = list(perimeter._owners)
+
+    # WHAT MUST COME BACK, CAPTURED BY IDENTITY BEFORE ANYTHING MOVES, and it
+    # is the SAVED ORIGINAL rather than the wrapper: the wrapper is a fresh
+    # closure on every `arm()` and its identity is meaningless across a
+    # lowering, while the original is jax's own function and is what `disarm()`
+    # will one day put back. See `_hand_back` for the partial failure this
+    # capture is the only thing that can see.
+    originals = {
+        face: {
+            slot: original
+            for slot, (original, _wrapper) in perimeter._installed[face]["slots"].items()
+        }
+        for face in faces
+    }
+
+    def _hand_back():
+        """Re-arm and PROVE it, or raise. Never returns having half-worked."""
+        for face in list(perimeter._installed):
+            perimeter._restore_face(face)
+        del perimeter._owners[:]
+        status = perimeter.arm(faces, owner=owners[0] if owners else object())
+        del perimeter._owners[:]
+        perimeter._owners.extend(owners)
+
+        # FOUR SEPARATE FAILURES, and `status.armed` alone sees only the first.
+        # A hand-back that half-worked is worse than one that did not: the
+        # owner list is back, `armed_faces()` reads right, and the protection
+        # every later test depends on is not there.
+        wrong = []
+        if not status.armed:
+            wrong.append(f"arm() refused [{status.code}]: {status.detail}")
+        if perimeter.armed_faces() != faces:
+            wrong.append(
+                f"faces came back as {perimeter.armed_faces()}, not {faces}"
+            )
+        live = perimeter.live_check()
+        if live != "armed":
+            wrong.append(f"live_check() is {live!r}, not 'armed'")
+        for face, slots in originals.items():
+            entry = perimeter._installed.get(face)
+            if entry is None:
+                continue  # already named by the faces check above
+            for slot, original in slots.items():
+                back = entry["slots"].get(slot, (None, None))[0]
+                if back is not original:
+                    # THE SILENT ONE. Something bound over the slot while the
+                    # perimeter was down, so `arm()` captured THAT as the
+                    # original and succeeded -- self-check included, because
+                    # an interloper that delegates still refuses the reference
+                    # defect. Every reading above says "armed"; the object
+                    # `disarm()` will restore is no longer jax's.
+                    wrong.append(
+                        f"{face}.{slot} was re-armed over a DIFFERENT object "
+                        f"than the one lowered: something rebound it while "
+                        f"the perimeter was down"
+                    )
+        if wrong:
+            raise AssertionError(
+                "the perimeter was lowered and did not come back intact:\n  "
+                + "\n  ".join(wrong)
+                + "\nEverything after this point would have run unprotected."
+            )
+
+    del perimeter._owners[:]
+    for face in list(perimeter._installed):
+        perimeter._restore_face(face)
+    try:
+        yield faces
+    finally:
+        # A raise in here during an unwind CHAINS onto the block's own
+        # exception rather than replacing it -- Python prints both -- and that
+        # is the right order: a leaked perimeter outlives whatever the block
+        # was failing about.
+        _hand_back()

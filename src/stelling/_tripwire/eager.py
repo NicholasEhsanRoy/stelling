@@ -485,7 +485,18 @@ _REGIONS: contextvars.ContextVar = contextvars.ContextVar(
 
 
 class expected_truncation:  # noqa: N801 - a context manager reads as a verb
-    """Declare that truncations inside this block are the SUBJECT of the code.
+    """Declare that narrowings inside this block are the SUBJECT of the code.
+
+    **IT COVERS TWO INSTRUMENTS, AND THE SECOND ONE IS A WIDENING OF WHAT THIS
+    USED TO MEAN.** It was written for the eager construction-site detector
+    and it now also permits a refusal from the dunder perimeter
+    (``--stelling-narrowing-perimeter``), whose findings include an *inexact*
+    literal as well as an out-of-range one: ``x <= 2**31 - 1`` on ``float32``
+    is not a truncation in the two's-complement sense and it is the same kind
+    of statement about the program, so a user should not need a second
+    ``with`` block to say the same thing twice. What is NOT shared is the
+    accounting: each instrument counts what IT permitted, in its own table,
+    with its own site rows, so a report still says which one was told what.
 
     ::
 
