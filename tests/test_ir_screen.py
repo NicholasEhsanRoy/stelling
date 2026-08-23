@@ -640,8 +640,33 @@ def _table_rows(block: str):
 
 
 def _live_test_names() -> set[str]:
+    """Every test function name a pytest session under `tests/` can reach.
+
+    **PRUNED THE WAY PYTEST PRUNES, WHICH IT WAS NOT.** A bare
+    `rglob("test_*.py")` reads `tests/build/`, `tests/dist/`, `tests/venv/`
+    and every dot-directory under `tests/`, and this set is consulted to
+    decide whether an attribution row quotes a test that EXISTS — so a name
+    found there made a fabricated row pass. Driven at `a431646`, blind,
+    before the pruning went in: a planted `F9` row quoting
+    `a_name_this_tree_has_never_had_at_all` gives `1 failed`, and the same
+    row with `tests/build/test_stale_copy.py` defining that name gives
+    `1 PASSED`. `pytest --collect-only` over the same tree collects **0**
+    tests from `tests/build/`.
+
+    An attribution row's whole value is that *"a reader can run the test it
+    names"* — the docstring on the gate below says so. A file no invocation
+    collects cannot be run by anybody, so it must not answer this.
+
+    The enumeration is now `conftest.collectable_test_files()` itself
+    rather than a second walk that applies the same predicate — the file
+    list and the pruning arrive together, so there is nothing here to fall
+    out of step with the skip inventory's scope check or with
+    `tests/test_prose_hygiene.py`'s resolver.
+    """
+    from conftest import collectable_test_files
+
     names: set[str] = set()
-    for f in (REPO / "tests").rglob("test_*.py"):
+    for f in collectable_test_files():
         names |= set(re.findall(r"^def (test_\w+)", f.read_text(encoding="utf-8"), re.M))
     return names
 
@@ -675,6 +700,39 @@ def test_an_attribution_row_may_not_quote_a_test_that_does_not_exist():
     text = release_prose()
     live = _live_test_names()
     assert len(live) > 1000, len(live)
+    # ... and NOTHING A SESSION CANNOT COLLECT IS IN IT. The false GREEN in
+    # `_live_test_names`'s docstring, held shut from the gate that suffered
+    # it: empty on a clean checkout, and the condition that makes it bite —
+    # a stale `tests/build/`, a vendored tree, a dot-directory under
+    # `tests/` — is the developer's environment rather than the repository.
+    #
+    # `reachable` is recomputed HERE from the collectable file list rather
+    # than taken from `_live_test_names`, or the comparison would be that
+    # function against itself and could not see it widen.
+    from conftest import _in_a_pruned_directory, collectable_test_files
+
+    def _defined(path):
+        return set(re.findall(
+            r"^def (test_\w+)", path.read_text(encoding="utf-8"), re.M
+        ))
+
+    reachable = set().union(*(_defined(p) for p in collectable_test_files()))
+    unreachable = set().union(
+        *(
+            _defined(p)
+            for p in (REPO / "tests").rglob("test_*.py")
+            if _in_a_pruned_directory(p)
+        ),
+        set(),
+    )
+    leaked = sorted((unreachable - reachable) & live)
+    assert not leaked, (
+        f"{leaked} reached the live-test set only through a file pytest "
+        f"will not collect, so an attribution row could name a test no "
+        f"reader can run and this gate would pass over it. See "
+        f"`_live_test_names`."
+    )
+
     blocks = _table_blocks(text)
     assert len(blocks) >= 3, f"{len(blocks)} attribution table(s) found"
 

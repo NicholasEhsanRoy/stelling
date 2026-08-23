@@ -23,6 +23,17 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+# The runner's own conftest, for the one thing it knows and nothing else
+# here does: which directories under `tests/` pytest REFUSES to recurse
+# into. `_resolvable_test_names` decides whether a citation in shipped prose
+# points at a live test, and a file no session can ever collect must not be
+# allowed to answer that question. See its docstring for the measured
+# false GREEN.
+from conftest import _in_a_pruned_directory, collectable_test_files
+# and the walker module's `git ls-files`, the one *"what does this
+# repository have"* — see `_shipped_text_files`.
+from _repo_files import tracked_paths
+
 # Extensible by design: add a library's name here when it becomes a
 # census contact (or a socket host) — the lint then forces every mention
 # in core to be a marked provenance citation, never an outward reference.
@@ -178,11 +189,34 @@ _REPO_ROOT = _TESTS.parent
 
 
 def _citation_sources():
-    """`(relative path, text)` for every file a citation is checked in."""
+    """`(relative path, text)` for every file a citation is checked in.
+
+    **TRACKED FILES ONLY — 0.2.0 D14, the same repair as
+    :func:`_shipped_text_files`.** The walk is repo-wide and then narrowed by
+    prefix, so two things a checkout GROWS were reaching it: a `docs/_build/`
+    under the `docs/` prefix, and — because the last clause takes every
+    root-level `.md` — `stelling_0_1_0_release_checklist.md`, the untracked
+    internal document `WITHHELD` exists to record. A local working file's
+    citations were being held to the standard for this project's SHIPPED
+    prose, which is what the gates over this function are about.
+
+    False RED only, unlike `_shipped_text_files`: every consumer here reports
+    what it finds, so a wider source set can only say MORE. It is fixed
+    anyway rather than recorded, because it is one line of the same
+    instrument in the same file, and a known instance of the class left
+    beside a repaired one is a trap for the next reader.
+
+    Degrades to the walk where git cannot answer, for the reason given at
+    :func:`_shipped_text_files`.
+    """
+    tracked = tracked_paths(_REPO_ROOT)
+    index = None if tracked is None else set(tracked)
     for path in sorted(_REPO_ROOT.rglob("*")):
         if not path.is_file() or path.suffix not in (".py", ".md", ".yml", ".txt"):
             continue
         rel = path.relative_to(_REPO_ROOT).as_posix()
+        if index is not None and rel not in index:
+            continue
         if rel.startswith(_CITATION_ROOTS) or (
             "/" not in rel and rel.endswith(".md")
         ):
@@ -600,7 +634,55 @@ def _shipped_roots():
     return [m.group(1).lstrip("/") for m in re.finditer(r'"([^"]+)"', block.group(1))]
 
 
+#: The suffixes this module treats as shipped prose. Narrower than
+#: `tests/_repo_files.SUFFIXES` (no `.txt`), because what is swept here is
+#: the SHIPPED set and the two answer different questions.
+_TEXT_SUFFIXES = (".py", ".md", ".yml", ".yaml", ".toml", ".cff")
+
+
 def _shipped_text_files():
+    """Every text file under an allowlisted sdist root.
+
+    **WHAT THE REPOSITORY SHIPS, NOT WHAT THE DIRECTORY HOLDS — 0.2.0 D14.**
+    This was a bare `rglob` under each allowlisted root, subtracting
+    `__pycache__` and nothing else. `/docs` is allowlisted whole, so a
+    `docs/_build/` — which `.gitignore` names, which hatchling therefore does
+    NOT pack, and which any Sphinx run creates — entered the shipped set. So
+    did a `tests/.hypothesis/`, a vendored checkout, or any generated tree
+    under one of the eight allowlisted directories.
+
+    **AND THAT WIDENING GOES BOTH WAYS, WHICH IS WHY IT IS FIXED RATHER THAN
+    RECORDED.** It is the only one of the six sites this batch touched that
+    is false-RED and false-GREEN at once:
+
+    * loud — `test_every_line_citation_in_shipped_prose_resolves` sweeps
+      this list, so a generated page carrying a `file.py:123` token reds a
+      gate about THIS project's prose;
+    * quiet — `_resolve_citation`'s second rule accepts a bare basename
+      *"only when exactly one file in the tree carries it"*, and a generated
+      copy of a page is a SECOND bearer. `docs/norms.md` and
+      `docs/_build/norms.md` make `norms.md` ambiguous, the citation resolves
+      to `None`, and a real citation stops being checked with the suite
+      green. That is a gate that has stopped looking.
+
+    `git ls-files` decides, for the same reason it decides in
+    `tests/test_sdist_reference_hygiene.py::
+    test_every_withheld_root_that_holds_content_is_a_content_root`: *"does
+    this repository keep this page"* is a question about the repository, and
+    it gives the same answer in a fresh clone and in a checkout somebody has
+    built documentation in.
+
+    **AND IT DEGRADES RATHER THAN SKIPPING**, for the reason
+    `tests/test_zero_dep_import_discipline.py::
+    _roots_the_repository_keeps_python_under` gives: where git cannot answer
+    — an unpacked sdist, a `git archive` export — the tree contains the
+    shipped files and nothing generated, so the walk IS the repository
+    there. Measured on this tree at `a431646`: the two enumerations return
+    the same 355 files, and the walk's untracked residue is EMPTY, so the
+    repair is a no-op on a clean checkout and only ever subtracts what the
+    developer's tooling put there.
+    """
+    tracked = tracked_paths(_REPO)
     out = []
     for root in _shipped_roots():
         base = _REPO / root
@@ -610,10 +692,13 @@ def _shipped_text_files():
             out.extend(
                 p for p in sorted(base.rglob("*"))
                 if p.is_file()
-                and p.suffix in (".py", ".md", ".yml", ".yaml", ".toml", ".cff")
+                and p.suffix in _TEXT_SUFFIXES
                 and "__pycache__" not in p.parts
             )
-    return out
+    if tracked is None:
+        return out
+    index = set(tracked)
+    return [p for p in out if p.relative_to(_REPO).as_posix() in index]
 
 
 def _resolve_citation(rel: str):
@@ -963,9 +1048,33 @@ def _resolvable_test_names() -> set[str]:
     Functions come from :func:`_defined_test_names`, so the five shapes that
     resolver deliberately over-reports and the two it closed apply here
     unchanged — one resolver, one semantic, one place to change it.
+
+    **AND THE SWEEP IS PRUNED THE WAY PYTEST PRUNES, WHICH IT WAS NOT.** A
+    bare `rglob("*.py")` reads `tests/build/`, `tests/dist/`, `tests/venv/`
+    and every dot-directory under `tests/` — none of which any session
+    collects. A stale copy of a module in one of them therefore RESOLVED a
+    name this tree no longer has, and this gate is the wrong way round for
+    that to be harmless: resolving is PASSING. Driven at `a431646`, blind,
+    before the pruning went in::
+
+        SOUNDNESS.md   `test_a_name_this_tree_has_never_had`   1 failed
+        + tests/build/test_stale_copy.py defining that name    1 PASSED
+
+    and `pytest --collect-only` over the same tree collects **0** tests from
+    `tests/build/`, so what silenced the gate was a file no invocation can
+    reach. The same pruning that `conftest.collectable_test_files` applies,
+    from the same predicate, so "a test of this suite" means one thing here
+    and there.
+
+    It reddens `test_the_declared_absences_are_still_absent` in the other
+    direction too — that one asserts a declared-absent name does NOT
+    resolve, so a stale copy of a RENAMED test would have failed it for a
+    file nobody can collect. One repair, both directions.
     """
     names: set[str] = set()
     for path in sorted(_TESTS.rglob("*.py")):
+        if _in_a_pruned_directory(path):
+            continue
         names.add(path.stem)
         defined = _defined_test_names(path.read_text(encoding="utf-8"))
         if defined:
@@ -1192,6 +1301,31 @@ def test_every_bare_test_name_in_shipped_prose_resolves():
     assert "test_every_bare_test_name_in_shipped_prose_resolves" in resolvable
     assert "test_prose_hygiene" in resolvable
     assert "test_no_such_test_anywhere_in_this_tree_at_all" not in resolvable
+    # ... and NOTHING A SESSION CANNOT COLLECT ANSWERED ANY OF IT. This is
+    # the false GREEN in `_resolvable_test_names`'s docstring, held shut from
+    # the gate that suffered it. Empty on a clean checkout and not vacuous
+    # where it matters — a stale `tests/build/`, a vendored tree or a
+    # dot-directory under `tests/` is the condition, and it is the developer's
+    # environment rather than the repository, which is why the resolver may
+    # not read one.
+    reachable = {
+        name
+        for path in collectable_test_files()
+        for name in _defined_test_names(path.read_text(encoding="utf-8"))
+    }
+    unreachable = {
+        name
+        for path in _TESTS.rglob("test_*.py")
+        if _in_a_pruned_directory(path)
+        for name in _defined_test_names(path.read_text(encoding="utf-8"))
+    }
+    leaked = sorted((unreachable - reachable) & resolvable)
+    assert not leaked, (
+        f"{leaked} resolve(s) only through a file under `tests/` that pytest "
+        f"will not collect, so a citation of it names a test nobody can run "
+        f"and this gate would pass over it. The resolver must prune what "
+        f"pytest prunes — see `_resolvable_test_names`."
+    )
     # ... and the two citation forms really are disjoint, so neither gate is
     # reading the other's population -- :data:`_PATH_FORM_OVERLAPS`, measured
     # rather than argued.
