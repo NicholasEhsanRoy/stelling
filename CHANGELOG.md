@@ -372,7 +372,11 @@ is 0.2.0 development work throughout.
   therefore unmeasurable on the shipped tree.**
   `tests/test_narrowing_perimeter.py`'s autouse fixture restored
   unconditionally — the exact asymmetry `arm(owner=...)` exists to prevent,
-  aimed at the plugin's hold. That file sorts **72nd of the 148 files** `pytest --collect-only -q -p no:randomly` names in this tree, so its
+  aimed at the plugin's hold. That file sorts **72nd** of the files `pytest
+  --collect-only -q -p no:randomly` names in this tree — how many files that
+  is belongs to the environment and not to the tree, since a module whose
+  imports are unavailable is never collected, so the count is not written
+  down here and the command that produces it is named instead — so its
   first test took the perimeter out and roughly **4,300 later
   tests ran unprotected with nothing red**; the documented dial-on command reported `NOT ARMED
   [detached] ... 0 integer literal(s) ... were checked`. It now records what

@@ -434,14 +434,25 @@ def _isolate():
     release, which is exactly the asymmetry ``perimeter.arm(owner=...)``
     exists to prevent, aimed at the session's own hold. Under
     ``--stelling-narrowing-perimeter=error`` the plugin arms under the
-    session's ``Config`` before any test runs; this file sorts **72nd of the
-    148 files** ``pytest --collect-only -q -p no:randomly`` names in this tree
+    session's ``Config`` before any test runs; this file sorts **72nd** of the
+    files ``pytest --collect-only -q -p no:randomly`` names in this tree
     -- derived in
     :func:`test_this_files_position_in_the_collection_is_the_measured_one`,
     which is also what holds the CHANGELOG's copy of it -- so its
     FIRST test unhooked that hold and the ~4,300 tests after it ran
-    unprotected with nothing red. Driven at ``e6968fe``, the documented
-    dial-on command over the whole suite reported::
+    unprotected with nothing red.
+
+    **HOW MANY FILES THAT IS BELONGS TO THE ENVIRONMENT AND NOT TO THIS
+    TREE, so no count is written here.** A module whose imports are
+    unavailable is never collected, so the denominator moves with which
+    optional dependencies a lane installs while the tree stands still --
+    which is why this sentence names the COMMAND instead of a number: run it
+    for the figure where you are. The RANK is the half that does not move,
+    and it is the load-bearing half anyway, since it is what sets the size
+    of "the ~4,300 tests after it".
+
+    Driven at ``e6968fe``, the documented dial-on command over the whole
+    suite reported::
 
         NOT ARMED [detached] ... 0 integer literal(s) ... were checked
 
@@ -1729,27 +1740,50 @@ def test_the_host_half_is_the_TARGET_FORMAT_and_not_the_door():
 
 
 def test_this_files_position_in_the_collection_is_the_measured_one():
-    """``72nd of 148`` -- counted, not typed.
+    """``72nd`` -- counted, not typed. And the TOTAL is not demanded at all.
 
-    Two artefacts carry that pair: :func:`_isolate`'s docstring, which is
+    Two artefacts carry the rank: :func:`_isolate`'s docstring, which is
     where the incident it explains is recorded, and the CHANGELOG entry for
     the same repair. It stood at **149** in both, one measurement behind --
     the hand-maintained-numeral class this batch's own first commit is named
     for, in the batch that named it.
 
-    The rank is the load-bearing half: it is why *"the ~4,300 tests after it
-    ran unprotected"* is the size it is. Both halves are derived here from
-    the collection itself, so a file added or removed reddens this rather
-    than rotting two prose paragraphs.
+    **AND CORRECTING IT TO 148 DID NOT FIX IT, BECAUSE THE DENOMINATOR IS A
+    PROPERTY OF THE ENVIRONMENT AND NOT OF THE TREE.** A module whose
+    imports are unavailable is never collected, so at ``c7cf164`` -- one
+    tree, one commit -- this command named 148 files here, 147 in a lane on
+    the jax 0.10 series, 144 in a lane with no solver wheels, and never
+    reaches this file at all in the zero-dep lane, which does not collect
+    it. Two CI lanes went red against a static 148, and no static numeral
+    could have been right in all of them. Relaxing this to a substring or a
+    range would have thrown the check away, and a hard-coded set of accepted
+    totals is the same hand-maintained-numeral defect with more entries.
+
+    So this holds what it can actually establish -- which is the reasoning
+    :func:`test_the_dial_on_figures_agree_between_the_page_and_the_changelog`
+    already applies to the whole-suite pass count, one numeral over. The
+    RANK is derived here and demanded verbatim in both artefacts, because it
+    is stable (72 in every environment above) and it is the load-bearing
+    half: it is why *"the ~4,300 tests after it ran unprotected"* is the size
+    it is. The COMMAND that produces the total is demanded too, because
+    naming it is what keeps the unwritten figure obtainable -- and it is
+    built from the argv this test just ran rather than typed, for the reason
+    the comment beside it gives. The TOTAL itself is measured and then only
+    PRINTED, in the failure message.
+
+    **The demanded phrase deliberately spans the slot the denominator sat
+    in** -- it runs from ``sorts``, through the bolded rank, to ``of the
+    files`` -- so a sentence that puts a count back between the two no
+    longer matches, and the numeral cannot return unnoticed.
 
     ``-p no:randomly`` is part of the claim and not an implementation detail:
     with ``pytest-randomly`` active the order is shuffled and a rank means
     nothing, so the artefacts name that spelling too.
     """
     repo = pathlib.Path(__file__).resolve().parents[1]
+    collect_args = ("--collect-only", "-q", *deterministic_order_args())
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q",
-         *deterministic_order_args()],
+        [sys.executable, "-m", "pytest", *collect_args],
         cwd=repo, capture_output=True, text=True,
         env={**os.environ, "PYTHONPATH": str(repo / "src"),
              "JAX_PLATFORMS": "cpu", "COLUMNS": "200"},
@@ -1769,17 +1803,29 @@ def test_this_files_position_in_the_collection_is_the_measured_one():
     rank = next(i + 1 for i, rel in enumerate(order) if rel.endswith(mine))
     total = len(order)
 
-    phrase = f"**{rank}{_ORDINAL[rank % 10]} of the {total} files**"
+    ordinal = f"{rank}{_ORDINAL[rank % 10]}"
+    phrase = f"sorts **{ordinal}** of the files"
+    # ...and the command the artefacts must name is BUILT FROM THE ARGV THAT
+    # WAS JUST RUN rather than typed here. Typed, it stood in this file's own
+    # source -- and one of the two artefacts IS this file, read whole, so the
+    # assertion line satisfied itself: the .py half of the command check
+    # could not go red however the prose was rewritten. Derived, it also
+    # cannot drift from the run it describes.
+    command = " ".join(("pytest", *collect_args))
     for rel in ("tests/test_narrowing_perimeter.py", "CHANGELOG.md"):
         flowed = " ".join((repo / rel).read_text(encoding="utf-8").split())
         assert phrase in flowed, (
-            f"{rel} does not say {phrase}. `pytest --collect-only -q "
-            f"-p no:randomly` names {total} files here and {mine} sorts "
-            f"{rank}th among them."
+            f"{rel} does not say {phrase!r}. `{command}` sorts {mine} "
+            f"{ordinal} here. It names {total} files in this environment -- "
+            f"but that figure is a property of the environment, so it is "
+            f"deliberately not written in either artefact; if the sentence "
+            f"has acquired a count between the rank and `of the files`, "
+            f"take it out."
         )
-        assert "`pytest --collect-only -q -p no:randomly`" in flowed or (
-            "``pytest --collect-only -q -p no:randomly``" in flowed
-        ), f"{rel} no longer names the command this figure comes from"
+        assert f"`{command}`" in flowed or f"``{command}``" in flowed, (
+            f"{rel} no longer names the command this figure comes from, "
+            f"which is what keeps the unwritten total obtainable: {command}"
+        )
 
 
 def test_the_changelogs_counts_over_the_six_cases_are_the_driven_ones():
