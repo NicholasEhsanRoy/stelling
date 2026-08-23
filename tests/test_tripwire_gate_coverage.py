@@ -1517,6 +1517,9 @@ def test_the_default_path_is_BYTE_IDENTICAL_without_the_flag():
 
     from stelling._tripwire import _adapter_jax as adapter
 
+    #: The eviction's own report, read after the block. See `detached`.
+    eviction: list[str] = []
+
     @contextlib.contextmanager
     def detached():
         """The hooks GONE, not the truncation permitted, and put back after.
@@ -1538,6 +1541,44 @@ def test_the_default_path_is_BYTE_IDENTICAL_without_the_flag():
         are the same eight ROUTES lambdas -- `x + N`, `N + x`, `x - N`,
         `x * N`, `x < N`, `x & N`, `x // N`, `x % N`, all `OVER` on `DTYPE`.
         Every one is a route of the table this test walks.
+
+        **AND JAX'S TRACE CACHES ARE PUT BACK, WHICH IS NOT HOUSEKEEPING.**
+        `_the_default_path_body` EXECUTES all thirty-five routes concretely.
+        Every jitted body they pass through is left in jax's trace caches --
+        process-global, for the rest of the session -- and
+        :func:`_eager_bucket` measures whether the detector SEES a
+        construction. A construction inside a body jax has already traced is
+        REPLAYED, not re-traced: the detector is never called, and the route
+        reads `silent`. Driven, this test placed before
+        :func:`test_the_declared_eager_coverage_is_the_measured_eager_coverage`
+        on jax 0.11.1 with neither solver wheel installed::
+
+            'jnp.take(x, i, fill_value=N)': declared 'raises',
+                                            measured 'silent'
+
+        ONE row of the thirty-five and not eight, measured: `jnp.take` is
+        the only one of the eight `raises` rows whose construction happens
+        inside jax's OWN jit, and the other seven build the constant in the
+        caller's frame, where there is no cache for a replay to skip. The
+        other thirty-four rows read exactly as declared in the same run.
+
+        In file order this test runs last and the leak is invisible; the
+        `random-order` job puts it anywhere, and nothing states or holds this
+        file's ordering, so the position is luck rather than a property.
+        `tests/_state_guard.py` cannot name this and says so itself: jax's
+        trace and compilation caches are the FIRST entry on its own list of
+        what it does not watch ("process-wide, unbounded, and routinely warmed
+        by ordinary tests ... not watchable as a fingerprint"). So the
+        restoration belongs here, in the test that does the warming.
+
+        `preconditions.check()` evicts for exactly this reason before every
+        trace it gates, and `_tripwire.evict_trace_caches()` is that same
+        shipped call. Emptying is the only restoration jax offers and it is
+        the safe direction: a cold cache can only make an instrument see MORE.
+        The code it returns is asserted after the block rather than dropped --
+        an eviction that did not happen leaves the leak standing, and a
+        restoration nobody checked is the shape of claim this file exists to
+        refuse.
         """
         was_armed = _eager.is_armed()
         if was_armed:
@@ -1546,12 +1587,22 @@ def test_the_default_path_is_BYTE_IDENTICAL_without_the_flag():
             with lowered_perimeter():
                 yield
         finally:
+            eviction.append(_tripwire.evict_trace_caches())
             if was_armed:
                 _tripwire.arm_eager()
 
     with detached():
         assert adapter.eager_live_check() == "detached"
         _the_default_path_body()
+    assert eviction == ["evicted"], (
+        f"this test executes every route concretely and must leave jax's "
+        f"trace caches as it found them; the eviction reported {eviction!r}. "
+        f"Anything but ['evicted'] means the routes it drove are still warm "
+        f"for the rest of the session, and the next test to ask whether the "
+        f"eager detector SEES one of them will be told about the cache "
+        f"instead. Nothing else in this suite watches that -- "
+        f"tests/_state_guard.py names jax's caches as outside its inventory."
+    )
 
 
 def _the_default_path_body():
