@@ -241,6 +241,52 @@ _DEVICE_BULLET_FURNITURE = frozenset({
 })
 
 
+#: THE SIX CASES B22's PAGE NAMED, in the order it named them, with the `jit`
+#: spelling of each. The CHANGELOG entry for the correction counts them, and
+#: it counted them wrong in both halves: *"four warn eagerly"* is right in no
+#: cell -- measured FIVE at ``JAX_ENABLE_X64=0`` and THREE at ``=1``, so
+#: *"identical in all four cells"* is false of the eager half -- and *"all of
+#: them warn inside `jit`"* is false of case 6, which is silent in all four
+#: and is the case the same entry describes moving out of the WARNS group as
+#: green for the wrong reason, eleven lines below.
+#:
+#: Case 6's operand is built ONCE, here, outside every measurement window, so
+#: what the ``jit`` row measures is the ``astype`` under the trace and not the
+#: ``asarray`` that made the array.
+_SIX_OPERAND = None
+
+
+def _six_operand():
+    global _SIX_OPERAND
+    if _SIX_OPERAND is None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            _SIX_OPERAND = jnp.asarray([1e300, 1e300])
+    return _SIX_OPERAND
+
+
+THE_SIX_THE_PAGE_NAMED = (
+    ("jnp.full((2,), 1e300, jnp.float32)",
+     lambda: jnp.full((2,), 1e300, jnp.float32),
+     lambda: jax.jit(lambda: jnp.full((2,), 1e300, jnp.float32))()),
+    ("jnp.full((2,), 70000.0, jnp.float16)",
+     lambda: jnp.full((2,), 70000.0, jnp.float16),
+     lambda: jax.jit(lambda: jnp.full((2,), 70000.0, jnp.float16))()),
+    ("jnp.float16(70000.0)",
+     lambda: jnp.float16(70000.0),
+     lambda: jax.jit(lambda: jnp.float16(70000.0))()),
+    ("x_f32 + 1e300",
+     lambda: jnp.zeros((2,), jnp.float32) + 1e300,
+     lambda: jax.jit(lambda a: a + 1e300)(jnp.zeros((2,), jnp.float32))),
+    ("x_f16 + 70000.0",
+     lambda: jnp.zeros((2,), jnp.float16) + 70000.0,
+     lambda: jax.jit(lambda a: a + 70000.0)(jnp.zeros((2,), jnp.float16))),
+    ("jnp.asarray([1e300, 1e300]).astype(jnp.float32)",
+     lambda: jnp.asarray([1e300, 1e300]).astype(jnp.float32),
+     lambda: jax.jit(lambda a: a.astype(jnp.float32))(_six_operand())),
+)
+
+
 #: Ordinal suffixes, for the collection-rank sentence below.
 _ORDINAL = {1: "st", 2: "nd", 3: "rd", 0: "th", 4: "th", 5: "th",
             6: "th", 7: "th", 8: "th", 9: "th"}
@@ -1717,6 +1763,65 @@ def test_this_files_position_in_the_collection_is_the_measured_one():
         assert "`pytest --collect-only -q -p no:randomly`" in flowed or (
             "``pytest --collect-only -q -p no:randomly``" in flowed
         ), f"{rel} no longer names the command this figure comes from"
+
+
+def test_the_changelogs_counts_over_the_six_cases_are_the_driven_ones():
+    """*"four warn eagerly"* and *"all of them warn inside `jit`"* -- both false.
+
+    The CHANGELOG entry that corrected B22's inverted float answer counted the
+    six cases the page had named, and got both counts wrong. Driven here under
+    ``simplefilter("error")``, in the cell that is running:
+
+    * **EAGER: five at x64=0, three at x64=1.** ``four`` is right in no cell,
+      and the clause *"identical in all four cells"* is false of this half --
+      which the same bullet's next paragraph says, about the same two lines.
+    * **INSIDE ``jit``: five of the six.** The sixth,
+      ``jit(a.astype(jnp.float32))`` on ``[1e300, 1e300]``, is silent in all
+      four cells once its operand is built outside the window -- the operand
+      really is an array by then and the conversion really is XLA's. That is
+      the case the same entry describes moving OUT of the WARNS group as
+      "green for the wrong reason", eleven lines below the sentence.
+
+    Both figures are compared against the entry's own sentence, so a count
+    typed there and not driven is red.
+    """
+    x64 = bool(jax.config.jax_enable_x64)
+    eager, jitted = [], []
+    for label, eager_build, jit_build in THE_SIX_THE_PAGE_NAMED:
+        for build, into in ((eager_build, eager), (jit_build, jitted)):
+            jax.clear_caches()
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                try:
+                    np.asarray(build())
+                except RuntimeWarning:
+                    into.append(label)
+
+    assert len(eager) == (3 if x64 else 5), (
+        f"with x64 {'ON' if x64 else 'OFF'}, {len(eager)} of the six cases "
+        f"warn eagerly ({eager}); the CHANGELOG says five with x64 off and "
+        f"three with it on"
+    )
+    assert len(jitted) == 5, (
+        f"{len(jitted)} of the six warn inside `jit` ({jitted}); the "
+        f"CHANGELOG says five of the six, with the sixth "
+        f"({THE_SIX_THE_PAGE_NAMED[-1][0]}) silent in all four cells"
+    )
+    assert THE_SIX_THE_PAGE_NAMED[-1][0] not in jitted, jitted
+
+    flowed = " ".join(
+        (pathlib.Path(__file__).resolve().parents[1] / "CHANGELOG.md")
+        .read_text(encoding="utf-8").split()
+    )
+    for sentence in (
+        "**five warn eagerly with x64 off, three with x64 on**",
+        "**five of the six warn inside `jit`**",
+    ):
+        assert sentence in flowed, (
+            f"CHANGELOG.md no longer states the count this test just drove. "
+            f"Expected:\n  {sentence}\nMeasured here: {len(eager)} eager "
+            f"(x64 {'on' if x64 else 'off'}), {len(jitted)} under jit."
+        )
 
 def test_the_refusal_names_the_line_that_wrote_the_literal():
     """Attribution with no stack walk: the writer is the wrapper's caller.
