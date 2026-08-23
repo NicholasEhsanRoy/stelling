@@ -687,3 +687,158 @@ def lane_series() -> tuple[str, ...]:
             continue
         found.add(_newest(TESTED_JAX_SERIES) if lane.jax == "floating" else lane.jax)
     return tuple(sorted(found, key=lambda s: tuple(int(p) for p in s.split("."))))
+
+
+# ── which INTERPRETER a job gets, which is a different question from ────────
+# which environment it provisions
+#
+# THE DEFECT THIS ANSWERS. `README.md:4` carried
+# `![python: 3.12, the version CI measures](…badge/python-3.12%20tested…)` — a
+# badge asserting a tested python — while `requires-python` declares `>=3.10`,
+# exactly one job in `.github/workflows/` names an interpreter at all, and
+# nothing tests the floor. The badge was therefore a claim about whatever
+# `ubuntu-latest` happens to ship: approximately true, held by nothing, and
+# quietly false the day the runner image moves. Three of the last four defects
+# to redden `main` were environment-dependent in exactly that way.
+#
+# So the README's replacement paragraph is read back off the workflows, the
+# same way :func:`lanes` reads what they install. WHAT IS READ IS THE
+# INTERPRETER SELECTION, not the interpreter: which version a runner hands an
+# unpinned `uv venv` is not in this file and this module does not pretend to
+# know it — that unknowability is the thing the README now says out loud.
+#
+# ALL THREE WORKFLOWS, not `ci.yml` alone. The claim being held is "exactly one
+# job pins an interpreter", and a pin added to the nightly canary or to
+# `release.yml` would falsify it just as squarely.
+#
+# FAIL-CLOSED ON A SPELLING IT DOES NOT KNOW, and on a FILE or a LINE it
+# cannot place. A reader that silently ignores `actions/setup-python`, or a
+# `.yaml` workflow, or a line that falls outside every job header it
+# recognises, would leave the README's count green while a second job pinned an
+# interpreter — the permissive answer to a question the workflow HAS answered.
+# Each of those three is recorded as `unreadable:…`, which no entry of
+# :data:`EXPECTED_PYTHON` carries, so it fails the measured/declared pin by
+# name rather than by absence.
+WORKFLOWS = REPO / ".github" / "workflows"
+
+#: `uv venv`, `uv run`, `uv sync` — the subcommands that can choose an
+#: interpreter. `uv pip install` is not one: it installs INTO an environment
+#: that already exists, so scanning it would record a `runner-default` reading
+#: for a line that provisions nothing.
+_UV_INTERPRETER_CMD = re.compile(r"\buv\s+(?:venv|run|sync)\b(.*)$")
+#: `--python 3.12`, `--python=3.12`, `-p 3.12` on one of those commands.
+_UV_PYTHON_FLAG = re.compile(r"--python[= ]\s*(\S+)|(?:^|\s)-p\s+(\S+)")
+#: What such a flag has to look like for its value to be READ as a version.
+#: `-p` is also pytest's plugin flag, so `uv run pytest -p no:randomly` would
+#: otherwise be recorded as a pin on an interpreter called `no:randomly`. It
+#: does not appear in this tree today; when it does, the reading has to be a
+#: can't-tell and not a confident wrong answer.
+_A_VERSION = re.compile(r"\d+(?:\.\d+)*|python\d(?:\.\d+)*")
+
+#: Every OTHER way this repository could select or assert an interpreter.
+#: Recognising one is not reading it: each is recorded as unreadable, so it
+#: has to be looked at by a person before the README's count can go green
+#: again. `python-version` covers `actions/setup-python`'s key, which is how
+#: a second pin would most likely arrive.
+_OTHER_INTERPRETER_TOKEN = re.compile(
+    r"setup-python|python-version|UV_PYTHON|pyenv|deadsnakes"
+    r"|python3?\s+--version|sys\.version_info"
+)
+
+
+def _interpreter_reading(line: str) -> str | None:
+    """This line's reading, or ``None`` if it selects no interpreter.
+
+    ONE RULE, TWO CALLERS — the per-job scan and the per-file count below it.
+    Written twice they could disagree, and the disagreement would read as
+    "a line fell outside a job" rather than as a bug here.
+    """
+    cmd = _UV_INTERPRETER_CMD.search(line)
+    if cmd:
+        flag = _UV_PYTHON_FLAG.search(cmd.group(1))
+        if flag is None:
+            return "runner-default"
+        version = flag.group(1) or flag.group(2)
+        if _A_VERSION.fullmatch(version):
+            return f"pin:{version}"
+        return f"unreadable:{line.strip()}"
+    if _OTHER_INTERPRETER_TOKEN.search(line):
+        return f"unreadable:{line.strip()}"
+    return None
+
+
+def python_provisioning() -> dict[str, tuple[str, ...]]:
+    """How every job in `.github/workflows/` gets its interpreter.
+
+    Keyed ``"<workflow file>:<job>"``, because two files may hold a job of the
+    same name. The values are readings, in file order:
+
+    * ``"pin:<version>"`` — the job names the interpreter;
+    * ``"runner-default"`` — it creates an environment without naming one, so
+      the version is the runner image's and is not stated anywhere here;
+    * ``"unreadable:<line>"`` — a spelling this module does not read. Never
+      dropped: see the block above.
+
+    A job that provisions no interpreter at all is absent rather than empty.
+    One key is not a job: ``"<file>:<outside any job>"`` carries an
+    ``unreadable:`` reading when the file holds interpreter lines that landed
+    in no job block, which is the one way a pin could be invisible here rather
+    than merely misfiled.
+    """
+    found: dict[str, tuple[str, ...]] = {}
+    # BOTH EXTENSIONS. GitHub reads `.yml` and `.yaml` alike, this repository
+    # happens to use one of them, and a reader that globs the habit rather than
+    # the rule cannot see the first file that breaks it.
+    for path in sorted(p for p in WORKFLOWS.iterdir() if p.suffix in (".yml", ".yaml")):
+        lines = _code_lines(path.read_text(encoding="utf-8"))
+        attributed = 0
+        for job, body in _blocks(lines).items():
+            readings: list[str] = []
+            for line in body:
+                reading = _interpreter_reading(line)
+                if reading is not None:
+                    readings.append(reading)
+            if readings:
+                attributed += len(readings)
+                found[f"{path.name}:{job}"] = tuple(readings)
+        # EVERY SUCH LINE IN THE FILE HAS TO LAND IN SOME JOB. `_blocks` finds a
+        # job by a header pattern, and a line before the first header it
+        # recognises is DROPPED — the one way a pin can be invisible here rather
+        # than merely misfiled. So the file's own count is taken independently
+        # and the difference is reported as what it is.
+        present = sum(1 for line in lines if _interpreter_reading(line) is not None)
+        if present != attributed:
+            found[f"{path.name}:<outside any job>"] = (
+                f"unreadable:{present - attributed} interpreter line(s) in this "
+                f"file were not inside a job block this module can find",
+            )
+    return found
+
+
+#: THE MEASURED INTERPRETER PROVISIONING, DECLARED — same idiom as
+#: :data:`EXPECTED_LANES`. A job that starts pinning, stops pinning, or moves
+#: its pin is a line in this diff, and the README paragraph that rests on it is
+#: held to the reading rather than to this table.
+EXPECTED_PYTHON: dict[str, tuple[str, ...]] = {
+    "ci.yml:acceptance-any-pytree": ("runner-default",),
+    "ci.yml:acceptance-reproducer": ("pin:3.12",),
+    "ci.yml:property": ("runner-default",),
+    "ci.yml:random-order": ("runner-default",),
+    "ci.yml:test-jax": ("runner-default",),
+    "ci.yml:test-jax-0-10": ("runner-default",),
+    "ci.yml:test-jax-no-solvers": ("runner-default",),
+    "ci.yml:test-no-jax": ("runner-default",),
+    "nightly-jax-canary.yml:control": ("runner-default",),
+    "nightly-jax-canary.yml:nightly": ("runner-default",),
+    "release.yml:test": ("runner-default",),
+}
+
+
+def python_pins() -> dict[str, str]:
+    """``{"<workflow>:<job>": "<version>"}`` for every job that names one."""
+    return {
+        job: reading.split(":", 1)[1]
+        for job, readings in python_provisioning().items()
+        for reading in readings
+        if reading.startswith("pin:")
+    }
