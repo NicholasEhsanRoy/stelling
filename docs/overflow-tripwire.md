@@ -185,9 +185,10 @@ construction doors below are silent for `bfloat16` and all three warn for
   four cells: `jnp.full((2,), 1e300, jnp.bfloat16)`,
   `jnp.array([1e300], jnp.bfloat16)` and `jnp.bfloat16(1e300)` are each `inf`
   with nothing raised, and so is every one of the other eleven formats above
-  at those same doors (the `fn`/`fnuz` ones give `nan`, and the `float4`/
-  `float6` ones saturate to their largest finite value). **This is not the
-  device residue in disguise**: `jax.make_jaxpr` already holds `inf:bf16[]`
+  at those same doors — the ones that encode no infinity give `nan` instead,
+  and the `float4`/`float6` ones saturate to their largest finite value.
+  **This is not the device residue in disguise**: `jax.make_jaxpr` already
+  holds `inf:bf16[]`
   before any XLA program exists, exactly as the `float16` route holds
   `inf:f16[]` — and that one warns.
 * **The control that separates the two**, with no jax in it at all: one numpy
@@ -217,15 +218,6 @@ construction doors below are silent for `bfloat16` and all three warn for
   by numpy on the way in and overflows there; with x64 on it stays `float64`
   through the host and XLA does the narrowing. Same source line, same result
   (`inf`), opposite answer to "is there a warning to turn on".
-
-**So the remedy, stated exactly.** `-W error::RuntimeWarning` is worth turning
-on and it is not a guarantee: it catches a HOST narrowing into `float16`,
-`float32` or `float64`, and it catches nothing else. It does not reach a
-device narrowing in any dtype, and it does not reach a host narrowing into
-`bfloat16` or any of the other eleven formats listed above — at any of the
-three construction doors — which is the half of the answer a program written
-in `bfloat16` lives in.
-
 * **An integer LITERAL that has no finite image in the float dtype it meets IS
   caught — by the third instrument, through an operator slot only.**
   `x_f16 <= 100000` runs as a comparison against `inf`, and
@@ -234,18 +226,25 @@ in `bfloat16` lives in.
   numpy's host cast warns**, so inside a `jit` this particular literal is also
   reachable by `-W error::RuntimeWarning` — which is the table above again,
   under a different door: `float16` is numpy's, and the `float8_*` names are
-  not. The other seven formats that can
-  lose a literal this way — seven of the eight `float8_*` names `jax.numpy`
-  exposes — are silent both ways, and there the perimeter is the only
-  instrument that speaks; they are tabulated under
+  not. The other seven formats that can lose a literal this way — seven of the
+  eight `float8_*` names `jax.numpy` exposes — are silent both ways, and there
+  the perimeter is the only instrument that speaks; they are tabulated under
   [the third door](#the-third-door-a-literal-that-never-existed), with the
   four whose comparison inverts to `False` rather than comparing against
-  `inf`. The same literal at a
-  CONSTRUCTION site is not covered by the perimeter at all:
+  `inf`. The same literal at a CONSTRUCTION site is not covered by the
+  perimeter at all:
   `jnp.full((2,), 100000, jnp.float16)` is `[inf, inf]` with all three armed
   and 0 fires, because the eager detector below is integer→integer and there
   is no operator for the perimeter to sit in — though that spelling, being a
   host cast into a format numpy implements, does warn.
+
+**So the remedy, stated exactly.** `-W error::RuntimeWarning` is worth turning
+on and it is not a guarantee: it catches a HOST narrowing into `float16`,
+`float32` or `float64`, and it catches nothing else. It does not reach a
+device narrowing in any dtype, and it does not reach a host narrowing into
+`bfloat16` or any of the other eleven formats listed above — at any of the
+three construction doors — which is the half of the answer a program written
+in `bfloat16` lives in.
 
 | door | status | measured |
 |---|---|---|
@@ -798,7 +797,9 @@ encode no infinity, so the literal saturates to `nan` and the comparison
 harness whose guard is `x <= N` stops holding instead of holding vacuously.
 And the seven `float8_*` rows are the ones where this perimeter is the **only**
 instrument that speaks: `-W error::RuntimeWarning` reaches the `float16` row
-under a trace and reaches none of them. This is the axis the corpus census
+under a trace and reaches none of them — which is
+[the target-format axis](#float-overflow-warning-table) again, one door along:
+`float16` is one of numpy's own formats and the `float8_*` names are not. This is the axis the corpus census
 below explicitly has no traffic on.
 
 Written larger than any of that, a literal does not reach jax intact either
