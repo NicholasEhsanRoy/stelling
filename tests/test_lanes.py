@@ -898,9 +898,24 @@ def test_no_reader_asks_whether_a_lane_HAS_JAX_by_comparing_the_STRING():
     """
     import ast
 
+    from conftest import _in_a_pruned_directory
+
     tests_dir = pathlib.Path(__file__).resolve().parent
     offenders = []
     for path in sorted(tests_dir.rglob("*.py")):
+        # THE SWEEP IS THE SUITE AND NOT THE DIRECTORY — 0.2.0 D14. This was
+        # a bare `rglob`, so a stale copy under `tests/build/` or
+        # `tests/.junk/` — directories pytest refuses to recurse into, and
+        # which `pytest --collect-only` reaches 0 tests in — was reported as
+        # an offender. Driven at `a431646`: the same body in both gives
+        # `1 failed` naming both paths. A comparison in a file no invocation
+        # can collect cannot answer a lane question for anybody, so the red
+        # was about the developer's directory. Direction noted, because it
+        # is not the same repair as `tests/test_prose_hygiene.py`'s: this is
+        # an `assert not offenders` scan, so the unpruned walk could only
+        # ever report MORE and was never a false GREEN.
+        if _in_a_pruned_directory(path):
+            continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:  # pragma: no cover

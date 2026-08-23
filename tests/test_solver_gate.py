@@ -36,6 +36,10 @@ from __future__ import annotations
 import ast
 import pathlib
 
+# the runner's own conftest, for its `norecursedirs` pruning and nothing
+# else — see `test_no_test_module_decides_ANY_SOLVER_AT_ALL_for_itself`
+from conftest import _in_a_pruned_directory
+
 import _solver_gate
 
 TESTS = pathlib.Path(__file__).resolve().parent
@@ -216,9 +220,35 @@ def test_no_test_module_decides_ANY_SOLVER_AT_ALL_for_itself():
 
     Every hit is a false skip waiting for an environment with an external
     cvc5 and no wheels: the test would pass there and says it does not apply.
+
+    **THE SWEEP IS THE SUITE, NOT THE DIRECTORY — 0.2.0 D14.** It was
+    `TESTS.rglob("*.py")` bare, so a stale copy in a directory pytest
+    refuses to recurse into was reported as an offender. Driven at
+    `a431646`::
+
+        tests/build/test_offender_copy.py    1 failed
+        tests/.junk/test_offender_copy2.py   (same run, both named)
+
+    Neither file can be collected by any invocation — `pytest
+    --collect-only` reaches **0** tests in either — so neither can produce
+    the false skip this exists to prevent, and reddening on one is a verdict
+    about the developer's directory rather than about the suite.
+
+    **AND THE DIRECTION MATTERS, WHICH IS WHY THIS IS NOT THE SAME REPAIR AS
+    `tests/test_prose_hygiene.py`'s.** This is an `assert not offenders`
+    scan: an unpruned walk can only report MORE, never less, so it was never
+    a false GREEN and pruning it is not a narrowing of what it can catch. It
+    was a false RED, and it also let a pruned copy borrow a
+    `NARROW_BY_DECLARATION` exemption, which is keyed by BASENAME.
+
+    One predicate, `conftest._in_a_pruned_directory` — not
+    `collectable_test_files()`, which yields `test_*.py` only, while this
+    scan is over every `.py` under `tests/` including the helpers.
     """
     offenders = {}
     for path in sorted(TESTS.rglob("*.py")):
+        if _in_a_pruned_directory(path):
+            continue
         lines = either_solver_decisions(path.read_text(encoding="utf-8"))
         if lines and path.name not in NARROW_BY_DECLARATION:
             offenders[str(path.relative_to(TESTS))] = lines

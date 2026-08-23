@@ -352,6 +352,56 @@ def test_every_root_entry_is_a_decision() -> None:
     force-includes**, which is the false dichotomy the old message offered. See
     the comment on :data:`WITHHELD` for the drive: `.hgignore` planted at the
     root, moved into WITHHELD, suite green, file shipped.
+
+    ────────────────────────────────────────────────────────────────────
+    THIS VERDICT IS A FUNCTION OF THE WORKING DIRECTORY, DELIBERATELY
+    ────────────────────────────────────────────────────────────────────
+
+    `REPO.iterdir()` is the input, so this reddens on any root entry
+    `WITHHELD` has not heard of — `.coverage`, `htmlcov`, `.tox`,
+    `<name>.egg-info`, a scratch directory somebody made this morning. The
+    0.2.0 D14 sweep examined that against the class it was closing —
+    *"a check whose input includes the developer's environment reports a
+    different truth to different people"* — and it is **policy here, not an
+    instance of the defect.** The distinction, which is the general rule the
+    rest of that batch turns on:
+
+        A check whose SUBJECT is the working directory may read the working
+        directory. A check whose subject is the REPOSITORY may not.
+
+    This one's subject IS the working directory. *"What is sitting at the
+    root of the tree an sdist would be built from"* is not answerable from
+    the index, because the whole point of the allowlist is the file that is
+    NOT in the index: an internal release checklist, untracked and
+    deliberately uncommitted, shipped byte-identical inside
+    `stelling-0.1.0.tar.gz`, and **an sdist on PyPI cannot be unpublished.**
+    A version of this check that asked `git ls-files` would have been green
+    on the day that happened. So the reachable-by-tooling entries are a cost
+    this check is worth, and the correct response to one is to DECIDE it —
+    one `WITHHELD` line with a reason — not to narrow the input.
+
+    Two things follow, and both are already true rather than aspirations:
+
+    * **Nothing this repository's own instructions produce is undecided.**
+      `tools/property_venv.sh` defaults its venv OUTSIDE the checkout for
+      exactly this reason and says so at the assignment; `.venv`, `venv`,
+      `.venv-prop`, `.pytest_cache`, `.hypothesis`, `.mypy_cache`,
+      `.ruff_cache`, `.pdm-build`, `__pycache__`, `build`, `dist`,
+      `.claude`, `.vscode` and `uv.lock` are all recorded above. There is no
+      coverage tooling in this project at all, so `.coverage` and `htmlcov`
+      are not among them; the day one arrives, its root gets a line here in
+      the same commit.
+    * **The dict is still a RECORD and not the enforcement**, so widening it
+      to quieten this test does not ship anything — that is what the
+      assertion below, and the `.hgignore` drive on :data:`WITHHELD`, exist
+      to keep true.
+
+    And the converse holds where it should: every OTHER consumer of
+    `WITHHELD` reads the record and not the directory. `_root_entries` in
+    `tests/test_sdist_reference_hygiene.py` used to union the checkout's
+    listing in and became six live failures the day CI made a `.venv`;
+    `tests/_repo_files.py`'s walker is `WITHHELD` itself. Those are checks
+    about the repository, and they no longer look at the disk.
     """
     allow = _allowlist()
     undecided = sorted(

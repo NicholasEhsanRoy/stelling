@@ -59,14 +59,33 @@ import ast
 import operator
 import pathlib
 import re
+import shutil
+import subprocess
 import sys
 
-# The one import, and it is the runner's own conftest: dependency-free
-# (``__future__``, ``fnmatch``, ``os``, ``pathlib``, ``pytest``) and already
-# imported by the collection that imports this file. What it supplies is the
-# ``norecursedirs`` pruning, so that "a file of this suite" means the same
-# thing here as it does to the skip inventory's scope check.
+import pytest
+
+# TWO local imports, and neither may cost this module its own subject: this
+# is the file that exists because a module-scope import broke collection on
+# the floor, so anything it imports has to be importable there.
+#
+# ``conftest`` is dependency-free (``__future__``, ``fnmatch``, ``os``,
+# ``pathlib``, ``pytest``) and already imported by the collection that
+# imports this file. What it supplies is the ``norecursedirs`` pruning, so
+# that "a file of this suite" means the same thing here as it does to the
+# skip inventory's scope check.
+#
+# ``_repo_files`` supplies :func:`~_repo_files.tracked_paths` — the one
+# *"ask git what this repository has"*, shared rather than copied. It reaches
+# ``tests/test_sdist_contents.py`` for the withheld-root record, and that
+# module's ``tomllib`` sits behind a version branch with ``tomli`` on the
+# 3.10 side. On the floor that resolves: ``tomli`` is declared in
+# ``[dependency-groups] dev`` AND ``pytest`` itself requires it below 3.11,
+# so no environment that can run this suite lacks it — the declaration is in
+# ``pyproject.toml`` beside the reason, and it is why this import is not the
+# defect this module is about.
 from conftest import _in_a_pruned_directory
+from _repo_files import tracked_paths
 
 # `hypothesis` is here for the same reason as the other three and one more:
 # it is a DEV-GROUP dependency, so the zero-dep job and both shared jax venvs
@@ -228,6 +247,73 @@ def _sdist_roots() -> list[str]:
     )
     assert block, "the sdist allowlist is not where this expects it"
     return [m.group(1).lstrip("/") for m in re.finditer(r'"([^"]+)"', block.group(1))]
+
+
+def _roots_the_repository_keeps_python_under() -> tuple[str, ...]:
+    """The allowlisted sdist roots this REPOSITORY tracks a `.py` under.
+
+    **THE QUESTION IS ABOUT THE REPOSITORY AND WAS BEING ASKED OF THE
+    WORKING DIRECTORY.** This read `(REPO / r).is_dir() and any((REPO / r).
+    rglob("*.py"))`, compared by `==` to :data:`_SHIPPED_PY_ROOTS_PIN` — so
+    ONE stray untracked `.py` under `design/`, `assets/` or `LICENSES/`
+    (the three allowlisted directories this repository keeps no Python in)
+    moved a root into the tuple and reddened the pin. Driven at `a431646`
+    with a two-line `design/plot_scratch.py`::
+
+        AssertionError: the set of shipped roots containing Python has
+        moved; the sweep follows it automatically, but the pin has not:
+        ('.github', 'corpus', 'design', 'docs', 'src', 'tests', 'tools')
+
+    Nothing about the repository had changed. It is the same shape as the
+    `.venv` that flipped a gate on `main` the same week, and the same repair
+    `tests/test_sdist_reference_hygiene.py::
+    test_every_withheld_root_that_holds_content_is_a_content_root` already
+    applies to the neighbouring question: *"does this repository keep content
+    under that root"* is answered by `git ls-files`, and gives the same
+    answer in a fresh clone and in a checkout somebody has been working in.
+
+    **AND IT DEGRADES RATHER THAN SKIPPING.** Where git cannot answer, the
+    walk IS the repository: an unpacked sdist and a `git archive` export
+    contain the shipped files and nothing untracked, so the two enumerations
+    agree there by construction. A `pytest.skip` would instead withdraw the
+    pin in exactly the environment `test_every_root_entry_is_a_decision` was
+    taught to keep running in.
+
+    Note which enumeration this is NOT. :func:`_shipped_python_files` stays a
+    disk walk on purpose: it feeds `assert not bad` offender scans, where the
+    question really is *"what would hatchling pack out of this directory"*,
+    and a stray file that would ship and breaks the floor is one those scans
+    SHOULD see. A partition compared by `==` and an offender scan want
+    different enumerations, and this is the line between them.
+    """
+    roots = _sdist_roots()
+    tracked = tracked_paths()
+    if tracked is None:
+        return tuple(sorted(
+            r for r in roots
+            if (REPO / r).is_dir() and any((REPO / r).rglob("*.py"))
+        ))
+    return _roots_with_a_python_file(tracked, roots)
+
+
+def _roots_with_a_python_file(paths, roots) -> tuple[str, ...]:
+    """Which of `roots` some path in `paths` puts a `.py` under.
+
+    Pure, and separate from the two enumerations above so the control can
+    drive it without a repository: given the same list, it must give the same
+    answer whatever produced the list.
+
+    ``sep`` is required, so a root that IS a file (`pyproject.toml`) can
+    never be reported as holding one — nothing sits under a file.
+    """
+    wanted = set(roots)
+    return tuple(sorted({
+        head
+        for path in paths
+        if path.endswith(".py")
+        for head, sep, _rest in (path.partition("/"),)
+        if sep and head in wanted
+    }))
 
 
 def _shipped_python_files() -> list[pathlib.Path]:
@@ -909,6 +995,14 @@ def test_the_shipped_sweep_covers_every_allowlisted_root_with_python_in_it():
     guards: it silently stops covering a root the moment the allowlist gains
     one. So the roots come out of `pyproject.toml`, and the pin below is only a
     cross-check that the derivation returned what a reader expects.
+
+    **AND THE CROSS-CHECK ASKS THE REPOSITORY, NOT THE DIRECTORY.** It used
+    to `rglob` each root for a `.py`, so a stray untracked file under
+    `design/` reddened a pin about which roots this project keeps Python in.
+    See :func:`_roots_the_repository_keeps_python_under` for the drive and
+    for why the fallback is a degrade rather than a skip; the control beside
+    this test is
+    `test_the_root_pin_reads_the_repository_and_not_the_working_directory`.
     """
     roots = _sdist_roots()
     # This was `len(roots) >= 20` — a bound satisfied by 22, 23 and 40 alike,
@@ -919,13 +1013,7 @@ def test_the_shipped_sweep_covers_every_allowlisted_root_with_python_in_it():
     # here is that the parse returned the allowlist and not a fragment of it.
     assert "src" in roots and "pyproject.toml" in roots, roots
     assert len(roots) == len(set(roots)), f"a root is listed twice: {sorted(roots)}"
-    with_python = tuple(
-        sorted(
-            r
-            for r in roots
-            if (REPO / r).is_dir() and any((REPO / r).rglob("*.py"))
-        )
-    )
+    with_python = _roots_the_repository_keeps_python_under()
     assert with_python == _SHIPPED_PY_ROOTS_PIN, (
         "the set of shipped roots containing Python has moved; the sweep "
         f"follows it automatically, but the pin has not: {with_python}"
@@ -940,6 +1028,73 @@ def test_the_shipped_sweep_covers_every_allowlisted_root_with_python_in_it():
     assert "tools/property_check.py" in rel
     # and nothing from the one area that does NOT ship
     assert not any(r.startswith("scratchpad/") for r in rel)
+
+
+def test_the_root_pin_reads_the_repository_and_not_the_working_directory(tmp_path):
+    """The control for the repair above, driven on a real index.
+
+    Both halves, because either alone is satisfiable by an accident: a
+    TRACKED `.py` under a root must put that root in the answer, and an
+    UNTRACKED one must not. Driven in a throwaway repository rather than in
+    this one — planting a file in the tree under test is the very thing this
+    check exists to stop mattering, and it would race any `-n auto` run.
+
+    The pure half is asserted separately from the git half, so a failure says
+    which of the two moved.
+    """
+    if shutil.which("git") is None:  # pragma: no cover - env-dependent
+        pytest.skip("needs git")
+
+    # the classification, with no repository at all
+    paths = [
+        "src/stelling/harness.py", "docs/gen.py", "design/notes.md",
+        "pyproject.toml", "README.md", "corpus/x/y.py",
+    ]
+    roots = ["src", "docs", "design", "corpus", "assets", "pyproject.toml"]
+    assert _roots_with_a_python_file(paths, roots) == ("corpus", "docs", "src")
+    # `pyproject.toml` is a root that IS a file: nothing sits under it, and a
+    # `.py` named on the same line must never make it look like a directory
+    assert _roots_with_a_python_file(["pyproject.toml"], roots) == ()
+    # a root the allowlist does not name is not reported however much Python
+    # it holds. `notes/` is used rather than a real unshipped root of this
+    # tree, so that this line is not itself a citation of a path the sdist
+    # does not carry — `tests/test_sdist_reference_hygiene.py` reads it, and
+    # said so on the first run of this control.
+    assert _roots_with_a_python_file(["notes/probe.py"], roots) == ()
+
+    # and now the index half
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, timeout=60)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "design").mkdir()
+    (tmp_path / "src" / "shipped.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "design" / "stray.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "src/shipped.py"], cwd=tmp_path, check=True, timeout=60
+    )
+    tracked = tracked_paths(tmp_path)
+    assert tracked == ["src/shipped.py"], (
+        f"`git ls-files` in a probe repository returned {tracked}; the pin "
+        "reads this, so an untracked stray reaching it is the defect"
+    )
+    assert _roots_with_a_python_file(tracked, ["src", "design"]) == ("src",), (
+        "the untracked `design/stray.py` reached the answer — which is the "
+        "exact shape that reddened the pin on a checkout somebody had left a "
+        "scratch script in"
+    )
+    # the walk, on the same tree, is what the old derivation asked and is
+    # what the fallback still asks where git cannot answer
+    walked = tuple(sorted(
+        r for r in ("src", "design")
+        if (tmp_path / r).is_dir() and any((tmp_path / r).rglob("*.py"))
+    ))
+    assert walked == ("design", "src"), (
+        "the probe tree no longer exhibits the difference, so this control "
+        "is asserting that two identical enumerations agree"
+    )
+
+    # …and where git cannot answer at all, the third answer is None and not
+    # an empty list, so no caller can read it as "tracks no Python"
+    assert tracked_paths(tmp_path / "src") is None
 
 
 def _scanned():

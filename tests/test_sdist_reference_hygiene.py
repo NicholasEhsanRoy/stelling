@@ -861,6 +861,81 @@ def test_the_content_roots_are_withheld_roots_and_not_a_second_list():
     )
 
 
+def test_the_walkers_skip_set_is_WITHHELD_and_not_a_second_list():
+    """The other list of root names that had to agree with `WITHHELD`, and
+    for eleven weeks did not.
+
+    `tests/_repo_files.py` is the walker THIS module's sweep is built on
+    (see the module docstring: *"one walker shared with the rest of the
+    suite rather than a second one to keep in step"*), and its `SKIP` was a
+    hand-typed tuple. `WITHHELD` named five root entries it did not —
+    `.claude`, `.hypothesis`, `.pdm-build`, `.venv-prop`, `.vscode` — and
+    `SUFFIXES` covers `.md` and `.py`, so a file under any of them was
+    walked and became an input to the strict partitions in
+    `tests/test_tripwire_gate_coverage.py` and `tests/test_tripwire_eager.py`.
+    A false RED, on a checkout that had done nothing but exist next to a
+    local agent configuration.
+
+    **THE REPAIR IS THE DERIVATION AND NOT THE FIVE NAMES.** Adding them to
+    the tuple would leave two lists that must agree, which is what produced
+    the gap; this asserts there is only one list, so the sixth name cannot
+    happen. It is the same shape and the same reason as
+    `test_the_content_roots_are_withheld_roots_and_not_a_second_list` above.
+
+    The one respect in which the two legitimately differ — `*.egg-info` is a
+    PATTERN and `WITHHELD` records exact root entries — is asserted here
+    rather than left in a comment, so it stays exactly one difference.
+
+    Break it: type a name into `_repo_files.SKIP` that `WITHHELD` does not
+    carry, or drop one `WITHHELD` carries.
+    """
+    import _repo_files
+
+    assert set(_repo_files.SKIP) == set(WITHHELD), (
+        "`tests/_repo_files.py`'s SKIP is no longer WITHHELD itself:\n"
+        f"  in SKIP and not WITHHELD: {sorted(set(_repo_files.SKIP) - set(WITHHELD))}\n"
+        f"  in WITHHELD and not SKIP: {sorted(set(WITHHELD) - set(_repo_files.SKIP))}\n"
+        "Derive it, do not extend it — two lists of directory names that "
+        "must agree is the defect one level up."
+    )
+
+    # THE FIVE THAT WERE MISSED, named so this cannot pass by both sides
+    # having gone empty together. Driven on paths rather than on this disk:
+    # a check of a walker that needed a `.venv-prop/` to exist would be an
+    # environment-dependent check of an environment-dependence fix.
+    for name in (".claude", ".hypothesis", ".pdm-build", ".venv-prop", ".vscode"):
+        assert name in WITHHELD, f"{name} left WITHHELD; this row is stale"
+        assert _repo_files.is_skipped(f"{name}/notes.md"), name
+        assert _repo_files.is_skipped(f"{name}/lib/python3.12/x.py"), name
+
+    # …and the walker still walks the project. A skip set that swallowed the
+    # tree would satisfy every assertion above.
+    for kept in ("SOUNDNESS.md", "src/stelling/harness.py", "docs/norms.md"):
+        assert not _repo_files.is_skipped(kept), kept
+
+    # THE ONE DIFFERENCE, STATED AS A DIFFERENCE AND NOT AS A BAN.
+    # `*.egg-info` is a PATTERN — the directory a setuptools-style install
+    # writes is named for the project's distribution name — and WITHHELD
+    # records exact root entries. So the walker carries it as a suffix rule,
+    # and what is asserted here is that the rule really covers a name
+    # WITHHELD does not and could not carry. A future `stelling.egg-info`
+    # entry in WITHHELD would be a legitimate ROOT decision and is not
+    # forbidden; it just cannot be what makes the walker skip one.
+    assert _repo_files.SKIP_SUFFIXES == (".egg-info",), (
+        "the walker's pattern rule has moved; this test states that the "
+        "ONLY difference between SKIP and WITHHELD is `*.egg-info`, and it "
+        "can no longer say so"
+    )
+    probe = "some-other-distribution-name.egg-info"
+    assert probe not in WITHHELD, "pick a probe name WITHHELD does not carry"
+    assert _repo_files.is_skipped(f"{probe}/PKG-INFO"), (
+        "the walker no longer covers an `*.egg-info` directory by pattern, "
+        "so it covers only the ones somebody typed into WITHHELD — and the "
+        "name is the distribution's, which is not knowable as a fixed key"
+    )
+    assert _repo_files.is_skipped(".egg-info/anything.md")
+
+
 def test_no_shipped_file_names_a_path_the_sdist_does_not_carry():
     """The gate. Every reference in a shipped file to a path outside the
     sdist must be declared — by `SOUNDNESS.md`'s own inventory, or in
