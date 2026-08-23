@@ -29,8 +29,9 @@ PAIR, and its two halves are not equal.** A stale DRIVER writing past this
 whitelist is caught by the parent for nine of the ten separators and not
 for the tenth, which is ``\\n``, the protocol's own record boundary
 (measured, real children, real bytes: ``scratchpad/probe_cvc5_backstop.py``
-part A, and
-``tests/test_solver_audit_findings.py::test_f4wheel3_the_reader_now_refuses_nine_of_the_ten_separators``).
+part A, which is tracked and not in the sdist, and
+``tests/test_solver_audit_findings.py::test_f4wheel3_the_reader_now_refuses_nine_of_the_ten_separators``,
+which ships and re-drives the property).
 A stale PARENT is not caught here at all. The whitelist is what makes the
 sentence true for all ten in the direction this file controls.
 

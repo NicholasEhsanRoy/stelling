@@ -47,7 +47,9 @@ conjunct is exactly the part of the precondition whose satisfiability was
 never established.
 
 **C — an `assume` traced AFTER the `assert_` it should constrain.** Open
-when this file was written, CLOSED now (`scratchpad/PREREG_MECHC.md`).
+when this file was written, CLOSED now (`scratchpad/PREREG_MECHC.md` — the
+pre-registration, tracked and not in the sdist; what closed it is pinned in
+this file and in `tests/test_exactness_lift.py`, both of which ship).
 What it pinned then was the two legs DISAGREEING: the affine guard keyed
 on `propagation.assume_dropped`, a whole-run flag with no order in it,
 while the interval withhold read its uncertified flag at assert time and
@@ -85,7 +87,9 @@ def _x64():
 #
 # Every "EMPTY" comment below is an oracle result, not an argument: 50 000
 # uniform samples over the declared box plus every corner plus a 21^3 grid
-# satisfy the assume 0 times (scratchpad/PREREG_REF1.md).
+# satisfy the assume 0 times (`scratchpad/PREREG_REF1.md`, a historical
+# measurement: the pre-registration is tracked and is not in the sdist, and
+# every harness it scored is below, re-driven by this file).
 
 def _plain_empty():
     """No redundant conjunct. Withheld even before this branch."""

@@ -1191,7 +1191,9 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
     # thing that is wrong — a driver out of step with this parser, i.e. a
     # PARTIAL UPGRADE, which is the case `_cvc5_driver`'s docstring promises
     # degrades to UNKNOWN. Three readers, same io layer, real children, real
-    # bytes (`scratchpad/probe_cvc5_backstop.py`, parts B/C/D):
+    # bytes (`scratchpad/probe_cvc5_backstop.py`, parts B/C/D — a historical
+    # measurement, tracked and not in the sdist; the arm that landed is this
+    # file, and `tests/test_solver_audit_findings.py` holds it):
     #
     #   (a) `text=True`                             — what shipped before
     #   (b) `bytes.decode()`

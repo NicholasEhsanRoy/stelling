@@ -182,7 +182,7 @@ and is covered by the subnormal haze, not by an accuracy budget.
 
 In the emission set but in neither transfer registry (2): `stelling_assume`, `xor`.
 
-- `stelling_assume` — "stelling_assume's *constraint* is inert (dropped, disclosed by the propagation notes) and is deliberately NOT emitted — only its data flow passes through, exactly as in propagation." (src/stelling/obligation.py:276); on the propagation side it is handled by the walk itself rather than through the transfer registry: "value semantics: the identity on the predicate — the assume's output passes its input through unchanged in BOTH modes" (src/stelling/propagate.py:10392)
+- `stelling_assume` — "stelling_assume's *constraint* is inert (dropped, disclosed by the propagation notes) and is deliberately NOT emitted — only its data flow passes through, exactly as in propagation." (src/stelling/obligation.py:276); on the propagation side it is handled by the walk itself rather than through the transfer registry: "value semantics: the identity on the predicate — the assume's output passes its input through unchanged in BOTH modes" (src/stelling/propagate.py:10394)
 - `xor` — no recorded reason for the absence of a transfer
 
 In the transfer registries but not in the emission set (16): `abs`, `add_any`, `copy`, `dynamic_slice`, `dynamic_update_slice`, `exp`, `gather`, `reduce_or`, `rem`, `sign`, `split`, `sqrt`, `stelling_any`, `stelling_assert`, `stop_gradient`, `unstack`.

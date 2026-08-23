@@ -75,6 +75,9 @@ def _without_certificate(h, monkeypatch, **kw):
 # Each docstring's claim about the assumed region is an ORACLE result, not
 # an argument: `scratchpad/cert/oracle.py` samples the declared set outside
 # stelling and reports whether any sampled member satisfies every assume.
+# That oracle is a historical measurement — tracked, and not in the sdist —
+# so what a reader of the distribution has is this file, which re-drives
+# every claim the oracle scored through the shipped propagator.
 
 
 def h_inhabited_narrowing():
@@ -652,7 +655,8 @@ def test_the_certificate_speaks_the_dial_the_query_was_judged_on():
     and sound in both, because the certificate is computed in the same
     arithmetic the obligations are judged in and under ieee the program
     really does compute 0.5. Three corpus rows go the other way
-    (`scratchpad/cert/RESULTS_invariant.txt`).
+    (`scratchpad/cert/RESULTS_invariant.txt`, a historical measurement,
+    tracked and not in the sdist; the row below re-drives from this file).
     """
     def h():
         x = any_array((), "float64", (0.25, 0.25))
@@ -682,8 +686,10 @@ def test_a_certifying_probe_narrows_nothing():
 
     Measured across the corpus rather than argued: 148 certifying probe
     runs inspected, 0 narrowed anything
-    (`scratchpad/cert/RESULTS_invariant.txt`). Driven here on the two
-    rows where a certifying run has more than one assume to get wrong.
+    (`scratchpad/cert/RESULTS_invariant.txt`, a historical measurement,
+    tracked and not in the sdist). Driven here on the two
+    rows where a certifying run has more than one assume to get wrong,
+    which is the half that re-drives from the shipped tree.
     """
     for h in (h_inhabited_narrowing, h_mixed):
         c = trace(h)
@@ -745,8 +751,10 @@ def test_the_probe_count_scales_down_with_the_declared_size():
     """The second bound, and the one that made the cap affordable: a
     failing search at the size cap walked the whole 16-point grid and cost
     **469 ms against a 23 ms propagation — 95% of the whole `check()`
-    pipeline** (`scratchpad/cert/RESULTS_cap.txt`). Scaling the probe
-    count by the declared size brings that to ~95 ms while small
+    pipeline** (`scratchpad/cert/RESULTS_cap.txt`, a historical
+    measurement, tracked and not in the sdist — a wall time cannot be
+    gated, and the figure is stated here rather than linked to). Scaling
+    the probe count by the declared size brings that to ~95 ms while small
     declarations keep the full grid.
 
     The FLOOR is 3 and not a fitted number: probes 0, 1 and 2 are the

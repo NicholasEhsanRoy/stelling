@@ -193,7 +193,10 @@ above the subnormal band).
 
 **Verdict: artifact of our imprecision, not genuine float divergence** —
 and the classification is measured, not argued. Four probes
-(`scratchpad/taskA_diagnose.py`, `taskA_probe4.py`):
+(`scratchpad/taskA_diagnose.py`, `taskA_probe4.py` — a historical
+measurement; `scratchpad/` is tracked in the repository and is not in the
+sdist, so the four findings below are the record and the probes are not
+openable from a distribution):
 
 1. **The dependency loss is mode-independent.** The harness declares
    `c ∈ [0.019, ∞)`; the field recomputes `c = exp(a₁) − x₀` where

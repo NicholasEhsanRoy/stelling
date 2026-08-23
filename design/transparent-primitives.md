@@ -28,7 +28,9 @@ jax 0.11 merged `Jaxpr` and `ClosedJaxpr` into one class —
 `ClosedJaxpr is Jaxpr` is `False` on 0.10.2 and `True` on 0.11.0 — so a
 container named here is a fact about the jax that produced the param, never
 a fact about the callee. Both columns below were driven on both
-interpreters (`scratchpad/SERIES_CLAIM_SWEEP.md` §A).
+interpreters (`scratchpad/SERIES_CLAIM_SWEEP.md` §A — a historical
+measurement, tracked and not in the sdist; the table below is its
+result).
 
 | primitive | sub-jaxpr param | container: 0.10.2 → 0.11.0 | other params of note |
 |---|---|---|---|
