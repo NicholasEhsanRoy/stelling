@@ -914,6 +914,96 @@ def test_jax_s_own_prng_mask_is_suppressed_and_named_not_blamed_on_the_caller(ar
     assert suppressed.origin == record.ORIGIN_JAX
 
 
+def test_the_pages_OPENING_DEMO_is_what_jax_does():
+    """``docs/overflow-tripwire.md``'s *"What it finds"* block, driven.
+
+    It is the first thing a reader of that page runs and the whole argument
+    for the tool -- ``x + 256`` on ``int8`` reaching the jaxpr as ``add a
+    0:i8[]``, and the jitted function returning its input unchanged. It is
+    marked ``illustrative`` because its output is written INTO the block as
+    comments, with an arrow under the byte that is gone, so
+    ``test_doc_examples.py`` has no fence to attach to it. That is a
+    legitimate reason not to run it there and it is not a reason for nobody
+    to run it: measured before this existed, ``grep`` for the jaxpr text and
+    for ``[100, 50, -10]`` across ``tests/`` had no hits, so the page's
+    flagship demo -- and the excerpt fence six paragraphs above it, which
+    quotes one equation of the same jaxpr -- were verified by nothing at all.
+
+    The page says the output is byte-identical on 0.10.2 and 0.11.0. This
+    runs on whichever is installed, so both lanes assert it.
+
+    **AND IT RUNS THE PAGE'S PROGRAM, NOT A COPY OF IT.** The first version
+    re-implemented ``add_offset`` here and compared the page's ANSWERS to the
+    re-implementation, so the one direction it could not see was the page's
+    CODE drifting from the answers printed under it -- which is the exact
+    question this batch was commissioned to answer. Driven: changing the
+    page's line to ``return x + 300`` left 325 tests green, while the real
+    jaxpr becomes ``add a 44:i8[]`` and the result ``[-112, 94, 34]``. The
+    block is now executed out of the page, so the program and its printed
+    reading move together or not at all.
+    """
+    import re
+
+    page = (
+        pathlib.Path(__file__).resolve().parents[1] / "docs" / "overflow-tripwire.md"
+    ).read_text(encoding="utf-8")
+
+    # THE PAGE'S OWN BLOCK, EXECUTED. Located by the two lines that make it
+    # this block and not another fence: the `def add_offset` the prose names
+    # and the `jax.jit` call whose reading is quoted below it.
+    blocks = [
+        b for b in re.findall(r"^```python\n(.*?)^```", page, re.M | re.S)
+        if "def add_offset" in b and "jax.jit(add_offset)" in b
+    ]
+    assert len(blocks) == 1, (
+        f"the page carries {len(blocks)} opening-demo blocks; this test "
+        f"executes exactly the one, located by `def add_offset` and "
+        f"`jax.jit(add_offset)`"
+    )
+    ns: dict = {}
+    exec(compile(blocks[0], "docs/overflow-tripwire.md", "exec"), ns)  # noqa: S102
+    assert "jaxpr" in ns and "result" in ns, (
+        "the page's demo no longer binds `jaxpr` and `result`; this test reads "
+        "the values it printed rather than recomputing them"
+    )
+
+    jaxpr = ns["jaxpr"]
+    result = ns["result"].tolist()
+
+    # the full jaxpr, quoted in the block as a comment
+    quoted = [
+        ln.lstrip("# ").rstrip()
+        for ln in page.splitlines()
+        if ln.startswith("# { lambda ")
+    ]
+    assert len(quoted) == 1, (
+        f"the page quotes {len(quoted)} jaxpr lines in its opening demo; this "
+        f"test reads exactly the one"
+    )
+    assert quoted[0] == str(jaxpr), (
+        f"the page's opening demo says the jaxpr is\n  {quoted[0]}\nand jax "
+        f"{jax.__version__} produces\n  {str(jaxpr)}"
+    )
+
+    # the executed values, quoted on the next comment line
+    executed = re.search(r"^# (\[[-0-9, ]+\])  — the function is", page, re.M)
+    assert executed, "the page no longer quotes what the jitted function returns"
+    assert executed.group(1) == str(result), (
+        f"the page says the jitted function returns {executed.group(1)} and it "
+        f"returns {result}"
+    )
+
+    # ...and the excerpt fence above it, which is one equation of that jaxpr
+    excerpt = "add a 0:i8[]"
+    assert f"\n{excerpt}\n" in page, (
+        "the page's excerpt fence no longer carries the equation it excerpts"
+    )
+    assert excerpt in str(jaxpr), (
+        f"the page excerpts {excerpt!r} from a jaxpr that now reads "
+        f"{str(jaxpr)!r}"
+    )
+
+
 #: The eleven doors ``SOUNDNESS.md`` enumerates, as callables of
 #: ``(array, operand)``. Split by SHAPE, because that split is the finding:
 #: six promote an operand against an array and five construct an array from an
@@ -1041,6 +1131,102 @@ def test_strict_promotion_is_a_DTYPE_check_measured_over_the_WHOLE_door_set():
         "that loses its value, so 'it is the Python int that wraps' is not "
         "the exclusive the report made of it"
     )
+
+    # (3b) AND "NEVER RAISES" IS NOT THE SAME SENTENCE AS "STRICT NEVER
+    # REJECTS IT". `docs/overflow-tripwire.md`'s row for the bare Python int
+    # said the first one, flat, and the page contradicted it ten lines later
+    # -- `jnp.array(256, jnp.int8)` raises `OverflowError` and the page says
+    # so, twice. Three of the eleven do, on the VALUE rather than the dtype,
+    # under strict AND standard alike, and that is exactly what makes the
+    # weakly-typed-array row below it a DIFFERENT row rather than the same
+    # sentence twice: for a weak `jax.Array`, "never raises" is true at all
+    # eleven. Measured in all four cells (0.10.2/0.11.0 x64 on/off).
+    loud_for_a_bare_int = None
+    for mode in ("strict", "standard"):
+        got = set()
+        with expected_truncation(
+            "the bare-int row: all eleven doors driven with a value that does "
+            "not fit, to separate a dtype rejection from a value rejection"
+        ), jax.numpy_dtype_promotion(mode):
+            for name, door in ELEVEN_DOORS.items():
+                try:
+                    door(jnp.zeros(3, jnp.int8), 256)
+                except OverflowError:
+                    got.add(name)
+                except Exception:  # noqa: BLE001 - promotion refusals are (3)
+                    pass
+        assert got == {"jnp.array", "jnp.asarray", "jnp.int8"}, (
+            f"under {mode} promotion a bare Python int raises OverflowError at "
+            f"{sorted(got)}; the page's row is written against exactly three"
+        )
+        loud_for_a_bare_int = got
+    assert _rejected_under_strict(lambda: jnp.asarray(256)) == set()
+    with expected_truncation("the weak-array control for the row below it"):
+        for name, door in ELEVEN_DOORS.items():
+            door(jnp.zeros(3, jnp.int8), jnp.asarray(256))  # raises nowhere
+
+    page = (
+        pathlib.Path(__file__).resolve().parents[1] / "docs" / "overflow-tripwire.md"
+    ).read_text(encoding="utf-8")
+    row = next(
+        (ln for ln in page.splitlines()
+         if ln.startswith("| a bare Python `int`, at any of the 11 |")),
+        None,
+    )
+    assert row is not None, (
+        "docs/overflow-tripwire.md no longer carries the bare-Python-int row "
+        "of the strict-promotion table this measurement is for"
+    )
+    assert "OverflowError" in row, (
+        f"the page's bare-int row reads {row!r}. It said 'never raises', and "
+        f"three of the eleven raise OverflowError on the value -- which the "
+        f"same page states ten lines below it. A row that is true only of "
+        f"TypePromotionError has to say so, because the row under it means "
+        f"'never raises' literally."
+    )
+    for door in sorted(loud_for_a_bare_int):
+        assert f"`{door}`" in row, f"the page's bare-int row does not name {door}"
+
+    # (3c) AND THE SURFACE A USER ACTUALLY READS. The same sentence ships in
+    # `report._suggestions`, printed under every finding, and the page's
+    # correction left it behind: "it rejects a Python int at none of the
+    # eleven, which is the spelling in front of you" -- flat, and contradicted
+    # by the bullet immediately above it in the same list, which tells the
+    # reader that `jnp.array(N, dt)` raises OverflowError for a Python int.
+    # Shipping the corrected claim in the docs and the wrong one in the
+    # message is worse than either alone, so the SAME measurement holds both.
+    from stelling._tripwire import report as _report
+
+    advice = " ".join(_report._suggestions(record.Finding(
+        file="m.py", line=1, func="f", written=256,
+        from_dtype="int64", to_dtype="int8", became=0, origin=record.ORIGIN_USER,
+    )))
+    assert "at none of the eleven" not in advice, (
+        "report._suggestions still says a Python int is rejected at none of "
+        "the eleven doors. Three of them raise OverflowError on the VALUE, "
+        "which the bullet above it in the same list already tells the reader."
+    )
+    assert "no TypePromotionError" in advice, (
+        f"the strict-promotion bullet no longer says WHICH rejection a bare "
+        f"Python int does not get. 'never rejects it' is the false reading "
+        f"that was there. Rendered advice:\n{advice}"
+    )
+    # ...against the CLAUSE, not against the whole rendered advice. `door in
+    # advice` passed for any door list at all: all three names already appear
+    # earlier in the same bullet, as members of the FIVE construction doors
+    # strict promotion is silent at. Measured: rewriting the OverflowError
+    # clause to `(jnp.full, jnp.full_like, jnp.where)` left this green.
+    clause = (
+        f"three of the construction doors "
+        f"({', '.join(sorted(loud_for_a_bare_int))}) raise OverflowError on "
+        f"the VALUE instead"
+    )
+    assert clause in advice, (
+        f"report._suggestions does not name the doors that raise "
+        f"OverflowError on a bare Python int as this test just measured "
+        f"them. Expected the clause:\n  {clause}\nRendered advice:\n{advice}"
+    )
+    assert len(loud_for_a_bare_int) == 3, sorted(loud_for_a_bare_int)
 
     # ...and the control for all of it: without strict, none of the eleven
     # raises, so the sets above are about the SETTING and not about the doors

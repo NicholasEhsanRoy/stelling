@@ -79,7 +79,7 @@ retracted for being wider than its measurement.
 | the **6** doors that promote an operand against an array — `x + N`, `x >= N`, `x.at[i].set(N)`, `jnp.where`, `jnp.clip`, `jnp.maximum` | raises `TypePromotionError` |
 | the **5** construction doors — `jnp.array`, `jnp.asarray`, `jnp.int8`, `jnp.full`, `jnp.full_like` | **silent**, and the operand narrows |
 | the same doors with the *in-range* `np.int64(3)` | raises at the same 6 |
-| a bare Python `int`, at any of the 11 | never raises |
+| a bare Python `int`, at any of the 11 | never raises a `TypePromotionError` — three of the construction doors (`jnp.array`, `jnp.asarray`, `jnp.int8`) raise `OverflowError` on the VALUE instead, under strict and standard alike |
 | a weakly-typed `jax.Array` (`jnp.asarray(256)`), at any of the 11 | never raises, and it wraps |
 
 So it separates **dtypes, not values**: it flags in-range code and misses the
@@ -135,6 +135,116 @@ section — and is not there either.)
 does it not see", because that is what it is for. Every row was measured with a
 live control in the same process, on both tested series with x64 on and off,
 and **the value wraps in every UNCOVERED row**.
+
+**And it is integers, all the way down — so here is the float answer, which
+this page is named for and did not give.** Every row below is an integer route,
+because both instruments in this section are integer→integer: this tripwire
+watches integer RANGE, the eager detector watches integer CONSTRUCTION, and
+`stelling.intentional_wrap` refuses every non-integer dtype by name. Two
+different things get called float overflow — a value that is already a float
+and overflows, and an integer literal with no finite image in the float dtype
+it meets. **Neither is seen by any of the three instruments. The first is
+partly seen by numpy, and which part is a measurement rather than a rule of
+thumb** — this page has now stated that partition wrongly twice, once with the
+sides swapped and once as HOST versus DEVICE, which does not partition it
+either. Driven under `warnings.simplefilter("error")`:
+
+<a id="float-overflow-warning-table"></a>
+
+| the narrowing | a spelling of it | is there a `RuntimeWarning` to turn on? |
+|---|---|---|
+| on DEVICE, into any dtype | `a * a` on a `float32` `1e30` | **no** — nothing on the host cast it, so there is nothing to enable |
+| on the HOST, into `float16`, `float32` or `float64` | `jnp.full((2,), 1e300, jnp.float32)` | **yes** — `RuntimeWarning: overflow encountered in cast` |
+| on the HOST, into any of the **other twelve** float formats `jax.numpy` has | `jnp.full((2,), 1e300, jnp.bfloat16)` | **no** — and this is the row a reader loses on |
+
+**The other twelve are** `bfloat16`, `float4_e2m1fn`, `float6_e2m3fn`,
+`float6_e3m2fn`, `float8_e3m4`, `float8_e4m3`, `float8_e4m3b11fnuz`,
+`float8_e4m3fn`, `float8_e4m3fnuz`, `float8_e5m2`, `float8_e5m2fnuz` and
+`float8_e8m0fnu` — every float format `jax.numpy` exposes that `numpy` does
+not implement itself. They come from `ml_dtypes`, which converts by integer
+bit arithmetic and raises no floating-point flag, so numpy has nothing to
+report; the three above are numpy's own binary formats and it reports all of
+them. It is the TARGET FORMAT that decides, not the door: all three of the
+construction doors below are silent for `bfloat16` and all three warn for
+`float32`.
+
+* **A value that is already a FLOAT and overflows the format it is converted
+  into is seen by none of these three instruments — but "seen by nothing" is
+  not the same sentence, and it is false.** Measured under
+  `warnings.simplefilter("error")`, identical in all four cells, each of
+  `jnp.full((2,), 1e300, jnp.float32)`, `jnp.full((2,), 70000.0, jnp.float16)`,
+  `jnp.float16(70000.0)`, `jnp.array([1e300], jnp.float32)` and
+  `jnp.full((2,), 100000, jnp.float16)` raises, and so do `x_f32 + 1e300`
+  and `x_f16 + 70000.0` **inside `jit`** — because a trace embeds its
+  constants through that same host cast, and **a harness is traced**. So
+  **`pytest -W error::RuntimeWarning` turns that part into a failure today**
+  and no new instrument is needed. Every case in that list narrows into
+  `float16` or `float32`, which is why it is the loud part.
+* **The same three doors, the same host, `bfloat16` instead — and all three
+  go quiet.** Measured under `warnings.simplefilter("error")`, silent in all
+  four cells: `jnp.full((2,), 1e300, jnp.bfloat16)`,
+  `jnp.array([1e300], jnp.bfloat16)` and `jnp.bfloat16(1e300)` are each `inf`
+  with nothing raised, and so is every one of the other eleven formats above
+  at those same doors — the ones that encode no infinity give `nan` instead,
+  and the `float4`/`float6` ones saturate to their largest finite value.
+  **This is not the device residue in disguise**: `jax.make_jaxpr` already
+  holds `inf:bf16[]`
+  before any XLA program exists, exactly as the `float16` route holds
+  `inf:f16[]` — and that one warns.
+* **The control that separates the two**, with no jax in it at all: one numpy
+  cast loop, one `float32` source array of `1e30`. `.astype(jnp.float16)`
+  **warns**; `.astype(jnp.float8_e5m2)` is **silent** and gives `inf`;
+  `.astype(jnp.float8_e4m3fn)` is **silent** and gives `nan`. Same call, same
+  source, and the two silent ones lost far more than the loud one.
+* **What IS silent whatever the dtype is the narrowing that happens on
+  DEVICE**, and that is the sharpest residue this page owes you. Once the
+  value is inside a `jax.Array`, nothing on the host casts it and there is no
+  warning to turn on. Measured under `warnings.simplefilter("error")`, silent
+  in all four cells: `a * a` and `a ** 2` on a `float32` array of `1e30`,
+  `jnp.exp` of a `float32` `1000.0`, `a.astype(jnp.float16)` and
+  `lax.convert_element_type(a, jnp.float16)` on that same array, and
+  `x_f16 + 70000.0` run EAGERLY — each `inf`, with 0 fires here, 0
+  truncations from the eager detector and no refusal from the perimeter.
+  **This is the case a numerical program actually produces**: the overflow is
+  computed, not written, so there is no literal for any of the three to read.
+  That is a scope boundary and not a hole — nothing on this page claims a
+  float — but it is the boundary, and `-W error::RuntimeWarning` does not
+  reach it.
+* **Whether a given source line is on the host at all can change with the
+  x64 flag**, and two spellings prove it by changing sides between cells.
+  `x_f32 + 1e300` and `jnp.asarray([1e300, 1e300]).astype(jnp.float32)`, run
+  eagerly, **warn at `JAX_ENABLE_X64=0` and are silent at
+  `JAX_ENABLE_X64=1`** — with x64 off the value is canonicalised to `float32`
+  by numpy on the way in and overflows there; with x64 on it stays `float64`
+  through the host and XLA does the narrowing. Same source line, same result
+  (`inf`), opposite answer to "is there a warning to turn on".
+* **An integer LITERAL that has no finite image in the float dtype it meets IS
+  caught — by the third instrument, through an operator slot only.**
+  `x_f16 <= 100000` runs as a comparison against `inf`, and
+  [the narrowing perimeter](#the-third-door-a-literal-that-never-existed)
+  refuses it. It is silent EAGER; **traced, `float16` is the one format where
+  numpy's host cast warns**, so inside a `jit` this particular literal is also
+  reachable by `-W error::RuntimeWarning` — which is the table above again,
+  under a different door: `float16` is numpy's, and the `float8_*` names are
+  not. The other seven formats that can lose a literal this way — seven of the
+  eight `float8_*` names `jax.numpy` exposes — are silent both ways, and there
+  the perimeter is the only instrument that speaks; they are tabulated under
+  [the third door](#the-third-door-a-literal-that-never-existed), with the
+  four whose comparison inverts to `False` rather than comparing against
+  `inf`. The same literal at a CONSTRUCTION site is not covered by the
+  perimeter at all:
+  `jnp.full((2,), 100000, jnp.float16)` is `[inf, inf]` with all three armed
+  and 0 fires, because the eager detector below is integer→integer and there
+  is no operator for the perimeter to sit in — though that spelling, being a
+  host cast into a format numpy implements, does warn.
+
+**So the remedy, stated exactly.** `-W error::RuntimeWarning` is worth turning
+on and it is not a guarantee: it catches a HOST narrowing into `float16`,
+`float32` or `float64`, and it catches nothing else. It does not reach a
+device narrowing in any dtype, and it does not reach a host narrowing into
+`bfloat16` or any of the other eleven formats listed above — at any of the
+three construction doors — which is the half of the answer a program written
+in `bfloat16` lives in.
 
 | door | status | measured |
 |---|---|---|
@@ -203,9 +313,9 @@ so. `tests/test_tripwire_gate_coverage.py` carries the same claim as a
 route that changes bucket goes red there. Two of its buckets are not in this
 table at all and are worth knowing: **`loud`**, where jax itself raises rather
 than wrapping (`jnp.array(N, dtype=dt)`, `jnp.asarray(N, dtype=dt)`,
-`jnp.int16(N)` — note that `jnp.full(shape, N, dt)`, three rows up, silently
-wraps the same value), and **`deferred`**, where the written constant reaches
-the jaxpr intact, so the trace gate has nothing to see and something
+`jnp.int16(N)` — note that the `jnp.full(shape, N, dt)` row of the table
+above silently wraps the same value), and **`deferred`**, where the written
+constant reaches the jaxpr intact, so the trace gate has nothing to see and something
 downstream is what refuses the route. Which something is declared per row and
 held against the verdict's FIRST note -- the root decline, not merely some
 note in the run -- because it is not the same one for all of
@@ -387,7 +497,8 @@ Both are declared `unwatched` in `GATE_COVERAGE`, declared `silent` in
 two — so a third cannot join them quietly.
 
 **And most of the table above is untouched by this**, which is worth saying
-plainly because "six of eight" invites the wrong reading. The rows this
+plainly because the fraction above invites the wrong reading: it is a
+fraction of the `unwatched` ROUTES, not of this page's table. The rows this
 detector does NOT close, each re-measured with it armed:
 
 * **eager execution of the inline door** — `a + 256` outside `jit` still
@@ -605,7 +716,7 @@ ships armed** and `jit` warm:
 
 | written | what runs | the tripwire | the eager detector | the perimeter |
 |---|---|---|---|---|
-| `jnp.full((3,), 40000, int16)` | `0`-filled | — | **refuses** | — |
+| `jnp.full((3,), 40000, int16)` | `-25536`-filled | — | **refuses** | — |
 | `x_int16 + 40000` | `-25536` | no fire | no fire | **refuses** |
 | `40000 + x_int16` | `-25536` | no fire | no fire | **refuses** |
 | `x_f32 <= 2**31 - 1` | `<= 2147483648.0` | no fire | no fire | **refuses** |
@@ -636,11 +747,78 @@ The armed slot list is printed in the report on every run, and it is the whole
 perimeter rather than a summary of one: an operator missing from it is
 unwatched.
 
+**Two kinds of loss, and the second one is this release's only float-overflow
+answer.** The literal at the top of this section MOVES: `2147483647` has a
+nearest `float32` and it is not the one written. A literal can also VANISH:
+`65504` is `float16`'s largest finite value, so `x_f16 <= 100000` is a
+comparison against `inf` — and disarmed it is **silent eager**, measured in
+both x64 cells; traced, numpy's host cast warns, and `float16` is the only
+format below where it does. The perimeter refuses both at the line that wrote
+the literal and names which it is, `inexact` for the first and
+`overflows-float` for the second. Those are two of the four in
+`prop_guard.REASONS`; the other two (`out-of-range`,
+`negative-into-unsigned`) are the integer ones.
+
+**Which formats `overflows-float` can fire silently on is decided by
+arithmetic, and the arithmetic ranges over every float dtype `jax.numpy` has —
+not over a catalogue.** This predicate has none: it asks `ml_dtypes.finfo`,
+which is why `prop_guard`'s F1 mitigation exists at all and why its self-test
+drives `float8_e5m2`. (`propagate._FLOAT_FORMATS` — `float16`, `bfloat16`,
+`float32`, `float64` — is the VERIFIER's IEEE-mode catalogue. It governs which
+formats a *verdict* can reason about; it has nothing to do with which formats
+this perimeter watches, and an earlier version of this paragraph borrowed it
+and came out four times too narrow.)
+
+`jax.numpy` exposes **15** concrete float formats, and they fall into three
+groups. Every `int64` value is finite in `float32`, `bfloat16`, `float64` and
+`float8_e8m0fnu`, so those **four** cannot lose one this way. `float4_e2m1fn`,
+`float6_e2m3fn` and `float6_e3m2fn` have `int64` values past their largest
+finite value, but they **saturate** to it rather than overflowing — the
+literal becomes `6`, `7.5` and `28`, which is `inexact` and not
+`overflows-float`, so those **three** are not this table either. **Eight can
+lose a literal to `inf` or `nan`**, and the perimeter refuses it as
+`overflows-float` on all eight. Measured disarmed under
+`warnings.simplefilter("error")`, identical in all four cells:
+
+| dtype | largest finite | written | runs as | disarmed, eager | disarmed, traced |
+|---|---|---|---|---|---|
+| `float16` | 65504 | `x <= 100000` | `inf` | silent | **warns** |
+| `float8_e3m4` | 15.5 | `x <= 33` | `inf` | silent | silent |
+| `float8_e4m3` | 240 | `x <= 483` | `inf` | silent | silent |
+| `float8_e5m2` | 57344 | `x <= 114691` | `inf` | silent | silent |
+| `float8_e4m3fn` | 448 | `x <= 899` | **`nan`** | silent | silent |
+| `float8_e4m3b11fnuz` | 30 | `x <= 63` | **`nan`** | silent | silent |
+| `float8_e4m3fnuz` | 240 | `x <= 483` | **`nan`** | silent | silent |
+| `float8_e5m2fnuz` | 57344 | `x <= 114691` | **`nan`** | silent | silent |
+
+**The four `nan` rows are worse in kind than the `inf` ones.** Those formats
+encode no infinity, so the literal saturates to `nan` and the comparison
+**inverts to `False` everywhere** rather than comparing against `inf` — a
+harness whose guard is `x <= N` stops holding instead of holding vacuously.
+And the seven `float8_*` rows are the ones where this perimeter is the **only**
+instrument that speaks: `-W error::RuntimeWarning` reaches the `float16` row
+under a trace and reaches none of them — which is
+[the target-format axis](#float-overflow-warning-table) again, one door along:
+`float16` is one of numpy's own formats and the `float8_*` names are not. This is the axis the corpus census
+below explicitly has no traffic on.
+
+Written larger than any of that, a literal does not reach jax intact either
+way: at `JAX_ENABLE_X64=1`, `x_f32 <= 10**40` raises jax's own `OverflowError`
+disarmed, and armed the perimeter gets there first and refuses it as
+`overflows-float` with the site named — a better message for the same defect,
+not a door that was open. At `JAX_ENABLE_X64=0` the literal is canonicalised
+from `int32`, so `x_f32 <= 10**18` raises there and is merely `inexact` with
+x64 on.
+
+Both of those are losses of the LITERAL you wrote, which is the only kind any
+of the three instruments sees. A value the program *computed* is covered by
+nothing here — bullet 3 below.
+
 ### What it does NOT cover
 
 Mode 1 and Mode 2 each have a section like this one. Mode 3's limits lived
 only in `report.PERIMETER_UNCOVERED`, which is printed at the END of a
-session — after the decision to arm has already been made — and two of them
+session — after the decision to arm has already been made — and three of them
 are load-bearing enough to belong here, where that decision is.
 
 The same wrong threshold, in three spellings of the same harness, with all
@@ -676,10 +854,54 @@ arithmetic slots and they could be installed. They are not, today, and a
 harness that does its narrowing in arithmetic rather than in a comparison is
 unwatched.
 
-Both are now bullets in the printed list too, so a run says them as well as
-this page. They were not, and the reason is worth one sentence: the list's
-last bullet already covered the function spelling *in general* — "any
-narrowing on a route with no Python operator on it at all" — and its three
+**3. A value that is ALREADY A FLOAT is covered by nothing on this page —
+which is not the same as nothing at all, and you have a remedy already.** The
+perimeter checks a written literal, and only `type(b) is int` reaches the
+predicate — `report.PERIMETER_UNCOVERED`'s second bullet. The other two
+instruments are integer→integer by construction — `stelling.intentional_wrap`
+refuses every non-integer dtype by name — so a float that overflows the format
+it is converted into gets 0 fires from the tripwire, 0 truncations from the
+eager detector and no refusal here. That much is a boundary of the release.
+
+**But it does not follow that it is silent, and this page said it was.** The
+narrowing is numpy's, and numpy says so. Driven under
+`warnings.simplefilter("error")`, identical in all four cells:
+`jnp.full((2,), 1e300, jnp.float32)`, `jnp.full((2,), 70000.0, jnp.float16)`,
+`jnp.float16(70000.0)`, `jnp.array([1e300], jnp.float32)` and
+`jnp.full((2,), 100000, jnp.float16)` each raise `RuntimeWarning: overflow
+encountered in cast`, and so do `x_f32 + 1e300` and `x_f16 + 70000.0` **when
+they are traced**, because a trace embeds its constants through the same host
+cast — and a harness is traced.
+**`pytest -W error::RuntimeWarning` fails on every one of those today**, with
+no new instrument, and this section previously told you the opposite.
+
+**The genuinely silent residue is the narrowing that happens on DEVICE**, and
+it is both smaller and more important than what was claimed. Once the value is
+inside a `jax.Array` no host cast runs, so there is nothing to warn: measured
+under the same filter, silent in all four cells, `a * a` and `a ** 2` on a
+`float32` array of `1e30`, `jnp.exp` of a `float32` `1000.0`,
+`a.astype(jnp.float16)` / `lax.convert_element_type(a, jnp.float16)` on that
+array, and `x_f16 + 70000.0` run EAGERLY are each `inf` with no warning and no
+fire from any of the three. **That is the shape of a real float overflow** —
+computed rather than written — so there is no literal for this perimeter to
+read even in principle.
+
+**And the line between them is the ROUTE, which two spellings demonstrate by
+changing sides.** `x_f32 + 1e300` and
+`jnp.asarray([1e300, 1e300]).astype(jnp.float32)`, run eagerly, warn at
+`JAX_ENABLE_X64=0` and are silent at `JAX_ENABLE_X64=1`: with x64 off numpy
+canonicalises the value to `float32` on the way in and overflows there, with
+x64 on it stays `float64` through the host and XLA narrows it. The
+`overflows-float` case above is the other side of the same line, and the
+difference is exactly what you wrote: an integer literal is watched, a value
+the program computed is not.
+
+The first two are now bullets in the printed list too, so a run says them as
+well as this page; the third always was one, and this page is where it was
+missing — the same defect facing the other way. They were not, and the reason
+is worth one sentence: the bullet reading "any narrowing that happens on a
+route with no Python operator on it at all" already covered the function
+spelling *in general* — and its three
 examples were all about tracing and caching, so a reader holding
 `jnp.less_equal(x, 2**31 - 1)` did not recognise their own program in it. A
 disclosure whose general clause is true and whose examples point elsewhere is
@@ -710,16 +932,27 @@ reason that has nothing to do with what it is about. Where the subject is an
 instrument **underneath** the perimeter, take the perimeter down for that
 block rather than declaring the narrowing.
 
-This repository runs the dial over its own suite and has both shapes. With
-`--stelling-narrowing-perimeter=error`, at `e6968fe` + this fixup, jax 0.11.0,
-CPU, `JAX_ENABLE_X64=0`:
+This repository runs the dial over its own suite and has both shapes.
+**Reproduce these four lines with one command** — jax 0.11.0, CPU:
+
+    JAX_ENABLE_X64=0 pytest -q -p no:randomly --stelling-narrowing-perimeter=error
+
+Measured that way at `49d1ff4` (this batch on top of `6c40ddc`):
 
 ```
 armed -- the dunder perimeter is live on tracer, array: 39 slot(s), 1 owner(s)
-1447 integer literal(s) ... were checked; 11 ... do not exist in the program jax would run
-11 narrowing(s) PERMITTED by an expected_truncation region, at 9 site(s)
-4404 passed, 10 skipped
+1473 integer literal(s) ... were checked; 15 ... do not exist in the program jax would run
+15 narrowing(s) PERMITTED by an expected_truncation region, at 9 site(s)
+4575 passed, 10 skipped
 ```
+
+*These are a measurement of one tree and they move when it does; the block
+read `1447 ... 11 ... 4404 passed` at `e6968fe`, several merges back. Nothing
+holds them CURRENT — running the command above is what does that, which is why
+it is written here — but the CHANGELOG's copy of them is held equal to this
+one, because the two carried different pass counts for the same claim.
+The claim that does not move is the shape: armed at the end, exit 0, and every
+narrowing the run permitted printed with the reason its author gave.*
 
 Nine sites declare a region and print their reason. Four more tests take the
 perimeter down instead, because each of them exists to watch the eager
@@ -755,6 +988,16 @@ armed against disarmed:
 | `to_dict(include_metadata=True)` | **DIFFERS** |
 | `str(jaxpr)` | **DIFFERS** |
 | a raw `repr()` of an equation's params, which carries `source_info` | **DIFFERS** |
+| StableHLO text with debug info (`jit(...).lower().as_text(debug_info=True)`) | **DIFFERS** |
+
+**Read the two StableHLO rows together, because the first one is identical for
+a reason that stops applying the moment you ask for more.** `as_text()` emits
+**no `loc(` at all** — measured, 0 of them, in all four cells — so there is no
+`source_info` in that text for the perimeter to perturb, and "identical" is a
+fact about what the spelling omits rather than about what arming does.
+`as_text(debug_info=True)` emits 144 of them on the same harness and **is not
+identical across the boundary**. If you dump HLO with debug info, the first row
+is not your row.
 
 `content_hash` is unaffected by design and not by luck: `ir.py`'s
 `CANONICALIZATIONS` declares `source_info` and `debug_info` outside the hash
@@ -877,7 +1120,7 @@ The codes are stable and greppable: `no-module`, `no-registry`, `no-entry`,
 arms and whose status is its workers' agreement: the first when not one worker
 sent a status back, the second when they disagreed.
 
-The last four belong to the **eager construction-site detector**, which
+Four of them belong to the **eager construction-site detector**, which
 attaches to a private jax *function* rather than a registry entry:
 `no-site-module` and `no-site` are the module and the attribute not being where
 they are expected; `signature-drift` is the function being there with its first
@@ -888,7 +1131,7 @@ That last failure is silent, it is what a jax release actually produces, and
 the detector refuses to attach rather than quietly dropping one of the seven
 construction routes it claims.
 
-The last three belong to the **narrowing perimeter**, which rebinds operator
+Three more belong to the **narrowing perimeter**, which rebinds operator
 slots on a jax type: `no-type` is that type no longer being findable through
 any public route, or being found and no longer owning the slots; `no-slot` is
 one slot of the set being absent, which would leave a hole in a perimeter
@@ -1056,9 +1299,10 @@ $ pytest -p stelling.overflow --stelling-overflow=require
 ```
 
 **`--stelling-eager-truncation` is registered by the same plugin and has the
-same property.** Naming `stelling.overflow` loads the plugin without arming
-the tripwire — the two dials are independent — so this is the spelling for the
-eager detector alone under `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`:
+same property.** Naming `stelling.overflow` also arms the tripwire — that is
+mode `auto` in the table above — and the two dials are independent, so
+`--stelling-overflow=off` is what leaves the eager detector on its own under
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`:
 
 ```console
 $ pytest -p stelling.overflow --stelling-overflow=off --stelling-eager-truncation=error

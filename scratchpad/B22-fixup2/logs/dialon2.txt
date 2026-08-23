@@ -1,0 +1,122 @@
+........................................................................................
+== fidelity gauge — measured discriminating power (L21)
+SCOPE — what these gates reach: the affine domain's own arithmetic: containment against dense sampling, exact cancellation, honest non-closure, and equivalence with the propagation pipeline. Does not drive the interval transfers, any emission plan, or the solver.
+baseline: passes every gate (containment-vs-dense-sampling, exact-cancellation, honest-nonclosure, pipeline-equivalence)
+  inward-rounding-on-a-coefficient-path  CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  uncanonicalized-product-cache          CAUGHT by exact-cancellation
+  mul-residue-dropped                    CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  err-accumulation-dropped-on-add        CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  discharge-reads-lo-strictly            CAUGHT by exact-cancellation
+  violation-claims-hi-at-zero            CAUGHT by honest-nonclosure
+  structural-routing-reversed            CAUGHT by exact-cancellation
+  concretization-inward-float-sum        CAUGHT by containment-vs-dense-sampling
+  cache-key-ignores-element              CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  err-signed-on-sub                      CAUGHT by containment-vs-dense-sampling
+  scale-branch-drops-snap-deltas         CAUGHT by containment-vs-dense-sampling
+== residual class (value-identical to the gauged stack; the explanation is the claim) ==
+  (empty: every mutation was caught)
+== face asymmetry (gates disagreeing about one subject; a survivor count cannot see a one-gate regression) ==
+  inward-rounding-on-a-coefficient-path: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  uncanonicalized-product-cache: CAUGHT by exact-cancellation — ADMITTED by containment-vs-dense-sampling, honest-nonclosure, pipeline-equivalence
+  mul-residue-dropped: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  err-accumulation-dropped-on-add: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  discharge-reads-lo-strictly: CAUGHT by exact-cancellation — ADMITTED by containment-vs-dense-sampling, honest-nonclosure, pipeline-equivalence
+  violation-claims-hi-at-zero: CAUGHT by honest-nonclosure — ADMITTED by containment-vs-dense-sampling, exact-cancellation, pipeline-equivalence
+  structural-routing-reversed: CAUGHT by exact-cancellation — ADMITTED by containment-vs-dense-sampling, honest-nonclosure, pipeline-equivalence
+  concretization-inward-float-sum: CAUGHT by containment-vs-dense-sampling — ADMITTED by exact-cancellation, honest-nonclosure, pipeline-equivalence
+  cache-key-ignores-element: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  err-signed-on-sub: CAUGHT by containment-vs-dense-sampling — ADMITTED by exact-cancellation, honest-nonclosure, pipeline-equivalence
+  scale-branch-drops-snap-deltas: CAUGHT by containment-vs-dense-sampling — ADMITTED by exact-cancellation, honest-nonclosure, pipeline-equivalence
+== every count above is scoped to: the affine domain's own arithmetic: containment against dense sampling, exact cancellation, honest non-closure, and equivalence with the propagation pipeline. Does not drive the interval transfers, any emission plan, or the solver. — a surface these gates do not drive is NOT gauged by this report ==
+.............. [  2%]
+..........ss.......................................................................................... [  4%]
+...................................................................................................... [  6%]
+...................................................................................................... [  8%]
+...................................................................................................... [ 11%]
+...................................................................................................... [ 13%]
+...................................................................................................... [ 15%]
+...................................................................................................... [ 17%]
+...................................................................................................... [ 20%]
+...................................................................................................... [ 22%]
+...................................................................................................... [ 24%]
+...................................................................................................... [ 26%]
+...................................................................................................... [ 28%]
+...................................................................................................... [ 31%]
+...................................................................................................... [ 33%]
+...................................................................................................... [ 35%]
+...................................................................................................... [ 37%]
+...................................................................................................... [ 40%]
+...................................................................................................... [ 42%]
+...................................................................................................... [ 44%]
+...................................................................................................... [ 46%]
+...................................................................................................... [ 49%]
+...................................................................................................... [ 51%]
+...................................................................................................... [ 53%]
+...................................................................................................... [ 55%]
+...................................................................................................... [ 57%]
+...................................................................................................... [ 60%]
+...................................................................................................... [ 62%]
+...................................................................................................... [ 64%]
+...................................................................................................... [ 66%]
+...................................................................................................... [ 69%]
+...................................................................................................... [ 71%]
+...................................................................................................... [ 73%]
+...................................................................................................... [ 75%]
+...................................................................................................... [ 78%]
+...................................................................................................... [ 80%]
+...................................................................................................... [ 82%]
+...................................................................................................... [ 84%]
+...................................................................................................... [ 86%]
+...................................................................................................... [ 89%]
+..................s................................................................................... [ 91%]
+...................................................................................................... [ 93%]
+...................................................................................................... [ 95%]
+...................................................................................................... [ 98%]
+........................................................................................               [100%]
+============================================== warnings summary ==============================================
+tests/test_falsify_independence.py::test_the_probe_disagrees_with_a_LYING_propagator
+  /home/nick/venvs/stelling-jax/lib/python3.12/site-packages/jax/_src/numpy/util.py:102: UserWarning: Explicitly requested dtype float64 requested in dtype is not available, and will be truncated to dtype float32. To enable more dtypes, set the jax_enable_x64 configuration option or the JAX_ENABLE_X64 shell environment variable. See https://github.com/jax-ml/jax#current-gotchas for more.
+    to_dtype, weak_type = dtypes.lattice_result_type(*args)
+
+tests/test_reproduce.py: 14 warnings
+tests/test_reproduce_acceptance.py: 6 warnings
+  /home/nick/venvs/stelling-jax/lib/python3.12/site-packages/flax/traverse_util.py:216: DeprecationWarning: `flax.traverse_util.Traversal` will be deprecated. If you are using it for `flax.optim`, use `optax` instead. Refer to the update guide https://flax.readthedocs.io/en/latest/guides/converting_and_upgrading/optax_update_guide.html for detailed instructions.
+    warnings.warn(
+
+tests/test_reproduce.py::test_a_precision_mismatch_gets_its_own_cause
+  /home/nick/venvs/stelling-jax/lib/python3.12/site-packages/jax/_src/numpy/util.py:84: UserWarning: Explicitly requested dtype float64 requested in dtype is not available, and will be truncated to dtype float32. To enable more dtypes, set the jax_enable_x64 configuration option or the JAX_ENABLE_X64 shell environment variable. See https://github.com/jax-ml/jax#current-gotchas for more.
+    to_dtype, weak_type = dtypes.lattice_result_type(*args)
+
+tests/test_reproduce_acceptance.py::test_the_file_restores_the_precision_its_query_was_traced_under
+  /home/nick/MSF/stelling-wt/B22-fx2-a/tests/reproduce_subjects.py:188: UserWarning: Explicitly requested dtype float64 requested in asarray is not available, and will be truncated to dtype float32. To enable more dtypes, set the jax_enable_x64 configuration option or the JAX_ENABLE_X64 shell environment variable. See https://github.com/jax-ml/jax#current-gotchas for more.
+    wide = jnp.asarray(x, jnp.float64)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================================== stelling narrowing perimeter ========================================
+armed -- the dunder perimeter is live on tracer, array: 39 slot(s), 1 owner(s)
+    armed on the array face, 33 slot(s): __add__ __and__ __divmod__ __eq__ __floordiv__ __ge__ __gt__ __le__ __lshift__ __lt__ __matmul__ __mod__ __mul__ __ne__ __or__ __radd__ __rand__ __rdivmod__ __rfloordiv__ __rlshift__ __rmatmul__ __rmod__ __rmul__ __ror__ __rpow__ __rrshift__ __rshift__ __rsub__ __rtruediv__ __rxor__ __sub__ __truediv__ __xor__
+    armed on the tracer face, 6 slot(s): __eq__ __ge__ __gt__ __le__ __lt__ __ne__
+    1473 integer literal(s) met an array or tracer in a guarded operator and were checked; 15 of them do not exist in the program jax would run
+    15 narrowing(s) PERMITTED by an expected_truncation region, at 9 site(s). A region permits ANY narrowing inside it, so each is named here with the reason its author gave:
+      /home/nick/MSF/stelling-wt/B22-fx2-a/tests/test_falsify_wrap_reach.py:352  x2  the null result IS the destruction of 256: these lines exist to show that no executable form of the program carries it
+      /home/nick/MSF/stelling-wt/B22-fx2-a/tests/test_tripwire_arm.py:1013  x3  the subject of this measurement IS which doors narrow in silence, so the construction doors are driven with an operand that does not fit | the bare-int row: all eleven doors driven with a value that does not fit, to separate a dtype rejection from a value rejection
+      /home/nick/MSF/stelling-wt/B22-fx2-a/tests/test_tripwire_arm.py:1014  x3  the subject of this measurement IS which doors narrow in silence, so the construction doors are driven with an operand that does not fit | the bare-int row: all eleven doors driven with a value that does not fit, to separate a dtype rejection from a value rejection
+      /home/nick/MSF/stelling-wt/B22-fx2-a/tests/test_tripwire_arm.py:816  x1  the subject of this test IS the scoped disable_jit block swallowing the narrowing; 200 -> -56 is what is being demonstrated
+      /home/nick/MSF/stelling-wt/B22-fx2-a/tests/test_tripwire_arm.py:889  x1  the wrap is this test's subject: it shows the const-fold site is NOT reached by eager `x + 256`, which requires performing it
+      /home/nick/MSF/stelling-wt/B22-fx2-a/tests/test_tripwire_eager.py:1873  x1  driving the jit-ON silence this test is about
+      /home/nick/MSF/stelling-wt/B22-fx2-a/tests/test_tripwire_gate.py:109  x1  the int8 bound 200 is incidental to this test's subject and runs as -56; the subject is the x + 256 the gate must see
+      /home/nick/MSF/stelling-wt/B22-fx2-a/tests/test_tripwire_gate.py:209  x1  the int8 bound 200 is incidental to this test's subject and runs as -56; the subject is the gate being transparent
+      /home/nick/MSF/stelling-wt/B22-fx2-a/tests/test_tripwire_gate_coverage.py:116  x2  GATE_COVERAGE is a measurement of the DEFAULT path; these routes are driven precisely to see which of them narrow in silence
+    the predicate declined nothing and recognised every slot it was given, so the figures above cover every check that was made
+    what this perimeter does NOT see:
+      - any operator that is not in the armed list printed above. The list is not a summary of a wider perimeter: it is the whole of it, and an operator missing from it is unwatched.
+      - a literal that is not a Python `int`: `x <= 2147483647.0` is a float on the way in and there is nothing to convert, so nothing is checked. Only `type(b) is int` reaches the predicate, and `bool` is excluded with it.
+      - a constant that never meets an operator: `jnp.full((), 256, jnp.int8)` is 0 before any slot is entered. That door is the EAGER detector's (`--stelling-eager-truncation`), and neither instrument covers the other's.
+      - an operand that is neither an array nor a tracer -- a numpy array or a numpy scalar meets numpy's own rules, and numpy raises its own OverflowError for an out-of-range int rather than narrowing silently.
+      - `x ** k`: jax lowers it to `integer_pow[y=k]` and keeps the exponent a Python int in the program's own structure -- it is never converted and never reaches StableHLO as a constant -- so the slot is deliberately not installed. `k ** x` IS covered: that one does convert, and does narrow.
+      - a size-0 operand, which is exempt by measurement: 2,988 (literal, narrowed-image) outcome comparisons on empty arrays across all 34 slots, zero differences. An empty array narrows nothing observably.
+      - an operand carrying a jax EXTENDED dtype (`key<fry>`), which the predicate declines before touching any attribute of it: those dtypes have no `.kind` and reading one raises.
+      - any narrowing that happens on a route with no Python operator on it at all -- inside a jitted function jax has already traced, inside a primitive's own lowering, or in code that never re-enters Python because a trace cache answered for it.
+      - the `jnp.*` FUNCTION spelling of an operator. `jnp.less_equal(x, N)` and `jnp.add(x, N)` are calls, not operators -- no slot is entered and nothing is checked. Measured: `x <= 2**31 - 1` on float32 is refused and `jnp.less_equal(x, 2**31 - 1)` is VERIFIED, and `jnp.add(x_int16, 40000)` is -25536 in silence.
+      - arithmetic inside a TRACED harness. The tracer face carries the six comparisons only, so of the slots armed above just those six can fire on a traced operand: `(x - N) <= 0.0` converts N in `Tracer.__sub__`, which is not installed, and is VERIFIED. The arithmetic slots are on the concrete array type -- the eager spelling -- and jax's tracer type owns them too, so this is a scope decision rather than a jax limit.
+4573 passed, 10 skipped, 23 warnings in 950.93s (0:15:50)

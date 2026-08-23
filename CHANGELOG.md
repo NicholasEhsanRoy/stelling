@@ -176,6 +176,7 @@ reaches it: Mode 2 is 0.2.0 development work throughout.
   function it patches and drives every construction route it claims, in both
   directions. Versions: 0.2.0 development builds only.
   [Detail](SOUNDNESS.md#m2-020-06)
+
 ### The narrowing perimeter (Mode 3), DEFAULT-OFF
 
 A THIRD instrument, opt-in and switched on by nothing else. The detail is
@@ -307,13 +308,22 @@ is 0.2.0 development work throughout.
 
 - **The dial can be turned on over this repository's own suite, and the seven
   tests it refused are now declared.** With
-  `--stelling-narrowing-perimeter=error` the whole suite is **4404 passed, 10
-  skipped**, exit 0 — armed at the end, `1447 integer literal(s)` checked,
-  `11 narrowing(s) PERMITTED at 9 site(s)`, each printed with the reason its
-  author gave. With the seven declarations taken back out it is **7 failed, 4397
-  passed**, and the report reads `1455 ... checked; 15 do not exist`, `7 of
-  those NOT inside an expected_truncation region`, `8 PERMITTED at 6 site(s)`
-  -- which is the measurement they answer.
+  `--stelling-narrowing-perimeter=error` the whole suite passes with the dial
+  armed at the end, exit 0, every permitted narrowing printed with the reason
+  its author gave. The figures are a measurement of one tree and move when it
+  does. Re-measured at `49d1ff4` (this batch on `6c40ddc`) with
+  `JAX_ENABLE_X64=0 pytest -q -p no:randomly
+  --stelling-narrowing-perimeter=error`, they read **4575 passed, 10
+  skipped**, `1473 integer literal(s)` checked, `15 narrowing(s) PERMITTED at 9
+  site(s)`; when this
+  entry was written they read `4404 passed, 10 skipped`, `1447` and `11 at 9`.
+  This entry and `docs/overflow-tripwire.md` carried **4568** and **4565** for
+  the same claim at the same tip, so a test now holds the two copies equal.
+  With the seven declarations taken back out — measured at the
+  time, not re-driven since — it is **7 failed, 4397 passed**, and the report
+  reads `1455 ... checked; 15 do not exist`, `7 of those NOT inside an
+  expected_truncation region`, `8 PERMITTED at 6 site(s)` — which is the
+  measurement they answer.
 
   Three of the seven are new `expected_truncation` regions
   (`test_tripwire_arm.py`, and two in `test_tripwire_gate.py` where an
@@ -352,7 +362,7 @@ is 0.2.0 development work throughout.
   each site.
 
 - **The shared helper is inert where it is not used.** `tests/conftest.py` is
-  imported by all 146 test files, the zero-dep lane included, so
+  imported by every test file in this tree, the zero-dep lane included, so
   `test_import_hygiene.py` now pins that importing it pulls in **no jax and no
   numpy**, that it arms nothing (it is a plain function, not a fixture), and
   that entering the block with nothing armed is a no-op yielding `()`. Driven
@@ -362,9 +372,9 @@ is 0.2.0 development work throughout.
   therefore unmeasurable on the shipped tree.**
   `tests/test_narrowing_perimeter.py`'s autouse fixture restored
   unconditionally — the exact asymmetry `arm(owner=...)` exists to prevent,
-  aimed at the plugin's hold. That file sorts **71 of 146**, so its first test
-  took the perimeter out and roughly **4,300 later tests ran unprotected with
-  nothing red**; the documented dial-on command reported `NOT ARMED
+  aimed at the plugin's hold. That file sorts **72nd of the 148 files** `pytest --collect-only -q -p no:randomly` names in this tree, so its
+  first test took the perimeter out and roughly **4,300 later
+  tests ran unprotected with nothing red**; the documented dial-on command reported `NOT ARMED
   [detached] ... 0 integer literal(s) ... were checked`. It now records what
   it found, lowers the hold for its own window only, and hands it back by
   identity through `arm()`, raising if it cannot.
@@ -414,9 +424,161 @@ is 0.2.0 development work throughout.
   those six can fire on a traced operand — `x - N` inside a harness goes
   through `Tracer.__sub__`, which is not installed. The second is a **scope
   decision, not a jax limitation**: measured, jax's tracer type owns all 27
-  arithmetic slots. The printed list's last bullet did cover the function
-  form *in general*, and its three examples were all about tracing and
+  arithmetic slots. The printed list's general bullet — *"any narrowing that
+  happens on a route with no Python operator on it at all"* — did cover the
+  function form, and its three examples were all about tracing and
   caching, which is how a true disclosure gets read as the examples.
+
+- **The float answer was written with its silence axis INVERTED, and the test
+  that certified it silenced the alarm.** `docs/overflow-tripwire.md` said a
+  float value that overflows *"is seen by nothing"* and *"raises no alarm
+  anywhere in this release"*. None of the three instruments sees one — that
+  part holds — but the narrowing is numpy's, and some of it numpy reports as
+  `RuntimeWarning: overflow encountered in cast`, so
+  **`pytest -W error::RuntimeWarning` fails on that part today**. Driven under
+  `warnings.simplefilter("error")` over the six cases the page named, in all
+  four cells (0.10.2 / 0.11.0 × x64 off/on): **five warn eagerly with x64
+  off, three with x64 on** — the eager half is exactly what the x64 flag
+  moves — and **five of the six warn inside `jit`**, because a trace embeds
+  its constants through that same cast. The sixth is
+  `jit(lambda a: a.astype(jnp.float32))` on `[1e300, 1e300]` with the operand
+  built outside the measurement window, which is **silent in all four cells**:
+  the operand really is an array by then and the conversion really is XLA's.
+  The integer cases the page contrasted all six against are genuinely silent,
+  eager and traced alike. The page defines
+  silence as *"no `RuntimeWarning` you could turn into one"* and names
+  `-W error` as common in scientific repos, so the conclusion drawn — *"a
+  scope boundary and not a hole … closing it would be a different
+  instrument"* — withheld a remedy the reader already had.
+
+  **The gate could not see it**: it wrapped its drive in
+  `warnings.simplefilter("ignore", RuntimeWarning)` and passed under
+  `pytest -W error::RuntimeWarning`. It asserts the warning now, per case,
+  in both directions.
+
+  **The genuinely silent residue is smaller and sharper, and it is the case a
+  numerical program actually produces.** The split is HOST versus DEVICE:
+  once a value is inside a `jax.Array` no host cast runs and there is nothing
+  to warn. Measured silent under the same filter in all four cells: `a * a`
+  and `a ** 2` on a `float32` array of `1e30`, `jnp.exp` of a `float32`
+  `1000.0`, `a.astype(jnp.float16)` / `lax.convert_element_type(a,
+  jnp.float16)` on that array, and `x_f16 + 70000.0` run EAGERLY — each
+  `inf`, 0 fires from all three instruments, and `-W error::RuntimeWarning`
+  does not reach any of them. The overflow there is *computed*, so there is no
+  literal for a literal-watcher to read even in principle.
+
+  **Whether a given line is on the host at all can change with the x64 flag**,
+  and two lines change sides between cells to prove it: `x_f32 + 1e300` and
+  `jnp.asarray([1e300, 1e300]).astype(jnp.float32)`, run eagerly, warn at
+  `JAX_ENABLE_X64=0` and are silent at `JAX_ENABLE_X64=1` — numpy
+  canonicalises to `float32` on the way in with x64 off, and XLA does the
+  narrowing with it on. They are a declared group in the gate, asserted in the
+  direction the running cell is in — and driving all four cells is what caught
+  a case this fixup had first filed under WARNS for the wrong reason
+  (`jit(a.astype(jnp.float32))` on `[1e300, 1e300]`, whose x64-off warning came
+  from the `asarray` that built the operand, not from the `astype` it was
+  named for).
+
+- **…and HOST versus DEVICE does not partition it either, which is the second
+  correction to the same paragraph.** The fixup's replacement claimed a
+  universal — *"where the narrowing is done ON THE HOST, by numpy, the cast
+  emits `RuntimeWarning`"* — and drew a remedy from it: `-W
+  error::RuntimeWarning` *"covers whatever numpy touched and nothing else."*
+  Measured, **it does not cover `bfloat16`**: `jnp.full((2,), 1e300,
+  jnp.bfloat16)`, `jnp.array([1e300], jnp.bfloat16)` and `jnp.bfloat16(1e300)`
+  are each `inf` with nothing raised, in all four cells, at the same three
+  construction doors that raise for `float32` — and `jax.make_jaxpr` already
+  holds `inf:bf16[]`, so it is a host narrowing and not the device residue.
+  **The page contained its own counter-example** three paragraphs from the
+  sentence: its float8 table said `float16` is the only format whose host cast
+  warns when traced, which is seven silent host casts beside a claim that host
+  casts warn.
+
+  **What decides is the TARGET FORMAT.** The warning comes from numpy's own
+  floating-point machinery, which knows only the formats numpy implements
+  itself — `float16`, `float32`, `float64`. The **other twelve** float
+  formats `jax.numpy` exposes come from `ml_dtypes`, which converts by integer
+  bit arithmetic and raises no floating-point flag. The control that settles
+  it has no jax in it: one numpy cast loop on one `float32` array of `1e30`
+  **warns** into `float16` and is **silent** into `float8_e5m2` (`inf`) and
+  `float8_e4m3fn` (`nan`) — the silent ones lost far more. So the page now
+  states the remedy exactly — it catches a host narrowing into `float16`,
+  `float32` or `float64` and nothing else — and a new gate derives both lists
+  from `jax.numpy`, drives all three doors on all fifteen formats, and
+  compares the page's table, its enumeration and its remedy sentence against
+  what was driven. **Measured before it existed:** inverting the axis
+  sentence, rewriting the device-silent case list, and changing the page to
+  claim `-W error::RuntimeWarning` *does* reach the device residue were all
+  three green.
+
+- **`overflows-float` fires on EIGHT of `jax.numpy`'s float formats, not the
+  one the page claimed — and four of them run as `nan`.** The sentence said
+  *"among the four catalogued formats only `float16` has a finite range an
+  integer literal can leave quietly"*, justified as *"arithmetic rather than
+  policy"*, and the justification is what made it wrong: the four were
+  `propagate._FLOAT_FORMATS`, the **verifier's** IEEE-mode catalogue, which
+  this perimeter's page never introduces and its predicate never consults.
+  `prop_guard` has no catalogue — it asks `ml_dtypes.finfo`, which is why F1
+  exists and why its own self-test drives `float8_e5m2`. Measured disarmed
+  under `simplefilter("error")`, identical in all four cells: `float16` plus
+  seven of the eight `float8_*` names it exposes lose an integer literal
+  quietly (`float8_e8m0fnu`'s range covers every `int64`), and
+  `float8_e4m3fn`, `float8_e4m3b11fnuz`, `float8_e4m3fnuz` and
+  `float8_e5m2fnuz` — which encode no infinity — run as **`nan`**, so
+  `x <= N` **inverts to `False` everywhere** rather than comparing against
+  `inf`. `float16` is the only one of the eight whose host cast warns when
+  traced, so on the other seven this perimeter is the only instrument that
+  speaks — the same axis the corpus census records as carrying no traffic at
+  all. The set is now derived from `jax.numpy` in the test rather than
+  borrowed, and compared against the page's table in both directions.
+
+- **Five gates that could not fail.** (1) The page's opening `x + 256` demo
+  was compared against a re-implementation in the test, so the page's CODE
+  could drift from the answers printed under it — measured: changing it to
+  `x + 300` left 325 tests green while the real jaxpr becomes `add a 44:i8[]`
+  and the result `[-112, 94, 34]`. The block is executed **out of the page**
+  now. (2) Nothing in the tree read the artefact table, so a row moved
+  between its halves silently; both directions are pinned against `IDENTICAL`
+  and `PERTURBED`. (3) The *what runs* table's cells were matched by
+  substring, so `-25536` was satisfied by `-255360`, and the comparison row's
+  driven value was discarded and replaced by a re-derivation down numpy's
+  cast path; cells are compared exactly and the comparison row is read out of
+  the **jaxpr**. (4) `x_f16 <= 100000` appears twice on the page and the
+  assertion was `... in page`, so either occurrence kept it green; every
+  occurrence is checked. (5) The StableHLO control was blind to what it
+  exists to detect — `jit(...).lower().as_text()`, the spelling the page
+  quotes, emits **no `loc(` at all**, so the `IDENTICAL` entry could not
+  redden on a `source_info` perturbation. `as_text(debug_info=True)` emits
+  144 and **DIFFERS**; both are in the table, the `loc(` counts are pinned,
+  and the three lowerings are taken from **one source line**, because that
+  text records the caller's line number and comparing two call sites
+  "differs" with nothing armed. (6) A sixth, found in this fixup's own work
+  and the same class as the other five: the silent half's failure message was
+  **referenced and not defined**, and every test stayed green, because an
+  `assert` message and an unreached `pytest.fail` argument are evaluated only
+  on the failing path — so the sentence a maintainer needs at the moment the
+  disclosure has become wrong was a `NameError`. It is rendered on the
+  PASSING path now, with both call shapes.
+
+- **A test that arms the tripwire no longer detaches the session's hold.**
+  `_tripwire.arm()`/`disarm()` carry no owner, so an unconditional `disarm()`
+  in a test takes out a session-armed instrument. Under
+  `pytest -p stelling.overflow --stelling-overflow=require` —
+  the spelling the page tells readers to use — `tests/test_narrowing_perimeter.py`
+  ended `NOT ARMED [detached]`, PARTIAL, **exit 1**, with `tests/_state_guard.py`
+  erroring at the test that did it. `conftest.borrowed_tripwire` /
+  `borrowed_eager` apply the one rule that fixes it — **do not put back what
+  you did not take** — and all four sites in that file use them; the same
+  command now reports `armed`, exit 0.
+
+- **The runtime message shipped the sentence the page had corrected.**
+  `report._suggestions` still read *"it rejects a Python int at none of the
+  eleven, which is the spelling in front of you"* — contradicted by the
+  bullet directly above it in the same list, which tells the reader that
+  `jnp.array(N, dt)` raises `OverflowError` for a Python int. It now says
+  which rejection a bare Python int does not get (`TypePromotionError`, at
+  none of the eleven) and which three doors raise on the **value** instead,
+  and one measurement holds both the page's row and the message.
 
 ### Verification pipeline
 
@@ -462,9 +624,10 @@ is 0.2.0 development work throughout.
   trigonometry, a fractional `pow`, a non-square `sqrt`) inherently, and
   `dot_general`, `sort`, `cumsum`, `stack`, `rem`, `scatter` and
   `scatter-add` because this module's tables have no reading for them
-  yet. Three of the six live
-  fixtures in `tests/test_falsify_probe.py` are `scatter` and now decline;
-  they are listed there with the primitive that costs each one.
+  yet. Three of the six fixtures `tests/test_falsify_probe.py`'s live corpus
+  USED TO HOLD are `scatter` and now decline; they are listed there, in
+  `DECLINED_FOR_WANT_OF_AN_EXACT_READING`, with the primitive that costs each
+  one, so `LIVE` holds the three that remain.
 
   Every admission is also downstream of the point being **admitted by
   every assume**, and that gate is a reading of the program that can be

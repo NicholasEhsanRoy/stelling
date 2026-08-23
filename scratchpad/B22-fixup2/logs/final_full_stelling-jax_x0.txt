@@ -1,0 +1,95 @@
+........................................................................................
+== fidelity gauge — measured discriminating power (L21)
+SCOPE — what these gates reach: the affine domain's own arithmetic: containment against dense sampling, exact cancellation, honest non-closure, and equivalence with the propagation pipeline. Does not drive the interval transfers, any emission plan, or the solver.
+baseline: passes every gate (containment-vs-dense-sampling, exact-cancellation, honest-nonclosure, pipeline-equivalence)
+  inward-rounding-on-a-coefficient-path  CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  uncanonicalized-product-cache          CAUGHT by exact-cancellation
+  mul-residue-dropped                    CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  err-accumulation-dropped-on-add        CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  discharge-reads-lo-strictly            CAUGHT by exact-cancellation
+  violation-claims-hi-at-zero            CAUGHT by honest-nonclosure
+  structural-routing-reversed            CAUGHT by exact-cancellation
+  concretization-inward-float-sum        CAUGHT by containment-vs-dense-sampling
+  cache-key-ignores-element              CAUGHT by containment-vs-dense-sampling, honest-nonclosure
+  err-signed-on-sub                      CAUGHT by containment-vs-dense-sampling
+  scale-branch-drops-snap-deltas         CAUGHT by containment-vs-dense-sampling
+== residual class (value-identical to the gauged stack; the explanation is the claim) ==
+  (empty: every mutation was caught)
+== face asymmetry (gates disagreeing about one subject; a survivor count cannot see a one-gate regression) ==
+  inward-rounding-on-a-coefficient-path: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  uncanonicalized-product-cache: CAUGHT by exact-cancellation — ADMITTED by containment-vs-dense-sampling, honest-nonclosure, pipeline-equivalence
+  mul-residue-dropped: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  err-accumulation-dropped-on-add: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  discharge-reads-lo-strictly: CAUGHT by exact-cancellation — ADMITTED by containment-vs-dense-sampling, honest-nonclosure, pipeline-equivalence
+  violation-claims-hi-at-zero: CAUGHT by honest-nonclosure — ADMITTED by containment-vs-dense-sampling, exact-cancellation, pipeline-equivalence
+  structural-routing-reversed: CAUGHT by exact-cancellation — ADMITTED by containment-vs-dense-sampling, honest-nonclosure, pipeline-equivalence
+  concretization-inward-float-sum: CAUGHT by containment-vs-dense-sampling — ADMITTED by exact-cancellation, honest-nonclosure, pipeline-equivalence
+  cache-key-ignores-element: CAUGHT by containment-vs-dense-sampling, honest-nonclosure — ADMITTED by exact-cancellation, pipeline-equivalence
+  err-signed-on-sub: CAUGHT by containment-vs-dense-sampling — ADMITTED by exact-cancellation, honest-nonclosure, pipeline-equivalence
+  scale-branch-drops-snap-deltas: CAUGHT by containment-vs-dense-sampling — ADMITTED by exact-cancellation, honest-nonclosure, pipeline-equivalence
+== every count above is scoped to: the affine domain's own arithmetic: containment against dense sampling, exact cancellation, honest non-closure, and equivalence with the propagation pipeline. Does not drive the interval transfers, any emission plan, or the solver. — a surface these gates do not drive is NOT gauged by this report ==
+.............. [  2%]
+..........ss.......................................................................................... [  4%]
+...................................................................................................... [  6%]
+...................................................................................................... [  8%]
+...................................................................................................... [ 11%]
+...................................................................................................... [ 13%]
+...................................................................................................... [ 15%]
+...................................................................................................... [ 17%]
+...................................................................................................... [ 20%]
+...................................................................................................... [ 22%]
+...................................................................................................... [ 24%]
+...................................................................................................... [ 26%]
+...................................................................................................... [ 28%]
+...................................................................................................... [ 31%]
+...................................................................................................... [ 33%]
+...................................................................................................... [ 35%]
+...................................................................................................... [ 37%]
+...................................................................................................... [ 40%]
+...................................................................................................... [ 42%]
+...................................................................................................... [ 44%]
+...................................................................................................... [ 46%]
+...................................................................................................... [ 49%]
+...................................................................................................... [ 51%]
+...................................................................................................... [ 53%]
+...................................................................................................... [ 55%]
+...................................................................................................... [ 57%]
+...................................................................................................... [ 60%]
+...................................................................................................... [ 62%]
+...................................................................................................... [ 64%]
+...................................................................................................... [ 66%]
+...................................................................................................... [ 69%]
+...................................................................................................... [ 71%]
+...................................................................................................... [ 73%]
+...................................................................................................... [ 75%]
+...................................................................................................... [ 77%]
+...................................................................................................... [ 80%]
+...................................................................................................... [ 82%]
+...................................................................................................... [ 84%]
+...................................................................................................... [ 86%]
+...................................................................................................... [ 89%]
+....................s................................................................................. [ 91%]
+...................................................................................................... [ 93%]
+...................................................................................................... [ 95%]
+...................................................................................................... [ 98%]
+..........................................................................................             [100%]
+============================================== warnings summary ==============================================
+tests/test_falsify_independence.py::test_the_probe_disagrees_with_a_LYING_propagator
+  /home/nick/venvs/stelling-jax/lib/python3.12/site-packages/jax/_src/numpy/util.py:102: UserWarning: Explicitly requested dtype float64 requested in dtype is not available, and will be truncated to dtype float32. To enable more dtypes, set the jax_enable_x64 configuration option or the JAX_ENABLE_X64 shell environment variable. See https://github.com/jax-ml/jax#current-gotchas for more.
+    to_dtype, weak_type = dtypes.lattice_result_type(*args)
+
+tests/test_reproduce.py: 14 warnings
+tests/test_reproduce_acceptance.py: 6 warnings
+  /home/nick/venvs/stelling-jax/lib/python3.12/site-packages/flax/traverse_util.py:216: DeprecationWarning: `flax.traverse_util.Traversal` will be deprecated. If you are using it for `flax.optim`, use `optax` instead. Refer to the update guide https://flax.readthedocs.io/en/latest/guides/converting_and_upgrading/optax_update_guide.html for detailed instructions.
+    warnings.warn(
+
+tests/test_reproduce.py::test_a_precision_mismatch_gets_its_own_cause
+  /home/nick/venvs/stelling-jax/lib/python3.12/site-packages/jax/_src/numpy/util.py:84: UserWarning: Explicitly requested dtype float64 requested in dtype is not available, and will be truncated to dtype float32. To enable more dtypes, set the jax_enable_x64 configuration option or the JAX_ENABLE_X64 shell environment variable. See https://github.com/jax-ml/jax#current-gotchas for more.
+    to_dtype, weak_type = dtypes.lattice_result_type(*args)
+
+tests/test_reproduce_acceptance.py::test_the_file_restores_the_precision_its_query_was_traced_under
+  /home/nick/MSF/stelling-wt/B22-fx2-d/tests/reproduce_subjects.py:188: UserWarning: Explicitly requested dtype float64 requested in asarray is not available, and will be truncated to dtype float32. To enable more dtypes, set the jax_enable_x64 configuration option or the JAX_ENABLE_X64 shell environment variable. See https://github.com/jax-ml/jax#current-gotchas for more.
+    wide = jnp.asarray(x, jnp.float64)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+4575 passed, 10 skipped, 23 warnings in 925.86s (0:15:25)

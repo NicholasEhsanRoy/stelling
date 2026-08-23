@@ -1258,10 +1258,26 @@ BLIND_SPOT = {
               "one numpy-vs-lax sign reading that tests/test_tripwire_eager "
               "and the norm's own instance re-drive"),
     "docs/overflow-tripwire.md": (
-        5, 10, "OWED by B17, which owns this page. Its fifteen blocks have "
-               "NOT been classified: the comment above EXPECTED_INVENTORY "
-               "accounts for the three ADDITIONS B16 and B17 made, not for "
-               "the page's inventory. Declared in _OWED_PAGES"),
+        5, 10, "NOT-A-TRANSCRIPT x8, EXCERPT x5, RAISES-BY-DESIGN x2. The "
+               "two that RAISE-BY-DESIGN are the eager detector's defect "
+               "(`jnp.full((), 256, jnp.int8)`) and the perimeter's harness: "
+               "armed they raise, disarmed they print nothing, so there is no "
+               "output either way. The five EXCERPTs are quotations of "
+               "something the tree owns -- one equation of the demo jaxpr "
+               "below it, one row of `_JAX_EAGER_CONSTANTS`, the denominator "
+               "line in the form `report.render_denominator` prints it, and "
+               "the trace gate's two refusals, which "
+               "`tests/test_tripwire_gate.py` holds. The eight "
+               "NOT-A-TRANSCRIPTs are a two-line conftest, the `x + 256` demo "
+               "whose reading is written into the block as comments with an "
+               "arrow (driven by "
+               "`test_tripwire_arm.py::test_the_pages_OPENING_DEMO_is_what_jax_does`), "
+               "a specimen report about a file that is not in this tree, the "
+               "eager alarm quoted so a reader meets it before arming, the "
+               "`intentional_wrap` declaration (which prints nothing), the "
+               "two PRNG measurements `tests/test_tripwire_eager.py` "
+               "re-drives, and the whole-suite dial-on summary, which this "
+               "module does not run"),
     "docs/preconditions.md": (
         1, 0, "READER-SUPPLIES: the LibmBudget example takes the reader's own "
               "profile name and measurement"),
@@ -1366,9 +1382,26 @@ def test_every_page_outside_the_gate_has_been_decided_about():
 # any reason at all through on those two pages -- measured: `"legacy,
 # whatever"` was GREEN on `quickstart.md` and RED on `norms.md` -- while the
 # test's docstring said each entry names which of the six cases it is.
-# `quickstart.md` has since been classified (EXCERPT, and its page says so),
-# which leaves one.
-_OWED_PAGES = {"docs/overflow-tripwire.md"}
+# `quickstart.md` was classified first (EXCERPT, and its page says so).
+#
+# IT IS EMPTY NOW, and the reason it stayed occupied so long is worth one
+# line: `docs/overflow-tripwire.md` was excluded from the 0.2.0 documentation
+# sweep because B17 owned it, and the exemption outlived the batch. Its
+# fifteen blocks are classified above, one case each, in B22 -- and two of
+# them stopped being ungated ENTIRELY rather than being labelled: the page's
+# opening `x + 256` demo and the excerpt fence six paragraphs above it are
+# now driven by
+# `tests/test_tripwire_arm.py::test_the_pages_OPENING_DEMO_is_what_jax_does`,
+# against the page's own comment lines, on both jax series. They stay
+# `illustrative` here because their reading is written into the block as
+# comments with an arrow under the byte that is gone, so this module has no
+# fence to attach -- which is what NOT-A-TRANSCRIPT means and is not a reason
+# for nobody to run them. Measured before that test existed: grep for the
+# jaxpr text and for `[100, 50, -10]` across `tests/` had no hits.
+#
+# AN EMPTY SET IS NOT A CLOSED DOOR. Adding a page back here is still one
+# edit, in the open, next to the sentence saying what the debt is for.
+_OWED_PAGES: set[str] = set()
 
 # How big the debt is, and it RATCHETS DOWN. Derived and re-measured on
 # every run below; recorded here so that GROWING it is an edit somebody has
@@ -1400,7 +1433,15 @@ _OWED_PAGES = {"docs/overflow-tripwire.md"}
 # says what it can see; what it cannot see is stated there rather than
 # implied, because the message it replaced read as though a smaller number
 # were evidence somebody had done the work.
-_OWED_DEBT = 15
+# B22 took it 15 -> 0: `docs/overflow-tripwire.md`, the last OWED page, is
+# classified above. The gate below says a smaller number is an edit somebody
+# made and not evidence somebody did the work, so here is what was done, to be
+# checked against the diff rather than believed: fifteen items, each given one
+# of the six case names; two of them additionally gated by a new test that
+# reads the page (see `_OWED_PAGES`); none deleted, none moved to another
+# page, and the page's `(5, 10)` pair is unchanged, which is the half
+# `test_every_page_outside_the_gate_has_been_decided_about` re-derives.
+_OWED_DEBT = 0
 
 
 def test_every_blind_spot_entry_carries_a_reason_from_the_closed_set():

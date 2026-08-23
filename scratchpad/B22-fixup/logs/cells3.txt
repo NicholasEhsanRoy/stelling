@@ -1,0 +1,5 @@
+=== FULL SUITE venv=stelling-jax010 x64=0 ===
+4568 passed, 10 skipped, 23 warnings in 790.38s (0:13:10)
+=== FULL SUITE venv=stelling-jax010 x64=1 ===
+4567 passed, 11 skipped, 22 warnings in 806.75s (0:13:26)
+=== FULL SUITE venv=stelling-jax x64=1 ===

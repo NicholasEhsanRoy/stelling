@@ -1,0 +1,16 @@
+=== venv=stelling-jax010 x64=0 ===
+...................................................................................................... [ 69%]
+............................................                                                           [100%]
+146 passed in 61.30s (0:01:01)
+=== venv=stelling-jax010 x64=1 ===
+========================================== short test summary info ===========================================
+FAILED tests/test_narrowing_perimeter.py::test_a_float_VALUE_that_overflows_warns_on_the_HOST_and_is_silent_on_DEVICE
+1 failed, 144 passed, 1 skipped in 67.01s (0:01:07)
+=== venv=stelling-jax x64=0 ===
+...................................................................................................... [ 69%]
+............................................                                                           [100%]
+146 passed in 63.89s (0:01:03)
+=== venv=stelling-jax x64=1 ===
+========================================== short test summary info ===========================================
+FAILED tests/test_narrowing_perimeter.py::test_a_float_VALUE_that_overflows_warns_on_the_HOST_and_is_silent_on_DEVICE
+1 failed, 144 passed, 1 skipped in 77.99s (0:01:17)

@@ -1382,8 +1382,8 @@ def lowered_perimeter():
     refuses the reference defect), every other reading says ``armed`` — and
     the object a later ``disarm()`` restores is no longer jax's.
     """
-    # IMPORTED HERE AND NOT AT MODULE SCOPE. Every one of this tree's 146 test
-    # files imports this conftest, the zero-dep lane included, and
+    # IMPORTED HERE AND NOT AT MODULE SCOPE. Every test file in this tree
+    # imports this conftest, the zero-dep lane included, and
     # `perimeter.py` is only numpy-free because it binds the predicate lazily.
     # A module-scope import would still be safe today and would be a standing
     # invitation to stop being; this is also why this is a plain function and
@@ -1476,3 +1476,61 @@ def lowered_perimeter():
         # is the right order: a leaked perimeter outlives whatever the block
         # was failing about.
         _hand_back()
+
+
+@contextlib.contextmanager
+def borrowed_tripwire(recorder=None):
+    """``arm()`` the const-fold tripwire and leave the SESSION's hold as found.
+
+    Yields ``(Status, Recorder)`` exactly as :func:`stelling._tripwire.arm`
+    does — and when the process was already armed, the recorder is the LIVE
+    one, because that is what ``arm()`` hands back in that case.
+
+    **WHY THIS EXISTS, and it is the same incident as** :func:`lowered_perimeter`
+    **one instrument along.** ``_tripwire.arm()``/``disarm()`` carry no owner:
+    ``disarm()`` restores jax's original rule whoever installed it. So a test
+    that arms, works, and unconditionally disarms **detaches a session-armed
+    tripwire**, and under ``pytest -p stelling.overflow
+    --stelling-overflow=require`` — the spelling ``docs/overflow-tripwire.md``
+    tells readers to use — the session then ends ``NOT ARMED [detached]``,
+    PARTIAL, exit 1, with every test after that point running uninstrumented
+    and ``tests/_state_guard.py`` erroring at the test that did it. Measured
+    on this file before this helper existed.
+
+    The fix is one line of policy: **do not put back what you did not take.**
+    ``install()`` returns ``already-armed`` and does not double-wrap, so when
+    the session owns the hold this block changes nothing at all — the state
+    guard's fingerprint of ``jax:const-fold-rule`` and ``tripwire:installed``
+    is identical either side — and when it does not, the disarm on the way out
+    is the one that was owed.
+    """
+    from stelling import _tripwire
+
+    ours = not _tripwire.is_armed()
+    status, rec = _tripwire.arm(recorder)
+    try:
+        yield status, rec
+    finally:
+        if ours:
+            _tripwire.disarm()
+
+
+@contextlib.contextmanager
+def borrowed_eager():
+    """:func:`borrowed_tripwire` for the eager truncation detector.
+
+    Same shape and the same reason: ``--stelling-eager-truncation=error`` arms
+    it for the whole session, ``arm_eager()``/``disarm_eager()`` have no owner,
+    and an unconditional ``disarm_eager()`` in a test hands the session's hold
+    back to nobody.
+    """
+    from stelling import _tripwire
+    from stelling._tripwire import eager as _eager
+
+    ours = not _eager.is_armed()
+    status = _tripwire.arm_eager()
+    try:
+        yield status
+    finally:
+        if ours:
+            _tripwire.disarm_eager()

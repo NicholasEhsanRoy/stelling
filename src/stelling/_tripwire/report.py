@@ -514,8 +514,12 @@ def _suggestions(finding: record.Finding) -> list[str]:
         "doors -- jnp.array, jnp.asarray, jnp.int8, jnp.full, jnp.full_like "
         "-- where that same operand narrows without a word. It rejects the "
         "IN-RANGE np.int64(3) at exactly those same six, so it separates "
-        "DTYPES and not values; and it rejects a Python int at none of the "
-        "eleven, which is the spelling in front of you.",
+        "DTYPES and not values. It raises no TypePromotionError for a bare "
+        "Python int at any of the eleven -- which is the spelling in front of "
+        "you -- and that is not the same as letting it through: three of the "
+        "construction doors (jnp.array, jnp.asarray, jnp.int8) raise "
+        "OverflowError on the VALUE instead, under strict and standard alike, "
+        "which is the bullet above this one.",
     ]
 
 
