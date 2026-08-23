@@ -293,7 +293,9 @@ _ORDINAL = {1: "st", 2: "nd", 3: "rd", 0: "th", 4: "th", 5: "th",
 
 
 #: The numerals this page writes as words, so a count can be compared against
-#: the sentence that carries it instead of against a hand-typed digit.
+#: the sentence that carries it instead of against a hand-typed digit. The
+#: CASE is the page's own: ``Eight`` opens its sentence and ``four``/``three``
+#: sit inside theirs, and the comparison is against the sentence as written.
 _WORDS = {
     1: "One", 2: "Two", 3: "three", 4: "four", 5: "five", 6: "six",
     7: "seven", 8: "Eight", 9: "Nine", 10: "Ten", 11: "eleven", 12: "twelve",
