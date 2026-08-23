@@ -86,11 +86,13 @@ measurement, sitting next to the measurement, held by nothing.*
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import pathlib
 import re
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -1280,6 +1282,79 @@ def test_it_runs_with_no_jax_and_names_jax_as_what_is_missing(monkeypatch, capsy
     assert "DID NOT HOLD" not in out
 
 
+#: The per-invocation latency a stand-in verdict reports. Any positive
+#: integer does — ``measure_cell`` sums these into ``Cell.ms``, and what the
+#: test below asks about a cell is which repeats put anything there at all,
+#: never how much.
+_STAND_IN_MS = 12
+
+
+def _a_stand_in_for_the_backend(monkeypatch):
+    """Give the tool the ONE thing the no-solver lane withholds, and no more.
+
+    THIS TEST'S SUBJECT IS NOT A SOLVER, and it must not need one to be
+    measured. What the test below is about is the arithmetic
+    ``direction_report`` does over a cell that disagreed with itself — which
+    repeats counted, and what a cell that both measured something and raised
+    is allowed to be rendered as. A backend is upstream of every part of that
+    and none of it is a claim about one.
+
+    It used to reach that subject by installing no stand-in at all and driving
+    the real battery, which works wherever a wheel happens to be installed and
+    silently measures NOTHING where one is not: with no backend reachable
+    ``measure`` returns before ``measure_cell`` ever runs, the harness this
+    test makes raise is never called, and the report correctly says the
+    finding was NOT MEASURED. The test then failed on the with-backends
+    rendering it had asserted — a live gate reporting the environment rather
+    than the tree.
+
+    **Skipping there would have been the worse repair**, since it converts the
+    gate into an unmeasured one, which is the defect this whole module exists
+    to refuse.
+
+    So two things are stood in for, both named, and NOTHING else about the run
+    is touched:
+
+    * ``probe_environment`` answers with the REAL environment and the two
+      reachability flags flipped on. The tool is told both backends will run;
+      ``stelling`` is told nothing, so no other consumer in the process sees a
+      wheel that is not there. This is :func:`_hide` in the other direction —
+      the page's own method for its single-backend columns, run the only way
+      that reaches a code path a wheel-less lane cannot otherwise enter.
+    * ``stelling.preconditions.check`` — the single call in ``measure_cell``
+      that reaches a backend — answers ``VERIFIED`` with one invocation and
+      one latency, which is the whole of what that loop reads off a verdict.
+
+    IT STILL TRACES. The stand-in calls ``stelling.harness.trace`` on the
+    harness before answering: that needs jax and no backend, so a harness that
+    blows up blows up exactly where a real ``check()`` would let it — inside
+    the repeat loop, as that repeat's own exception. A canned verdict that
+    never drove the harness would make the raising row unreachable and leave
+    this test asserting over a condition it had not created.
+    """
+    from stelling import preconditions
+    from stelling.harness import trace
+
+    real_probe = battery.probe_environment
+    monkeypatch.setattr(
+        battery, "probe_environment",
+        lambda *a, **k: dataclasses.replace(
+            real_probe(*a, **k), z3_reachable=True, cvc5_reachable=True),
+    )
+
+    def stand_in(harness, **kwargs):
+        trace(harness)
+        return types.SimpleNamespace(
+            status="VERIFIED",
+            notes=[f"assert #0: stand-in answered unsat in {_STAND_IN_MS}ms"],
+            stamp=types.SimpleNamespace(
+                solver=(types.SimpleNamespace(invoked=True),)),
+            obligations=(),
+        )
+
+    monkeypatch.setattr(preconditions, "check", stand_in)
+
+
 def test_a_repeat_that_raised_is_not_a_finding_that_did_not_hold(
     monkeypatch, capsys, x64
 ):
@@ -1292,12 +1367,20 @@ def test_a_repeat_that_raised_is_not_a_finding_that_did_not_hold(
     saying ``on every linear row``. Measured, by making row 3's harness raise;
     reproduced here.
 
-    Row 3's harness raises on the LAST of each cell's three repeats rather than
-    on all of them, which is the case that actually distinguishes the fix: a
-    cell whose every repeat raised has no milliseconds at all, so even the old
-    predicate would have called it unattempted. The defect only bites when
-    some repeats measured something and a later one did not.
+    Row 3's harness raises on SOME of each cell's three repeats and not all of
+    them, which is the case that actually distinguishes the fix: a cell whose
+    every repeat raised has no milliseconds at all, so even the old predicate
+    would have called it unattempted. The defect only bites when some repeats
+    measured something and a later one did not — so the mixed cell this makes
+    is asserted to BE mixed, below, before anything is asked about the report.
+
+    THE BACKEND IS STOOD IN FOR, and :func:`_a_stand_in_for_the_backend` says
+    at length why: none of the above is a claim about a solver, and a gate on
+    it that only runs where a wheel is installed is a gate that reports the
+    environment.
     """
+    _a_stand_in_for_the_backend(monkeypatch)
+
     calls = {"n": 0}
     real = battery.BUILDERS["array8_linear_false"]
 
@@ -1314,6 +1397,19 @@ def test_a_repeat_that_raised_is_not_a_finding_that_did_not_hold(
     out = capsys.readouterr().out
     assert rc == 0
     finding = [line for line in out.splitlines() if "FINDING 1" in line]
+
+    # THE CONDITION FIRST, then the report about it. A run in which nothing
+    # raised, or in which nothing was measured, satisfies every assertion
+    # below for the wrong reason; this is the one line that says the case the
+    # fix distinguishes was actually constructed. `error/unsat!` is
+    # `Cell.render` for a cell whose repeats disagreed: some measured, one
+    # raised, and the `!` is the legend saying the milliseconds beside it
+    # cover only the repeats that did.
+    assert "error/unsat!" in out, (
+        "row 3's cell is supposed to be one that BOTH measured something and "
+        "raised; nothing in this run rendered as such a cell, so the case "
+        "this test exists for was never reached:\n" + out
+    )
     assert "DID NOT HOLD" not in out, (
         "a row that raised on one repeat was counted as a row that failed to "
         "be decided:\n" + "\n".join(finding)
