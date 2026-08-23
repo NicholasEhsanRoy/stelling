@@ -38,7 +38,7 @@ python3 - <<'PYX'
 import pathlib
 p = pathlib.Path("tools/solver_battery.py"); s = p.read_text()
 head = '''        contested=(
-            "the page's row says z3 TIMED OUT and cvc5 answered in 166-175 ms. "'''
+            "the page's row says z3 TIMED OUT and cvc5 answered in 166-175 ms, "'''
 i = s.index(head)
 j = s.index('),\n    ),\n    Row(\n        n=8,', i)
 p.write_text(s[:i] + '        contested="",\n' + s[j + len('),\n'):])

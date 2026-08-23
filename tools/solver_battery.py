@@ -99,8 +99,8 @@ assume; none of the ten rows does). Both are counted from
 
 The page never says what IT timed, and no arithmetic on the page recovers it:
 its ``both`` column is the sum of its own singles, but that identity is forced
-by ``solvers._escalate``'s sequential no-short-circuit loop and cannot fail
-for any correct measurement. See :data:`_SUM_IS_FORCED`.
+by the sequential no-short-circuit loop in ``solvers._dispatch_obligation``
+and cannot fail for any correct measurement. See :data:`_SUM_IS_FORCED`.
 
 RUNNING WITH NOTHING INSTALLED. The zero-dep lane is a promise this project
 keeps, so a battery most readers cannot run is not much of a remedy:
@@ -156,44 +156,105 @@ DEFAULT_REPEATS = 1
 #: **And the binary question is the wrong question.** What decides whether a
 #: published cell can be re-derived is not whether the label pins a harness —
 #: no label anywhere pins one completely — but WHETHER THE FREEDOM THE LABEL
-#: LEAVES REACHES THE PUBLISHED NUMBER. Swept and measured
-#: (``scratchpad/D7-solver-battery/probe-does-the-freedom-reach-the-number.py``):
+#: LEAVES REACHES THE PUBLISHED NUMBER.
 #:
-#: * rows 1-6 — it does not. Every label-compatible reading lands on the same
-#:   two floors: the cvc5 wall-guarded subprocess spawn the page itself names
-#:   (~70 ms) and z3's ~10 ms. Across 34 readings the spread is at most 1.22x
-#:   the spread of THREE REPEATS OF ONE UNCHANGED HARNESS, and exactly equal
-#:   to it in four of the eighteen (row, portfolio) pairs. A cell that IS the
-#:   floor cannot be moved by a choice made above it, so those six cells are
-#:   RECONSTRUCTED.
+#: THE FIRST ANSWER TO THAT WAS A UNIVERSAL, AND IT WAS FALSE. Until
+#: 2026-08-23 this file graded rows 1-6 RECONSTRUCTED on one sentence — *the
+#: choice of reading adds no more spread than re-running the same harness
+#: does* — resting on a sweep
+#: (``probe-does-the-freedom-reach-the-number.py``) that reports ``A/B <=
+#: 1.22x`` over 34 readings. **Every row-4 and row-5 reading in that sweep is
+#: capped at a box of +/-100**, row 1 reaches +/-1000, and NOTHING said so.
+#: The labels supply no such bound: AM-GM holds on the whole of R^2 and the
+#: Motzkin polynomial is nonnegative on the whole of R^2, and this file's own
+#: row 4 says as much. A universal quantified over a silently bounded family
+#: cannot be repaired by widening the family, because the next box is always
+#: wider.
+#:
+#: **There is exactly one ceiling here that is not a judgement call, and the
+#: FORMAT supplies it.** These harnesses declare a float64 box, so no reading
+#: of any of these labels can put an endpoint outside float64. Swept to that
+#: ceiling — ``probe-where-does-the-box-stop.py``, five interleaved passes,
+#: load 1.24-1.65, transcript committed beside it — the answer is no longer
+#: uniform over rows 1-6, and the partition below is what it actually is:
+#:
+#: * **rows 1, 3, 4, 6 — the freedom does not reach the number**, over the
+#:   whole 10^308-fold range: ``A/B`` is 1.00x-1.13x at the format's own
+#:   ceiling, and every reading gives the published outcome. RECONSTRUCTED.
+#: * **rows 2, 5 — the outcome is forced and the millisecond is not.** Row 5's
+#:   z3 cell climbs with the box — 5-6 ms at +/-1, 7-11 at +/-1e60, 14-20 at
+#:   +/-1e100, 28-35 at +/-1e150, 126-140 at the top of the format: ``A/B =
+#:   17.82x``, and 2.55x even restricted to +/-1e100. Row 2's does the same
+#:   more gently, 4-5 ms to 11-13, ``A/B = 1.62x``. Both are past the 1.22x
+#:   the old universal rested on, so both are OUTCOME ONLY.
 #: * rows 9, 10 — it reaches the seconds but not the direction. One reading of
 #:   *"10-factor product chain"* shows the page's split (z3 fast, cvc5 slow),
 #:   another shows no split at all, and none reverses it. The DIRECTION is
 #:   reproducible; the numbers are not.
-#: * rows 7, 8 — it reaches the direction, violently. One reading of *"32
-#:   vars, 16 elementwise products"* runs the page's direction BACKWARDS. No
-#:   number produced here may be filed against those rows.
+#: * rows 7, 8 — it reaches the direction, violently. See
+#:   :data:`GRADE_UNSUPPORTED` for the criterion and what each row meets it on.
+#:
+#: **AND HALF THE OLD SUPPORTING ARGUMENT WAS FALSE.** It read: *their cells
+#: sit on two floors this page itself names, the cvc5 spawn (~70 ms) and z3's
+#: ~10 ms, and a cell that IS the floor cannot be moved by a choice made above
+#: it.* **True of cvc5** — measured, cvc5 is 55-71 ms on every one of these
+#: rows at every declarable box, ``A/B <= 1.08x``: it really is sitting on the
+#: wall-guarded subprocess spawn and nothing above it moves it. **False of
+#: z3**, which has no such floor: 1-3 ms on row 1 in one sweep, 126-140 ms on
+#: row 5 at the top of the format. Row 5's ~10 ms was never a floor. It was
+#: the price of that predicate at that box, and the label leaves the box open.
 #:
 #: Grading all ten the same is why rows 4 and 5 used to read as weakly as row
 #: 7, which is a different kind of dishonesty from the one that disclaimer was
-#: written to prevent, and not a smaller one.
+#: written to prevent, and not a smaller one. Grading rows 2 and 5 with rows
+#: 1, 3, 4 and 6 is the same mistake in the other direction.
 GRADE_RECONSTRUCTED = "reconstructed"
+GRADE_OUTCOME_ONLY = "outcome only"
 GRADE_DIRECTION_ONLY = "direction only"
 GRADE_UNSUPPORTED = "unsupported"
 
-#: The three grades, and what each one licenses a reader to do. Printed under
-#: the inventory and carried in ``--json``; the page publishes the same three
-#: words in its table's own ``reconstruction`` column, and
-#: ``tests/test_solver_battery.py`` refuses to let the two spellings drift.
+#: THE ONE SENTENCE THAT SAYS WHAT THE STRONGEST GRADE DOES NOT CLAIM — and,
+#: until 2026-08-23, THE LEAST PROTECTED THING IN THIS FILE.
+#:
+#: The page carried this limit in its own words and :data:`GRADES` carried a
+#: paraphrase of it, and nothing held one against the other. Either could be
+#: INVERTED into the overclaim — *reconstructed MEANS this battery reproduced
+#: the published milliseconds* — on its own, with the whole module green. The
+#: grade WORD was gated both ways; the grade's MEANING was gated neither way.
+#: It is now one string, quoted verbatim by the page and by the dict below,
+#: and ``tests/test_solver_battery.py::
+#: test_the_page_states_every_grade_s_meaning_in_the_tool_s_own_words``
+#: reddens if either side stops carrying it.
+RECONSTRUCTED_IS_NOT_A_REPRODUCTION = (
+    "`reconstructed` does NOT mean `this battery reproduced the published "
+    "milliseconds` — it means the label's remaining freedom is not what "
+    "separates them"
+)
+
+#: The four grades, and what each one licenses a reader to do. Printed under
+#: the inventory and carried in ``--json``; **the page publishes these strings
+#: verbatim**, in its own grade table, and
+#: ``tests/test_solver_battery.py`` refuses to let the two spellings drift —
+#: which is what stops a grade meaning one thing here and another there.
 GRADES: dict[str, str] = {
     GRADE_RECONSTRUCTED: (
-        "the freedom the label leaves does not reach the published number: "
-        "every label-compatible reading measured gave the published OUTCOME "
-        "and landed on the same two floors, with a spread no wider than "
-        "re-running one unchanged harness. It does NOT mean this battery "
-        "reproduced the published milliseconds — this machine's cvc5 cells "
-        "run below them throughout. It means no choice a reader makes inside "
-        "the label would have moved them"
+        "the freedom the label leaves does not reach the published number, "
+        "measured over every box a float64 declaration can express — from "
+        "+/-1 to the format's own ceiling, not the +/-100 an earlier sweep "
+        "stopped at without saying so. Every label-compatible reading gave "
+        "the published OUTCOME, and neither column moved further than three "
+        "repeats of one unchanged harness move it. "
+        + RECONSTRUCTED_IS_NOT_A_REPRODUCTION +
+        ": no choice a reader makes inside the label would have moved them"
+    ),
+    GRADE_OUTCOME_ONLY: (
+        "the published OUTCOME is forced by the obligation and every "
+        "label-compatible reading gives it — but the label bounds the "
+        "declared box nowhere, and the box REACHES the published millisecond. "
+        "Driven out to the widest box float64 can declare, this row's z3 cell "
+        "climbs monotonically with the box and past anything three repeats of "
+        "one unchanged harness produce. The outcome is reconstructed; the "
+        "millisecond is the reading's, and the label does not fix the reading"
     ),
     GRADE_DIRECTION_ONLY: (
         "the readings agree on WHICH BACKEND WINS wherever they split, and "
@@ -201,10 +262,12 @@ GRADES: dict[str, str] = {
         "direction survives and the seconds do not"
     ),
     GRADE_UNSUPPORTED: (
-        "the readings disagree about which backend finishes, and at least one "
-        "runs the published direction BACKWARDS. Unsupported, which is not "
-        "the same as wrong: nothing here refutes the published cell, and that "
-        "is exactly the problem — nothing here CAN"
+        "no reading reproduces the published split, and the readings do not "
+        "agree with each other about which backend wins: at least one puts "
+        "the backend this page has LOSING ahead of the one it has winning. "
+        "Unsupported, which is not the same as wrong: nothing here refutes "
+        "the published cell, and that is exactly the problem — nothing here "
+        "CAN"
     ),
 }
 
@@ -276,10 +339,13 @@ INTERVAL_UNDECIDED = (
 #: sum. The arithmetic is real. The inference is worthless, and the reason is
 #: in this repository rather than in a judgement call.
 #:
-#: ``solvers._escalate`` runs the admitted backends in a plain sequential
-#: ``for position, backend in enumerate(ordered)`` loop with **no
-#: short-circuit** — a backend that has already answered ``unsat`` does not
-#: stop the next one being asked — and the page states the same thing in
+#: ``solvers._dispatch_obligation`` — the function ``solvers.escalate``
+#: reaches for each obligation — runs the admitted backends in a plain
+#: sequential ``for position, backend in enumerate(ordered)`` loop with **no
+#: short-circuit**: measured, that loop is ``solvers.py:1997``, its body ends
+#: at 2046 and contains no ``break``, so a backend that has already answered
+#: ``unsat`` does not stop the next one being asked. The page states the same
+#: thing in
 #: words: *"Primary is ordering, not selection: every installed backend runs
 #: on every fragment."* So a two-backend wall IS the two single-backend walls,
 #: plus per-call overhead, for ANY correct measurement of any harness
@@ -291,14 +357,21 @@ INTERVAL_UNDECIDED = (
 #: not time the ``check()`` wall. That wall also pays tracing, jit and
 #: interval propagation, and on a VERIFIED it runs the vacuity widen re-check,
 #: which invokes every backend a SECOND time (see :data:`_UNPUBLISHED`).
-#: Measured here per repeat over two sessions, load average recorded with each
-#: (``scratchpad/D7-solver-battery/wall-and-invocation-order-2026-08-23.txt``):
-#: **1.8x-3.1x** the notes sum on a discharged cheap row, against
-#: **1.05x-1.11x** on a REFUTED one, where no re-check runs at all — four
-#: invoked stamps against two published latencies on every discharged row, two
-#: against two on the refuted one. The page's cheap ``both`` cells are
-#: 78-112 ms against 79-93 ms of their own singles; at the wall they would have
-#: been 150 ms and up.
+#: THE PART OF THAT WHICH IS STABLE IS THE INVOCATION COUNT, NOT THE RATIO.
+#: Four invoked stamps against two published latencies on every discharged row
+#: of this battery, two against two on a refuted one: that is structural and
+#: it held in every driving. The RATIO is a wall time and moves like one.
+#: Measured per repeat over two committed sessions, load recorded with each
+#: (``wall-and-invocation-order-2026-08-23.txt``, load 1.71;
+#: ``wall-and-invocation-order-2-2026-08-23.txt``, load 4.10): **2.07x-3.20x**
+#: the notes sum on a discharged cheap row, against **1.05x-1.09x** on a
+#: REFUTED one, where no re-check runs at all. This used to be published as
+#: 1.8x-3.1x with neither load stated; an independent re-drive at load 7.5-11
+#: reported 1.86x-4.58x, whose transcript is not in this tree. Read the
+#: direction — a discharged row's wall is at least twice its notes sum and a
+#: refuted row's is within a tenth of it — not the multiple. The page's cheap
+#: ``both`` cells are 78-112 ms against 79-93 ms of their own singles; at the
+#: wall they would have been 150 ms and up.
 #:
 #: AND ROW 9 IS WORSE THAN "DOES NOT FIT". Its published ``both`` (~8.1 s) is
 #: BELOW its published ``cvc5 alone`` (8.3-8.5 s). A sequential portfolio with
@@ -307,9 +380,10 @@ INTERVAL_UNDECIDED = (
 #: mismatch; it is a sign violation, and it is recorded on the row.
 _SUM_IS_FORCED = (
     "the page's `both` column is the SUM of its own two single-backend "
-    "columns. That is FORCED by solvers._escalate's sequential no-short-"
-    "circuit loop and cannot fail for any correct measurement, so it "
-    "corroborates nothing about what was timed"
+    "columns. That is FORCED by the sequential no-short-circuit loop in "
+    "solvers._dispatch_obligation (reached from solvers.escalate) and cannot "
+    "fail for any correct measurement, so it corroborates nothing about what "
+    "was timed"
 )
 
 #: The page never says what it timed, and no arithmetic on the page recovers
@@ -343,10 +417,16 @@ ROWS: tuple[Row, ...] = (
         page_both="unsat, 86–91 ms",
         page_z3="unsat, 10–12 ms",
         page_cvc5="unsat, 77–87 ms",
-        grade=GRADE_RECONSTRUCTED,
+        grade=GRADE_OUTCOME_ONLY,
         fixed=("one declared array of 64 elements", "every operation linear",
                "QF_LRA", "true, so unsat"),
-        chosen=("the declared box [1, 2]", "the predicate sum(2x - x) >= 64",
+        chosen=("the declared box [1, 2] — AND THE BOX IS WHY THIS ROW IS NOT "
+                "RECONSTRUCTED. The label bounds it nowhere; driven from "
+                "+/-1 out to the widest a float64 declaration reaches, this "
+                "row's z3 cell goes from 4-5 ms to 11-13 ms, A/B = 1.62x, "
+                "past the 1.22x the old universal rested on. The outcome is "
+                "unsat at every one of them",
+                "the predicate sum(2x - x) >= 64",
                 "that the 64 elements are reduced rather than asserted "
                 "elementwise", INTERVAL_UNDECIDED, _TIMED),
         build="array64_linear",
@@ -382,11 +462,13 @@ ROWS: tuple[Row, ...] = (
                "pins a predicate", "QF_NRA", "true everywhere, so unsat"),
         chosen=("the declared box [-1, 1]^2 — AM-GM is a statement over all "
                 "of R^2 and a declared harness must bound it somewhere. It "
-                "is the ONLY free parameter this label leaves, and it was "
-                "swept over six boxes from [0,1]^2 to [-100,100]^2: same "
-                "answer every time, and a cvc5 spread of 75-84 ms — 1.05x the "
-                "spread of three repeats of one unchanged harness",
-                _TIMED),
+                "is the ONLY free parameter this label leaves. An earlier "
+                "sweep stopped at [-100,100]^2 and did not say so; driven "
+                "out to the widest box float64 can declare, BOTH columns of "
+                "this row are flat — z3 4-5 ms and cvc5 56-66 ms over a "
+                "10^308-fold range, A/B 1.00x in both — which is why this "
+                "row keeps the strongest grade and rows 2 and 5 do not",
+                INTERVAL_UNDECIDED, _TIMED),
         build="amgm",
         named_object="AM-GM (two-variable degree-2 form): x^2 + y^2 >= 2xy",
     ),
@@ -397,20 +479,30 @@ ROWS: tuple[Row, ...] = (
         page_both="unsat, 92–106 ms",
         page_z3="unsat, 12–13 ms",
         page_cvc5="unsat, 81–83 ms",
-        grade=GRADE_RECONSTRUCTED,
+        grade=GRADE_OUTCOME_ONLY,
         fixed=("two declared scalars", "total degree 6",
                "THE PREDICATE ITSELF: the Motzkin polynomial is "
                "x^4 y^2 + x^2 y^4 - 3 x^2 y^2 + 1, a named object and not a "
                "choice — the second and last label on that page that pins a "
                "predicate", "QF_NRA", "nonnegative everywhere, so unsat"),
-        chosen=("the declared box [-2, 2]^2 — swept over five boxes from "
-                "[-1,1]^2 to [-100,100]^2",
+        chosen=("the declared box [-2, 2]^2 — AND THE BOX IS WHY THIS ROW IS "
+                "NOT RECONSTRUCTED. The Motzkin polynomial is nonnegative on "
+                "the whole of R^2, so the label bounds the box nowhere. An "
+                "earlier sweep stopped at [-100,100]^2 and did not say so, "
+                "and inside that cap the cell does not move. Driven out to "
+                "the widest box float64 can declare, this row's z3 cell "
+                "climbs rung by rung — 5-6 ms at +/-1, 6-8 at +/-1e20, 7-11 "
+                "at +/-1e60, 14-20 at +/-1e100, 28-35 at +/-1e150, 131-140 at "
+                "+/-1e300 and 126-132 at the format's own ceiling. A/B = "
+                "17.82x, and 2.55x restricted to +/-1e100. The outcome is "
+                "unsat at every one of them; the millisecond is the box's",
                 "the association of the degree-6 monomials — (x2*x2)*y2 "
                 "rather than x2*(x2*y2), which is the same polynomial and not "
                 "the same emitted script; both associations and the factored "
-                "form x2*y2*(x2 + y2 - 3) + 1 were driven, and the spread "
-                "across all eleven readings is 1.00x-1.07x the spread of "
-                "three repeats of one unchanged harness", _TIMED),
+                "form x2*y2*(x2 + y2 - 3) + 1 were driven, and inside the "
+                "old cap the spread across all eleven readings is 1.00x-1.07x "
+                "the spread of three repeats of one unchanged harness",
+                INTERVAL_UNDECIDED, _TIMED),
         build="motzkin",
         named_object=("Motzkin: x^4 y^2 + x^2 y^4 - 3 x^2 y^2 + 1 >= 0"),
     ),
@@ -425,7 +517,8 @@ ROWS: tuple[Row, ...] = (
         fixed=("one declared scalar", "total degree 3", "QF_NRA",
                "FALSE, so sat with a replayed witness"),
         chosen=("the cubic — this battery uses x^3, the page could have used "
-                "any of them", "the declared box [-2, 2]", _TIMED),
+                "any of them", "the declared box [-2, 2]", INTERVAL_UNDECIDED,
+                _TIMED),
         build="cubic_false",
     ),
     Row(
@@ -445,12 +538,15 @@ ROWS: tuple[Row, ...] = (
                 INTERVAL_UNDECIDED, _TIMED),
         build="wide_products",
         contested=(
-            "the page's row says z3 TIMED OUT and cvc5 answered in 166-175 ms. "
-            "Three readings of this label were built and driven (--variants): "
-            "one REVERSES that (z3 unsat, cvc5 timeout) and two show no split "
-            "at all (both backends under 200 ms). The label does not choose "
-            "between them, so no number produced here can be filed against "
-            "this row"
+            "the page's row says z3 TIMED OUT and cvc5 answered in 166-175 ms, "
+            "so the published split is `cvc5 finishes, z3 does not`. Three "
+            "readings of this label were built and driven (--variants) and "
+            "NONE reproduces it: the literal one REVERSES it outright (z3 "
+            "unsat 4.4-4.6 s, cvc5 timeout at its 16.0 s wall guard) and the "
+            "other two show no split at all, both backends under 200 ms. All "
+            "three put z3 — the backend the page has losing — ahead of cvc5. "
+            "The label does not choose between them, so no number produced "
+            "here can be filed against this row"
         ),
     ),
     Row(
@@ -466,10 +562,28 @@ ROWS: tuple[Row, ...] = (
                "true, so unsat"),
         chosen=("the declared box [0, 1]^32 x [0, 1]^32",
                 "the predicate sum(a*b) <= sum(a)",
-                "the same contest as row 7", INTERVAL_UNDECIDED, _TIMED),
+                "row 7's label at twice the width — and its readings do NOT "
+                "behave the same way, which is what `contested` records and "
+                "what this line claimed the opposite of until 2026-08-23",
+                INTERVAL_UNDECIDED, _TIMED),
         build="wide_products",
-        contested="row 7's contest at twice the width; the same three readings "
-                  "disagree the same way",
+        contested=(
+            "row 7's contest at twice the width, and NOT the same way — this "
+            "row's evidence is its own and was recorded wrongly until "
+            "2026-08-23. The published split is `cvc5 finishes in 772-792 ms, "
+            "z3 does not`. Driven at row 8's width (load 1.27, 2 repeats, "
+            "probe-row8-and-the-constraint-three-rows-omit.py): the LITERAL "
+            "reading has NEITHER backend finishing — z3 UNKNOWN at 10.1 s and "
+            "cvc5 UNKNOWN at its 16.0 s wall guard — so it does not reverse "
+            "the row, it produces no split to compare at all; sum-of-squares "
+            "has both finishing with z3 at 152-157 ms against cvc5 at "
+            "936-946 ms; cancellation has both finishing with z3 at 3-5 ms "
+            "against cvc5 at 62-65 ms. So no reading reproduces the published "
+            "split, and the two that split at all put z3 — the backend this "
+            "page has losing — six to twenty-two times AHEAD of cvc5. No "
+            "number "
+            "produced here can be filed against this row"
+        ),
     ),
     Row(
         n=9,
@@ -495,20 +609,25 @@ ROWS: tuple[Row, ...] = (
             "THREE SIGNALS ON ONE ROW, and they are about the page's cells "
             "rather than about this harness.",
             "(1) SIGN VIOLATION. Its published `both` (~8.1 s) is BELOW its "
-            "published `cvc5 alone` (8.3-8.5 s). solvers._escalate is a "
-            "sequential loop with no short-circuit, so a two-backend run "
+            "published `cvc5 alone` (8.3-8.5 s). solvers._dispatch_obligation "
+            "runs the backends in a sequential loop with no short-circuit, so "
+            "a two-backend run "
             "cannot finish faster than one of its own backends does, under "
             "any definition of what was timed.",
             "(2) It is the only one of the four second-scale rows whose "
             "`both` is not the sum of its own singles (123-133 ms + 8.3-8.5 s "
             "= 8.4-8.6 s against a published ~8.1 s) — and (1) is why that "
             "misfit is not a rounding mismatch.",
-            "(3) It is the row this battery's reading disagrees with most in "
-            "MILLISECONDS while agreeing with it on every OUTCOME: z3 at 6 ms "
-            "against a published 123-133 ms is a factor of twenty, and cvc5 "
-            "is out by 3.6x, and both cells still say unsat. Both facts are "
-            "true at once, which is the whole reason the direction is the "
-            "readable part of that table and the milliseconds are not.",
+            "(3) Its milliseconds are a long way out while every outcome "
+            "agrees: across the three committed runs z3 is 3-7 ms against a "
+            "published 123-133 ms, a factor of 18x-44x, cvc5 is out by about "
+            "3.6x, and every cell still says unsat. This used to read `the "
+            "row this battery disagrees with most in milliseconds`, and that "
+            "was FALSE and checkable from the same three transcripts: row 10 "
+            "also agrees on every cell's outcome in all three and is out by "
+            "98x-351x. Row 9's case rests on (1) and (2), which are about "
+            "arithmetic the page's own cells cannot satisfy; (3) is context, "
+            "and it is not a superlative.",
         ),
     ),
     Row(
@@ -563,6 +682,110 @@ VARIANTS: tuple[Variant, ...] = (
     Variant(10, "one-variable",
             "x^12 >= 0 over [-1, 2], the chain being one variable twelve times",
             "chain_one_variable"),
+)
+
+
+# ------------------------------------------- what the readings SETTLED
+
+#: A MILLISECOND PARSER FOR THE PAGE'S OWN CELLS — used to derive which
+#: backend a published row has ahead, never to compare a measurement to one.
+_PUBLISHED_MS = re.compile(
+    r"~?(\d+(?:\.\d+)?)(?:\s*[\u2013-]\s*~?(\d+(?:\.\d+)?))?\s*(ms|s)\b")
+
+
+def published_ms(cell: str) -> tuple[float, float] | None:
+    """``(lo, hi)`` in milliseconds for a published cell, or ``None`` if that
+    backend did not finish.
+
+    ``UNKNOWN`` is the page's spelling for *did not finish inside the budget*,
+    and a backend that did not finish is behind one that did, whatever the
+    clock said."""
+    if "UNKNOWN" in cell:
+        return None
+    m = _PUBLISHED_MS.search(cell)
+    if m is None:
+        return None
+    scale = 1000.0 if m[3] == "s" else 1.0
+    lo = float(m[1]) * scale
+    return (lo, float(m[2]) * scale if m[2] else lo)
+
+
+def ahead(z3_ms, cvc5_ms) -> str:
+    """Which backend is AHEAD, on the only comparison this page endorses.
+
+    Finishing beats not finishing; between two that finished, the faster is
+    ahead; if neither finished, neither is. Ranges are compared on their
+    midpoints, because the page publishes ranges and a direction that flips
+    on which end you pick is not a direction."""
+    if z3_ms is None and cvc5_ms is None:
+        return ""
+    if cvc5_ms is None:
+        return "z3"
+    if z3_ms is None:
+        return "cvc5"
+    a = (z3_ms[0] + z3_ms[1]) / 2
+    b = (cvc5_ms[0] + cvc5_ms[1]) / 2
+    return "z3" if a < b else ("cvc5" if b < a else "")
+
+
+def published_direction(row: Row) -> tuple[bool, bool, str]:
+    """``(z3 finished, cvc5 finished, which is ahead)`` for a published row."""
+    z, c = published_ms(row.page_z3), published_ms(row.page_cvc5)
+    return z is not None, c is not None, ahead(z, c)
+
+
+@dataclass(frozen=True)
+class Reading:
+    """The DIRECTION one label-compatible reading produced. Never its clock.
+
+    **This is deliberately not a millisecond.** A hand-copied table of
+    milliseconds is what this page had to delete: it drifted, nothing held it,
+    and setting one of its cells to ``999-999 ms`` left the whole module green.
+    What a grade rests on is *which backend finished, and which was ahead*, and
+    that is the part that held in every driving of this battery. So that is
+    what is recorded, and ``tests/test_solver_battery.py`` DERIVES each
+    contested row's grade from it rather than taking the grade's word.
+
+    ``where`` names the committed transcript the direction was read off, so a
+    reading with no driving behind it cannot be added.
+    """
+
+    row: int
+    key: str
+    z3_finished: bool
+    cvc5_finished: bool
+    ahead: str  # "z3" | "cvc5" | "" when neither finished
+    where: str
+
+
+#: EVERY READING DRIVEN AGAINST A CONTESTED OR DIRECTION-ONLY ROW, as a
+#: direction. Row 8's entry is the one this table was built for: until
+#: 2026-08-23 its refusal said *"the same three readings disagree the same
+#: way"* as row 7's, and that was false — at row 8's width the literal reading
+#: has NEITHER backend finishing, so it does not reverse the row, it produces
+#: no split to compare at all. Row 8 is still unsupported, on the evidence
+#: below rather than on row 7's.
+READINGS: tuple[Reading, ...] = (
+    Reading(7, "literal: sum(a*b) <= sum(a)", True, False, "z3",
+            "battery-run-2-2026-08-22T1959Z.txt"),
+    Reading(7, "sum-of-squares", True, True, "z3",
+            "battery-run-2-2026-08-22T1959Z.txt"),
+    Reading(7, "cancellation", True, True, "z3",
+            "battery-run-2-2026-08-22T1959Z.txt"),
+    Reading(8, "literal: sum(a*b) <= sum(a)", False, False, "",
+            "row8-and-the-constraint-2026-08-23.txt"),
+    Reading(8, "sum-of-squares", True, True, "z3",
+            "row8-and-the-constraint-2026-08-23.txt"),
+    Reading(8, "cancellation", True, True, "z3",
+            "row8-and-the-constraint-2026-08-23.txt"),
+    Reading(9, "the battery's own: (x0*...*x9)^2 >= 0", True, True, "z3",
+            "battery-run-3-2026-08-23T2351Z.txt"),
+    Reading(9, "one-variable: x^10 >= 0", True, True, "z3",
+            "battery-run-3-2026-08-23T2351Z.txt"),
+    Reading(10, "the battery's own: (x0*...*x11)^2 >= 0", True, False, "z3",
+            "battery-run-3-2026-08-23T2351Z.txt"),
+    Reading(10, "one-variable: x^12 >= 0", True, True, "z3",
+            "battery-run-3-2026-08-23T2351Z.txt"),
 )
 
 
@@ -1448,7 +1671,8 @@ def render_rows(width: int) -> str:
 
     Pure data — no jax, no solver, no measurement. This is the section a
     reader should read before any table, and it is why the tool can be honest
-    about a row it cannot reconstruct AND about the eight it can."""
+    about the two rows it cannot reconstruct, the two whose milliseconds a
+    reader's own choice of box moves, and the four it can."""
     out = [
         "THE TEN ROWS: WHAT EACH LABEL FIXES, WHAT IT LEAVES OPEN, AND",
         "WHETHER WHAT IT LEAVES OPEN REACHES THE PUBLISHED NUMBER",
@@ -1461,26 +1685,53 @@ def render_rows(width: int) -> str:
         "THE SECOND LIST IS NOT A VERDICT ON THE ROW. Every label anywhere",
         "leaves something open; what matters is whether the freedom reaches",
         "the published cell, and that is measured rather than assumed. The",
-        "three grades:",
+        "four grades, in the same words docs/choosing-a-solver-backend.md",
+        "publishes them in — one statement of a grade's meaning, not two:",
         "",
     ]
-    for g in (GRADE_RECONSTRUCTED, GRADE_DIRECTION_ONLY, GRADE_UNSUPPORTED):
+    for g in (GRADE_RECONSTRUCTED, GRADE_OUTCOME_ONLY, GRADE_DIRECTION_ONLY,
+              GRADE_UNSUPPORTED):
         rows_with = [str(r.n) for r in ROWS if r.grade == g]
         out.extend(_wrap(f"{g.upper()} (rows {', '.join(rows_with)}): "
                          f"{GRADES[g]}", width - 2, "  ", "    "))
     out.extend([
         "",
-        "The sweep behind the first grade is",
-        "scratchpad/D7-solver-battery/probe-does-the-freedom-reach-the-number.py:",
-        "34 label-compatible readings of rows 1-6 — boxes over a 200-fold",
-        "range, both Motzkin associations and its factored form, three",
-        "thresholds for the false row, reduced and elementwise for the array",
-        "row — three repeats each, three portfolios each. Every reading gave",
-        "the page's own outcome, and the spread ACROSS all of them is at most",
-        "1.22x the spread across three repeats of ONE unchanged harness (and",
-        "exactly equal to it in four of the eighteen row/portfolio pairs). A",
-        "cell that sits on cvc5's subprocess-spawn floor and z3's few",
-        "milliseconds is not a cell a choice above it can move.",
+        "WHAT DECIDES THOSE TWO GRADES, AND THE CEILING THAT USED TO BE",
+        "UNSTATED. Two sweeps, both committed under scratchpad/D7-solver-",
+        "battery/ with the load average in their header.",
+        "",
+        "  probe-does-the-freedom-reach-the-number.py varies everything the",
+        "  six labels leave open EXCEPT the box's magnitude: 34 readings —",
+        "  both Motzkin associations and its factored form, three thresholds",
+        "  for the false row, three cubics, reduced against elementwise —",
+        "  three repeats and three portfolios each. Every reading gives the",
+        "  page's own outcome. Its A/B statistic (the spread across readings",
+        "  over the spread inside one unchanged cell) is 1.22x at load 11.74",
+        "  and 1.67x re-driven unchanged at load 1.62, so the DIGIT is one",
+        "  run's; what survives is that A/B stays near 1 and its worst pair",
+        "  is always a z3 column at single-digit milliseconds. And note A >=",
+        "  B by construction — B is a max over cells and A is the same ratio",
+        "  over the pooled samples — so the statistic is biased toward 1 in",
+        "  the direction that flatters it.",
+        "",
+        "  THAT SWEEP CAPS ROWS 4 AND 5 AT A BOX OF +/-100 AND SAID SO",
+        "  NOWHERE, which made its conclusion a universal over a silently",
+        "  bounded family. probe-where-does-the-box-stop.py removes the cap.",
+        "  These harnesses declare a float64 box, so the FORMAT supplies the",
+        "  only ceiling that is not a judgement call, and each row is driven",
+        "  to it in five interleaved passes (load 1.24-1.65):",
+        "",
+        "    cvc5, every row, every declarable box : 55-71 ms, A/B <= 1.08x",
+        "    z3, rows 1, 3, 4, 6                   : A/B 1.00x-1.13x",
+        "    z3, row 2                             : 4-13 ms, A/B 1.62x",
+        "    z3, row 5   5-6 ms at +/-1 -> 126-140 at the top of the",
+        "                format, A/B 17.82x",
+        "",
+        "  So cvc5's cell really does sit on the wall-guarded subprocess",
+        "  spawn and nothing above it moves it. z3 has NO such floor — 1-3 ms",
+        "  on row 1 in one sweep, 140 ms on row 5 at the widest declarable",
+        "  box — and on rows 2 and 5 the box reaches the cell. Those two are",
+        "  OUTCOME ONLY for that reason and the other four are RECONSTRUCTED.",
         "",
         "TWO LABELS PIN A PREDICATE, and it is worth saying which, because an",
         "earlier version of this file said none did:",
@@ -1495,16 +1746,22 @@ def render_rows(width: int) -> str:
         "WHAT THE PAGE'S OWN ARITHMETIC CAN AND CANNOT SETTLE. Its `both`",
         "cells are the SUM of its own two single-backend cells, and that",
         "looks like a recovery of the definition it never states. It is not.",
-        "solvers._escalate runs the admitted backends in a plain sequential",
-        "loop with no short-circuit, and the page says the same in words",
+        "solvers._dispatch_obligation — reached from solvers.escalate — runs",
+        "the admitted backends in a plain sequential loop with no short-",
+        "circuit, and the page says the same in words",
         "(\"every installed backend runs on every fragment\"), so the identity",
         "cannot fail for any correct measurement of any harness. Its holding",
         "is evidence of nothing, and a third of that table carries no",
         "information about the harness behind it.",
         "",
-        "What it DOES rule out: the page did not time the check() wall.",
-        "Measured here, published-latency sum against wall: 1.8x-3.1x on a",
-        "discharged cheap row, 1.05x-1.11x on a refuted one. And row 9 does",
+        "What it DOES rule out: the page did not time the check() wall. The",
+        "stable part of that is the invocation count — 4 invoked stamps",
+        "against 2 published latencies on every discharged row, 2 against 2",
+        "on a refuted one. The ratio is a wall time and moves like one:",
+        "2.07x-3.20x of the notes sum on a discharged cheap row over two",
+        "committed sessions at load 1.71 and 4.10, 1.05x-1.09x on a refuted",
+        "one, and 1.86x-4.58x on an independent re-drive at load 7.5-11.",
+        "And row 9 does",
         "not merely miss the sum — its published `both` is BELOW its own",
         "published `cvc5 alone`, which a sequential portfolio cannot do.",
         "",

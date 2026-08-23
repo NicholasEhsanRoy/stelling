@@ -1,0 +1,29 @@
+load average: 4.10 2.39 3.44
+
+row 1  VERIFIED  QF_LRA r1: status=VERIFIED published-latency-sum=69 ms  check()-wall=221 ms  ratio=3.20x  invoked-stamps=4 vs published=2  admitted-region-notes=0
+    [0] z3 (wheel)     unsat          8 ms
+    [1] cvc5 (wheel)   unsat         61 ms
+row 1  VERIFIED  QF_LRA r2: status=VERIFIED published-latency-sum=64 ms  check()-wall=137 ms  ratio=2.14x  invoked-stamps=4 vs published=2  admitted-region-notes=0
+    [0] z3 (wheel)     unsat          3 ms
+    [1] cvc5 (wheel)   unsat         61 ms
+row 1  VERIFIED  QF_LRA r3: status=VERIFIED published-latency-sum=63 ms  check()-wall=134 ms  ratio=2.13x  invoked-stamps=4 vs published=2  admitted-region-notes=0
+    [0] z3 (wheel)     unsat          3 ms
+    [1] cvc5 (wheel)   unsat         60 ms
+row 3  REFUTED   QF_LRA r1: status=REFUTED published-latency-sum=66 ms  check()-wall=72 ms  ratio=1.09x  invoked-stamps=2 vs published=2  admitted-region-notes=0
+    [0] z3 (wheel)     sat            5 ms
+    [1] cvc5 (wheel)   sat           61 ms
+row 3  REFUTED   QF_LRA r2: status=REFUTED published-latency-sum=64 ms  check()-wall=68 ms  ratio=1.06x  invoked-stamps=2 vs published=2  admitted-region-notes=0
+    [0] z3 (wheel)     sat            4 ms
+    [1] cvc5 (wheel)   sat           60 ms
+row 3  REFUTED   QF_LRA r3: status=REFUTED published-latency-sum=62 ms  check()-wall=67 ms  ratio=1.08x  invoked-stamps=2 vs published=2  admitted-region-notes=0
+    [0] z3 (wheel)     sat            4 ms
+    [1] cvc5 (wheel)   sat           58 ms
+row 4  VERIFIED  QF_NRA r1: status=VERIFIED published-latency-sum=62 ms  check()-wall=130 ms  ratio=2.10x  invoked-stamps=4 vs published=2  admitted-region-notes=0
+    [0] cvc5 (wheel)   unsat         57 ms
+    [1] z3 (wheel)     unsat          5 ms
+row 7  VERIFIED  both r1: status=VERIFIED published-latency-sum=19819 ms  check()-wall=19894 ms  ratio=1.00x  invoked-stamps=4 vs published=2  admitted-region-notes=0
+    [0] cvc5 (wheel)   timeout    16004 ms
+    [1] z3 (wheel)     unsat       3815 ms
+row 7  VERIFIED  both r2: status=VERIFIED published-latency-sum=19846 ms  check()-wall=19922 ms  ratio=1.00x  invoked-stamps=4 vs published=2  admitted-region-notes=0
+    [0] cvc5 (wheel)   timeout    16018 ms
+    [1] z3 (wheel)     unsat       3828 ms

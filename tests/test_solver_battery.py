@@ -55,6 +55,33 @@ measured. So four things are gated here rather than one:
 * and the three-readings table on the page still shows the reversal and the
   two non-splits its own prose claims
   (:func:`test_the_three_readings_table_still_shows_what_the_prose_says`).
+
+**AND FOUR MORE, ADDED 2026-08-23, BECAUSE THE ROUND ABOVE GATED THE GRADE
+WORD AND NOT THE GRADE.** Ten mutations of the first round's claims left this
+module green, and the four sharpest were all of one shape: *a claim about a
+measurement, sitting next to the measurement, held by nothing.*
+
+* **what each grade MEANS**, the page's table of it against the tool's
+  ``GRADES`` dictionary byte for byte, in both directions
+  (:func:`test_the_page_states_every_grade_s_meaning_in_the_tool_s_own_words`).
+  The sentence saying what ``reconstructed`` does NOT claim could be inverted
+  into the overclaim on either side independently, with everything green.
+* **a contested row's grade DERIVED from its recorded readings** rather than
+  asserted beside them
+  (:func:`test_a_contested_row_s_grade_is_DERIVED_from_its_readings`). Row 8
+  was graded on a criterion its own readings do not meet, and its refusal
+  claimed row 7's evidence.
+* **every figure quoted from a committed transcript is in that transcript**,
+  and still in the record that quotes it
+  (:func:`test_every_quoted_sweep_figure_is_in_the_transcript_it_is_attributed_to`).
+  The ``1.22x`` appeared in four places and all four could be re-typed green.
+  Rows 9 and 10's *"out by a factor of N"* is now computed from the three
+  committed runs instead of typed
+  (:func:`test_the_clock_gap_the_page_states_is_the_one_its_transcripts_show`).
+* **every ``solvers.<name>`` either record cites is a name that module has**
+  (:func:`test_every_solver_symbol_these_two_cite_exists`). ``solvers._escalate``
+  has never existed; the page cited it twice and the tool five times, for a
+  mechanism claim that is correct about a function with a different name.
 """
 
 from __future__ import annotations
@@ -276,13 +303,18 @@ def test_the_battery_is_the_page_s_table_row_for_row():
     )
 
 
-def test_every_grade_is_one_of_the_three_the_tool_defines():
-    """A fourth grade is a fourth meaning, and nothing would say what it is.
+def test_every_grade_is_one_the_tool_defines():
+    """A grade with no entry in ``GRADES`` is a word, and nothing says what it
+    means.
 
     ``GRADES`` maps each grade to what it licenses a reader to do. A row (or a
     page cell) carrying a word that is not a key of it is claiming something
     undefined, which is how one uniform disclaimer became three grades in the
-    first place — by nobody having to say what the disclaimer meant.
+    first place — by nobody having to say what the disclaimer meant. It became
+    four on 2026-08-23, when driving the box out to the ceiling the float64
+    FORMAT supplies showed that rows 2 and 5 do not belong with rows 1, 3, 4
+    and 6; the count is deliberately not asserted here, because a partition
+    that may not gain a class is a partition that cannot be corrected.
     """
     unknown = sorted({r.grade for r in battery.ROWS} - set(battery.GRADES))
     assert not unknown, (
@@ -336,6 +368,91 @@ def test_the_page_s_marks_are_the_tool_s_refusals():
     )
 
 
+#: The header of the page's grade-meanings table — the one that carries
+#: :data:`battery.GRADES` verbatim.
+_GRADE_TABLE_HEADER = (
+    "| grade | rows | what it licenses a reader to do, and what it does not |"
+)
+
+
+def test_the_page_states_every_grade_s_meaning_in_the_tool_s_own_words():
+    """The page's statement of what a grade MEANS, against the tool's.
+
+    **This is the hole the grade WORD gate left open, and it was the biggest
+    one on this page.** ``test_the_battery_is_the_page_s_table_row_for_row``
+    holds the grade word in the table's ``reconstruction`` column both ways,
+    so neither side can call row 4 something the other does not. Nothing held
+    what the word MEANS. The page said it in the page's words, ``GRADES`` said
+    it in the tool's, and the sharpest sentence in either — *"``reconstructed``
+    does NOT mean this battery reproduced the published milliseconds"* — could
+    be INVERTED into the overclaim on either side independently, with the whole
+    module green. Measured, both times, before this test existed.
+
+    So there is now one string per grade and both records quote it. The page
+    carries them in a table; this reads that table and compares it to
+    ``battery.GRADES`` byte for byte, in both directions, including which rows
+    each grade covers.
+
+    **What this does not catch**, written down rather than implied: a
+    consistent inversion — editing the tool's string AND the page's copy of it
+    to the same wrong thing — is green here, because both records would still
+    agree. What stops that is that the strings say what was measured and the
+    transcripts are committed beside them
+    (:func:`test_every_quoted_sweep_figure_is_in_the_transcript_it_is_attributed_to`).
+
+    Watched to fail: inverting the page's limit sentence to *"reconstructed
+    MEANS this battery reproduced the published milliseconds"*; inverting
+    ``GRADES[GRADE_RECONSTRUCTED]``'s copy of it; and moving a row between
+    grades on one side only. All three were green before this test.
+    """
+    rows = _markdown_table(_GRADE_TABLE_HEADER, "grade-meanings-table")
+    assert all(len(r) == 3 for r in rows), rows
+    on_page = {r[0].strip("`"): (r[1], r[2]) for r in rows}
+    assert len(on_page) == len(rows), (
+        f"the page's grade table names a grade twice: {[r[0] for r in rows]}"
+    )
+    assert set(on_page) == set(battery.GRADES), (
+        f"the page defines grades {sorted(on_page)} and the tool defines "
+        f"{sorted(battery.GRADES)}. A grade defined on one side only is a "
+        f"word with no meaning behind it on the other."
+    )
+    for grade, (rows_cell, meaning) in on_page.items():
+        assert meaning == battery.GRADES[grade], (
+            f"the page and the tool state what `{grade}` means in different "
+            f"words, so they are two records of one fact and can drift.\n"
+            f"  page: {meaning!r}\n"
+            f"  tool: {battery.GRADES[grade]!r}"
+        )
+        theirs = [int(n) for n in rows_cell.replace(" ", "").split(",") if n]
+        ours = [r.n for r in battery.ROWS if r.grade == grade]
+        assert theirs == ours, (
+            f"the page files rows {theirs} under `{grade}` and the tool files "
+            f"{ours}"
+        )
+
+    # AND THE LIMIT SENTENCE, WHICH IS THE PART THAT INVERTS MOST QUIETLY.
+    # It must be inside the strongest grade's meaning (so the table above
+    # carries it), and it must ALSO stand on the page in its own right, where
+    # a reader who never reads a table still meets it.
+    limit = battery.RECONSTRUCTED_IS_NOT_A_REPRODUCTION
+    assert limit in battery.GRADES[battery.GRADE_RECONSTRUCTED], (
+        "GRADE_RECONSTRUCTED's meaning no longer contains the sentence saying "
+        "what it does NOT claim. That sentence is the limit of the strongest "
+        "grade on this page and it is not optional."
+    )
+    text = PAGE.read_text(encoding="utf-8")
+    assert text.count(limit) >= 2, (
+        f"the page must carry the limit sentence in the grade table AND on "
+        f"its own, in the tool's exact words; found {text.count(limit)} "
+        f"occurrence(s) of:\n  {limit!r}"
+    )
+    assert f"> {limit}" in text, (
+        "the page's standalone statement of the limit is gone. It is the one "
+        "sentence on this page that says what `reconstructed` does not claim, "
+        "and the row it grades six ways depends on it being read."
+    )
+
+
 def test_every_row_says_what_the_page_left_open():
     """Every row must still say which parameters its label left open.
 
@@ -359,6 +476,30 @@ def test_every_row_says_what_the_page_left_open():
     assert not silent, (
         f"rows {silent} declare nothing under `fixed`, so nothing says what "
         f"the label was good for"
+    )
+
+    # AND THE ONE CONSTRAINT EVERY ROW HAS TO SATISFY AND THE PAGE ASSERTS
+    # EVERY ROW RECORDS. An obligation interval propagation decides never
+    # reaches a backend, so it cannot be a row of a solver comparison at all;
+    # `test_no_row_is_decided_before_a_backend_is_asked` measures that in the
+    # lane that has jax, and this holds the DISCLOSURE of it in the lane that
+    # does not. It was false on rows 4, 5 and 6 — the reconstruction rows —
+    # while the page asserted it of all ten, and nothing said so.
+    unstated = [r.n for r in battery.ROWS
+                if battery.INTERVAL_UNDECIDED not in r.chosen]
+    assert not unstated, (
+        f"rows {unstated} do not record that their obligation had to be "
+        f"interval-UNDECIDED. The page asserts every row's `chose here` list "
+        f"records it, and it is not decorative: AM-GM over per-variable boxes "
+        f"x in [0,0.1], y in [10,20] is interval-decided with ZERO solver "
+        f"invocations, and so is Motzkin over [1e-300,1e-299]^2 — both of "
+        f"them label-compatible readings that could not have been rows of "
+        f"this table."
+    )
+    text = PAGE.read_text(encoding="utf-8")
+    assert "every row's `chose\nhere` list records that" in text, (
+        "the page no longer says every row records the interval-undecided "
+        "constraint, so the check above is holding the tool to nothing"
     )
 
 
@@ -385,6 +526,330 @@ def test_a_contested_row_has_the_alternate_readings_that_contest_it():
     stray = sorted(v.row for v in battery.VARIANTS
                    if v.row not in {r.n for r in battery.ROWS})
     assert not stray, f"VARIANTS name rows that do not exist: {stray}"
+
+
+def test_a_contested_row_s_grade_is_DERIVED_from_its_readings():
+    """The grade must follow from the recorded readings, not sit beside them.
+
+    **This exists because row 8's grade did not meet the grade's own stated
+    criterion.** ``GRADES[GRADE_UNSUPPORTED]`` used to say *"at least one runs
+    the published direction BACKWARDS"*. Row 7 satisfies that literally. Row
+    8's three readings, driven at row 8's own width: the literal one has
+    NEITHER backend finishing, and the other two have BOTH finishing. **None
+    reverses.** The row's ``contested`` string said *"the same three readings
+    disagree the same way"* as row 7's, which is not what the readings do and
+    is contradicted by this batch's own README. Row 8 was — and still is —
+    defensibly unsupported, on evidence nothing recorded.
+
+    So the direction of every reading is now recorded as data
+    (:data:`battery.READINGS`), the published direction is derived from the
+    page's own cells, and the grade is checked against both:
+
+    * ``unsupported`` — NO reading reproduces the published direction, and at
+      least one puts the backend the page has LOSING ahead of the one it has
+      winning;
+    * ``direction only`` — at least one reading reproduces it, and NONE puts
+      the published loser ahead.
+
+    Milliseconds are deliberately not in that table: a hand-copy of them is
+    what this page had to delete. A direction is what the page asks to be read
+    and it is what held across every driving.
+
+    Watched to fail: giving row 8 row 7's readings (a reversal it does not
+    have) reddens; so does dropping the one reading that puts z3 ahead.
+    """
+    by_row: dict[int, list] = {}
+    for r in battery.READINGS:
+        by_row.setdefault(r.row, []).append(r)
+    known = {r.n for r in battery.ROWS}
+    stray = sorted(set(by_row) - known)
+    assert not stray, f"READINGS name rows that do not exist: {stray}"
+
+    graded = {battery.GRADE_UNSUPPORTED, battery.GRADE_DIRECTION_ONLY}
+    for row in battery.ROWS:
+        if row.grade not in graded:
+            assert row.n not in by_row, (
+                f"row {row.n} is graded {row.grade!r} but carries readings in "
+                f"READINGS, which is where the contested grades get their "
+                f"evidence. Either it is contested or it is not."
+            )
+            continue
+        readings = by_row.get(row.n, [])
+        assert len(readings) >= 2, (
+            f"row {row.n} is graded {row.grade!r} on {len(readings)} "
+            f"reading(s). A contest with fewer than two contestants is a "
+            f"claim, not a measurement."
+        )
+        pub = battery.published_direction(row)
+        winner = pub[2]
+        assert winner in ("z3", "cvc5"), (
+            f"row {row.n}'s published cells put neither backend ahead "
+            f"({row.page_z3!r} / {row.page_cvc5!r}), so there is no direction "
+            f"for a reading to reproduce or reverse"
+        )
+        loser = "cvc5" if winner == "z3" else "z3"
+        same = [r.key for r in readings
+                if (r.z3_finished, r.cvc5_finished, r.ahead) == pub]
+        reversed_ = [r.key for r in readings if r.ahead == loser]
+
+        if row.grade == battery.GRADE_UNSUPPORTED:
+            assert not same, (
+                f"row {row.n} is graded UNSUPPORTED, whose criterion begins "
+                f"`no reading reproduces the published split` — but "
+                f"{same} does. Either the grade or the reading is wrong."
+            )
+            assert reversed_, (
+                f"row {row.n} is graded UNSUPPORTED, whose criterion requires "
+                f"at least one reading putting {loser} — the backend this "
+                f"page has LOSING — ahead of {winner}. None of {[r.key for r in readings]} "
+                f"does. That is exactly the defect this test was written for."
+            )
+        else:
+            assert same, (
+                f"row {row.n} is graded DIRECTION ONLY, which claims the "
+                f"direction survives — but none of "
+                f"{[r.key for r in readings]} reproduces the published one "
+                f"{pub}."
+            )
+            assert not reversed_, (
+                f"row {row.n} is graded DIRECTION ONLY, which claims no "
+                f"reading reverses — but {reversed_} puts {loser} ahead. A row "
+                f"whose direction reverses under a label-compatible reading is "
+                f"UNSUPPORTED, not direction only."
+            )
+
+    # ...and no reading may be recorded without the driving it was read off.
+    if _EVIDENCE.is_dir():
+        for r in battery.READINGS:
+            assert (_EVIDENCE / r.where).is_file(), (
+                f"row {r.row} [{r.key}] cites {r.where}, which is not in "
+                f"{_EVIDENCE.relative_to(REPO)}. A recorded direction with no "
+                f"transcript behind it is the thing this table replaced."
+            )
+
+
+# ------------------------------ the figures, and the transcripts behind them
+
+#: The evidence directory. Tracked, and DELIBERATELY absent from the sdist
+#: (``tests/_repo_files.py`` names it), so a run from an unpacked sdist has
+#: no transcripts to check and the two tests below skip rather than fail.
+_EVIDENCE = REPO / "scratchpad" / "D7-solver-battery"
+
+#: EVERY MEASURED FIGURE THIS PAGE QUOTES FROM A DRIVING, AND THE COMMITTED
+#: TRANSCRIPT IT IS ATTRIBUTED TO.
+#:
+#: A wall time cannot be gated — that is this page's own position and it is
+#: right. But a figure ATTRIBUTED to a run can be held to that run's
+#: transcript, and that closes the gap the ``1.22x`` sat in: it appeared in
+#: four places, none of them checked, and all four could be edited to ``1.02x``
+#: with the whole module green. Measured, before this existed.
+#:
+#: Each entry is ``(figure, which records must carry it)``. The figure must
+#: appear in its transcript AND in every record named, so re-typing a digit in
+#: EITHER record reddens on its own — which is the case the first draft of this
+#: test missed, because "page or tool" is satisfied by whichever side was not
+#: edited. Changing it on both sides and in the transcript means replacing what
+#: a committed run printed, which is a different kind of act.
+_FIGURES_FROM_TRANSCRIPTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "sweep-does-the-freedom-reach-the-number-2026-08-23.txt": (
+        ("11.74", "both"),      # the load this page never used to state
+        ("1.22x", "both"),      # A/B, that run's
+    ),
+    "sweep-2-does-the-freedom-reach-the-number-2026-08-23.txt": (
+        ("1.62", "both"),       # its load
+        ("1.67x", "both"),      # the same sweep, unchanged, re-driven
+    ),
+    "where-does-the-box-stop-2026-08-23.txt": (
+        ("17.82x", "both"),     # row 5's z3 A/B at the format's ceiling
+        ("1.62x", "both"),      # row 2's
+        ("2.55x", "both"),      # row 5's, restricted to +/-1e100
+    ),
+    "row8-and-the-constraint-2026-08-23.txt": (
+        ("152-157 ms", "tool"),  # row 8, sum-of-squares, z3
+        ("936-946 ms", "tool"),  # row 8, sum-of-squares, cvc5
+    ),
+}
+
+
+def _evidence_or_skip(name: str) -> str:
+    path = _EVIDENCE / name
+    if not _EVIDENCE.is_dir():
+        pytest.skip(
+            f"{_EVIDENCE.relative_to(REPO)} is tracked evidence and is not in "
+            f"the sdist; there is nothing to check against here"
+        )
+    assert path.is_file(), (
+        f"{path.relative_to(REPO)} is quoted by docs/{PAGE.name} and is not "
+        f"in this tree. A figure attributed to a transcript that does not "
+        f"exist is a figure with no provenance, which is the defect this "
+        f"whole page is about."
+    )
+    return path.read_text(encoding="utf-8")
+
+
+def test_every_quoted_sweep_figure_is_in_the_transcript_it_is_attributed_to():
+    """A quoted figure must be in the run it is attributed to, both ways.
+
+    Not *"this number is correct"* — nothing here can say that, and a gate on a
+    wall time would go red when the box is busy. What this says is narrower and
+    checkable: the digits the page prints as a run's are the digits that run
+    printed, and they still appear where the page or the tool claims them.
+
+    Watched to fail: editing the page's ``1.22x`` to ``1.02x``. Driven at
+    ``943b9c6`` with all four of the places that figure appears re-typed, this
+    module was green at 38 passed.
+    """
+    records = {
+        "page": (f"docs/{PAGE.name}", PAGE.read_text(encoding="utf-8")),
+        "tool": ("tools/solver_battery.py",
+                 (TOOLS / "solver_battery.py").read_text(encoding="utf-8")),
+    }
+    text = records["page"][1]
+    tool = records["tool"][1]
+    for name, figures in _FIGURES_FROM_TRANSCRIPTS.items():
+        transcript = _evidence_or_skip(name)
+        for figure, where in figures:
+            assert figure in transcript, (
+                f"{name} does not contain {figure!r}, which is quoted from it. "
+                f"Either the figure was re-typed or the transcript was "
+                f"replaced by a different run."
+            )
+            wanted = ("page", "tool") if where == "both" else (where,)
+            for which in wanted:
+                label, body = records[which]
+                assert figure in body, (
+                    f"{figure!r} is attributed to {name} and {label} no "
+                    f"longer carries it. A figure re-typed in one record and "
+                    f"not the other is two records of one measurement."
+                )
+        assert name in text or name in tool, (
+            f"nothing names {name}, so the figures checked against it are "
+            f"attributed to a transcript no reader is pointed at"
+        )
+
+
+#: The three committed full runs of the battery, in the order the page cites
+#: them. Rows 9 and 10's "the clock is out by a factor of N" claims are
+#: DERIVED from these rather than typed, which is the whole point of the test
+#: below.
+_BATTERY_RUNS = (
+    "battery-run-1-2026-08-22T1949Z.txt",
+    "battery-run-2-2026-08-22T1959Z.txt",
+    "battery-run-3-2026-08-23T2351Z.txt",
+)
+
+
+def _measured_z3(transcript: str, row_n: int) -> tuple[float, float]:
+    """This battery's own ``z3 alone`` cell for one row, off a run transcript."""
+    body = transcript.split(
+        "MEASURED HERE (this battery's harnesses, not the page's)", 1)
+    assert len(body) == 2, "a battery transcript with no MEASURED HERE table"
+    for line in body[1].splitlines():
+        cells = re.split(r"\s{2,}", line.strip())
+        if len(cells) >= 5 and cells[0] == str(row_n):
+            got = battery.published_ms(cells[4])
+            assert got is not None, (
+                f"row {row_n}'s measured z3 cell {cells[4]!r} carries no "
+                f"milliseconds this parser can read"
+            )
+            return got
+    raise AssertionError(f"no row {row_n} in that transcript's measured table")
+
+
+@pytest.mark.parametrize("row_n", (9, 10))
+def test_the_clock_gap_the_page_states_is_the_one_its_transcripts_show(row_n):
+    """*"a factor of N"* about rows 9 and 10, derived rather than typed.
+
+    **Both factors were wrong, and both understated their own top.** The page
+    said row 9's z3 column was out *"by a factor of eighteen to forty"* in one
+    place and *"twenty to forty"* in another — it is 44x at the top — and row
+    10's *"a hundred to three hundred"*, which is 351x. The tool carried a
+    third spelling, *"a factor of twenty"*. Four hand-typed renderings of two
+    quantities that the three committed transcripts fix exactly.
+
+    So they are computed here: this battery's own ``z3 alone`` cell for that
+    row, unioned over the three committed runs, against the page's own
+    published cell for it. **Nothing here asserts a millisecond is correct** —
+    both sides are already-committed text, so the arithmetic is deterministic
+    and a busy box cannot redden it.
+
+    Watched to fail: putting *"a hundred to three hundred"* back on row 10.
+    """
+    if not _EVIDENCE.is_dir():
+        pytest.skip("scratchpad/ is tracked evidence and is not in the sdist")
+    los, his = [], []
+    for name in _BATTERY_RUNS:
+        lo, hi = _measured_z3(_evidence_or_skip(name), row_n)
+        los.append(lo)
+        his.append(hi)
+    lo, hi = min(los), max(his)
+    row = next(r for r in battery.ROWS if r.n == row_n)
+    pub = battery.published_ms(row.page_z3)
+    assert pub is not None, f"row {row_n}'s published z3 cell is not a time"
+    factor = f"{round(pub[0] / hi)}x\u2013{round(pub[1] / lo)}x"
+    text = PAGE.read_text(encoding="utf-8")
+    assert factor in text, (
+        f"row {row_n}'s published z3 cell is {row.page_z3!r} and this "
+        f"battery's is {lo:g}\u2013{hi:g} ms over the three committed runs, "
+        f"so the gap is {factor}. The page does not say that. Whatever it "
+        f"says instead was typed rather than derived, and both of the "
+        f"renderings this replaced understated their own top."
+    )
+
+
+def test_every_solver_symbol_these_two_cite_exists():
+    """``solvers.<name>`` on the page or in the tool must be a name it has.
+
+    **This exists because ``solvers._escalate`` never did.** The page cited it
+    twice and the tool five times, as the source citation for the claim that a
+    third of that ten-row table carries no information. The MECHANISM was
+    correct — the loop is real, it is sequential and it has no ``break`` — but
+    the function is ``solvers._dispatch_obligation``, reached from
+    ``solvers.escalate``, and ``hasattr(solvers, "_escalate")`` has been
+    ``False`` for the whole life of this repository.
+
+    A citation to a symbol that does not exist is worse than no citation: it
+    reads as checkable and cannot be checked, which is exactly what happened —
+    the name survived from a comment in ``src/`` onto a user-facing page.
+
+    Runs in the zero-dep lane: ``stelling.solvers`` imports without jax.
+    """
+    from stelling import solvers
+
+    cited: dict[str, set[str]] = {}
+    for label, text in (
+        (f"docs/{PAGE.name}", PAGE.read_text(encoding="utf-8")),
+        ("tools/solver_battery.py",
+         (TOOLS / "solver_battery.py").read_text(encoding="utf-8")),
+    ):
+        for name in re.findall(r"\bsolvers\.([A-Za-z_][A-Za-z0-9_]*)", text):
+            # `solvers.py` is the FILE both records cite by path, not a
+            # symbol; every other `solvers.<name>` is an attribute claim.
+            if name == "py":
+                continue
+            cited.setdefault(name, set()).add(label)
+    assert cited, (
+        "neither the page nor the tool cites any `solvers.` symbol, so this "
+        "test is holding nothing — the mechanism claim about the `both` "
+        "column rests on one and must name it"
+    )
+    missing = {n: sorted(w) for n, w in cited.items()
+               if not hasattr(solvers, n)}
+    assert not missing, (
+        "these `solvers.<name>` citations name nothing stelling.solvers has:\n"
+        + "\n".join(f"  solvers.{n} — cited by {', '.join(w)}"
+                     for n, w in sorted(missing.items()))
+    )
+    # ...and the specific mechanism the `both` column's claim rests on: a
+    # sequential loop over the admitted backends with nothing that stops it.
+    import inspect
+    src = inspect.getsource(solvers._dispatch_obligation)
+    assert "for position, backend in enumerate(ordered)" in src, (
+        "the loop the `both = z3 + cvc5` identity is called FORCED by is not "
+        "in solvers._dispatch_obligation any more. If it moved, the citation "
+        "moves with it; if it gained a short-circuit, the identity stops "
+        "being forced and a third of that table stops being uninformative."
+    )
 
 
 # ------------------------------------------- the two objects a label NAMES

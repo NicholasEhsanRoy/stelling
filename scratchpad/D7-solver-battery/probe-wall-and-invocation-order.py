@@ -2,10 +2,13 @@
 
 Two measurements, both about the page's `both` column.
 
-1. **The identity is forced.** `solvers._escalate` runs the admitted backends
-   in a plain sequential loop with no short-circuit, so a two-backend wall IS
-   the two single-backend walls for any correct measurement. It cannot fail
-   and it corroborates nothing.
+1. **The identity is forced.** `solvers._dispatch_obligation` — reached from
+   `solvers.escalate`, and cited here as `solvers._escalate` until 2026-08-23,
+   which is a name this repository has never had — runs the admitted backends
+   in a plain sequential loop with no short-circuit (`solvers.py:1997`, body
+   1998-2046, no `break`), so a two-backend wall IS the two single-backend
+   walls for any correct measurement. It cannot fail and it corroborates
+   nothing.
 
 2. **What it does rule out** is that the page timed the `check()` wall. This
    prints, per repeat, the published-latency sum against the wall, plus the

@@ -1,0 +1,28 @@
+load average: 1.27 1.68 3.39
+repeats 2   timeout 10000 ms
+
+(A) ROW 8'S THREE READINGS — does ANY of them reverse the published row?
+
+    the page's row 8, as published:  z3 **UNKNOWN** (timeout) | cvc5 unsat, 772-792 ms
+    so the published DIRECTION is: cvc5 finishes, z3 does not.
+    a REVERSAL is that pattern with the two backends swapped.
+
+    reading                    z3 alone                           cvc5 alone                        
+    ------------------------------------------------------------------------------------------------
+    literal: sum(a*b)<=sum(a)  UNKNOWN, 10100-10115 ms  [1-1 inv] UNKNOWN, 16018-16018 ms  [1-1 inv]
+    sum-of-squares             unsat, 152-157 ms  [1-1 inv]       unsat, 936-946 ms  [1-1 inv]      
+    cancellation               unsat, 3-5 ms  [1-1 inv]           unsat, 62-65 ms  [1-1 inv]        
+
+(B) TWO READINGS THE UNSTATED CONSTRAINT EXCLUDES — and rows 4, 5, 6
+    do not record it.  `inv` is the number of solver invocations:
+    ZERO means interval propagation decided it and no backend was
+    ever asked, so it cannot be a row of a solver comparison.
+
+    AM-GM, per-variable boxes x in [0,0.1], y in [10,20]
+      z3    unsat, 0-0 ms  [0-0 inv]
+      cvc5  unsat, 0-0 ms  [0-0 inv]
+    Motzkin over [1e-300, 1e-299]^2
+      z3    unsat, 0-0 ms  [0-0 inv]
+      cvc5  unsat, 0-0 ms  [0-0 inv]
+
+load average at end: 1.81 1.77 3.31
