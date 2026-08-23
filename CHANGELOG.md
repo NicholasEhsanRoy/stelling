@@ -239,9 +239,16 @@ is 0.2.0 development work throughout.
 
 - **The predicate is vendored, not written.** `stelling/_tripwire/prop_guard.py`
   is the artefact of the 0.2.0 dunder-perimeter fuzz round, copied in with
-  four import-route edits and no others, its self-test and its provenance
-  comment intact. (A fifth edit, one line and answer-preserving on the scored
-  corpus, lands in this batch's fixup below.) Its 24 cases run in this repository's suite. **The evidence
+  six edits and no others, its self-test and its provenance comment intact.
+  **The note in its header says what KIND each edit is, and not only how many
+  there are** — one provenance edit (its SPDX lines and the note itself),
+  three import-route edits, one behaviour edit and one message-text edit —
+  because an import reroute, a change to what the predicate answers after an
+  internal fault, and a change to the English in an error message are three
+  different claims about how much of the scoring survives the copy, and a
+  bare count makes none of them. (The last two land in this batch's fixups
+  below; neither moves an answer the corpus was scored on, and the second
+  moves no answer at all.) Its 24 cases run in this repository's suite. **The evidence
   behind it is two kinds and they are not interchangeable**: a 482,691-check
   real-corpus census with zero false positives, which establishes that the
   predicate is not trigger-happy on code people write — and a
@@ -393,10 +400,55 @@ is 0.2.0 development work throughout.
   in 20**, over a run of 21 checks whose report named exactly one decline
   while twenty more were answered out of the memo. The branch now returns
   instead of caching; the same drive fires **20 of 20**. This is the
-  **fifth** edit to the vendored predicate and the only one that touches
-  behaviour; it is
+  **fifth** edit to the vendored predicate, and the only one that can change
+  an answer it gives; it is
   answer-preserving on the scored corpus, whose `INTERNAL_DECLINES` was empty
   in all nine configurations, so the branch was never taken during scoring.
+
+- **The perimeter's refusal was ungrammatical on two of its four reasons.**
+  `prop_guard.Finding.message` interpolates a phrase and then the target
+  dtype, and two of the four phrases were not phrases a dtype can follow — so
+  the text of a `NarrowingError`, which `perimeter.py` quotes verbatim into
+  the sentence it raises, read *"the literal 100000 written in `__le__` is
+  overflows float16"* and *"the literal -3 written in `__ge__` is a negative
+  literal cannot exist in the unsigned type it is compared against uint8"*.
+  Driven end to end through the armed perimeter on all four reasons, before
+  and after. `overflows-float` is the reason this release promotes to a
+  headline on two pages, so the release documented a user-facing string it
+  had left broken. The phrases are a mapping keyed by reason now, rather than
+  an `elif` chain whose `else` handed the overflow phrase to anything it did
+  not recognise, and `tests/test_narrowing_perimeter.py` holds the keys equal
+  to `REASONS` and pins the sentence each reason renders. This is the
+  **sixth** edit to the vendored predicate, and the only one that changes no
+  answer at all: `classify` is untouched, its 24-case self-test is
+  byte-identical across the repair, and a differential over 286,824
+  `(dtype, slot, literal, shape)` comparisons — jax 0.10.2 and 0.11.0, both
+  x64 cells — reports **0** differences in `reason`, `narrowed_to`,
+  `target_dtype`, `literal` or `slot`.
+
+- **And the vendoring ledger moved in the same commit, because it had to.**
+  `prop_guard.py`'s note is a claim about provenance that three documents
+  restate, with nothing holding any of them equal — which is why the batch
+  that found the defect above declined to fix it: a further edit falsified
+  every restatement at once, and quietly incrementing a stated count is the
+  class this campaign keeps closing. **A hand-grep for one spelling did not
+  find them all** — the `**fifth** edit` sentence in the bullet above was
+  outside the list one produced, and so were the markers in the file's own
+  body. The note now enumerates its edits with a KIND on each and a `TALLY`
+  line beside the list; every edit but the note itself is marked at the line
+  it changed; and `tests/test_prop_guard_ledger.py` derives the figures from
+  that list and holds every restatement in the tree to them — found by
+  SCANNING the tree, so a site nobody declared is a failure rather than a
+  silence. **The markers are pinned to the list in both directions and are
+  deliberately NOT what the figures are derived from**: a marker is a comment
+  beside a line of code and is forgotten at least as easily as a sentence, so
+  deriving from it would make the gate green on exactly the omission it
+  exists to catch. What no in-tree check can see is an edit made with neither
+  marker nor entry; the witness for that is the artefact the note names, and
+  the sentence telling a reviewer to `diff` against it is itself held here.
+  Every fence above and here was driven on its own mutation — a site changed
+  alone, a marker added without an entry, an entry added without a marker, a
+  count planted in a fourth file, a phrase reverted to the broken one.
 
 - **`arm()`'s exception handler no longer restores faces another owner
   holds.** It restored everything installed rather than what that call

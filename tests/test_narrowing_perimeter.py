@@ -557,6 +557,130 @@ def test_the_vendored_predicates_own_selftest_passes_in_this_cell():
     assert "internal declines  : none" in text
 
 
+#: THE SENTENCE EACH REASON RENDERS, written out rather than derived, because
+#: the subject is ENGLISH and no assertion judges grammar. What a fence can
+#: hold is that the sentence a user meets is the one a reviewer read here, and
+#: that every reason has one. Driven below through the ARMED perimeter, which
+#: is the route this text reaches a user by: ``perimeter.py`` quotes
+#: ``Finding.message`` verbatim into the sentence it raises.
+#:
+#: TWO OF THESE FOUR WERE UNGRAMMATICAL until the message-text vendoring
+#: edit named in ``prop_guard.py``'s note, and in the same way. (Which edit
+#: that is, is not written here: it is an ordinal into a list, and
+#: ``tests/test_prop_guard_ledger.py`` is where ordinals into that list are
+#: held to it.) The template reads *"the literal L
+#: written in `slot` is <phrase> <dtype>"*, and two of the phrases were not
+#: phrases a dtype can follow, so a user read
+#:
+#:     ... is overflows float16: the program uses inf
+#:     ... is a negative literal cannot exist in the unsigned type it is
+#:         compared against uint8: the program uses 253
+#:
+#: ``overflows-float`` is the reason `docs/overflow-tripwire.md` promotes to a
+#: headline, so the release documented a string it had left broken. The
+#: predicate's ANSWERS never had anything to do with it -- ``reason``,
+#: ``narrowed_to`` and ``target_dtype`` were right in all four rows, which is
+#: why the self-test above (which prints those and not the message) could not
+#: see it and is byte-identical across the repair.
+MESSAGES = (
+    ("out-of-range", "int8", 256, lambda x: x <= 256,
+     "the literal 256 written in `__le__` is outside the range of int8: "
+     "the program uses 0"),
+    ("inexact", "float32", MOVED, lambda x: x <= MOVED,
+     "the literal 2147483647 written in `__le__` is not exactly "
+     "representable in float32: the program uses 2147483648.0"),
+    ("overflows-float", OVERFLOWING_FMT, OVERFLOWS, lambda x: x <= OVERFLOWS,
+     "the literal 100000 written in `__le__` is too large in magnitude for "
+     "float16: the program uses inf"),
+    ("negative-into-unsigned", "uint8", -3, lambda x: x >= -3,
+     "the literal -3 written in `__ge__` is negative and cannot exist in the "
+     "unsigned type uint8: the program uses 253"),
+)
+
+
+def test_every_reason_has_its_OWN_phrase_and_none_falls_through_to_another():
+    """Totality, and it is the leg a new reason meets first.
+
+    ``Finding.message`` chose its phrase with an ``elif`` chain ending in an
+    ``else``, so a fifth entry in ``REASONS`` would have rendered as an
+    overflow -- a sentence about a defect it does not have, in the text a
+    user reads -- rather than saying it had no phrase. The phrases are a
+    mapping now, and this holds its keys equal to ``REASONS`` in BOTH
+    directions: a reason with no phrase, and a phrase for a reason that no
+    longer exists, are each a failure.
+
+    ``MESSAGES`` is held to the same set, so a reason cannot be added with a
+    phrase and without a rendering anybody has read.
+    """
+    assert set(prop_guard._WHAT) == set(prop_guard.REASONS), (
+        f"phrases are written for {sorted(prop_guard._WHAT)} and the closed "
+        f"reason set is {sorted(prop_guard.REASONS)}. A reason with no "
+        f"phrase renders through the fallback, which names the reason "
+        f"instead of a defect -- correct, but nobody has written the "
+        f"sentence a user would read."
+    )
+    assert {row[0] for row in MESSAGES} == set(prop_guard.REASONS), (
+        f"{sorted({row[0] for row in MESSAGES})} have a rendering written "
+        f"out above and {sorted(prop_guard.REASONS)} exist"
+    )
+
+
+@pytest.mark.parametrize(
+    ("reason", "fmt", "literal", "expr", "sentence"),
+    MESSAGES,
+    ids=[row[0] for row in MESSAGES],
+)
+def test_the_sentence_this_reason_puts_in_front_of_a_user(
+        reason, fmt, literal, expr, sentence):
+    """One reason, rendered twice: off the ``Finding`` and out of the ARMED
+    perimeter, which is where a user meets it.
+
+    The fields are MEASURED and not invented -- the ``Finding`` comes out of
+    ``classify`` on a real array -- so this cannot pass by rendering a
+    hand-built object that the predicate would never produce.
+    """
+    x = jnp.zeros((3,), getattr(jnp, fmt))
+    finding = prop_guard.classify(x, literal, "__le__" if literal > 0
+                                  else "__ge__")
+    assert finding is not None and finding.reason == reason, finding
+    assert finding.message == sentence, (
+        f"the {reason} sentence reads\n  {finding.message}\nand this file "
+        f"records\n  {sentence}"
+    )
+
+    with perimeter.armed(("array",)) as status:
+        assert status.armed, status.explanation
+        with pytest.raises(perimeter.NarrowingError) as caught:
+            expr(x)
+    assert caught.value.finding.reason == reason, caught.value.finding
+    assert sentence in str(caught.value), (
+        f"the perimeter's own sentence is\n  {caught.value}\nand it does not "
+        f"carry the {reason} rendering\n  {sentence}"
+    )
+
+
+def test_a_reason_with_no_phrase_names_ITSELF_rather_than_borrowing_one():
+    """The fallback the mapping replaced the ``else`` with, driven.
+
+    ``Finding.message`` is reached from ``NarrowingError.__init__``, and a
+    guard may not raise on the path where it reports -- so an unmapped reason
+    cannot be a ``KeyError``. What it must not do instead is render as some
+    OTHER reason, which is exactly what the ``else`` did. Driven on a reason
+    that is deliberately not in ``REASONS``: the sentence names it.
+    """
+    finding = prop_guard.Finding(
+        reason="not-a-reason", slot="le", operand_dtype="int8",
+        target_dtype="int8", literal=7, narrowed_to=7,
+    )
+    text = finding.message
+    assert "not-a-reason" in text, text
+    for phrase in prop_guard._WHAT.values():
+        assert phrase not in text, (
+            f"an unmapped reason rendered with {phrase!r}, the phrase of "
+            f"another reason: {text}"
+        )
+
+
 @pytest.mark.parametrize(
     ("slot", "fires"),
     [
@@ -608,7 +732,12 @@ def test_the_size_zero_exemption_reads_size_so_the_array_must_be_passed():
     # all-False.
     assert finding.reason == "negative-into-unsigned"
     assert finding.narrowed_to == 253
-    assert "negative literal cannot exist" in finding.message
+    # The whole sentence, and every reason's, is in :data:`MESSAGES`; what
+    # this leg is about is that the SEPARATE reason reaches the SEPARATE
+    # advice, so it reads the half of the sentence that only this reason
+    # produces rather than the half the template gives them all.
+    assert "is negative and cannot exist in the unsigned type uint8" in (
+        finding.message), finding.message
     # ...and the dtype-only spelling has no `.size` to read, which is why the
     # contract says to pass the array.
     assert prop_guard.classify(np.dtype("uint8"), -3, "__ge__") is None

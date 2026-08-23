@@ -1014,8 +1014,11 @@ used.)
 
 The predicate is not written in `perimeter.py`. It is
 `stelling/_tripwire/prop_guard.py`, vendored essentially unchanged from the
-artefact that was measured, and it carries **two different kinds of evidence
-that are not interchangeable**:
+artefact that was measured — its header enumerates every edit made on the way
+in and says what KIND each one is, because an import reroute and a change to
+what the predicate answers are not the same claim about how much of the
+scoring below survives the copy — and it carries **two different kinds of
+evidence that are not interchangeable**:
 
 * **A real-corpus census.** 482,691 guard-eligible checks — jax's own shipped
   harness corpus in both x64 cells, the shipped test suites of optax and of
