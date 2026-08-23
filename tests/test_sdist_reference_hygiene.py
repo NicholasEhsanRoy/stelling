@@ -97,11 +97,41 @@ WHAT COUNTS AS A REFERENCE, AND WHAT THIS SCAN CANNOT SEE
 ────────────────────────────────────────────────────────────────────────────
 
 A reference is a token of the shape ``root/component[/component…]``, with an
-optional trailing slash, whose ROOT COMPONENT names a real entry at the root
-of this checkout. Everything else is prose that happens to contain a slash:
-``and/or``, ``jax/lax.py``, ``stelling-0.1.0/scratchpad/PREREG_SDIST.md``
-(a tarball member, not a tree path — the lookbehind refuses a token that
-begins after a slash).
+optional trailing slash, whose ROOT COMPONENT is a root THIS REPOSITORY
+DECLARES — one `pyproject.toml`'s sdist allowlist ships, or one
+:data:`_CONTENT_ROOTS` names as content the allowlist withholds. Everything
+else is prose that happens to contain a slash: ``and/or``, ``jax/lax.py``,
+``stelling-0.1.0/scratchpad/PREREG_SDIST.md`` (a tarball member, not a tree
+path — the lookbehind refuses a token that begins after a slash).
+
+**IT USED TO READ "NAMES A REAL ENTRY AT THE ROOT OF THIS CHECKOUT", AND
+THAT PUT THE DEVELOPER'S ENVIRONMENT INSIDE THE VERDICT.** `.venv` is a
+`WITHHELD` key and deliberately NOT a content root, so the narrowing at
+:data:`_CONTENT_ROOTS` kept `.venv/bin/python` out of the scan — but
+:func:`_root_entries` unioned the checkout's own directory listing in on a
+SECOND branch, and that listing carries `.venv` the moment somebody runs
+`uv venv`. CI creates one in the repository root; a local worktree has
+none. Measured at `f00a28e`, one `mkdir` apart, no file changed::
+
+    pytest -q -p no:randomly tests/test_sdist_reference_hygiene.py
+      17 passed
+    mkdir -p .venv/bin && touch .venv/bin/python
+    pytest -q -p no:randomly tests/test_sdist_reference_hygiene.py
+      2 failed, 15 passed
+      test_no_shipped_file_names_a_path_the_sdist_does_not_carry
+        .venv/bin/python, in six shipped files that name the interpreter
+        a CI step runs — three workflows and three tests
+      test_this_modules_own_references_are_only_what_it_declares
+        .venv/bin/python
+
+**A CHECK WHOSE INPUT INCLUDES THE DEVELOPER'S ENVIRONMENT IS A CHECK THAT
+REPORTS A DIFFERENT TRUTH TO DIFFERENT PEOPLE**, and this was the third of
+that shape to redden `main` in three merges — after a collection
+denominator and an assertion that assumed a backend was installed. Whether
+a token is a citation of a repository path is a question about what the
+token says and what the packaging config carries. It is never a question
+about whether somebody has run a command in that checkout, and the two
+controls at the bottom of this file are what hold it to that.
 
 **A BARE ``scratchpad/`` IS NOT A REFERENCE.** It is a name for the
 directory, and the directory is what four shipped files exist to talk
@@ -116,12 +146,19 @@ their own.
 
 Three limits, stated because they are real:
 
-* **A reference to a root this project has never had is invisible here.**
-  The root component has to be a name :func:`_root_entries` knows — on
-  disk, in the allowlist, in `WITHHELD` or in
-  `GENERATED_IN_DISTRIBUTION` — so ``notes/plan.md`` is not seen at all
-  when there is no ``notes/`` and never was. This gate answers *"is the
-  path shipped"*, not *"does the path exist"*;
+* **A reference to a root this project does not DECLARE is invisible
+  here.** The root component has to be a name :func:`_root_entries`
+  knows — in the sdist allowlist, or in :data:`_CONTENT_ROOTS` — so
+  ``notes/plan.md`` is not seen at all while no ``notes`` entry stands in
+  either. That set is narrower than the tree's on purpose, and the cost
+  is real and in one place: a root added to `WITHHELD` that holds this
+  repository's OWN content is invisible to this scan until it is named a
+  content root as well.
+  `test_every_withheld_root_that_holds_content_is_a_content_root` is what
+  makes that an omission somebody has to make deliberately — `git
+  ls-files` decides which withheld roots hold content, so the question is
+  answered by the repository and not by a directory listing. This gate
+  answers *"is the path shipped"*, not *"does the path exist"*;
   `test_sdist_contents.py::test_every_readme_repo_link_resolves_to_a_real
   _path` answers the second question, for `README.md` only.
 * **The sweep is `tests/_repo_files.text_files()`**, one walker shared with
@@ -286,7 +323,20 @@ _DISCLOSURE = re.compile(
 #: exception: `.git/info/exclude` names one of the four exclusion sources
 #: git itself reads, in the two files whose subject is that hatchling reads
 #: a different set. It is a git mechanism, not a path in this project's
-#: tree, and both mentions are declared as MACHINERY below.
+#: tree. Both mentions are declared as MACHINERY below, and those two rows
+#: are a RECORD now rather than an exemption the scan needs — `.git` is not
+#: a declared root, so nothing flags them. They stay because why those two
+#: sentences are machinery is worth reading beside the files that write
+#: them, which is what `WITHHELD`'s own comment means by *"MEMBERSHIP HERE
+#: IS A RECORD, NOT AN ENFORCEMENT"*.
+#:
+#: **AND THIS SET IS THE ONLY ROUTE BY WHICH A WITHHELD ROOT BECOMES
+#: VISIBLE TO THE SCAN, WHICH IT WAS NOT.** :func:`_root_entries` used to
+#: union the checkout's directory listing in as well, so every `WITHHELD`
+#: key that HAPPENED TO EXIST arrived past this narrowing on a second
+#: branch — the nine paths measured above stopped being a documented
+#: exclusion and became six live failures the day CI made a `.venv`. See
+#: :func:`_root_entries`.
 #:
 #: Held to `WITHHELD` by
 #: `test_the_content_roots_are_withheld_roots_and_not_a_second_list`, so
@@ -535,19 +585,41 @@ def _shipped_roots() -> set[str]:
 def _root_entries() -> set[str]:
     """Every name that counts as a root entry of this project, present or not.
 
-    **NOT `REPO.iterdir()` ALONE, AND THE REASON IS AN ENVIRONMENT THIS
-    SUITE IS MEANT TO RUN IN.** An unpacked sdist has no `scratchpad/`, so
-    a scan keyed on what is on disk stops recognising
-    `scratchpad/pin/corpus_pin.py` as a repo path in exactly the artefact
-    where it dangles. Driven, in a `.git`-less copy of this tree:
-    `1 failed, 13 passed, 1 skipped`. So the allowlist and
-    :data:`_CONTENT_ROOTS` are unioned in, and the answer no longer depends
-    on which directories happen to exist.
+    **NOT `REPO.iterdir()` AT ALL, AND THIS DOCSTRING USED TO SAY "NOT
+    `REPO.iterdir()` ALONE".** The reason it gave is true and is half of
+    this: an unpacked sdist has no `scratchpad/`, so a scan keyed on what
+    is on disk stops recognising `scratchpad/pin/corpus_pin.py` as a repo
+    path in exactly the artefact where it dangles — driven, in a
+    `.git`-less copy of this tree: `1 failed, 13 passed, 1 skipped`.
+    Unioning the allowlist and :data:`_CONTENT_ROOTS` in cured the
+    direction where a declared root is MISSING from disk, and left the
+    direction where an undeclared one is PRESENT wide open, under a
+    sentence that claimed both: *"the answer no longer depends on which
+    directories happen to exist"*. It did. Every `WITHHELD` key but
+    `scratchpad` names something a command creates — a cache, a build
+    output, a virtualenv — and each of them reached this set the moment
+    the command ran, past the narrowing :data:`_CONTENT_ROOTS` exists to
+    be. `.venv/bin/python`, in six shipped files, went from prose to a
+    dangling citation with no edit to any of them. The measurement is in
+    this module's docstring.
+
+    So the term is gone and the claim is now true: this is a function of
+    `pyproject.toml` and of :data:`_CONTENT_ROOTS`, it reads no directory,
+    and it answers the same in a bare checkout, in a checkout somebody has
+    run `uv venv`, `pytest` and `uv build` in, and in an unpacked sdist.
+
+    The force-include model is NOT unioned in, and could not move a
+    verdict if it were: every name it adds is a name the sdist CARRIES,
+    and :func:`dangling` only ever flags a root the sdist does not carry.
+    It is also the one part of :func:`_shipped_roots` that reads outside
+    this tree — `.hgignore` is located by walking UP — and keeping it out
+    of the reference rule keeps that where it belongs, in the model of
+    what hatchling ships.
 
     `GENERATED_IN_DISTRIBUTION` is deliberately NOT unioned in: `PKG-INFO`
     is a file, exists only in a tarball, and nothing can sit under it.
     """
-    return {path.name for path in REPO.iterdir()} | _allowlist() | _CONTENT_ROOTS
+    return _allowlist() | _CONTENT_ROOTS
 
 
 def references(text: str, *, markdown: bool) -> list[str]:
@@ -1201,3 +1273,139 @@ def test_the_soundness_partition_bites():
         "a row for a path the page does not cite left the partition green"
     )
     assert not missing
+
+
+def test_a_directory_a_command_creates_is_never_a_repo_path():
+    """**THE VERDICT MUST NOT MOVE WITH THE WORKING DIRECTORY.**
+
+    Every `WITHHELD` key outside :data:`_CONTENT_ROOTS` names a cache, a
+    build output, a local environment, local tool configuration or a single
+    file, and a shipped file naming a path under one of those is describing
+    a command's working directory rather than pointing at a missing
+    artefact member. That is the rule :data:`_CONTENT_ROOTS` states; this
+    drives it over the WHOLE class rather than over the one member CI
+    happened to create, because the defect reached all of them equally and
+    `.venv` is only the first one somebody ran.
+
+    Three legs, and the middle one is the reason this is not a blinding: an
+    unshipped citation has to keep reddening in the same call, with the
+    same shipped set, or the presence rule was removed by making the scan
+    stop looking.
+
+    Break it: put `{path.name for path in REPO.iterdir()}` back into
+    :func:`_root_entries`. A plain checkout is enough to redden it —
+    `.git` is in this class and is always there — and CI adds `.venv`.
+    """
+    shipped = _shipped_roots()
+    roots = _root_entries()
+
+    transient = sorted(set(WITHHELD) - _CONTENT_ROOTS)
+    assert len(transient) >= 10, (
+        f"only {len(transient)} withheld roots outside the content roots, "
+        f"so this control is not driving the class it says it is"
+    )
+    leaked = []
+    for root in transient:
+        text = f"run `{root}/bin/python -m pytest -q` from the repo root"
+        if (
+            root in roots
+            or references(text, markdown=True)
+            or dangling(text, markdown=True, shipped=shipped)
+        ):
+            leaked.append(root)
+    assert not leaked, (
+        "root(s) this repository declares nowhere are being read as "
+        "repository paths, so a shipped file naming one reddens for "
+        "whoever has the directory and passes for whoever does not:\n  "
+        + "\n  ".join(leaked)
+    )
+
+    assert dangling(
+        "the figures come from `scratchpad/anything.py`, driven for each.",
+        markdown=True,
+        shipped=shipped,
+    ) == ["scratchpad/anything.py"], (
+        "an unshipped citation stopped reddening, so the working-directory "
+        "dependence went away by blinding the scan and not by deriving it"
+    )
+
+    # and the same rule said about what is on this disk RIGHT NOW rather than
+    # about a dict: whatever this checkout happens to carry that neither the
+    # allowlist nor :data:`_CONTENT_ROOTS` names must not reach the answer. In
+    # a checkout that is `.git` at least; in CI it is `.venv` and
+    # `.pytest_cache` too; in an unpacked sdist it is `PKG-INFO`. This is the
+    # leg that also covers a root NO list here has heard of.
+    undeclared = {path.name for path in REPO.iterdir()} - _allowlist() - _CONTENT_ROOTS
+    assert not (undeclared & roots), (
+        "the working directory reached the root-entry set: "
+        + ", ".join(sorted(undeclared & roots))
+    )
+
+
+def test_every_withheld_root_that_holds_content_is_a_content_root():
+    """The other half of the :data:`_CONTENT_ROOTS` partition — the half
+    `REPO.iterdir()` used to answer, badly.
+
+    `test_the_content_roots_are_withheld_roots_and_not_a_second_list` holds
+    the direction that would let this module INVENT a root. This holds the
+    direction that would let it MISS one: a `WITHHELD` key holding this
+    repository's own tracked content, not named here, is a root the scan
+    cannot see, and a shipped citation into it would dangle unread.
+
+    **ANSWERED BY `git ls-files` AND NOT BY A DIRECTORY LISTING, WHICH IS
+    THE WHOLE DISTINCTION.** *"Does this repository keep content under that
+    root"* is a question about the repository, and it gives the same answer
+    in a fresh clone and in a checkout somebody has run `uv venv`, `pytest`
+    and `uv build` in. *"Is that directory here"* is a question about the
+    machine, and it was the one being asked.
+
+    Only paths UNDER a root count, so a withheld root that is a single file
+    (`uv.lock`) is not read as content: nothing can be cited under it.
+
+    Git-gated, and in a test of its own because a skip raised inside a test
+    skips the whole test — the same shape and the same reason string as
+    `test_the_inventorys_tracked_file_count_is_derived_from_git`.
+
+    Break it: drop `scratchpad` from :data:`_CONTENT_ROOTS`, or track a
+    file under another `WITHHELD` root.
+    """
+    files = _tracked_files()
+    assert len(files) > 100, (
+        f"`git ls-files` listed {len(files)} tracked files, which is not "
+        f"this repository"
+    )
+    holding = {f.split("/", 1)[0] for f in files if "/" in f} & set(WITHHELD)
+    assert holding == set(_CONTENT_ROOTS), (
+        f"the withheld roots this repository tracks content under are "
+        f"{sorted(holding)}; _CONTENT_ROOTS names {sorted(_CONTENT_ROOTS)}. "
+        f"A root in the first and not the second is INVISIBLE to this scan "
+        f"— a shipped file could cite a path under it and nothing here "
+        f"would see the citation. A root in the second and not the first "
+        f"holds no content and should not be widening what counts as a "
+        f"repository path at all."
+    )
+
+
+def _tracked_files() -> list[str]:
+    """`git ls-files`, skipping only where `.git` is absent.
+
+    The same shape and the SAME REASON STRING as
+    :func:`_git_ls_files_scratchpad`, for the same reason:
+    `tests/test_skip_inventory.py`'s existing rule discloses this skip and
+    no second disclosure has to be kept in step. A `.git` that is present
+    and a git that still fails is a DEFECT here and not an environment, so
+    it raises rather than skipping.
+    """
+    import subprocess
+
+    if not _git_can_read_this_tree():
+        pytest.skip("not a git checkout (an unpacked sdist, say)")
+    proc = subprocess.run(
+        ["git", "ls-files"],
+        cwd=REPO, capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0 and proc.stdout.strip(), (
+        f"`.git` is present and `git ls-files` failed "
+        f"(rc={proc.returncode}, stderr={proc.stderr.strip()!r})"
+    )
+    return [line for line in proc.stdout.split("\n") if line.strip()]
