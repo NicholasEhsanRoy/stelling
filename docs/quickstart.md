@@ -131,8 +131,12 @@ runs eagerly — and this dial refuses that too, on `float16` and on the seven
 `nan` and invert the comparison to
 `False`. Those are losses of the literal you wrote, which is the only kind any
 of the three watches: a value the program COMPUTED and overflowed is outside
-all three, and where its narrowing happens on the host numpy still warns, so
-`-W error::RuntimeWarning` catches that part and nothing catches the rest.)
+all three, and numpy reports only some of what it narrows —
+`-W error::RuntimeWarning` catches a HOST narrowing into `float16`, `float32`
+or `float64`, and it catches nothing else, not a device narrowing in any dtype
+and not a host narrowing into `bfloat16` or any `float8_*`. That axis is the
+target format rather than the host, and it is
+[tabulated and driven](overflow-tripwire.md#float-overflow-warning-table).)
 This raises
 `stelling.NarrowingError` at the line that wrote the literal. Off by default,
 and neither dial above turns it on.

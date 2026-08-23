@@ -1629,13 +1629,28 @@ def test_the_host_half_is_the_TARGET_FORMAT_and_not_the_door():
     # ...and the remedy sentence itself, which is the one line on this page a
     # reader acts on and the one that has been wrong twice.
     remedy = (
-        "it catches a HOST narrowing into "
+        "catches a HOST narrowing into "
         + ", ".join(f"`{n}`" for n in HOST_DOOR_LOUD[:-1])
-        + f" or `{HOST_DOOR_LOUD[-1]}`, and it catches nothing else."
+        + f" or `{HOST_DOOR_LOUD[-1]}`, and it catches nothing else"
     )
     assert remedy in flowed, (
         f"docs/overflow-tripwire.md's remedy sentence no longer names exactly "
         f"the formats numpy reports. Expected:\n{remedy}"
+    )
+    # ...and the SECOND page that states it. `docs/quickstart.md` carried the
+    # same false universal -- "where its narrowing happens on the host numpy
+    # still warns" -- and the only thing holding it was that the string
+    # `-W error::RuntimeWarning` appeared somewhere in the file.
+    quick = " ".join(
+        (repo / "docs" / "quickstart.md").read_text(encoding="utf-8").split()
+    )
+    assert remedy in quick, (
+        f"docs/quickstart.md's one sentence about this no longer names "
+        f"exactly the formats numpy reports. Expected:\n{remedy}"
+    )
+    assert "not a host narrowing into `bfloat16` or any `float8_*`" in quick, (
+        "docs/quickstart.md no longer states the half `-W "
+        "error::RuntimeWarning` misses on the host"
     )
     assert "It does not reach a device narrowing in any dtype" in flowed, (
         "docs/overflow-tripwire.md no longer says `-W error::RuntimeWarning` "
