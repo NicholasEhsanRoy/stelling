@@ -7358,6 +7358,10 @@ and a count over entries that happened to say something is not a count.
   guard** — it is in `## Log`, outside the pinned region — and was simply
   missed; that is why it is fixed and this one is not.
 
+  **THAT DEBT IS PAID — 2026-08-23, 0.2.0 D13; see *PAID* below.**
+  Everything between here and that heading is the record as it stood while
+  the debt was open, and is left as it was written.
+
   **THE DEFERRAL STANDS, AND THE 0.2.0 D5 ACCURACY PASS MEASURED WHY RATHER
   THAN REPEATING IT.** D5 set out to pay this debt: two other routed lines
   needed amending in the same pass, so a `dest_sha256` update and a
@@ -7431,6 +7435,57 @@ and a count over entries that happened to say something is not a count.
   `**N blocks were edited in transit**` sentence has to move only once
   however many blocks are amended in the same commit — which is an argument
   for doing them together and not one at a time.
+
+  **PAID — 0.2.0 D13, 2026-08-23, off `6507169`, all three in one commit
+  and at the price D5 measured.** The three files are `SOUNDNESS.md`, the
+  manifest and `CHANGELOG.md`, and the guard was watched at each stage
+  rather than taken on the note's word:
+
+  ```
+  three routed lines amended, manifest untouched
+      -> 2 failed
+         test_every_routed_block_arrives_in_soundness_md
+           "detail section(s) no longer hash to the manifest's dest_sha256
+            — the routed text has been edited without the manifest being
+            updated: [('SF-0.2.0-46', '634740d10e9d', 'cae1bf46ac51'),
+            ('SF-0.2.0-62', '7b14f3cd5677', '2b354c8fb266'),
+            ('SF-0.2.0-64', 'd36a72736834', 'aa2b6677f315')]"
+         test_the_source_hashes_reproduce_from_git[soundness]
+           "SF-0.2.0-46: the destination does not carry 3 of this block's
+            non-blank source lines and the manifest quotes 0"
+  ... dest_sha256, src_lines_not_carried, not_carried and edit_note
+      written for all three (3, 1 and 12 lines not carried)
+      -> 1 failed
+         test_the_record_says_how_many_blocks_were_edited_in_transit
+           "`### Soundness fixes` says 3 block(s) were edited in transit
+            and the manifest declares 6: ['SF-0.2.0-07', 'SF-0.2.0-46',
+            'SF-0.2.0-51', 'SF-0.2.0-59', 'SF-0.2.0-62', 'SF-0.2.0-64']"
+  ... `CHANGELOG.md`'s count sentence moved to SIX and all six named
+      -> 29 passed
+  ```
+
+  So the count guard names every block it is short of, which is what makes
+  it a guard against a routing becoming a summarisation rather than a
+  tally. **All three are amendments to STAMPED HISTORY and none is a
+  restatement**: each keeps the figure that was measured, names the commit
+  it was measured at (`ded5036`, `321209d`, `f729d70`), and sets what the
+  tree reads now beside it. `SF-0.2.0-64`'s four rotted citations are
+  STRUCK rather than re-pointed at today's numbers, and its two survivors
+  are cited by symbol with the greps that find them — re-pointing would
+  only reschedule the rot, which is `SF-0.2.0-14`'s rule and was the whole
+  finding.
+
+  **ONE CORRECTION TO THE NOTE ABOVE, FOUND IN PAYING IT: `57 / 10 / 47`
+  IS A LANE FIGURE AND WAS WRITTEN AS IF IT WERE NOT.** `_population()`
+  ends with `_numpy_candidates()`, which returns `[]` where numpy cannot
+  be imported, so the same probe reads **57 objects, 10 accepted, 47
+  refused** in the jax lane and **53 / 8 / 45** in the zero-dep lane —
+  those four objects are the whole of the difference, and `0 faces split`
+  in both. The `321209d` control is lane-dependent for the same reason and
+  gives the entry's own **51 / 8 / 43** with numpy present and 47 / 6 / 41
+  without. The amended entry states both lanes; this note stated one
+  number for a measurement that has two, which is the smaller sibling of
+  the defect it was recording.
 
   **The interaction with B5-1, said plainly**: a `dot_general`-floored sum
   of squares now reaches the `div` transfer with a `[0, S]` box exactly as
@@ -13535,9 +13590,22 @@ was measured on a B6-free tree unless it says otherwise.
   precision), so no verdict was wrong; verdicts move **UNKNOWN →
   VERIFIED/REFUTED** where the lost ulp was what prevented a decision.
   `mul` now takes the same `_exactable`/`Fraction` route `add` and `div`
-  already had, confined the same way (an infinite endpoint keeps the bump,
-  because `Fraction(inf)` raises and `0·±inf = 0` is an endpoint
-  convention). The ieee `mul` kernels deliberately do NOT change: under
+  already had. **AS M16 SHIPPED IT that route was confined the same way
+  the unconditional bump had been: an infinite endpoint ANYWHERE in the
+  operand quadruple kept the bump on all four corners, because
+  `Fraction(inf)` raises and `0·±inf = 0` is an endpoint convention. That
+  is the measurement this entry stamped at `ded5036`, and it is NOT what
+  the code does now** (amended 2026-08-23 at `6507169`, audit 0.2.0 D13;
+  the gate moved under this entry at `e3a6475`, and the entry is left as
+  the historical measurement it is rather than restated as current). The
+  gate is per CORNER now — `interval._mul_corner` — so an infinity costs
+  only the corners it touches, and the `0·±inf = 0` corner comes back as
+  an exact `Fraction(0)` precisely so it takes NO bump. Re-driven at
+  `6507169`: `_mul_corners(2.0, 3.0, 2.0, inf)` floors at exactly `4.0`
+  and `_mul_corners(0.0, inf, 0.0, 3.0)` at exactly `0.0`, where the
+  whole-quadruple gate returned `-5e-324` — M16's own symptom, inside
+  `mul`, in the half of the input space M16's fix did not
+  reach. The ieee `mul` kernels deliberately do NOT change: under
   ieee the value IS `fl(x*y)`, which the native corner products already
   compute exactly.
 
@@ -14963,11 +15031,39 @@ was measured on a B6-free tree unless it says otherwise.
   `queue` and `types` with a battery of generic constructor arguments,
   derives a subclass of every type that allows one, derives a
   refusing-`__iter__` subclass of every ACCEPTED type, and adds numpy's
-  containers by hand. Measured on this tree: **51 objects, 8 accepted, 43
+  containers by hand. Measured at `321209d`: **51 objects, 8 accepted, 43
   refused, and the two faces partition identically** — so the door and the
   emission cannot come to hold different rules, in either direction, and
   the soundness direction (emission ⊆ door) is the one that would be
   UNSOUND-1 again.
+
+  **THOSE THREE NUMERALS ARE A STAMPED MEASUREMENT AND THEY HAVE GONE
+  STALE; THE PARTITION CLAIM BESIDE THEM HAS NOT** (amended 2026-08-23 at
+  `6507169`, audit 0.2.0 D13 — the figures above are left as what was
+  measured at `321209d`, not restated as today's). Re-run here — the same
+  `_population()` through the same `issubclass(type(param),
+  ir._SHAPE_PARAM_CONTAINERS)` oracle and the same `_door`/`_emission`
+  probes — this tree reads **57 objects, 10 accepted, 47 refused, 0 faces
+  split** where numpy is importable, and **53 / 8 / 45** in the zero-dep
+  lane, where `_numpy_candidates` returns nothing and its four objects
+  are the whole of the difference. **That figure was never lane-qualified
+  and it needed to be.** The growth is DRIFT and not a bad original: the
+  `321209d` `_population()` run against THIS tree's `stelling` still
+  gives exactly **51 objects, 8 accepted, 43 refused** with numpy present
+  (**47 / 6 / 41** without, the same four objects again), so what moved is
+  the population and not the rule — `_lying_iter_candidates` and
+  `_claiming_candidates` were added after the stamp.
+
+  **And the sentence above credited the pin with measuring those figures,
+  which it does not.**
+  `test_the_measured_partition_IS_the_documented_rule` asserts that each
+  face's accept/refuse partition equals the `issubclass` oracle, that the
+  two faces agree EXACTLY, and that the population clears FLOORS — `>= 15`
+  refused, `>= 4` accepted, `>= 2` unreadable. It never asserts a numeral,
+  so the half of that sentence
+  that carries soundness is pinned and reproduces (0 faces split, both
+  lanes), and the census beside it was held by nothing, which is how it
+  went three numerals stale in silence.
 
   **What that pin does not cover is stated in the test rather than
   discovered later.** It does not prove the population complete — a
@@ -15139,32 +15235,73 @@ was measured on a B6-free tree unless it says otherwise.
   **THE SCOPE OF THAT SENTENCE IS `obligation`, AND IT WAS WRITTEN
   WITHOUT ONE** (audit 0.2.0 B6 audit 5, F3). It stood here as *"no
   caller anywhere"*, which is false one module over: `propagate` does not
-  call `_size` and carries **six** raw `n = 1; for d in shape: n *= d`
-  products of its own. Measured on this tree, three of them loop over a
+  call `_size` and carries raw `n = 1; for d in shape: n *= d` products
+  of its own. At `f729d70`, where this was stamped, there were six, three
+  of them looping over a
   shape read straight off an `ir.Aval` or an `ir.Array` at the site —
+  **and it is five and two now, so the block below is TODAY'S two, by
+  symbol, and not the three this entry listed:**
 
   ```
-  _refused_value_problem    for d in value.shape       propagate.py:1180
-  _atom_element_count       for d in atom.aval.shape   propagate.py:6584
-  _declared_element_count   for d in out.aval.shape    propagate.py:10657
+  _atom_element_count       for d in atom.aval.shape
+  _declared_element_count   for d in out.aval.shape
   ```
 
-  (line numbers as measured at this commit; the census itself is computed
+  **BOTH NUMERALS HAVE MOVED SINCE, AND ALL FOUR OF THE
+  `propagate.py:NNN` CITATIONS THIS ENTRY CARRIED HAVE ROTTED** (amended
+  2026-08-23 at `6507169`, audit 0.2.0 D13; the stamp is kept and what
+  the tree reads now is set beside it, not written over it). Re-running
+  this entry's OWN AST census gives **five and two** — the block above is
+  the two, by SYMBOL — and `_refused_value_problem` is the one that left
+  it, at B8a item 1, when it stopped taking a raw product over
+  `value.shape` and began counting the extents `iv.check_shape` had
+  returned. The four that rotted pointed into `propagate.py` at lines
+  1180, 6584, 10657 and 814; at `6507169` those four lines are the
+  interior of `_int_bracket`, the interior of the `_ieee_convert`
+  transfer, the interior of the equation dispatch, and a dataclass field
+  list in `Propagation`. They are struck rather than re-pointed at today's
+  numbers, which would only reschedule the rot — `SF-0.2.0-14` states the
+  rule this entry should have been following, in this same section:
+  *"Cited by SYMBOL and not by line on purpose … a line that still exists
+  and has become something else is exactly the claim nothing checks."*
+  To find these two now, grep `propagate` for `for d in atom.aval.shape`
+  and for `for d in out.aval.shape`.
+
+  The census itself is computed
   from `propagate`'s own AST by `tests/test_aval_lie_both_faces.py::
-  test_the_element_count_census_covers_propagate_TOO`, which reds naming
-  this entry if a seventh appears or one of these moves.)
+  test_the_element_count_census_covers_propagate_TOO`, and **the
+  parenthetical this entry put beside that name was a claim about that
+  test which the test does not support** — it is why the entry could say
+  six and three, with four dead line numbers under it, and stay green. It
+  read *"which reds naming this entry if a seventh appears or one of
+  these moves"*. What the test actually holds is the census as an EXACT
+  five-row set of `(function, iterated expression)` pairs — so a sixth or
+  a seventh reds it, and so does a site moving to a different function —
+  plus, of this entry, only that the two surviving `off_ir` names appear
+  ANYWHERE in its text and that the unscoped claim is absent from it. It
+  holds NO line numbers, so a site sliding down the file moves nothing it
+  looks at, and no numeral in this entry is anything it reads. **And its
+  module opens `pytest.importorskip("jax")`, so it is a JAX-LANE
+  instrument**: the whole file is `1 skipped` in the zero-dep lane, where
+  nothing checks this census at all — a limit of the guard, stated here
+  rather than left for the next reader to find.
 
-  — one more (`propagate._elements`, `propagate.py:814`) is reached at one
-  remove and only from `ir.Array.shape` at both its call sites, and the
+  One more, `propagate._elements`, is reached at one remove and no longer
+  takes a shape at all: B8a item 1 rewrote it to take ALREADY-NORMALISED
+  EXTENTS, its parameter is named `extents`, and its three call sites
+  hand it `iv.check_shape(...)`'s return — which is why its census row
+  reads `("_elements", "extents")`. And the
   remaining two take a caller-supplied `shape` argument. `_declared_
   element_count` is the library's SECOND element-count reader and was
   already named by an earlier audit in `_Slicer._declared_shape`'s
-  docstring; the other five appear in this entry for the first time. The
+  docstring; the other four appear in this entry for the first time. The
   version of this sentence in `_shape_problem`'s docstring opens *"It is
   `_size`:"* and is correctly scoped; this one is the one a reader quotes,
   and it is now scoped too.
+  The two that read an `ir` shape at the site are `_atom_element_count`
+  and `_declared_element_count`, in the block above.
 
-  What makes those six safe is not `_size` and is stated where it is:
+  What makes those two safe is not `_size` and is stated where it is:
   after audit 5's F1, `ir.Aval` and `ir.Array` CARRY the extents their own
   `__post_init__` validated, as plain `int` in a plain `tuple`, so a
   product taken over one of their shapes has no second protocol to reach.

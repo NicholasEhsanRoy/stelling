@@ -20,16 +20,33 @@ its own span and its own blocks.
 block that left the changelog is pinned here by the sha256 of the text it
 left as (`src_sha256`) and by the sha256 of the text it arrived as
 (`dest_sha256`); `tests/test_soundness_routing.py` reads `SOUNDNESS.md` and
-compares. For 68 of the 72 blocks the two hashes are equal, which is what
+compares. For 65 of the 72 blocks the two hashes are equal, which is what
 "verbatim" means here and is not a claim anyone has to take on trust.
 
-**FOUR BLOCKS WERE EDITED IN TRANSIT AND ALL FOUR ARE DECLARED**, each
+**SEVEN BLOCKS WERE EDITED IN TRANSIT AND ALL SEVEN ARE DECLARED**, each
 because the text it carried was wrong rather than because it read badly: an
 unreproducible hash literal (`SF-0.2.0-59`), a solver workaround's obsolete
 justification (`SF-0.2.0-51`), a route census stating 32 routes and 7
 `unwatched` against a dict holding 33 and 8 (`SF-0.2.0-07`), and Mode 2's
 own route census and its account of why the old fraction survived
 (`M2-0.2.0-01`).
+
+**THREE MORE ON 2026-08-23, AND THEY ARE A DIFFERENT KIND** (0.2.0 D13):
+what an infinite endpoint costs `mul` (`SF-0.2.0-46`), a container-type
+population census (`SF-0.2.0-62`), and an element-count census carrying four
+`propagate.py` line numbers that now point at unrelated code
+(`SF-0.2.0-64`). Each of the first four carried something that was already
+wrong when it left `CHANGELOG.md`; each of these three was RIGHT when it was
+stamped, and the tree moved underneath it. So they are AMENDMENTS TO STAMPED HISTORY and not restatements of it:
+each keeps the figure that was measured, names the commit and the date it
+was measured at, and sets what the tree reads now beside it. A historical
+entry silently updated to today's figure is a falsification, and this
+project's `## Log` discipline says so. Their three edit notes carry the
+drives. All three had been recorded as a KNOWN DEBT in `SOUNDNESS.md`'s
+`## Log` — the price is three files, not one, because editing any block
+flips it into this partition and `CHANGELOG.md`'s count sentence is derived
+from the partition's size — and they were paid in one commit for that
+reason.
 
 **AND THE MEASUREMENT THAT MAKES THAT SENTENCE MEAN ANYTHING WAS NOT TAKEN
 UNTIL THE B8c FIXUP.** This paragraph used to end *"each edited block also
@@ -49,8 +66,10 @@ It is measured now, twice over. Each edited block records
 the lines is what makes an edit reviewable: a summarisation with a note
 attached would have to write every line it summarised away into this file,
 where a reader will meet them. Four, three, three and eleven lines, in the
-order the four are named above; the rest of all four blocks moved
-untouched. (`SF-0.2.0-59` was two until 2026-08-23, when its destination
+order the first four are named above, and three, one and twelve for
+`SF-0.2.0-46`, `SF-0.2.0-62` and `SF-0.2.0-64`; the rest of all seven
+blocks moved untouched. (`SF-0.2.0-59` was two until 2026-08-23, when its
+destination
 stopped calling ONE document two — *"a hand-built document"* in one
 sentence and *"a traced … persisted through JSON"* in the next.) Those
 numerals are restated here for a reader and are held to nothing — each
@@ -692,9 +711,36 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(1933, 1965),
         src_lines=33,
         src_sha256="cae1bf46ac51e599f077a207732e0296a308a47a3b0a3c10862deaf19cba7616",
-        dest_sha256="cae1bf46ac51e599f077a207732e0296a308a47a3b0a3c10862deaf19cba7616",
-        src_lines_not_carried=0,
-        edit_note="",
+        dest_sha256="634740d10e9d71e4f956db5f3ecc34b9d849624742f11e71dff702528ef32f99",
+        src_lines_not_carried=3,
+        not_carried=(
+            '  already had, confined the same way (an infinite endpoint keeps the bump,',
+            '  because `Fraction(inf)` raises and `0·±inf = 0` is an endpoint',
+            '  convention). The ieee `mul` kernels deliberately do NOT change: under',
+        ),
+        edit_note=(
+            "the entry's account of what an infinite endpoint costs `mul` "
+            "went stale underneath it, and was false in BOTH clauses rather "
+            "than one. As stamped at `ded5036` the exact-rational route was "
+            "gated on the WHOLE operand quadruple -- an infinite endpoint "
+            "anywhere kept the unconditional bump on all four corners -- "
+            "which was a true description of the code M16 shipped. "
+            "`e3a6475` moved the gate per CORNER "
+            "(`stelling.interval._mul_corner`): an infinity now costs only "
+            "the corners it touches, and the 0-times-infinity convention "
+            "corner comes back as an exact `Fraction(0)` precisely so that "
+            "it takes no bump at all. Driven here: "
+            "`_mul_corners(2.0, 3.0, 2.0, inf)` floors at exactly 4.0 and "
+            "`_mul_corners(0.0, inf, 0.0, 3.0)` at exactly 0.0, where the "
+            "whole-quadruple gate gave -5e-324. THE STAMP IS KEPT AND "
+            "DATED and the present reading is set beside it -- this is an "
+            "amendment to a historical measurement, not a restatement of "
+            "it as current. Recorded as a known debt in `SOUNDNESS.md`'s "
+            "`## Log` from 2026-08-22 and paid at 0.2.0 D13 together with "
+            "`SF-0.2.0-62` and `SF-0.2.0-64`, because the `**N blocks were "
+            "edited in transit**` sentence moves once however many blocks "
+            "are amended in one commit. No behaviour change."
+        ),
     ),
     Block(
         id="SF-0.2.0-47",
@@ -879,9 +925,38 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(3231, 3279),
         src_lines=49,
         src_sha256="2b354c8fb2660fa3bccbbbe5e4de552f8d883dc8f22a1c521321106e913a4790",
-        dest_sha256="2b354c8fb2660fa3bccbbbe5e4de552f8d883dc8f22a1c521321106e913a4790",
-        src_lines_not_carried=0,
-        edit_note="",
+        dest_sha256="7b14f3cd5677416b9e915ffe8b61012b90580430182d0b2a3c49b410a6942b26",
+        src_lines_not_carried=1,
+        not_carried=(
+            '  containers by hand. Measured on this tree: **51 objects, 8 accepted, 43',
+        ),
+        edit_note=(
+            "the container-population census went stale under a stamped "
+            "entry, and the sentence carrying it credited the pin with "
+            "measuring figures the pin does not assert. `321209d` measured "
+            "51 objects, 8 accepted, 43 refused; re-run at 0.2.0 D13, the "
+            "same `_population()` through the same `issubclass(type(param), "
+            "ir._SHAPE_PARAM_CONTAINERS)` oracle and the same "
+            "`_door`/`_emission` probes reads 57 / 10 / 47 where numpy is "
+            "importable and 53 / 8 / 45 in the zero-dep lane -- a LANE "
+            "SPLIT the figure never disclosed, and `_numpy_candidates`' "
+            "four objects are the whole of the difference. It is drift and "
+            "not a bad original, driven: the `321209d` `_population()` run "
+            "against THIS tree's `stelling` still gives exactly 51 / 8 / "
+            "43 with numpy present and 47 / 6 / 41 without, and "
+            "`_lying_iter_candidates` and `_claiming_candidates` "
+            "were added after the stamp. The half that carries soundness "
+            "-- the two faces partitioning identically -- reproduces, 0 "
+            "split, in both lanes. AND the pin the sentence credited, "
+            "`test_the_measured_partition_IS_the_documented_rule`, asserts "
+            "each face against the oracle, the two faces against each "
+            "other, and FLOORS on the population (>= 15 refused, >= 4 "
+            "accepted, >= 2 unreadable) -- never a numeral; so the census "
+            "beside it was held by nothing, which is how it went three "
+            "numerals stale in silence, and the entry now says so. The "
+            "stamp is kept and dated rather than overwritten. No behaviour "
+            "change."
+        ),
     ),
     Block(
         id="SF-0.2.0-63",
@@ -901,9 +976,58 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(3405, 3475),
         src_lines=71,
         src_sha256="aa2b6677f315d457bbff57c68112ab0960f158bb9c50464be9039260e598e81a",
-        dest_sha256="aa2b6677f315d457bbff57c68112ab0960f158bb9c50464be9039260e598e81a",
-        src_lines_not_carried=0,
-        edit_note="",
+        dest_sha256="d36a72736834c1de351091f7b61a892b813ec6bfeb70032d7846d90831f27859",
+        src_lines_not_carried=12,
+        not_carried=(
+            '  call `_size` and carries **six** raw `n = 1; for d in shape: n *= d`',
+            '  products of its own. Measured on this tree, three of them loop over a',
+            '  _refused_value_problem    for d in value.shape       propagate.py:1180',
+            '  _atom_element_count       for d in atom.aval.shape   propagate.py:6584',
+            '  _declared_element_count   for d in out.aval.shape    propagate.py:10657',
+            '  (line numbers as measured at this commit; the census itself is computed',
+            '  test_the_element_count_census_covers_propagate_TOO`, which reds naming',
+            '  this entry if a seventh appears or one of these moves.)',
+            '  — one more (`propagate._elements`, `propagate.py:814`) is reached at one',
+            '  remove and only from `ir.Array.shape` at both its call sites, and the',
+            '  docstring; the other five appear in this entry for the first time. The',
+            '  What makes those six safe is not `_size` and is stated where it is:',
+        ),
+        edit_note=(
+            "THREE FAULTS IN ONE STAMPED ENTRY: the element-count census "
+            "went stale, all four of its `propagate.py:NNN` citations "
+            "rotted, and its parenthetical made a claim about its own "
+            "instrument that the instrument does not support. As stamped "
+            "at `f729d70` the entry said `propagate` carried SIX raw "
+            "`n = 1; for d in shape: n *= d` products, THREE of them over "
+            "a shape read off an `ir.Aval`/`ir.Array` at the site. "
+            "Re-running the entry's OWN AST census at 0.2.0 D13 gives FIVE "
+            "and TWO: `_refused_value_problem` left the census at B8a item "
+            "1, when it stopped taking a raw product over `value.shape` "
+            "and began counting the extents `iv.check_shape` returned, and "
+            "the same item rewrote `_elements` to take already-normalised "
+            "EXTENTS rather than a shape. The four cited lines now point "
+            "at unrelated code -- 1180 inside `_int_bracket`, 6584 inside "
+            "the `_ieee_convert` transfer, 10657 inside the equation "
+            "dispatch, 814 a dataclass field list in `Propagation` -- so "
+            "they are STRUCK and the two survivors are cited by SYMBOL, "
+            "which is the rule `SF-0.2.0-14` states in this same section; "
+            "re-pointing them at today's numbers would only reschedule the "
+            "rot. And the parenthetical said the census test 'reds naming "
+            "this entry if a seventh appears or one of these moves': that "
+            "test pins the census as an exact FIVE-row set of (function, "
+            "iterated expression) pairs, holds NO line numbers, and asks "
+            "of this entry only that the two surviving `off_ir` names "
+            "appear ANYWHERE in its text -- which is why it stayed green "
+            "while the entry read six and three with four dead citations "
+            "under it -- and its module opens "
+            "`pytest.importorskip(\"jax\")`, so it is a jax-lane "
+            "instrument and checks nothing in the zero-dep lane, which "
+            "the entry now states. That test's own failure text said "
+            "three, and named "
+            "`CHANGELOG.md` for an entry that lives in `SOUNDNESS.md`; "
+            "corrected in the same commit, message-only. The stamp is kept "
+            "and dated rather than overwritten. No behaviour change."
+        ),
     ),
     Block(
         id="SF-0.2.0-65",

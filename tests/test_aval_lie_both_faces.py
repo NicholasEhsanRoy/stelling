@@ -1451,9 +1451,12 @@ def test_the_element_count_census_covers_propagate_TOO():
         ("_declared_element_count", "out.aval.shape"),
     ]), (
         f"`propagate`'s raw element-count census has moved: {sorted(found)}. "
-        f"The `ir.py` message-totality entry in `CHANGELOG.md` names the "
-        f"three that read an `ir.Aval`/`ir.Array` shape at the site, and "
-        f"they must move together."
+        f"`SF-0.2.0-64` in `SOUNDNESS.md` -- \"AN ELEMENT COUNT COMES FROM "
+        f"`__index__`\", routed out of `CHANGELOG.md` -- names the TWO that "
+        f"read an `ir.Aval`/`ir.Array` shape at the site, and they must move "
+        f"together. (This message said three, and `CHANGELOG.md`, until "
+        f"2026-08-23: the census went to five and two at B8a item 1 and the "
+        f"entry and this text were both a measurement behind.)"
     )
 
     off_ir = [f for f, it in found if it.endswith(".shape")]
@@ -1493,7 +1496,7 @@ def test_the_element_count_census_covers_propagate_TOO():
     entry = max(entries, key=len)
     assert "no caller anywhere" not in entry.lower(), (
         "the record still makes the UNSCOPED claim; `propagate` does "
-        "not call `_size` and carries six raw products of its own"
+        "not call `_size` and carries five raw products of its own"
     )
     for name in off_ir:
         assert name in entry, (

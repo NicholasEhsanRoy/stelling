@@ -929,17 +929,22 @@ single source of truth for them (`DOCUMENTATION_ARCHITECTURE.md` §8.3).
 there whole, block for block, and `tests/test_soundness_routing.py`
 checks the move rather than asserting it: every block that left this
 section is pinned by the sha256 of the text it left as, and has to be
-found under its own ID in `SOUNDNESS.md` with that hash. **Three blocks
+found under its own ID in `SOUNDNESS.md` with that hash. **Six blocks
 were edited in transit** — `SF-0.2.0-07`'s route census, which said 32
 construction routes and 7 `unwatched` against a dict holding 33 and 8;
 `SF-0.2.0-51`'s solver-workaround justification, which named a case the
-emission cannot produce; and `SF-0.2.0-59`'s hash literal, which nobody
-could reproduce. All three are declared in the manifest with the reason,
+emission cannot produce; `SF-0.2.0-59`'s hash literal, which nobody
+could reproduce; and three stamped measurements that had gone stale
+underneath their own entries — `SF-0.2.0-46`'s account of what an
+infinite endpoint costs `mul`, `SF-0.2.0-62`'s container-population
+census, and `SF-0.2.0-64`'s element-count census together with the four
+`propagate.py` line numbers it quoted, all four of which now point at
+unrelated code. All six are declared in the manifest with the reason,
 with a count of the source lines the edit did not carry and with those
 lines QUOTED — and the count and the quotation are both measured against
 the pre-routing file rather than taken on trust, which they were not
 until the B8c fixup. The digit in this sentence is derived from the
-manifest too, so a fourth edit cannot leave it reading three. The check
+manifest too, so a seventh edit cannot leave it reading six. The check
 is a partition in both directions: an ID missing from either file, an ID
 in one and not the other, and a detail section nothing links to are each
 a failure, so **an entry cannot be made to comply by deleting it.**
