@@ -937,13 +937,13 @@ This repository runs the dial over its own suite and has both shapes.
 
     JAX_ENABLE_X64=0 pytest -q -p no:randomly --stelling-narrowing-perimeter=error
 
-Measured that way at `804b9ca` (this batch on top of `6c40ddc`):
+Measured that way at `49d1ff4` (this batch on top of `6c40ddc`):
 
 ```
 armed -- the dunder perimeter is live on tracer, array: 39 slot(s), 1 owner(s)
 1473 integer literal(s) ... were checked; 15 ... do not exist in the program jax would run
 15 narrowing(s) PERMITTED by an expected_truncation region, at 9 site(s)
-4574 passed, 10 skipped
+4575 passed, 10 skipped
 ```
 
 *These are a measurement of one tree and they move when it does; the block

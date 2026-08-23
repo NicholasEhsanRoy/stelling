@@ -311,9 +311,9 @@ is 0.2.0 development work throughout.
   `--stelling-narrowing-perimeter=error` the whole suite passes with the dial
   armed at the end, exit 0, every permitted narrowing printed with the reason
   its author gave. The figures are a measurement of one tree and move when it
-  does. Re-measured at `804b9ca` (this batch on `6c40ddc`) with
+  does. Re-measured at `49d1ff4` (this batch on `6c40ddc`) with
   `JAX_ENABLE_X64=0 pytest -q -p no:randomly
-  --stelling-narrowing-perimeter=error`, they read **4574 passed, 10
+  --stelling-narrowing-perimeter=error`, they read **4575 passed, 10
   skipped**, `1473 integer literal(s)` checked, `15 narrowing(s) PERMITTED at 9
   site(s)`; when this
   entry was written they read `4404 passed, 10 skipped`, `1447` and `11 at 9`.
