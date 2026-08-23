@@ -118,8 +118,9 @@ All counts computed from the live registries at generation time.
 ## Where the sets differ
 
 Every difference below is computed from the live registries. Reasons
-are quoted verbatim from code comments/docstrings, with file:line;
-where the code records no reason for a difference, the entry says
+are quoted verbatim from code comments/docstrings and are cited by
+the FILE that carries them, with no line number; where the code
+records no reason for a difference, the entry says
 "no recorded reason".
 
 ### Real vs ieee transfer registry membership

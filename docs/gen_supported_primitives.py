@@ -458,9 +458,16 @@ def generate() -> str:
     # -- where the sets differ -----------------------------------------------
     w("## Where the sets differ")
     w("")
+    # 0.2.0 D16, 2026-08-23: this said "with file:line" until today. D15
+    # took the line number out of :func:`_q`'s citation and rewrote the
+    # page's HEADER sentence, and left this one -- so the page whose whole
+    # subject is that everything on it is derived from the live registries
+    # carried a false sentence about its own citations. It is a generated
+    # page, so the repair is here and not in the file.
     w("Every difference below is computed from the live registries. Reasons")
-    w("are quoted verbatim from code comments/docstrings, with file:line;")
-    w("where the code records no reason for a difference, the entry says")
+    w("are quoted verbatim from code comments/docstrings and are cited by")
+    w("the FILE that carries them, with no line number; where the code")
+    w("records no reason for a difference, the entry says")
     w("\"no recorded reason\".")
     w("")
 

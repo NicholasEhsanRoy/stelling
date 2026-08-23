@@ -3003,7 +3003,13 @@ and a count over entries that happened to say something is not a count.
   violating admitted point. The existing suite is unmoved: 2151 passed /
   2 skipped on jax 0.11.0 and on 0.10.2, the only red being the
   generated `docs/supported-primitives.md` line-number citation, which is
-  regenerated.
+  regenerated. **(AMENDED 2026-08-23, 0.2.0 D16: the figure is left as
+  measured and the red it names cannot happen now. 0.2.0 D15 (`c9083fa`)
+  took all 49 source-line coordinates out of that page, so an edit that
+  moves a cited line no longer reddens
+  `test_committed_page_matches_live_registries`; what still reddens it is
+  a registry change. Driven and enumerated at the 2026-08-15 B5
+  follow-up entry below.)**
 
   **Why no test caught it.** An instrumented full-suite run recorded 264
   calls into assume classification with atom shapes `()`, `(1,)`, `(2,)`,
@@ -4344,7 +4350,12 @@ and a count over entries that happened to say something is not a count.
   between `681c6ef` (2371 ids) and `0ad22bb` (2400 ids). Same
   line-number-keyed-id artefact class as `docs/supported-primitives.md`:
   a doc-example id is a file:line pair, so editing prose above a block
-  retires one id and mints another.
+  retires one id and mints another. **(AMENDED 2026-08-23, 0.2.0 D16: the
+  doc-example half of that comparison is unchanged and still behaves
+  exactly this way; the page has left the class. 0.2.0 D15 (`c9083fa`)
+  removed all 49 of its source-line coordinates and it cites a file and a
+  SYMBOL. Read the sentence as naming the artefact class, not that
+  page.)**
 
   **This branch, on top of that.** `fix/shared-point-pin-both-directions`
   adds 5 tests and removes none — `--collect-only` id diff, `0ad22bb`
@@ -4554,7 +4565,14 @@ and a count over entries that happened to say something is not a count.
   re-run found.** One worktree each, `python -B`, `__pycache__` cleared,
   every mutation LINE-NEUTRAL — a mutant that shifts line numbers can be
   "killed" by the generated `docs/supported-primitives.md` citation
-  check, which is an artefact and not coverage. The first pass killed 8;
+  check, which is an artefact and not coverage. **(AMENDED 2026-08-23,
+  0.2.0 D16: every mutant in this round WAS line-neutral and the kills
+  below are unchanged, but the hazard that constraint defended against no
+  longer exists. 0.2.0 D15 (`c9083fa`) removed all 49 source-line
+  coordinates from that page, so a mutant that shifts line numbers
+  reddens nothing there and a later round must not cite this sentence as
+  a reason to stay line-neutral. Driven at the 2026-08-15 B5 follow-up
+  entry below.)** The first pass killed 8;
   `M8_no_index_dtype_gate` SURVIVED because the test covering it drove
   the helper directly and never asked whether the transfer consults it.
   A gate proved correct and never proved wired in; closed with a query
@@ -6242,8 +6260,18 @@ and a count over entries that happened to say something is not a count.
   reddens **18** tests, all of them in `tests/test_assume_scope_identity.py`.
   Method: full suite against the mutant, with the environmental baseline
   subtracted — the untracked-file check and the generated-page line-number
-  check redden on any edited tree and are not detections. **No pre-existing
-  test anywhere in the suite detects that mutant**, so all regression
+  check redden on any edited tree and are not detections. **(AMENDED
+  2026-08-23, 0.2.0 D16: that baseline had two members and now has one.
+  The 18 above is unaffected — it counts reds inside
+  `tests/test_assume_scope_identity.py`, and the subtraction only ever
+  removed rows outside it. The generated-page member is the one that has
+  gone: 0.2.0 D15 (`c9083fa`) removed all 49 source-line coordinates, so
+  `test_committed_page_matches_live_registries` no longer reddens on an
+  edited tree. `test_no_untracked_file_anywhere_would_ship` is unchanged
+  and still has to be subtracted. Driven at the 2026-08-15 B5 follow-up
+  entry below.)**
+  **No pre-existing test anywhere in the suite detects that mutant**, so
+  all regression
   protection for this defect rests on that one file. An earlier build report
   recorded this mutant as "14 red"; that figure does not reproduce and is
   not used.
@@ -7967,7 +7995,103 @@ and a count over entries that happened to say something is not a count.
   19. The B5-1 revert additionally reds
   `test_committed_page_matches_live_registries`, because the generated
   primitives page quotes source LINE NUMBERS and the revert shifts them;
-  same treatment.
+  same treatment. **(That clause went false on 2026-08-23; the amendment
+  immediately below is the canonical one for this file.)**
+
+  **AMENDED 2026-08-23 (0.2.0 D16): THE CONFOUND ABOVE WAS REAL WHEN THIS
+  TABLE WAS TAKEN AND DOES NOT EXIST NOW, AND THIS ENTRY IS THE CANONICAL
+  ONE FOR IT** — the 2026-08-15 B4 entry below and the 2026-08-15 B6
+  escalation entry below it both defer to *"the same treatment the B5
+  entry gives it"*. Every figure in the table above is left as measured
+  and no NET column moves, because the subtraction only ever removed a
+  row that was never a detection. What changed is the artefact. 0.2.0 D15
+  (`c9083fa`, merged at `abab576`) took all **49** source-line coordinates
+  out of the generated `docs/supported-primitives.md` — 17 emitted by
+  `gen_supported_primitives._site` and 32 by `_q`, 42 of them distinct —
+  so the page cites a FILE and a SYMBOL and carries no line number at all.
+  Both lookups are still called and still refuse to generate a page that
+  names a file which has stopped defining a registry, or quotes text the
+  code no longer carries; what stopped is the digit reaching the page.
+
+  **Driven here rather than taken from D15's report or from a note.** Two
+  comment lines inserted below the imports of the modules the page cites,
+  in a `git clone --shared` of each tree, `__pycache__` purged,
+  `pytest tests/test_supported_primitives_doc.py -q -p no:randomly`:
+
+  ```
+  plant                              ac00a32 (pre-D15)   abab576 (this base)
+  +2 comment lines, obligation.py    1 failed, 1 passed  2 passed
+  +2 comment lines, propagate.py
+    and coverage.py together         1 failed, 1 passed  2 passed
+  ```
+
+  **THIS CHANGES WHAT A LATER EXPERIMENT HAS TO CONTROL FOR, WHICH IS WHY
+  IT IS NOT A WORDING FIX.** A revert or mutation experiment touching
+  `obligation.py`, `propagate.py` or `coverage.py` has no line-count
+  confound to subtract from its raw failure count any more — raw IS net on
+  that account — and a mutant no longer has to be built LINE-NEUTRAL to
+  stop this page "killing" it, which is what the 2026-08-09 index-bounds
+  entry above required of every mutant it ran. What the page still reds on
+  is a REGISTRY change, which is what it is for.
+
+  **THE ENUMERATION IS THE OTHER HALF OF THE FINDING, AND IT IS WHY THIS
+  NOTE IS IN ONE PLACE AND POINTED AT FROM THE REST.** Searched at
+  `abab576`, a grep of this file for the page's FILENAME finds SEVEN
+  sentences, and that is not the population: six more speak of *"the
+  generated primitives page"* or *"the generated-page line-number check"*,
+  or name only `test_committed_page_matches_live_registries`, and one more
+  was on the generated page itself. **Thirteen in this file and one on the
+  page**, every one amended and dated in this batch — in `## Log`, the
+  2026-08-07 zero-element entry, the 2026-08-08 certificate entry, the
+  2026-08-09 index-bounds entry, the 2026-08-14 assume-scope-identity
+  entry, this one,
+  the 2026-08-15 undescended-`assume` entry, the 2026-08-15 B4 entry
+  (twice) and the 2026-08-15 B6 escalation entry; and in the routed
+  region, `SF-0.2.0-56` (twice), `SF-0.2.0-59` and `SF-0.2.0-66`. The
+  page's own *"Reasons are quoted verbatim from code comments/docstrings,
+  with file:line"* was emitted by `docs/gen_supported_primitives.py` and
+  is repaired in the generator and not by hand, because the page is
+  byte-compared against a fresh generation and a hand edit there is a red.
+
+  **THE PRICE, WATCHED AT EACH STAGE RATHER THAN DESCRIBED.** Four of the
+  thirteen sit inside the hash-pinned routed region, in THREE blocks, so
+  they cost three files — `SOUNDNESS.md`,
+  `tests/_soundness_routing_manifest.py` and `CHANGELOG.md`, whose
+  *"**N blocks were edited in transit**"* sentence is DERIVED from the
+  size of the `src_sha256 != dest_sha256` partition and must NAME every
+  block in it. `SF-0.2.0-59` was already in that partition and
+  `SF-0.2.0-56` and `SF-0.2.0-66` are new to it, so the count moves SIX to
+  EIGHT. Driven off this commit's final text, not an earlier one:
+
+  ```
+  three routed blocks amended, manifest untouched
+      -> 2 failed
+         test_every_routed_block_arrives_in_soundness_md
+           "detail section(s) no longer hash to the manifest's dest_sha256
+            — the routed text has been edited without the manifest being
+            updated: [('SF-0.2.0-56', '1f28f90512e1', 'abb5c7fb5706'),
+            ('SF-0.2.0-59', 'cb51ed00b864', '8d606ece8b93'),
+            ('SF-0.2.0-66', '4ad061e5fa7f', '1f72b74efc77')]"
+         test_the_source_hashes_reproduce_from_git[soundness]
+           "SF-0.2.0-56: the destination does not carry 5 of this block's
+            non-blank source lines and the manifest quotes 0"
+  ... dest_sha256, src_lines_not_carried, not_carried and edit_note
+      written for all three (5, 6 and 3 lines not carried; SF-0.2.0-59
+      keeps the four its first edit declared and adds two)
+      -> 1 failed
+         test_the_record_says_how_many_blocks_were_edited_in_transit
+           "`### Soundness fixes` says 6 block(s) were edited in transit
+            and the manifest declares 8: ['SF-0.2.0-07', 'SF-0.2.0-46',
+            'SF-0.2.0-51', 'SF-0.2.0-56', 'SF-0.2.0-59', 'SF-0.2.0-62',
+            'SF-0.2.0-64', 'SF-0.2.0-66']"
+  ... `CHANGELOG.md`'s count sentence moved to EIGHT, with both new
+      blocks named
+      -> 29 passed
+  ```
+
+  The other NINE are in `## Log`, outside the pinned region, and cost
+  nothing but the writing — which is the reason the routing guard could
+  not have found them and a reader had to.
 
   **Two of those registered controls had stopped applying, and the static
   check could not see it.** `oracle-masked` and `widen` both mutate
@@ -8412,7 +8536,13 @@ and a count over entries that happened to say something is not a count.
   measure the repaired behaviour, and the empty-ledger test now asserts
   the door it is scoped to. `docs/supported-primitives.md` was regenerated
   because it embeds source line numbers; this batch's edits do not move
-  any it cites, so it is byte-identical.
+  any it cites, so it is byte-identical. **(AMENDED 2026-08-23, 0.2.0 D16:
+  that regeneration happened and its result stands. What is no longer true
+  is the reason for it. 0.2.0 D15 (`c9083fa`) removed all 49 source-line
+  coordinates, so the page does not change when a cited file's layout
+  does, and no batch owes it a regeneration on that account; a REGISTRY
+  change still does. Driven at the 2026-08-15 B5 follow-up entry
+  above.)**
 
 - **2026-08-15 (pre-release, B4 part 1): the format-parametric ieee mode
   was still speaking binary64 in four places.** Audit 0.2.0 M12, M13, M14,
@@ -9070,14 +9200,24 @@ and a count over entries that happened to say something is not a count.
   it.
   `test_supported_primitives_doc.py::test_committed_page_matches_live_registries`
   reds on every mutation that shifts a source line and is excluded from
-  every count above, the same treatment the B5 entry gives it.
+  every count above, the same treatment the B5 entry gives it. **(AMENDED
+  2026-08-23, 0.2.0 D16 — no longer true of this tree; see the paragraph
+  below.)**
 
   Every mutation additionally reds
   `test_supported_primitives_doc.py::test_committed_page_matches_live_registries`,
   because the generated primitives page quotes source LINE NUMBERS and
   every mutation shifts them; that is an artifact of mutating, not a
   control, and is excluded from each count — the same treatment the B5
-  entry above gives it. The attribution runs were driven with a reduced
+  entry above gives it. **(AMENDED 2026-08-23, 0.2.0 D16: this entry
+  states that exclusion twice and neither statement is true of this tree.
+  Every count above is a NET after the subtraction and none of them moves.
+  0.2.0 D15 (`c9083fa`) removed all 49 source-line coordinates from
+  `docs/supported-primitives.md`, so a mutation that shifts a line reddens
+  that test no longer, and a re-run of this attribution has nothing to
+  exclude on that account. Driven at the 2026-08-15 B5 follow-up entry
+  above, which both statements defer to.)**
+  The attribution runs were driven with a reduced
   environment, whose own clean baseline is 3,269 passed / 18 skipped
   rather than 3,277 / 10; the FAILED lists are what is read here, and the
   totals reconcile against that baseline in every row.
@@ -11010,7 +11150,15 @@ in place and marked.*
   `test_sdist_contents.py::test_no_untracked_file_anywhere_would_ship`,
   because the attribution runs were driven before the three new test files
   were `git add`ed and an untracked file under `tests/` would ship. Both
-  are artifacts of how the measurement was taken, not controls.
+  are artifacts of how the measurement was taken, not controls. **(AMENDED
+  2026-08-23, 0.2.0 D16: of those two, the first no longer reds. The
+  counts above are NETs and are left as measured; 0.2.0 D15 (`c9083fa`)
+  removed all 49 source-line coordinates from
+  `docs/supported-primitives.md`, so a mutation that shifts a line does
+  not redden `test_committed_page_matches_live_registries`, and a re-run
+  of these three reverts would subtract only the untracked-file row, which
+  is unchanged. Driven at the 2026-08-15 B5 follow-up entry above, which
+  this one defers to.)**
 
   **One pre-existing test changed status and was repaired rather than
   relaxed**:
@@ -13981,11 +14129,32 @@ was measured on a B6-free tree unless it says otherwise.
   the undisclosed skip — again in the unreverted base. `git clone` has
   neither, and is the method.
 
-  One confound genuinely does have to be subtracted:
+  One confound genuinely HAD to be subtracted here, and a repeat of this
+  experiment no longer has it at all (amended 2026-08-23, 0.2.0 D16; the
+  note below carries the drive):
   `test_supported_primitives_doc.py::test_committed_page_matches_live_registries`
-  reds on ANY line-count change in `src/stelling/obligation.py`, because
-  `docs/supported-primitives.md` embeds source line numbers, and
+  red on ANY line-count change in `src/stelling/obligation.py`, because
+  `docs/supported-primitives.md` embedded source line numbers THEN and
+  carries none now, and
   regenerating the page per revert would make the experiment circular.
+
+  **AMENDED 2026-08-23 (0.2.0 D16): THAT CONFOUND IS GONE, AND THIS IS
+  THE PART OF THIS ENTRY A LATER EXPERIMENT HAS TO READ.** The table
+  below is left exactly as measured — raw, conf and NET all stand, and
+  the subtraction was correct on the day. 0.2.0 D15 (`c9083fa`) removed
+  all 49 source-line coordinates from the generated
+  `docs/supported-primitives.md`, so
+  `test_committed_page_matches_live_registries` no longer reds on a
+  line-count change in `src/stelling/obligation.py` and a revert
+  experiment repeated on this tree has NOTHING to subtract on that
+  account: its raw column is its NET column. That is a change to the
+  METHOD this entry prescribes, not a wording fix. Driven — two comment
+  lines inserted below the imports of `obligation.py` in a
+  `git clone --shared` of each tree, `__pycache__` purged,
+  `pytest tests/test_supported_primitives_doc.py -q -p no:randomly`:
+  `1 failed, 1 passed` at `ac00a32` and `2 passed` at `abab576`. The
+  `## Log`'s 2026-08-15 B5 follow-up entry carries the full note and the
+  enumeration of every sentence this change falsified.
 
   **RESULT** — full suite per revert, `JAX_ENABLE_X64=1`, jax 0.11.0,
   `pytest -q -p no:randomly`; NET = raw failures minus that row's base
@@ -14133,9 +14302,11 @@ was measured on a B6-free tree unless it says otherwise.
   a fact about today's readers agreeing, not a licence to let them
   diverge.
 
-  Note also what P2 shows: a PROSE revert of `obligation.py` reds the
-  supported-primitives page and nothing else, which is what makes that
+  Note also what P2 shows: a PROSE revert of `obligation.py` red the
+  supported-primitives page and nothing else, which is what made that
   subtraction a line-count effect rather than a behavioural one.
+  (As measured; on this tree that revert reds nothing at all — amended
+  2026-08-23, 0.2.0 D16, see the note above.)
 
   **AND AUDIT 3'S OWN FIXES, ATTRIBUTED THE SAME WAY** — by MUTATION,
   which is what `docs/norms.md` prescribes for a one-line guard and what a
@@ -14630,9 +14801,18 @@ was measured on a B6-free tree unless it says otherwise.
   measuring an unreverted tree), the whole suite run once per row,
   `JAX_ENABLE_X64=1`, jax 0.11.0, python 3.12.3,
   `pytest -q -p no:randomly`. No confound to subtract on any row:
-  `docs/supported-primitives.md` cites line numbers in `obligation.py`,
-  `propagate.py` and `coverage.py`, and the only row that touches one of
+  `docs/supported-primitives.md` cited line numbers in `obligation.py`,
+  `propagate.py` and `coverage.py` when this table was taken, and the
+  only row that touches one of
   those (`R7`) is line-count neutral. NET = raw.
+
+  *(Amended 2026-08-23, 0.2.0 D16: that page has carried no line numbers
+  since 0.2.0 D15 `c9083fa`, which removed all 49 of them. The reading
+  above is unchanged; what changed is that a repeat of this table could
+  not acquire the confound even if a row DID move a line, so `NET = raw`
+  holds for every row rather than because `R7` happened to be
+  line-count neutral. Driven and enumerated at the `## Log`'s
+  2026-08-15 B5 follow-up entry.)*
 
   ```
   revert (this commit, applied alone)       raw  conf  NET  the tests that red
@@ -15396,12 +15576,19 @@ was measured on a B6-free tree unless it says otherwise.
   make good on that file's claim to drive the three sites its canonical
   document masks. Neither is a claiming test of any mutated hunk.
 
-  **F3a's one confound is the line-count one this table already names:**
+  **F3a's one confound WAS the line-count one this table already
+  names:**
   `test_supported_primitives_doc.py::test_committed_page_matches_live_registries`
-  reds on ANY change to `src/stelling/obligation.py`'s line count, and
+  red on ANY change to `src/stelling/obligation.py`'s line count, and
   F3a is the only row that changes it. F1b, F1c and F3b edit the same
-  file at constant length and do not red it, which is what makes the
+  file at constant length and did not red it, which is what makes the
   subtraction a line-count effect rather than a behavioural one.
+  0.2.0 D15 (`c9083fa`) removed all 49 source-line coordinates from
+  `docs/supported-primitives.md` on 2026-08-23, so that test no longer
+  reds on a line-count change at all and F3a's raw and NET would now be
+  equal; the row is left as measured (amended 2026-08-23, 0.2.0 D16 —
+  driven and enumerated at the `## Log`'s 2026-08-15 B5 follow-up
+  entry).
 
   **AND F1a IS THE ROW THAT SAYS WHAT THE PIN DOES NOT COVER.** Widening
   the rule moves the door and the emission TOGETHER — they read one
