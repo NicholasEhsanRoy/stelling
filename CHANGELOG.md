@@ -311,11 +311,15 @@ is 0.2.0 development work throughout.
   `--stelling-narrowing-perimeter=error` the whole suite passes with the dial
   armed at the end, exit 0, every permitted narrowing printed with the reason
   its author gave. The figures are a measurement of one tree and move when it
-  does: re-measured at `5ad906f` + B22 + its fixup they read **4568 passed, 10
+  does. Re-measured at `804b9ca` (this batch on `6c40ddc`) with
+  `JAX_ENABLE_X64=0 pytest -q -p no:randomly
+  --stelling-narrowing-perimeter=error`, they read **4574 passed, 10
   skipped**, `1473 integer literal(s)` checked, `15 narrowing(s) PERMITTED at 9
-  site(s)` — the same three figures the fixup found before it, with three more
-  tests passing; at `5ad906f` + B22 the pass count was `4565`, and when this
-  entry was written they read `4404 passed, 10 skipped`, `1447` and `11 at 9`. With the seven declarations taken back out — measured at the
+  site(s)`; when this
+  entry was written they read `4404 passed, 10 skipped`, `1447` and `11 at 9`.
+  This entry and `docs/overflow-tripwire.md` carried **4568** and **4565** for
+  the same claim at the same tip, so a test now holds the two copies equal.
+  With the seven declarations taken back out — measured at the
   time, not re-driven since — it is **7 failed, 4397 passed**, and the report
   reads `1455 ... checked; 15 do not exist`, `7 of those NOT inside an
   expected_truncation region`, `8 PERMITTED at 6 site(s)` — which is the

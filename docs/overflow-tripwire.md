@@ -932,19 +932,25 @@ reason that has nothing to do with what it is about. Where the subject is an
 instrument **underneath** the perimeter, take the perimeter down for that
 block rather than declaring the narrowing.
 
-This repository runs the dial over its own suite and has both shapes. With
-`--stelling-narrowing-perimeter=error`, re-measured at `5ad906f` + this batch,
-jax 0.11.0, CPU, `JAX_ENABLE_X64=0`:
+This repository runs the dial over its own suite and has both shapes.
+**Reproduce these four lines with one command** — jax 0.11.0, CPU:
+
+    JAX_ENABLE_X64=0 pytest -q -p no:randomly --stelling-narrowing-perimeter=error
+
+Measured that way at `804b9ca` (this batch on top of `6c40ddc`):
 
 ```
 armed -- the dunder perimeter is live on tracer, array: 39 slot(s), 1 owner(s)
 1473 integer literal(s) ... were checked; 15 ... do not exist in the program jax would run
 15 narrowing(s) PERMITTED by an expected_truncation region, at 9 site(s)
-4565 passed, 10 skipped
+4574 passed, 10 skipped
 ```
 
 *These are a measurement of one tree and they move when it does; the block
-read `1447 ... 11 ... 4404 passed` at `e6968fe`, which is three merges back.
+read `1447 ... 11 ... 4404 passed` at `e6968fe`, several merges back. Nothing
+holds them CURRENT — running the command above is what does that, which is why
+it is written here — but the CHANGELOG's copy of them is held equal to this
+one, because the two carried different pass counts for the same claim.
 The claim that does not move is the shape: armed at the end, exit 0, and every
 narrowing the run permitted printed with the reason its author gave.*
 

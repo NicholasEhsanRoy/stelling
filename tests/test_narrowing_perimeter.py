@@ -1840,6 +1840,77 @@ def test_the_changelogs_counts_over_the_six_cases_are_the_driven_ones():
             f"(x64 {'on' if x64 else 'off'}), {len(jitted)} under jit."
         )
 
+
+#: The four lines the dial-on session prints, as (label, regex over the PAGE's
+#: code block, regex over the CHANGELOG sentence). These are the
+#: "reproducible by a named command" class: nothing in the tree can hold them
+#: CURRENT without running the suite, and the page says so and names the
+#: command. What a test CAN hold is that the two artefacts carrying them agree
+#: -- and they did not: `docs/overflow-tripwire.md` said `4565 passed` and
+#: `CHANGELOG.md` said `4568` for the same claim at the same tip, because the
+#: CHANGELOG missed the one test `ca0a79b` had just added.
+#: The third field is whether the CHANGELOG entry states that figure too. It
+#: does not repeat all four, and a comparison that demanded it would be
+#: asking the entry to carry something it has no use for -- so which ones are
+#: compared is DECLARED, and a figure disappearing from the entry is red
+#: rather than quietly dropping out of the comparison.
+_DIAL_ON_FIGURES = (
+    ("slots", r"(\d+) slot\(s\), (\d+) owner\(s\)", False),
+    ("literals", r"(\d+) integer literal\(s\)", True),
+    ("nonexistent", r"(\d+)(?: of them| \.\.\.) do not exist", False),
+    ("permitted", r"(\d+) narrowing\(s\) PERMITTED[^0-9]*(\d+) site\(s\)", True),
+    ("passed", r"(\d+) passed, (\d+) skipped", True),
+)
+
+
+def test_the_dial_on_figures_agree_between_the_page_and_the_changelog():
+    """One measurement, two artefacts, and they disagreed.
+
+    `docs/overflow-tripwire.md` printed ``4565 passed, 10 skipped`` under a
+    heading claiming it had been re-measured for this batch, and
+    ``CHANGELOG.md`` said ``4568`` for the same tip -- the CHANGELOG had
+    missed the one test the commit before it added. Neither is checkable
+    without running the whole suite, which is why the page names the command
+    that produces them; what IS checkable, and cheap, is that the two copies
+    of one measurement are the same numbers.
+    """
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    page = (repo / "docs" / "overflow-tripwire.md").read_text(encoding="utf-8")
+    block = page.split(
+        "armed -- the dunder perimeter is live on tracer, array:", 1
+    )[1].split("```", 1)[0]
+    changelog = " ".join(
+        (repo / "CHANGELOG.md").read_text(encoding="utf-8").split()
+    )
+    entry = changelog.split("The dial can be turned on over this repository", 1)
+    assert len(entry) == 2, "CHANGELOG.md no longer carries the dial-on entry"
+    entry = entry[1].split("- **", 1)[0]
+
+    compared = 0
+    for label, pattern, in_changelog in _DIAL_ON_FIGURES:
+        here = re.search(pattern, "armed -- the dunder perimeter is live on "
+                                  "tracer, array:" + block)
+        assert here, (
+            f"docs/overflow-tripwire.md's dial-on block no longer prints the "
+            f"{label} figure. Block:\n{block}"
+        )
+        if not in_changelog:
+            continue
+        compared += 1
+        there = re.search(pattern, entry)
+        assert there, (
+            f"the CHANGELOG's dial-on entry no longer states the {label} "
+            f"figure, which the page prints as {here.group(0)!r}"
+        )
+        assert here.groups() == there.groups(), (
+            f"the dial-on {label} figure is {here.groups()} in "
+            f"docs/overflow-tripwire.md and {there.groups()} in CHANGELOG.md. "
+            f"One measurement, two copies: re-run\n  JAX_ENABLE_X64=0 pytest "
+            f"-q -p no:randomly --stelling-narrowing-perimeter=error\n"
+            f"and write the same numbers in both."
+        )
+    assert compared == 3, compared
+
 def test_the_refusal_names_the_line_that_wrote_the_literal():
     """Attribution with no stack walk: the writer is the wrapper's caller.
 
