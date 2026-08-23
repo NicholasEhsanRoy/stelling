@@ -152,6 +152,7 @@ import difflib
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -160,6 +161,7 @@ from dataclasses import dataclass
 import pytest
 
 import _lanes
+from _repo_files import tracked_paths
 from stelling._optional import TESTED_JAX_SERIES, available, jax_series_tested
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -408,8 +410,89 @@ def _doc_files() -> list[pathlib.Path]:
     and is therefore read by neither module. The exclusion is deliberate
     and is documented where the allowlist is; the defect was this sentence,
     in the commit whose whole subject is this qualifier.
+
+    **AND THE POPULATION IS WHAT THE REPOSITORY KEEPS, NOT WHAT THE DIRECTORY
+    HOLDS -- 0.2.0 D15.** The ``rglob`` above was a disk walk, and ``docs/``
+    is a directory a documentation build writes into: a ``docs/_build/`` --
+    which ``.gitignore`` names, which hatchling therefore does not pack, and
+    which any Sphinx run creates -- was walked straight into the population.
+    Every figure this module pins is an EQUALITY over that population and
+    every scan over it is an ``assert not``, so a page the developer's
+    tooling left there can only make this module RED. Reproduced at
+    ``ac00a32`` with ``docs/norms.md`` copied to ``docs/_build/norms.md``,
+    which is the one thing building the documentation gets you for free::
+
+        plain_fences        86 -> 90    red: test_inventory_is_what_the_
+        plain_unattached    46 -> 50           docstring_says
+        docs/_build/norms.md  (0, 4)    red: test_every_page_outside_the_
+                                               gate_has_been_decided_about
+
+    That is *"a check whose input includes the developer's environment
+    reports a different truth to different people"* -- the class D14 closed
+    across six walkers and named this file as the one it carried forward.
+    (It is not quite the last, and the sweep that says so is reported rather
+    than implied: ``tests/test_release_doc_claims.py`` reads the working
+    directory twice, at its non-recursive ``docs/*.md`` page glob and at its
+    ``docs``/``tests``/``src`` norm-letter walk. Both are ``assert not
+    <collection>`` scans, so both are false RED and only that -- the
+    direction D14 recorded at ``test_solver_gate.py`` and ``test_lanes.py``
+    rather than treating as the prose repair. Driven at ``ac00a32``, one
+    each: an untracked ``docs/stray_note.md`` naming a file this tree does
+    not have reds ``test_every_file_the_docs_name_is_placed``, and a
+    ``docs/_build/page.md`` citing a norm by a letter no norm has reds
+    ``test_no_norm_is_cited_by_a_letter_it_does_not_have`` -- while a
+    ``docs/_build/`` holding a copy of this tree's OWN ``docs/norms.md`` is
+    ``15 passed``, so neither has a live instance here today. Recorded and
+    not repaired: different file, different subject, and no batch owns it
+    from here. The offending letter is not spelled out in this docstring
+    because that gate is a substring scan that cannot tell a citation from a
+    description of one -- the second time this batch has met that shape, the
+    first being the guard reported beside it in the commit message.)
+    The RULE is written where the one check of the OPPOSITE kind lives
+    (``tests/test_sdist_contents.py::test_every_root_entry_is_a_decision``):
+    **a check whose SUBJECT is the working directory may read the working
+    directory; a check whose subject is the REPOSITORY may not.** *"Which
+    pages does this project document itself with"* is the second kind.
+
+    D14 left this file alone deliberately -- it was in no batch's ownership
+    list and three batches had edited it -- and recorded the measurement in
+    its commit message so that the repair could be driven against it rather
+    than re-derived. This is the same one line D14 applied at
+    ``tests/test_prose_hygiene.py::_shipped_text_files``, and it DEGRADES
+    rather than skipping, for the reason ``tests/_repo_files.tracked_paths``
+    gives: where git cannot answer -- an unpacked sdist, a ``git archive``
+    export -- the tree holds the shipped pages and nothing generated, so the
+    walk IS the repository there. Measured on a clean checkout at this
+    commit, the two enumerations return the same **22** files and the walk's
+    untracked residue is EMPTY, so the repair is a no-op on a clean tree and
+    only ever subtracts what the developer's tooling put there.
     """
-    return [REPO / "README.md", *sorted((REPO / "docs").rglob("*.md"))]
+    found = [REPO / "README.md", *sorted((REPO / "docs").rglob("*.md"))]
+    return _pages_the_repository_keeps(REPO, found, tracked_paths(REPO))
+
+
+def _pages_the_repository_keeps(
+    root: pathlib.Path,
+    found: list[pathlib.Path],
+    tracked: list[str] | None,
+) -> list[pathlib.Path]:
+    """``found``, narrowed to what the index has -- or all of it, if not asked.
+
+    Separate from :func:`_doc_files`, and taking its root as an argument, so
+    that :func:`test_the_population_is_what_the_repository_keeps` can drive it
+    on a throwaway repository. Planting a page in the tree under test is the
+    very thing this narrowing exists to stop mattering, and it would race any
+    ``-n auto`` run.
+
+    ``None`` is the third answer :func:`~_repo_files.tracked_paths` returns
+    where git cannot say, and it must WIDEN rather than empty the population:
+    an enumeration that could not run must never report the same thing as one
+    that ran and found nothing.
+    """
+    if tracked is None:
+        return list(found)
+    index = set(tracked)
+    return [p for p in found if p.relative_to(root).as_posix() in index]
 
 
 def _fences(text: str):
@@ -767,6 +850,60 @@ def test_inventory_is_what_the_docstring_says():
 
 def test_collected_cases_match_the_inventory():
     assert len(CASES) == EXPECTED_INVENTORY["executed"]
+
+
+def test_the_population_is_what_the_repository_keeps(tmp_path):
+    """The control for :func:`_doc_files`'s narrowing, driven on a real index.
+
+    Both halves, because either alone is satisfiable by an accident: a
+    TRACKED page must be in the population, and an UNTRACKED one must not.
+    Driven in a throwaway repository rather than in this one, for the reason
+    :func:`_pages_the_repository_keeps` gives.
+
+    The last assertion is the one that says the repair did not simply make
+    the population smaller: where git cannot answer, ``None`` must widen back
+    to the walk, because an unpacked sdist has no index at all and every page
+    in it is a page this project ships.
+    """
+    if shutil.which("git") is None:  # pragma: no cover - env-dependent
+        pytest.skip("needs git")
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, timeout=60)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "_build").mkdir()
+    (tmp_path / "docs" / "page.md").write_text("# page\n", encoding="utf-8")
+    (tmp_path / "docs" / "_build" / "page.md").write_text(
+        "# page\n", encoding="utf-8"
+    )
+    subprocess.run(
+        ["git", "add", "docs/page.md"], cwd=tmp_path, check=True, timeout=60
+    )
+
+    walked = sorted((tmp_path / "docs").rglob("*.md"))
+    assert [q.relative_to(tmp_path).as_posix() for q in walked] == [
+        "docs/_build/page.md", "docs/page.md"
+    ], (
+        "the probe tree no longer exhibits the difference, so this control "
+        "is asserting that two identical enumerations agree"
+    )
+
+    tracked = tracked_paths(tmp_path)
+    assert tracked == ["docs/page.md"], (
+        f"`git ls-files` in a probe repository returned {tracked}; the "
+        "population reads this, so a generated page reaching it is the defect"
+    )
+    kept = _pages_the_repository_keeps(tmp_path, walked, tracked)
+    assert [q.relative_to(tmp_path).as_posix() for q in kept] == [
+        "docs/page.md"
+    ], (
+        "the untracked `docs/_build/page.md` reached the population -- the "
+        "exact shape that moved this module's inventory by four fences on a "
+        "checkout somebody had built the documentation in"
+    )
+    assert _pages_the_repository_keeps(tmp_path, walked, None) == walked, (
+        "a tree git cannot answer for lost pages; where there is no index "
+        "the walk IS the repository"
+    )
 
 
 @pytest.mark.parametrize("path,block", CASES)
