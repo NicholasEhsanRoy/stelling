@@ -427,7 +427,10 @@ denominator is the 200 moved rows, not the 240 harnesses. Recorded in
 WITNESS, WITHHELD 80 = 40 %"*, produced by
 `scratchpad/s13/sweep_loop_assume_wide.py` with results in
 `scratchpad/s13/RESULTS_loop_wide.txt`. Both are in the git checkout; neither
-is in the sdist.) The withholding is still the right answer —
+is in the sdist — what a reader of the distribution has instead is the
+reproducer's executable form, `s13_scan` in
+`tests/test_undescended_assume.py`, which ships and runs; the 240-harness
+sweep behind the ratio does not.) The withholding is still the right answer —
 nothing in the run honoured your precondition, so nothing could tell that
 witness from one your precondition excludes — but an UNKNOWN here means
 *undecided*, not *your program is fine*. Lift the `assume` to the top level

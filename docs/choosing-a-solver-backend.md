@@ -61,7 +61,9 @@ answering it graded all ten of these the same and made row 4 read as weakly as
 row 7. What decides whether a published cell can be re-derived is
 **whether the freedom the label leaves REACHES the published number** — and
 that is a measurable question. Measured (`tools/solver_battery.py --rows` for
-the parameters, `scratchpad/`'s two sweeps for the driving), the ten rows fall
+the parameters — it ships, and prints every grade below on your own machine —
+and two sweeps under `scratchpad/`, which is tracked in the repository and is
+not in the sdist, for the driving), the ten rows fall
 into four groups, and the table below carries the answer in its own
 `reconstruction` column rather than one disclaimer repeated ten times:
 
@@ -414,7 +416,7 @@ says so"*, and that was FALSE OF ITS OWN SECTION** — which is the same defect
 it was written to repair, one level up. The figures below come from ten
 drivings, each at its own load, and each now carries it:
 
-| figure below | transcript, all under `scratchpad/D7-solver-battery/` | load |
+| figure below | transcript, all under `scratchpad/D7-solver-battery/` — a historical measurement, tracked and not in the sdist; `tools/solver_battery.py` ships and re-drives it | load |
 |---|---|---|
 | the ten-row battery table and finding 1's `8.0x–11.8x` | `battery-run-2-2026-08-22T1959Z.txt` | 4.0 |
 | finding 1's `6.9x–12.8x` | `battery-run-1-2026-08-22T1949Z.txt` | 5.7 |
@@ -427,10 +429,24 @@ drivings, each at its own load, and each now carries it:
 | row 7's one-parameter-at-a-time re-drive | `row7-re-driven-2026-08-23.txt` | 1.15 |
 
 Every one of those transcripts is committed under
-`scratchpad/D7-solver-battery/` with its load average in its header. The
+`scratchpad/D7-solver-battery/` — a historical measurement, tracked and not
+in the sdist, with `tools/solver_battery.py` shipping in its place — with its
+load average in its header. The
 sweep whose cvc5 column read 54–85 ms was quoted here until 2026-08-23 with no
 transcript behind it at all; it has been dropped and replaced by the re-drive
 above, which has one.
+
+**THAT DIRECTORY IS TRACKED AND IS NOT IN THE SDIST, so a reader of the
+distribution cannot open one of these, and what they have instead is better
+for the question they are asking.** `tools/solver_battery.py` ships — it is
+the reason `/tools` is in the sdist allowlist at all — and re-drives this
+battery on the reader's own machine, which is the only machine whose
+milliseconds are about them; `tests/test_solver_battery.py` ships too and
+holds every figure on this page to the transcript it is attributed to
+wherever those transcripts are present, skipping rather than failing where
+they are not. The wall times below are a historical measurement of two
+particular machines at the loads stated, and this page's own instruction is
+to read the direction rather than the multiple.
 
 **What held.**
 
@@ -461,9 +477,15 @@ above, which has one.
 The `reconstruction` cells above are a measurement. Two sweeps produce it and
 both are committed under `scratchpad/D7-solver-battery/` — which is in the
 repository but not in the sdist — each with its load average in its header.
+What the distribution carries is the ANSWER they decided rather than the
+instruments: the per-row grade is in `tools/solver_battery.py`, printed by
+`--rows`, and `tests/test_solver_battery.py` holds this page and that tool to
+one another.
 
 **The first sweep varies everything those six labels leave open except the
-size of the box.** `scratchpad/D7-solver-battery/probe-does-the-freedom-reach-the-number.py`,
+size of the box.** `scratchpad/D7-solver-battery/probe-does-the-freedom-reach-the-number.py`
+— a historical measurement, tracked and not in the sdist; the grade it
+decided ships in `tools/solver_battery.py` —
 **34 label-compatible readings**: for AM–GM six boxes from `[0,1]²` to
 `[−100,100]²`; for Motzkin five boxes plus both associations of the degree-6
 monomials plus the factored form `x²y²(x² + y² − 3) + 1`; for the linear rows
@@ -488,7 +510,9 @@ single-digit milliseconds where one millisecond of jitter is tens of percent.
 
 **The second sweep is there because the first one has a ceiling and did not
 say so.** Every row-4 and row-5 reading above is capped at a box of `±100`.
-`scratchpad/D7-solver-battery/probe-where-does-the-box-stop.py` removes the
+`scratchpad/D7-solver-battery/probe-where-does-the-box-stop.py` — the same
+shape: a historical measurement, tracked and not in the sdist, whose
+correction to the grade ships in `tools/solver_battery.py` — removes the
 cap: these harnesses declare a
 float64 box, so the widest reading of any of these labels is the widest box the
 format holds, and each row is driven from `±1` out to the largest scale at

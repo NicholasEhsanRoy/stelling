@@ -187,7 +187,9 @@ def certifies_point_witness(
     caller and its argument size, and running the whole suite on
     jax 0.11.0, records **2203 calls from ``_region_witness``, non-empty
     at 2203 of 2203**, and **1544 of 1544** over
-    ``scratchpad/pin/corpus_pin.py``. The only empty-set calls anywhere in
+    ``scratchpad/pin/corpus_pin.py`` — a historical measurement; that corpus
+    is tracked and is not in the sdist, while the whole-suite half above
+    re-drives from the shipped tree. The only empty-set calls anywhere in
     the tree are the **2** from
     ``test_the_point_witness_decision_is_one_sided_and_static``, which
     exercises this guard directly and is the reason it stays: an importer

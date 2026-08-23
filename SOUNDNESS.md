@@ -568,6 +568,104 @@ repairing them, and the repairs are in place above and in
   that test passes too, because what it actually checks is not what the
   entry says it checks.
 
+## The evidence this page cites from `scratchpad/`, which the distribution does not carry
+
+**THIRTY-TWO DISTINCT PATHS UNDER `scratchpad/` ARE CITED ON THIS PAGE AND
+NOT ONE OF THEM IS IN THE SDIST.** Measured over this page outside this
+table, and stated with the unit each numeral counts: **48** citations,
+naming **32** distinct paths, which is **53** occurrences of the string
+`scratchpad/` once the bare directory name is counted in; **all 32 are
+present in this checkout**, where `git ls-files scratchpad` is **161**
+files. So nothing here is broken for a reader of the REPOSITORY, and every
+one of those citations dangled for a reader of the DISTRIBUTION, which is
+the artefact this project publishes. The tarball's side of that is not
+taken on this page's word: `tests/test_sdist_contents.py` establishes it by
+INTERVENTION — a file planted in the tree and shown not to ship — rather
+than by naming a path, which is the form that survives a rename.
+
+**THE RULE IS THIS PROJECT'S OWN, AND IT WAS WRITTEN ABOUT THE DIRECTORY
+NEXT DOOR.** `pyproject.toml`'s sdist allowlist ships `/tools` for one
+stated reason — `tests/property/README.md` ships too, and tells a reader to
+run `tools/property_check.py` — and states the rule beside it: *"A shipped
+instruction pointing at a path the artefact does not contain is a claim
+defect waiting to be found by somebody who trusted it."* That was this
+page, at every path in the table below.
+
+**THE OTHER WAY TO SATISFY THAT RULE IS CLOSED, AND THE SAME COMMENT SAYS
+WHY.** Adding `/scratchpad` to the allowlist would re-open the hole the
+allowlist was built to close: shipping working files is how an internal
+release checklist, untracked and deliberately uncommitted, shipped
+byte-identical inside `stelling-0.1.0.tar.gz`. **An sdist on PyPI cannot be
+unpublished.** The exclusion is recorded in four places and none of them is
+this one: `/scratchpad` appears **zero** times in `pyproject.toml`,
+`tests/test_sdist_contents.py` carries a `WITHHELD` entry with the reason,
+`REUSE.toml` carries the `scratchpad/**` annotation that keeps those files
+licence-compliant without inline headers, and `tests/_repo_files.py` skips
+the subtree. The registrations in particular are kept in the tree they
+register AGAINST, because *"a registration a reader cannot reach from the
+repository it constrains is not a registration"*.
+
+**SO WHAT A CITATION OF ONE OF THESE PATHS MEANS, HERE AND FROM NOW ON.** It
+is a PROVENANCE MARK — the name of the instrument that produced a figure —
+and never an instruction to open a file. The figure it marks is stated at
+the citation, with whatever of the jax series, the load average and the date
+its own entry carries; the instrument is in the repository and not in the
+distribution. The table below says, for each of the 32, what the instrument
+is and what a reader of the DISTRIBUTION can run instead. **20** of the
+**32** have a shipped answer that re-derives the BEHAVIOUR the figure was
+about — the third column names it, and it is a path the sdist carries; the
+other **12** are historical measurements, and the table says *historical
+measurement* in those words rather than implying a reproduction nobody can
+perform.
+
+**THE TABLE IS HELD TO THE PAGE, IN BOTH DIRECTIONS, AND THE COUNTS ABOVE
+ARE DERIVED FROM IT.** `tests/test_sdist_reference_hygiene.py` partitions
+the two: a path under `scratchpad/` cited anywhere else on this page and
+missing from this table reddens, a row here naming a path the page no longer
+cites reddens too, and every numeral in the two paragraphs above is
+recomputed rather than trusted — five of the six from this page, and the
+**135**, which is a fact about the repository and not about the page, from
+`git ls-files` in a test of its own, because a skip raised inside a test
+skips the whole test. The same test derives the sdist allowlist from
+`pyproject.toml` — not a hand-copied list — and reddens on a reference to an
+unshipped path in **any** shipped file, so the next one cannot land the way
+these did.
+
+| cited path | what it is | what the distribution carries |
+|---|---|---|
+| `scratchpad/PREREG_CERT.md` | pre-registration for the non-emptiness certificate, written before the first `src/` edit, outcomes appended below its clauses | `tests/test_nonempty_certificate.py` and `tests/test_exactness_lift.py` pin the behaviour it registered; the registration is a record of what was PREDICTED and is re-derivable from nothing |
+| `scratchpad/PREREG_MECHC.md` | pre-registration for *an `assume` is a precondition on the WHOLE QUERY* | `tests/test_exactness_lift.py`, `tests/test_assume_constrain.py`, `tests/test_vacuous_refutation.py` |
+| `scratchpad/PREREG_PROBE.md` | pre-registration for the probe-membership repair | `tests/test_probe_witness.py` |
+| `scratchpad/PREREG_REACH.md` | pre-registration for the two sub-jaxpr defects; its clause **C5** is quoted in full at the place this page records contradicting it | `tests/test_branch_reachability.py` |
+| `scratchpad/PREREG_REF1.md` | pre-registration for the wrong-REFUTED class under assumes; the three blind spots this page's own correction found are written into it | `tests/test_vacuous_refutation.py` |
+| `scratchpad/cert/` | the certificate build's corpus, oracle, ledger, mutant applier and result logs — 12 files | `tests/test_nonempty_certificate.py`, `tests/test_exactness_lift.py` |
+| `scratchpad/cert/corpus.py` | the 32-row corpus, each row run twice: through stelling, and through a numpy oracle over concrete members of the declared set | `tests/test_nonempty_certificate.py` re-drives the behaviour; the corpus is not distributed |
+| `scratchpad/cert/apply_mutant.py` | applies one behaviour-preserving routing mutant to a worktree in place | the pins the mutants were built to redden ship, in `tests/test_exactness_lift.py`; the applier does not, and neither do the worktrees |
+| `scratchpad/cert/RESULTS_cap.txt` | raw output of the cost run, load averages included | historical measurement — the figures and the loads are stated at the citation, and it is not re-runnable from the distribution |
+| `scratchpad/cert/RESULTS_invariant.txt` | raw output: 148 certifying probe runs inspected, 0 narrowed anything | `tests/test_nonempty_certificate.py` drives the same invariant on the two rows where a certifying run has more than one assume to get wrong, and cites the same figure |
+| `scratchpad/cert/RESULTS_mutants.txt` | the three routing mutants' 32 corpus verdicts | historical measurement — the counts are stated at the citation |
+| `scratchpad/claims/corpus_b3.py` | the second corpus: 29 harnesses, 464 obligation-runs, the full mechanism × region × shape cross product, empty:non-empty 1:1 by construction rather than by selection | historical measurement — the grid, the counts and the jax series are stated at the citation, which also says that no corpus in this tree supplies the rate |
+| `scratchpad/crlf/corpus_solver.py` | 14 rows whose obligations the interval leg leaves UNKNOWN, built because `scratchpad/pin/corpus_pin.py` scores no solver path at all | historical measurement — the 3009 leaf keys, the 337 verdict-bearing ones and both positive controls are stated at the citation |
+| `scratchpad/crlf/RESULTS_crlf.txt` | that run's raw output, including the complete list behind the 155-key control | historical measurement — the figures are stated at the citation |
+| `scratchpad/crlf/probe_property_grammar.py` | drives the shipped property file's grammar and oracle exhaustively **without** hypothesis: 185 records, 27 483 513 drives, 0 counterexamples | the file it drives ships — `tests/property/test_cvc5_protocol.py`, which runs under hypothesis on the `dev` profile |
+| `scratchpad/fuzz_transport.py` | the transport property fuzzer, 20 000 examples per seed | a seeded, bounded descendant ships and runs in every lane: `tests/test_solver_audit_findings.py`, `test_f4wheel2_property_fuzz_no_definite_answer_from_an_incomplete_run`, 4000 examples with an anti-vacuity floor |
+| `scratchpad/mechc/` | corpus, ledger, orders and scorer for the query-scoped repair, with its jax 0.10.2 and 0.11.0 result JSON | `tests/test_assume_constrain.py`, `tests/test_exactness_lift.py`, `tests/test_vacuous_refutation.py` |
+| `scratchpad/pin/` | the shared-point pin audit's corpus, its three reproducers, its mutant builder and its result log — 6 files | `tests/test_nonempty_certificate.py`, `tests/test_exactness_lift.py` |
+| `scratchpad/pin/corpus_pin.py` | the 95-row per-obligation corpus: mechanism × shape × order × mode × semantics × leg | historical measurement — every figure it produced is stated at its citation, and so is its own docstring's limit, that it has no solver escalation and therefore scores nothing in `solvers.py` |
+| `scratchpad/pin/RESULTS_pin.txt` | raw output for every figure that branch added, including the same cost table taken at two load averages | historical measurement — both readings are printed at the citation, which is the reason the file is named there at all |
+| `scratchpad/pin/f2_repro.py` | rebuilds the branch-scoped-assume counter-construction and its cost twin from scratch, each with a sampling oracle over the executed program | the construction is a permanent test: `test_a_region_inhabited_only_via_the_UNTAKEN_branch_is_not_recovered`, in `tests/test_nonempty_certificate.py` |
+| `scratchpad/pin/f6_repro.py` | counts and times the two witness searches, in a worktree instrumented with one increment per loop | historical measurement — the timing table, the probe counts and both load averages are stated at the citation; it needs the instrumented worktree and is re-runnable from no tree |
+| `scratchpad/pin/mutants.py` | builds one worktree per mutant, `python -B` and `__pycache__` cleared, so a same-size edit cannot be masked by a stale bytecode cache | the pins the mutants were built against ship, in `tests/test_exactness_lift.py`, and the suite counts quoted beside each mutant are counts of the shipped suite; the builder does not ship |
+| `scratchpad/probe/` | the reachability build's corpus and its mutations | `tests/test_branch_reachability.py` |
+| `scratchpad/probe/corpus.py` | that corpus — `float64`-only, which is the scope limit this page states against its own *18 → 0* | `tests/test_branch_reachability.py`; the limit is why the next corpus was built |
+| `scratchpad/probe2/` | the 619-case / 1359-obligation narrow-float corpus, built because `scratchpad/probe/corpus.py` declares no narrow float and is blind to the residual | `tests/test_probe_witness.py` |
+| `scratchpad/probe_cvc5_backstop.py` | the three-arm backstop probe, parts A–D, real cvc5 children and real bytes | the arm that landed IS the shipped code, `src/stelling/_cvc5_driver.py`, and `tests/test_solver_audit_findings.py` holds its constructions |
+| `scratchpad/probe_cvc5_separators.py` | drives cvc5's escaping of each of the ten separators inside a String literal | historical measurement — the outcome is stated at the citation |
+| `scratchpad/probe_cvc5_sorts.py` | the branch's FIRST probe, kept because it is the record of a false negative: it named its datatype constructor in ASCII and so missed the value channel entirely | historical measurement — what it missed, and why, is stated at the citation |
+| `scratchpad/probe_cvc5_value_channel.py` | the probe that found the quoted-symbol value channel, driven through the driver's own parse route | historical measurement — its output is quoted verbatim at the citation, all four cases including the ASCII control |
+| `scratchpad/s13/sweep_loop_assume_wide.py` | the 240-harness loop-carrier sweep, over the axes the citation lists: six carriers, the `lt`/`le`/`gt`/`ge` comparison set plus a contradictory pair, four asserts in both directions, two statement orders | the reproducer's executable form ships as `s13_scan` in `tests/test_undescended_assume.py`, and this page's one `python` fence is executed by `tests/test_soundness_wrap_reproducer.py` |
+| `scratchpad/s13/RESULTS_loop_wide.txt` | that sweep's results | historical measurement — the counts and the whole environment are stated at the citation: jax 0.11.0, z3 5.0.0.0, cvc5 1.3.4, CPU, `JAX_ENABLE_X64=1` |
+
 ## Log
 
 **EVERY ENTRY BELOW CARRIES A `Versions:` FIELD, FROM A CLOSED SET OF
@@ -5335,11 +5433,21 @@ and a count over entries that happened to say something is not a count.
   openable from the distribution. **They are not.** `/scratchpad` is not
   in the sdist allowlist in `pyproject.toml` — `tests/test_sdist_contents.py`
   withholds it deliberately, and nothing force-includes it — so not one
-  of the **30 distinct `scratchpad/` paths** this page cites is openable
-  from a distribution either. The true contrast is with a reader of the
-  REPOSITORY: `git ls-files scratchpad` is **80** files, all 30 cited
-  paths resolve inside it, and these receipts are in neither the tree nor
-  the tarball.)*
+  of the `scratchpad/` paths this page cites is openable from a
+  distribution either. The true contrast is with a reader of the
+  REPOSITORY: every one of them resolves in the checkout, and these
+  receipts are in neither the tree nor the tarball. **THIS SENTENCE
+  CARRIED TWO NUMERALS AND NOTHING READ EITHER OF THEM** — *30 distinct
+  paths* and *`git ls-files scratchpad` is 80 files*, correct on the day
+  they were written and carried unmeasured until 2026-08-23, by which time
+  both were wrong. It carries no numeral now, because a numeral standing
+  where nothing derives it is what went wrong here: every `scratchpad/`
+  path this page cites is inventoried and disposed of, one row each, under
+  [The evidence this page cites from `scratchpad/`, which the distribution
+  does not carry](#the-evidence-this-page-cites-from-scratchpad-which-the-distribution-does-not-carry),
+  and the counts live there, where `tests/test_sdist_reference_hygiene.py`
+  derives them from the page and from `git ls-files` rather than trusting
+  them — and reddens on the next such citation in any shipped file.)*
 
   What WAS re-derived here, and can be
   re-derived from those artefacts by anyone who does have them, is every

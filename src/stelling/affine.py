@@ -1263,7 +1263,9 @@ def refine_propagation(
             # MEASURED, not reasoned — this call site wrapped in a
             # recorder that delegates to the real decision, jax 0.11.0:
             # **31 of 31** whole-suite reaches and **70 of 70** reaches
-            # over `scratchpad/pin/corpus_pin.py` carry
+            # over `scratchpad/pin/corpus_pin.py` — a historical
+            # measurement; that corpus is tracked and is not in the
+            # sdist, and the whole-suite half re-drives here — carry
             # `nonemptiness_certified=True` and `coverage.constrained == 0`,
             # and `narrowing_uncertified` is False at every one of them.
             # The other two inputs ARE live at the same site and on the

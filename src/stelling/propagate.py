@@ -7472,8 +7472,10 @@ def _bool_status(b: iv.IntervalArray, *, constrained: bool = False) -> tuple[str
     reads the flag, so no value of it can change which of the three
     statuses comes back. MEASURED, not asserted: over the whole suite this
     function is called **7392** times and computing the status both ways
-    disagrees **0** times; over the 184-row `scratchpad/mechc` ledger and
-    the 464-row `scratchpad/claims/corpus_b3.py` ledger, forcing the flag
+    disagrees **0** times — that half re-drives from the shipped tree —
+    and over the 184-row `scratchpad/mechc` ledger and
+    the 464-row `scratchpad/claims/corpus_b3.py` ledger, both a historical
+    measurement, tracked and not in the sdist, forcing the flag
     to ``True`` and to ``False`` moves **0** of 648 obligation statuses
     (details move 62/8 and 86/4 respectively).
 
@@ -10752,7 +10754,8 @@ class _Propagator:
             # judged over a narrowed box while this flag is still False.
             #
             # Measured: 6 of the 76 before/after obligation pairs in
-            # `scratchpad/mechc` differ in this detail and 0 differ in
+            # `scratchpad/mechc` — a historical measurement, tracked and
+            # not in the sdist — differ in this detail and 0 differ in
             # status; forcing the flag both ways moves 0 of 648
             # obligation statuses across two corpora and disagrees 0 times
             # in 7392 suite-wide calls (see `_bool_status`).
@@ -11348,7 +11351,9 @@ def _withhold_uncertified_refutations(p) -> None:
     leg found definitely FALSE at every point of that same domain, and a
     re-minted violation is caught by the shared point again on the affine
     leg. Measured across `scratchpad/mechc` and
-    `scratchpad/claims/corpus_b3.py` (100 harness-runs, jax 0.11.0):
+    `scratchpad/claims/corpus_b3.py` — a historical measurement, tracked
+    and not in the sdist, and the figures it produced are these —
+    (100 harness-runs, jax 0.11.0):
     **24** obligations newly offered to each layer, **34** additional
     solver invocations, and **0** new affine discharges, **0** new affine
     violations, **0** solver-decided outcomes (every one `unknown`) and
@@ -11419,7 +11424,9 @@ def _withhold_uncertified_refutations(p) -> None:
 # cost actually tracks — it is predictable from the harness.
 #
 # TWO BOUNDS, because one was not enough and the measurement says which.
-# `scratchpad/cert/RESULTS_cap.txt`, jax 0.11.0, load 0.44: with the size
+# `scratchpad/cert/RESULTS_cap.txt` is a historical measurement, tracked and
+# not in the sdist, and its figures are stated here rather than linked to:
+# jax 0.11.0, load 0.44, with the size
 # cap alone at 4096, a search that FINDS nothing walks the full grid and
 # costs **469 ms against a 23 ms propagation — 95% of the whole `check()`
 # pipeline**. The successful search is cheap (3.7x) because it stops at
@@ -11432,7 +11439,10 @@ def _withhold_uncertified_refutations(p) -> None:
 # ~469 ms to ~70 ms, and small declarations still get the whole grid.
 #
 # WHAT THE FLOOR COSTS, measured rather than assumed
-# (`scratchpad/cert/RESULTS_probe_index.txt`): across the 17 corpus rows
+# (`scratchpad/cert/RESULTS_probe_index.txt` — a historical measurement,
+# tracked and not in the sdist; this is the only place in the tree that
+# names it, and the figures below are what it holds): across the 17 corpus
+# rows
 # that witness at all, the first witnessing probe index is 0, 1 or 2 in
 # **17 of 17** — three probes recover 100% of them, one probe recovers
 # 18%. Probes 0, 1 and 2 are the declared box's LOW corner, HIGH corner
@@ -11447,7 +11457,8 @@ def _withhold_uncertified_refutations(p) -> None:
 # it still runs `for k in range(_PROBE_COUNT)`, 16 full propagations, at
 # any declared size whatever. Measured on this tree (jax 0.11.0, load
 # 1.18 before and 1.16 after, a violation inside a `lax.cond` branch;
-# `scratchpad/pin/f6_repro.py time`): `propagate` costs
+# `scratchpad/pin/f6_repro.py time`, a historical measurement in an
+# instrumented worktree, tracked and not in the sdist): `propagate` costs
 # 1.6/9.7/126.6/549.9 ms at n = 16/256/4096/16384 against a bare walk of
 # 0.1/0.5/6.2/25.7 ms — 21.4x at n = 16384, which is four times the size
 # cap above, with the probe count unmoved at 16 throughout. That is the
@@ -11461,7 +11472,8 @@ def _withhold_uncertified_refutations(p) -> None:
 # which `_reachability_witnesses` returns the empty set BEFORE probing.
 # Contrapositive: a run that pays the 16 probes is a run whose certificate
 # search declined at its gate for 0. MEASURED over
-# `scratchpad/pin/corpus_pin.py` plus a size grid built to reach both,
+# `scratchpad/pin/corpus_pin.py` — a historical measurement, tracked and
+# not in the sdist — plus a size grid built to reach both,
 # **508 propagations** including 32 rows that put a branch-scoped
 # violation beside a narrowing and a dropped assume: **0 pay for both**,
 # and the worst combined probe count is **16**, not `16 +

@@ -109,7 +109,9 @@ the spec): `(a+c)² ≤ (a·c − b²)·10.125` over a,c ∈ [1,2].
   witness accepted).
 
 Main-agent verification, independent of the builder's tests
-(`scratchpad/acceptance_verify.py`): 22/22 checks — own harnesses, own
+(`scratchpad/acceptance_verify.py` — a historical measurement, tracked and
+not in the sdist; what follows is what it checked): 22/22 checks — own
+harnesses, own
 raw-`Fraction` replay of the returned witness, own membership check of
 the witness against the declared box, stamp-shape checks (both
 invocations, `nl-cov`/`nl-ext` exclusion pinned, script hashes),
