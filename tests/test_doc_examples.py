@@ -255,6 +255,15 @@ EXPECTED_INVENTORY = {
     # whole of the retraction) and the `semantics="ieee"` + solver_timeout_ms
     # caller error. The page's speed table stays hand-checked and says so.
     #
+    # THAT GREP HAS HITS NOW, and the sentence above is kept as the history it
+    # is rather than repaired into the present tense. D7 added
+    # `tests/test_solver_battery.py`, which holds that page's ten-row table
+    # from outside this module: its row labels, order and published cells
+    # against `tools/solver_battery.py`'s copy of them, and -- with NO backend
+    # installed -- the fragment column and every row's declared input count
+    # re-derived from the traced jaxpr. Not one millisecond, deliberately; see
+    # this file's BLIND_SPOT entry for that page.
+    #
     # And two are a corrected
     # `proposed-*.md` header paying for itself. `proposed-int-literal-convert.md`
     # and `proposed-div-straddle-decline.md` each argued from a hand-written
@@ -1251,7 +1260,60 @@ BLIND_SPOT = {
     "README.md": (1, 1, "READER-SUPPLIES: the jax-only int8 truncation demo "
                         "and its two-line reading, which need no stelling"),
     "docs/choosing-a-solver-backend.md": (
-        0, 1, "NOT-A-TRANSCRIPT: the z3 tactic chain, written as a pipeline"),
+        0, 1, "NOT-A-TRANSCRIPT: the z3 tactic chain, written as a pipeline. "
+              "That page's comparison tables are markdown tables, which this "
+              "inventory does not count and which D7 therefore decided about "
+              "explicitly rather than leaving to the gap. THERE WERE TWO, and "
+              "an earlier version of this entry said `TWO` while the test "
+              "behind it located exactly ONE -- `_page_table()` finds a table "
+              "by its header, and the page then carried a third table (a "
+              "ten-row hand-copy of the tool's own cells) whose header "
+              "differed, so nothing read it: setting one of its cells to "
+              "`999-999 ms` left the whole module green. That copy is gone, "
+              "and what is left is held. (1) The published ten-row table: its "
+              "row labels, order, fragment cells, all three published cells "
+              "AND its reconstruction grades are held against tools/"
+              "solver_battery.py's copy of them, the fragment column and "
+              "every row's declared input count are RE-DERIVED with no "
+              "backend, the six cheap rows' unsat/sat is gated because it is "
+              "a fact about the obligation, and the two rows whose labels "
+              "name a polynomial are held to that polynomial coefficient by "
+              "coefficient. (2) The three-readings table: its `as published` "
+              "row is held byte for byte to row 7's published cells, and its "
+              "DIRECTION pattern -- one reading reversing the page, two "
+              "showing no split -- is held against the prose beside it, "
+              "because that pattern is the page's headline finding and it "
+              "used to be possible to invert it on the page with nothing "
+              "going red. What is NOT gated is any millisecond's TRUTH, "
+              "deliberately: the published cells are PINNED to the tool's "
+              "copy of them so the two records cannot drift, but nothing "
+              "asserts that one of them is right and nothing re-measures "
+              "one. A wall time is not a property of this tree, and rows "
+              "7-10's cells are `did this backend finish inside ten "
+              "seconds`, which is one. tools/solver_battery.py re-measures "
+              "them on demand instead. THE D7 FIXUP OF 2026-08-23 ADDED THREE "
+              "MORE TABLES to that page and they are not equally held, so "
+              "they are decided about here too. (3) The GRADE-MEANINGS table "
+              "is `tools/solver_battery.py`'s GRADES dictionary quoted "
+              "verbatim and is held to it byte for byte in both directions, "
+              "including the sentence saying what `reconstructed` does NOT "
+              "claim -- which was the sharpest thing on the page and, until "
+              "that fixup, the least protected: the page's copy and the "
+              "tool's could each be INVERTED into the overclaim on its own "
+              "with the whole module green, measured both ways. (4) The "
+              "PROVENANCE table maps each figure below it to the committed "
+              "transcript and load average it came from; the figures in it "
+              "are held to those transcripts by "
+              "test_every_quoted_sweep_figure_is_in_the_transcript_it_is_"
+              "attributed_to, which is what the `1.22x` never had -- it "
+              "appeared in four places and all four could be re-typed with "
+              "the whole module green, measured. (5) The BOX-CEILING table is "
+              "four measured A/B ratios and is NOT held cell by cell: two of "
+              "them (1.62x, 17.82x) and the 2.55x in the prose beside it are "
+              "held to their transcript by the same test, and the table "
+              "carries no claim the prose does not repeat. No millisecond in "
+              "any of the three tables is gated for TRUTH, for the reason "
+              "above"),
     "docs/norms.md": (
         0, 4, "NOT-A-TRANSCRIPT x3 (a four-line procedure, the cost table "
               "quoted from obligation.py, a subprocess sweep's output) plus "

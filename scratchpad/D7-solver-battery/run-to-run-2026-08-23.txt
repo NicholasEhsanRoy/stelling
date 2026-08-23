@@ -1,0 +1,37 @@
+row column      run 1 (load 5.67)      run 2 (load 3.99)  widest ratio
+------------------------------------------------------------------------
+  1 both         unsat, 70–91 ms        unsat, 73–80 ms         1.30x  ms
+  1 z3             unsat, 5–6 ms          unsat, 6–9 ms         1.80x  ms
+  1 cvc5            unsat, 64 ms        unsat, 71–78 ms         1.22x  ms
+  2 both         unsat, 75–83 ms        unsat, 81–91 ms         1.21x  ms
+  2 z3            unsat, 8–10 ms         unsat, 9–13 ms         1.62x  ms
+  2 cvc5         unsat, 68–72 ms        unsat, 74–88 ms         1.29x  ms
+  3 both           sat, 73–75 ms          sat, 75–81 ms         1.11x  ms
+  3 z3              sat, 9–12 ms           sat, 8–10 ms         1.50x  ms
+  3 cvc5           sat, 62–64 ms          sat, 64–73 ms         1.18x  ms
+  4 both         unsat, 68–75 ms        unsat, 75–77 ms         1.13x  ms
+  4 z3             unsat, 7–8 ms          unsat, 8–9 ms         1.29x  ms
+  4 cvc5         unsat, 66–71 ms        unsat, 64–72 ms         1.12x  ms
+  5 both         unsat, 81–85 ms        unsat, 75–85 ms         1.13x  ms
+  5 z3             unsat, 8–9 ms         unsat, 9–14 ms         1.75x  ms
+  5 cvc5         unsat, 66–69 ms        unsat, 70–79 ms         1.20x  ms
+  6 both           sat, 68–74 ms          sat, 78–83 ms         1.22x  ms
+  6 z3               sat, 6–8 ms            sat, 7–8 ms         1.33x  ms
+  6 cvc5           sat, 63–74 ms          sat, 67–71 ms         1.17x  ms
+  7 both      unsat, 20.0–20.0 s     unsat, 20.2–20.6 s         1.03x  s
+  7 z3          unsat, 4.0–4.1 s       unsat, 4.4–4.6 s         1.15x  s
+  7 cvc5    UNKNOWN, 16.0–16.0 s        UNKNOWN, 16.0 s         1.00x  s
+  8 both    UNKNOWN, 26.1–26.2 s   UNKNOWN, 26.1–26.2 s         1.00x  s
+  8 z3      UNKNOWN, 10.1–10.1 s   UNKNOWN, 10.1–10.2 s         1.01x  s
+  8 cvc5    UNKNOWN, 16.0–16.0 s   UNKNOWN, 16.0–16.0 s         1.00x  s
+  9 both        unsat, 2.4–2.4 s       unsat, 2.3–2.5 s         1.09x  s
+  9 z3             unsat, 6–7 ms            unsat, 6 ms         1.17x  ms
+  9 cvc5        unsat, 2.4–2.5 s       unsat, 2.3–2.3 s         1.09x  s
+ 10 both      unsat, 16.0–16.0 s     unsat, 16.0–16.0 s         1.00x  s
+ 10 z3             unsat, 6–7 ms            unsat, 6 ms         1.17x  ms
+ 10 cvc5    UNKNOWN, 16.0–16.0 s   UNKNOWN, 16.0–16.0 s         1.00x  s
+
+widest millisecond disagreement: row 1 [z3 alone] 'unsat, 5–6 ms' against 'unsat, 6–9 ms' — 1.80x (80%)
+widest second-scale disagreement: row 7 [z3 alone] 'unsat, 4.0–4.1 s' against 'unsat, 4.4–4.6 s' — 1.15x (15%)
+
+Every answer and every direction is identical between the two runs; only the clock moved.
