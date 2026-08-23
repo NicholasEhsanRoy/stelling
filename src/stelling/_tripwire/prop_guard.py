@@ -3,18 +3,40 @@
 
 # VENDORED, NOT WRITTEN HERE, AND DELIBERATELY NOT REWRITTEN. This file is
 # `/home/nick/MSF/stelling-sweeps/artifacts/prop_guard.py` -- the mitigation
-# bundle of the 0.2.0 dunder-perimeter fuzz round -- copied in with FIVE edits
-# and no others, so that a reviewer can `diff` it against the artefact and see
-# the whole of what changed:
+# bundle of the 0.2.0 dunder-perimeter fuzz round -- copied in with SIX edits
+# and no others, so that a reviewer can `diff` it against the artefact and
+# see the whole of what changed.
 #
-#   1. these SPDX lines and this note;
-#   2. `_jnp()` takes `jnp` from `stelling._jax_compat` instead of importing
-#      `jax.numpy` itself;
-#   3. `_x64()` takes `jax` from the same place;
-#   4. `_selftest()` takes both from the same place;
-#   5. `_target_dtype()` RETURNS on its own except branch instead of caching
-#      the `None` that branch produced -- one line, and the only edit that
-#      touches behaviour at all. See below.
+# THE COUNT IS NOT THE CLAIM; THE KINDS ARE. A ledger that says only how many
+# times a vendored file was touched has stopped being evidence about it. So
+# every edit below carries the KIND of change it is, and the tally by kind is
+# on the TALLY line rather than in a sentence someone has to keep in step.
+#
+#   1. (provenance)   these SPDX lines and this note;
+#   2. (import-route) `_jnp()` takes `jnp` from `stelling._jax_compat`
+#                     instead of importing `jax.numpy` itself;
+#   3. (import-route) `_x64()` takes `jax` from the same place;
+#   4. (import-route) `_selftest()` takes both from the same place;
+#   5. (behaviour)    `_target_dtype()` RETURNS on its own except branch
+#                     instead of caching the `None` that branch produced --
+#                     one line, and the only edit here that can change an
+#                     answer this module gives. See below.
+#   6. (message-text) `Finding.message` renders two of its four reasons as
+#                     English. It changes no answer at all, which is a
+#                     stronger statement than edit 5 can make. See below.
+#
+#   TALLY: 6 = 1 provenance + 3 import-route + 1 behaviour + 1 message-text
+#
+# Edit 1 is this note, which cannot mark itself. EVERY OTHER EDIT IS MARKED
+# AT THE SITE IT CHANGED, by a `# VENDORING EDIT <n>` comment, so the list
+# above and the file below can be held to each other rather than read side
+# by side. `tests/test_prop_guard_ledger.py` holds them: to each other, to
+# the TALLY line, and to every restatement of these figures elsewhere in
+# this tree, which it finds by SCANNING the tree rather than by carrying a
+# page list. It derives the figures from the LIST and not from the markers,
+# and says why in as many words: a marker is forgotten at least as easily as
+# a sentence, so a gate that read one would go green on the omission it
+# exists to catch.
 #
 # Edits 2-4 exist because this repository allows the `import jax` / `from jax`
 # token in exactly one file (`_jax_compat.py`) and
@@ -43,6 +65,35 @@
 # scoring and no scored answer can differ. What it changes is only what
 # happens AFTER a fault -- the next call recomputes rather than reading a
 # cached blindness -- which is the fail-safe the module already documents.
+#
+# EDIT 6, AND WHY IT IS A DIFFERENT KIND AGAIN. `Finding.message` interpolates
+# a phrase and then the target dtype -- "the literal L written in `slot` is
+# <phrase> <dtype>: the program uses V" -- and two of the four phrases were
+# not phrases a dtype can follow. Driven, all four:
+#
+#     out-of-range  ... is outside the range of int8: ...             OK
+#     inexact       ... is not exactly representable in float32: ...  OK
+#     overflows     ... is overflows float16: ...                 BROKEN
+#     negative      ... is a negative literal cannot exist in the
+#                       unsigned type it is compared against uint8: BROKEN
+#
+# That is the text of a `NarrowingError` a user reads -- `perimeter.py` quotes
+# it verbatim into the sentence it raises -- and `overflows-float` is the
+# reason `docs/overflow-tripwire.md` and `CHANGELOG.md` promoted to a headline
+# this release, so the release documented a string it had left broken. The
+# phrases are now a MAPPING keyed by reason (`_WHAT`) rather than an `elif`
+# chain ending in an `else` that handed the overflow phrase to anything it did
+# not recognise, so a fifth entry in `REASONS` cannot inherit a fourth's
+# sentence in silence.
+#
+# NOTHING ELSE MOVES, and that is checked rather than asserted. `classify` is
+# not touched: the same operand, literal and slot return the same `None` or
+# the same `Finding`, carrying the same `reason`, `narrowed_to`,
+# `target_dtype`, `literal` and `slot`. Only the RENDERING of a Finding that
+# was already going to be produced is different. The 24-case self-test prints
+# reasons and values rather than messages and is byte-identical across this
+# edit; the corpus and property censuses below were scored on answers, and no
+# answer here is different.
 #
 # WHY IT IS NOT REWRITTEN. It came out of a 204,300-evaluation property census
 # and was then scored, by a context that did not write it, over 482,691
@@ -292,6 +343,29 @@ class NarrowingError(OverflowError):
         self.finding = finding
 
 
+#: THE PHRASE EACH REASON CONTRIBUTES TO :attr:`Finding.message`, which reads
+#: "the literal L written in `slot` is <phrase> <target dtype>: the program
+#: uses V".  Every entry is therefore a phrase A DTYPE CAN FOLLOW, and that
+#: contract is the whole of vendoring edit 6: two of these four were not, and
+#: rendered as "is overflows float16" and "is a negative literal cannot exist
+#: in the unsigned type it is compared against uint8" -- in the text of a
+#: `NarrowingError` a user reads.
+#:
+#: A MAPPING, AND NOT THE `elif` CHAIN IT WAS.  That chain ended in an `else`
+#: carrying the overflow phrase, so a fifth entry in :data:`REASONS` would
+#: have rendered as an overflow -- a sentence about a defect it does not have
+#: -- rather than saying it had no phrase.  The lookup below names a reason it
+#: does not know instead, and `tests/test_narrowing_perimeter.py` holds these
+#: keys equal to `REASONS`, so that fallback is unreachable in this copy.
+_WHAT = {                                       # VENDORING EDIT 6
+    "out-of-range": "outside the range of",
+    "negative-into-unsigned":
+        "negative and cannot exist in the unsigned type",
+    "inexact": "not exactly representable in",
+    "overflows-float": "too large in magnitude for",
+}
+
+
 @dataclass(frozen=True)
 class Finding:
     reason: str
@@ -303,15 +377,11 @@ class Finding:
 
     @property
     def message(self) -> str:
-        if self.reason == "negative-into-unsigned":
-            what = ("a negative literal cannot exist in the unsigned type it "
-                    "is compared against")
-        elif self.reason == "out-of-range":
-            what = "outside the range of"
-        elif self.reason == "inexact":
-            what = "not exactly representable in"
-        else:
-            what = "overflows"
+        # VENDORING EDIT 6: the phrase is LOOKED UP rather than chosen by an
+        # `elif` chain whose `else` was a fallthrough.  See `_WHAT` above.
+        what = _WHAT.get(self.reason)
+        if what is None:                        # never one of `REASONS`
+            what = "narrowed by an unlisted reason (%s) into" % (self.reason,)
         return (
             "the literal %r written in `%s` is %s %s: the program uses %r"
             % (self.literal, "__%s__" % self.slot, what, self.target_dtype,
@@ -404,14 +474,15 @@ def _target_dtype(dt, slot):
             out = np.dtype(jnp.result_type(dt, 1))
     except Exception as exc:
         INTERNAL_DECLINES[type(exc).__name__] += 1
-        # EDIT 5: `return None` rather than falling through to the memo. A
-        # value this call did not compute must not be cached: one transient
-        # fault -- `jax.transfer_guard`, a public and documented API, closing
-        # over the `zeros((0,), dt) / 1` allocation this branch makes -- would
-        # otherwise blind the guard for that key for the REST OF THE PROCESS,
-        # while `INTERNAL_DECLINES` recorded exactly 1. Declining is fail-safe
-        # only while it is counted, and a memoised decline is counted once and
-        # taken forever after. See the note at the top of this file.
+        # VENDORING EDIT 5: `return None` rather than falling through to
+        # the memo. A value this call did not compute must not be cached:
+        # one transient fault -- `jax.transfer_guard`, a public and
+        # documented API, closing over the `zeros((0,), dt) / 1` allocation
+        # this branch makes -- would otherwise blind the guard for that key
+        # for the REST OF THE PROCESS, while `INTERNAL_DECLINES` recorded
+        # exactly 1. Declining is fail-safe only while it is counted, and a
+        # memoised decline is counted once and taken forever after. See the
+        # note at the top of this file.
         return None
     _TARGET_CACHE[key] = out
     return out
