@@ -1,7 +1,7 @@
 <img src="https://raw.githubusercontent.com/NicholasEhsanRoy/stelling/main/assets/stelling_logo.png" alt="the stelling wordmark: three cubes arranged as ∴, therefore, beside the name" width="100%">
 
 [![ci](https://github.com/NicholasEhsanRoy/stelling/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/NicholasEhsanRoy/stelling/actions/workflows/ci.yml)
-![python: 3.12, the version CI measures](https://img.shields.io/badge/python-3.12%20tested-blue.svg)
+[![python: >=3.10, the floor this package declares — see "Which Python" for what CI actually runs](https://img.shields.io/badge/python-%3E%3D3.10%20declared-blue.svg)](https://github.com/NicholasEhsanRoy/stelling/blob/main/pyproject.toml)
 [![license: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/NicholasEhsanRoy/stelling/blob/main/LICENSE)
 
 # Stelling
@@ -80,12 +80,34 @@ the whole trace: "no narrowing was seen" and "no narrowing occurred" are
 different claims and only the second one licenses a VERIFIED.
 
 So a VERIFIED with the tripwire armed says the property holds AND that no
-narrowing was seen on any route the tripwire watches. **That last clause is
-load-bearing and the watched set is finite**: constants destroyed at array
-CONSTRUCTION — `jnp.full(shape, N, dt)` is the one to know — are narrowed
-before any primitive is bound, where this hook cannot see them. The watched
-and unwatched routes are enumerated door by door, and the enumeration is
-measured rather than asserted, in
+narrowing was seen on any route *that* tripwire watches. That clause is
+load-bearing, which is why the release ships **three** instruments and not
+one. Each is a separate opt-in dial, and none of them turns on either of the
+others:
+
+- **the trace-time tripwire** (`-p stelling.overflow`) — the const-fold site
+  above, where a constant that survived into the trace dies;
+- **the eager construction-site detector**
+  (`--stelling-eager-truncation=error`) — array CONSTRUCTION.
+  `jnp.full(shape, N, dt)` narrows its constant before any primitive is
+  bound, where the hook above cannot see it; this one **raises** at the line
+  that wrote the constant. What it does not reach, at that site, is a
+  constant numpy destroyed before jax was called at all — two named routes,
+  measured;
+- **the narrowing perimeter** (`--stelling-narrowing-perimeter=error`) — an
+  integer literal that does not survive the conversion into the dtype it
+  meets, which need not be out of *range* to be destroyed: `x <= 2**31 - 1`
+  on `float32` is a program about `2147483648.0`.
+
+**With all three armed the watched set is still finite**, and the residue is
+sharper than "constants at construction" rather than gone. Two spellings of
+that same wrong threshold reach VERIFIED today — `jnp.less_equal(x, 2**31 - 1)`,
+because a `jnp.*` function carries no Python operator slot to attach to, and
+`(x - (2**31 - 1)) <= 0.0`, because inside a traced harness only the
+comparison slots are live. And a narrowing the program **computed** rather
+than wrote — a float overflow on device — leaves no literal for any of the
+three to read. The watched and unwatched routes are enumerated door by door,
+and the enumeration is measured rather than asserted, in
 [`docs/overflow-tripwire.md`](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md).
 
 ---
@@ -96,11 +118,12 @@ measured rather than asserted, in
 |---|---|---|
 | **`jax.experimental.checkify`** | runtime checks: NaN, OOB indexing, div-by-zero | operates on the jaxpr after constant folding — integer-literal narrowing has already completed before the transform runs |
 | **jaxtyping** | static shape and dtype checking via type hints | verifies types, not values — `int8` is the correct type; whether `256` fits in it is a different question |
-| **stelling** | trace-time overflow detection + static SMT-backed proof of algorithmic properties over declared input regions | the `jnp.full` / eager-execution paths where the literal is destroyed before the trace exists ([documented](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md)) |
+| **stelling** | trace-time overflow detection + static SMT-backed proof of algorithmic properties over declared input regions | the paths where the literal is destroyed before the trace exists — array construction (`jnp.full`) and eager execution — across three opt-in instruments, each with its own measured limits ([documented](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md)) |
 
 These tools are complementary. checkify catches runtime faults stelling
 cannot see; jaxtyping catches shape mismatches at definition time; stelling
-catches the trace-time value corruption both are blind to and proves
+catches the value corruption both are blind to — in the trace, and at the
+sites that destroy a constant before the trace exists — and proves
 properties neither attempts.
 
 ---
@@ -184,6 +207,35 @@ macOS, and Windows.
 
 `python -m stelling` prints which optional dependencies are installed and
 runs a one-formula smoke test against each available solver.
+
+### Which Python
+
+The badge above names the **floor**, `requires-python = ">=3.10"`, because
+that is the one interpreter fact this repository holds. The floor and the
+version CI runs are different claims, and the badge used to conflate them.
+Both, measured:
+
+- **The floor is declared, not exercised.** pip enforces `>=3.10` on
+  install; **no job in `.github/workflows/` asks for a 3.10 interpreter.**
+  What holds the floor instead is a static read —
+  `tests/test_zero_dep_import_discipline.py` checks every shipped module's
+  imports against the 3.10 standard library — and that check states its own
+  limit in as many words: syntax newer than the floor is invisible to it and
+  would need a real floor interpreter to catch.
+- **What CI provisions is mostly the runner's.** Exactly one job pins an
+  interpreter — `acceptance-reproducer`, at 3.12 — and it pins for a
+  dependency reason: jaxfluids requires ≥3.11 while stelling declares
+  ≥3.10, so the two projects disagree about what a valid interpreter is.
+  **Every other job takes whatever interpreter the runner image provides**,
+  and nothing here pins it, asserts it or records it.
+
+So a badge saying some version is *tested* would be a claim about the runner
+image, which this repository does not hold and cannot promise. It says
+`>=3.10 declared` instead, and both bullets above are read back off
+`pyproject.toml` and `.github/workflows/` by
+`tests/test_readme_claims.py`: a lane that starts or stops pinning, a pin
+that moves, or a floor that moves reddens this section rather than leaving
+it quietly false.
 
 ### cvc5: wheel vs external binary
 
@@ -334,7 +386,7 @@ you find a defect, please report it.
 | [Reading a verdict](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/reading-a-verdict.md) | the statuses, every stamp line, and the two vacuity instruments |
 | [Preconditions guide](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/preconditions.md) | ready-made obligation templates and posing guidance |
 | [Choosing a solver backend](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/choosing-a-solver-backend.md) | z3, cvc5, or both — how obligations are routed, what each backend decided, and what one alone costs |
-| [The overflow tripwire](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md) | full reference: every door it watches, every door it does not, xdist aggregation, and the gate that refuses to verify a corrupted trace |
+| [The overflow tripwire](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md) | full reference for all three instruments: every door each one watches, every door it does not, xdist aggregation, and the gate that refuses to verify a corrupted trace |
 | [Reproducing a witness](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/reproducing-a-witness.md) | emit a runnable file that executes a REFUTED's witness through **your own program, with stelling uninstalled** — the one check that does not trust this tool |
 | [SOUNDNESS.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/SOUNDNESS.md) | what a verdict is permitted to claim |
 | [docs/](https://github.com/NicholasEhsanRoy/stelling/tree/main/docs/) | index, including the project-state and ledger records |
