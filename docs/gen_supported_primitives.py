@@ -11,7 +11,8 @@ exists in the file, generation fails loudly rather than citing stale
 text. ``tests/test_supported_primitives_doc.py`` regenerates the page
 and fails if the committed copy differs from the live registries.
 
-Registries consumed (located by scan, cited with live line numbers):
+Registries consumed (located by scan, cited by SYMBOL and file — never
+by a line number; see ``_site`` and ``_q``):
 
 - ``stelling.propagate.TRANSFERS`` — real-mode interval transfers, tiered
 - ``stelling.propagate.IEEE_TRANSFERS`` — ieee-mode transfers, tiered
@@ -86,6 +87,53 @@ def _def_line(rel: str, name: str) -> int:
     raise LookupError(f"definition of {name!r} not found in {rel}")
 
 
+def _site(rel: str, name: str) -> str:
+    """The file that defines ``name`` — verified here, cited without a line.
+
+    **THE SCAN STAYS; ITS ANSWER STOPS REACHING THE PAGE — 0.2.0 D15.** This
+    used to be spelled ``f"{rel}:{_def_line(rel, name)}"`` and the page
+    carried the number. A line number is true at generation time and is true
+    of nothing afterwards: the sdist a reader downloads carries the digits
+    that were right on the day the page was generated, and every later edit
+    above the definition falsifies them for that reader without touching the
+    page. And the cost is paid twice — the reader's, and the batch's; see
+    :func:`_q`, where this page's one measured instance of it lives.
+
+    **AND THE SYMBOL BESIDE IT IS BOTH DURABLE AND WHAT A READER ACTUALLY
+    USES.** Every one of these citations names its registry (``TRANSFERS``,
+    ``_INT_COMPUTING``, ``LIBM_MEASURED``) in the same parenthesis. ``grep -n
+    '^TRANSFERS' src/stelling/propagate.py`` is what a reader runs; this
+    function runs that same column-0 search, narrowed to the lines where the
+    name is being ASSIGNED. So what the page loses is a digit nobody follows
+    and what it keeps is the name that finds the thing.
+
+    **WHAT THIS IS NOT, STATED RATHER THAN ELIDED.** It is the same class
+    0.2.0 D13 closed in ``SOUNDNESS.md`` — four rotted ``propagate.py:NNN``
+    citations struck, the survivors re-cited by symbol with the grep that
+    finds them — but a WEAKER instance of it. This page is GENERATED and
+    ``tests/test_supported_primitives_doc.py`` regenerates it against the
+    live registries, so a coordinate that went stale here REDDENED rather
+    than rotting silently, which is exactly what a hand-written one does not
+    do. **Say that rather than overstate it**: no wrong coordinate was found
+    standing on this page, and none is claimed. What is repaired is the
+    COST, not a live falsehood — a coordinate in a shipped artefact that is
+    true only of the checkout that generated it, and a regeneration owed by
+    every batch that adds a line to a module this page cites.
+
+    **THE COUNTS ARE NOT THIS.** ``50 entries``, ``17 entries`` are ``len()``
+    of the live registry, re-derived on every generation and held by the
+    drift gate. A number the tree computes is the kind of figure that belongs
+    on a generated page; it is the COORDINATE that was the defect.
+
+    The lookup is kept and is not decorative: it still raises ``LookupError``
+    if the named symbol is no longer assigned at that file's top level, so
+    the page can never name a file that has stopped defining the registry it
+    is cited for.
+    """
+    _def_line(rel, name)
+    return rel
+
+
 # Everything a wrapped string literal puts at a continuation: the closing
 # quote of one fragment, then an optional prefix and the opening quote of
 # the next. Dropping the quotes but keeping the prefix is the trap — see
@@ -133,9 +181,40 @@ def _quote_line(rel: str, quote: str, *, window: int = 40) -> int:
 
 
 def _q(rel: str, quote: str) -> str:
-    """Render a code-recorded reason: verbatim quote plus file:line cite."""
-    line = _quote_line(rel, quote)
-    return f'"{_norm(quote)}" ({rel}:{line})'
+    """Render a code-recorded reason: verbatim quote plus the file carrying it.
+
+    **THE SAME REPAIR AS :func:`_site`, AND FOR A STRONGER REASON — 0.2.0
+    D15.** This returned ``f'"{quote}" ({rel}:{line})'``, so 32 of the page's
+    49 coordinates came from here. A quote citation's ANCHOR is the quoted
+    sentence itself, which is reproduced verbatim on the page immediately to
+    the left of the citation and is verified against the file on every
+    generation — so the reader already holds a search string strictly better
+    than a line number, and the line number is the only part of the pair that
+    can be false.
+
+    **AND THIS IS THE HALF THAT HAS A MEASURED PRICE ON IT.** 0.2.0 D4 added
+    two lines of docstring to ``propagate.py`` above a cited reason and the
+    zero-dep lane went ``1 failed, 2304 passed`` on
+    ``test_committed_page_matches_live_registries``. The whole regeneration
+    was ONE line: the cited reason's coordinate moved by two, from 10392 to
+    10394, and nothing else on the page moved at all. D4 wrote the diagnosis
+    down rather than only paying it — *"the figure is a property of the
+    file's layout rather than of its content"* — which is the same sentence
+    that retired a collection denominator in that week's hotfix. Nothing
+    about the page's content had changed, and no reader was better off for
+    either number.
+
+    :func:`_quote_line` is STILL CALLED and its contract is unchanged: it
+    raises ``LookupError`` when the code no longer carries the quote, modulo
+    wrapping, which is what makes *"the page never cites text the code no
+    longer carries"* true. What stops is the number reaching the page.
+    ``tests/test_supported_primitives_doc.py::
+    test_citations_survive_any_rewrapping_of_the_quoted_source`` collects its
+    population by spying on this call, so it keeps covering every quote on
+    the page.
+    """
+    _quote_line(rel, quote)
+    return f'"{_norm(quote)}" ({rel})'
 
 
 def _asserted_tiers(text: str) -> set[str]:
@@ -193,59 +272,59 @@ def generate() -> str:
     universe = sorted(set(transfers) | set(ieee) | supported | replay)
 
     regs = [
-        ("stelling.propagate.TRANSFERS", _PROPAGATE,
-         _def_line(_PROPAGATE, "TRANSFERS"), len(transfers),
+        ("stelling.propagate.TRANSFERS",
+         _site(_PROPAGATE, "TRANSFERS"), len(transfers),
          "real-mode interval transfer registry (`semantics=\"real\"`); each "
          "entry carries an assumption tier"),
-        ("stelling.propagate.IEEE_TRANSFERS", _PROPAGATE,
-         _def_line(_PROPAGATE, "IEEE_TRANSFERS"), len(ieee),
+        ("stelling.propagate.IEEE_TRANSFERS",
+         _site(_PROPAGATE, "IEEE_TRANSFERS"), len(ieee),
          "ieee-mode interval transfer registry (`semantics=\"ieee\"`); each "
          "entry carries an assumption tier"),
-        ("stelling.propagate._INT_COMPUTING", _PROPAGATE,
-         _def_line(_PROPAGATE, "_INT_COMPUTING"), len(computing),
+        ("stelling.propagate._INT_COMPUTING",
+         _site(_PROPAGATE, "_INT_COMPUTING"), len(computing),
          "transfer-side integer-semantics census: transfers that can compute "
          "a new numeric value (they carry the overflow-reachability guard)"),
-        ("stelling.propagate._INT_NON_COMPUTING", _PROPAGATE,
-         _def_line(_PROPAGATE, "_INT_NON_COMPUTING"), len(non_computing),
+        ("stelling.propagate._INT_NON_COMPUTING",
+         _site(_PROPAGATE, "_INT_NON_COMPUTING"), len(non_computing),
          "transfer-side integer-semantics census: transfers recorded as "
          "computing no new value"),
-        ("stelling.propagate._INT_NON_COMPUTING_EXEMPT", _PROPAGATE,
-         _def_line(_PROPAGATE, "_INT_NON_COMPUTING_EXEMPT"),
+        ("stelling.propagate._INT_NON_COMPUTING_EXEMPT",
+         _site(_PROPAGATE, "_INT_NON_COMPUTING_EXEMPT"),
          len(_pr._INT_NON_COMPUTING_EXEMPT),
          "per-primitive written soundness reasons for the non-computing "
          "classification (reproduced in the appendix below)"),
-        ("stelling.propagate._ASSUME_CMPS", _PROPAGATE,
-         _def_line(_PROPAGATE, "_ASSUME_CMPS"), len(assume_cmps),
+        ("stelling.propagate._ASSUME_CMPS",
+         _site(_PROPAGATE, "_ASSUME_CMPS"), len(assume_cmps),
          "the comparisons a point-bounded `stelling_assume` can narrow "
          "through"),
-        ("stelling.obligation._SUPPORTED", _OBLIGATION,
-         _def_line(_OBLIGATION, "_SUPPORTED"), len(supported),
+        ("stelling.obligation._SUPPORTED",
+         _site(_OBLIGATION, "_SUPPORTED"), len(supported),
          "the SMT emission set: primitives an obligation slice may contain "
          "and emit"),
-        ("stelling.obligation._INT_OVERFLOW_EMITTED", _OBLIGATION,
-         _def_line(_OBLIGATION, "_INT_OVERFLOW_EMITTED"), len(overflow),
+        ("stelling.obligation._INT_OVERFLOW_EMITTED",
+         _site(_OBLIGATION, "_INT_OVERFLOW_EMITTED"), len(overflow),
          "emission-side integer-semantics census: emitted primitives that "
          "compute a new numeric value (integer dtypes decline)"),
-        ("stelling.obligation._INT_SAFE_EMITTED", _OBLIGATION,
-         _def_line(_OBLIGATION, "_INT_SAFE_EMITTED"), len(int_safe),
+        ("stelling.obligation._INT_SAFE_EMITTED",
+         _site(_OBLIGATION, "_INT_SAFE_EMITTED"), len(int_safe),
          "emission-side integer-semantics census: emitted primitives "
          "recorded int-safe"),
-        ("stelling.obligation._INT_SAFE_EMITTED_REASONS", _OBLIGATION,
-         _def_line(_OBLIGATION, "_INT_SAFE_EMITTED_REASONS"),
+        ("stelling.obligation._INT_SAFE_EMITTED_REASONS",
+         _site(_OBLIGATION, "_INT_SAFE_EMITTED_REASONS"),
          len(_ob._INT_SAFE_EMITTED_REASONS),
          "per-primitive written soundness reasons for the int-safe "
          "classification (reproduced in the appendix below)"),
-        ("stelling.obligation._REPLAY_SUPPORTED", _OBLIGATION,
-         _def_line(_OBLIGATION, "_REPLAY_SUPPORTED"), len(replay),
+        ("stelling.obligation._REPLAY_SUPPORTED",
+         _site(_OBLIGATION, "_REPLAY_SUPPORTED"), len(replay),
          "the exact-rational replay surface: primitives the solver-free "
          "witness replay can evaluate"),
-        ("stelling.obligation._SCALAR_STRUCT_FMT", _OBLIGATION,
-         _def_line(_OBLIGATION, "_SCALAR_STRUCT_FMT"),
+        ("stelling.obligation._SCALAR_STRUCT_FMT",
+         _site(_OBLIGATION, "_SCALAR_STRUCT_FMT"),
          len(_ob._SCALAR_STRUCT_FMT),
          "the scalar literal decoder — keyed by numpy dtype code, not by "
          "primitive"),
-        ("stelling.coverage.DEFAULT_TRANSPARENT", _COVERAGE,
-         _def_line(_COVERAGE, "DEFAULT_TRANSPARENT"), len(transparent),
+        ("stelling.coverage.DEFAULT_TRANSPARENT",
+         _site(_COVERAGE, "DEFAULT_TRANSPARENT"), len(transparent),
          "call wrappers descended into (sub-jaxpr walked) instead of "
          "transferred"),
     ]
@@ -267,11 +346,11 @@ def generate() -> str:
     w("**GENERATED FILE — do not edit by hand.** This page is emitted by")
     w(f"`{_GENERATOR}`, which imports stelling's live capability registries")
     w("and derives every membership, tier, count, and citation below from")
-    w("them. The registries consumed, with their definition sites at")
-    w("generation time:")
+    w("them. The registries consumed, each named beside the file that")
+    w("defines it:")
     w("")
-    for name, rel, line, size, role in regs:
-        w(f"- `{name}` (`{rel}:{line}`, {size} entries) — {role}")
+    for name, rel, size, role in regs:
+        w(f"- `{name}` (`{rel}`, {size} entries) — {role}")
     w("")
     w(f"Regenerate with `python {_GENERATOR}`. The drift gate")
     w(f"`{_TEST}` regenerates this page and fails")
@@ -535,10 +614,10 @@ def generate() -> str:
     _shipped = _pr.LIBM_PROFILES[_pr._DEFAULT_LIBM_PROFILE]
     _maxre = re.compile(r"max error ([0-9.]+) ulps")
     w(f"Shipped profile `{_shipped.name}` "
-      f"({_PROPAGATE}:{_def_line(_PROPAGATE, 'XLA_CPU_2026_08')}), and "
+      f"({_site(_PROPAGATE, 'XLA_CPU_2026_08')}), and "
       f"the measurement each budget is rounded up from "
       f"(`stelling.propagate.LIBM_MEASURED`, "
-      f"{_PROPAGATE}:{_def_line(_PROPAGATE, 'LIBM_MEASURED')}):")
+      f"{_site(_PROPAGATE, 'LIBM_MEASURED')}):")
     w("")
     _rows = []
     for (_op, _dt), _u in _shipped.ulps:
@@ -746,7 +825,7 @@ def generate() -> str:
     w("")
     w(f"### Emission int-safe reasons "
       f"(`stelling.obligation._INT_SAFE_EMITTED_REASONS`, "
-      f"`{_OBLIGATION}:{_def_line(_OBLIGATION, '_INT_SAFE_EMITTED_REASONS')}`)")
+      f"`{_site(_OBLIGATION, '_INT_SAFE_EMITTED_REASONS')}`)")
     w("")
     out.extend(_table(
         ["primitive", "recorded reason"],
@@ -756,7 +835,7 @@ def generate() -> str:
     w("")
     w(f"### Transfer non-computing exemptions "
       f"(`stelling.propagate._INT_NON_COMPUTING_EXEMPT`, "
-      f"`{_PROPAGATE}:{_def_line(_PROPAGATE, '_INT_NON_COMPUTING_EXEMPT')}`)")
+      f"`{_site(_PROPAGATE, '_INT_NON_COMPUTING_EXEMPT')}`)")
     w("")
     out.extend(_table(
         ["primitive", "recorded reason"],

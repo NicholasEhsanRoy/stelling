@@ -68,10 +68,16 @@ at 1267; `solvers.py:1050`, cited as the dispatch site, is blank;
 the `def` is at 952; `reproduce.py:258`, cited as `SIDECAR_KEYS`, is blank. A
 line number in a page nothing regenerates is a claim nothing checks, and a
 wrong one sends a reader to a line that reads plausibly. Symbols move too, but
-they move LOUDLY — `grep` comes back empty — and the one page here that does
-carry line numbers, `docs/supported-primitives.md`, gets them from
-`docs/gen_supported_primitives.py` and is byte-compared on every run by
-`tests/test_supported_primitives_doc.py`.*
+they move LOUDLY — `grep` comes back empty — and the one page here that did
+carry line numbers, `docs/supported-primitives.md`, got them from
+`docs/gen_supported_primitives.py` and was byte-compared on every run by
+`tests/test_supported_primitives_doc.py`. Since 0.2.0 D15 (2026-08-23) it
+carries none: a generated coordinate is still true only of the checkout that
+generated it, and the sdist a reader downloads carries the digits that were
+right on the day. The generator still LOCATES every registry and every quoted
+reason, and still refuses to generate when one has left its file or changed
+its words; what it emits is the file and the SYMBOL, which is this page's own
+rule and is now that page's too.*
 
 ## The capability, and why it is unreachable
 
