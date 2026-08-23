@@ -20,10 +20,10 @@ its own span and its own blocks.
 block that left the changelog is pinned here by the sha256 of the text it
 left as (`src_sha256`) and by the sha256 of the text it arrived as
 (`dest_sha256`); `tests/test_soundness_routing.py` reads `SOUNDNESS.md` and
-compares. For 65 of the 72 blocks the two hashes are equal, which is what
+compares. For 63 of the 72 blocks the two hashes are equal, which is what
 "verbatim" means here and is not a claim anyone has to take on trust.
 
-**SEVEN BLOCKS WERE EDITED IN TRANSIT AND ALL SEVEN ARE DECLARED**, each
+**NINE BLOCKS WERE EDITED IN TRANSIT AND ALL NINE ARE DECLARED**, each
 because the text it carried was wrong rather than because it read badly: an
 unreproducible hash literal (`SF-0.2.0-59`), a solver workaround's obsolete
 justification (`SF-0.2.0-51`), a route census stating 32 routes and 7
@@ -48,6 +48,28 @@ flips it into this partition and `CHANGELOG.md`'s count sentence is derived
 from the partition's size — and they were paid in one commit for that
 reason.
 
+**TWO MORE, AND A SECOND EDIT TO `SF-0.2.0-59`, ON 2026-08-23** (0.2.0
+D16), and they are the D13 kind again — right when stamped, and the tree
+moved. `docs/supported-primitives.md` is GENERATED and carried 49
+source-line coordinates until 0.2.0 D15 (`c9083fa`) took them all out, so
+any edit that moved a cited line reddened
+`test_supported_primitives_doc.py::test_committed_page_matches_live_registries`
+without the page's content having changed. Three routed blocks record a
+revert or mutation experiment that subtracted exactly that: `SF-0.2.0-56`
+declares it as the one confound `git clone` could not eliminate by
+construction and adds that a PROSE revert of `obligation.py` reds that
+page and nothing else, `SF-0.2.0-66` names it as F3a's one confound, and
+`SF-0.2.0-59`'s attribution preamble gives it as the reason no row needed
+a subtraction. **These are amendments to a METHOD and not to a figure**:
+no table moves, and what changes is what a later experimenter has to
+control for, which is now nothing on that account. Driven rather than
+taken from D15's report — two comment lines below the imports of each
+cited module, in a `git clone --shared` of each tree with `__pycache__`
+purged: `1 failed, 1 passed` at `ac00a32`, `2 passed` at `abab576`. The
+same change falsified NINE more sentences in `SOUNDNESS.md`'s unrouted
+`## Log`, which cost nothing here and are amended in the same commit; the
+enumeration is in that file's 2026-08-15 B5 follow-up entry.
+
 **AND THE MEASUREMENT THAT MAKES THAT SENTENCE MEAN ANYTHING WAS NOT TAKEN
 UNTIL THE B8c FIXUP.** This paragraph used to end *"each edited block also
 records `src_lines_not_carried` … and the test holds each to the number
@@ -65,13 +87,17 @@ It is measured now, twice over. Each edited block records
 `source_commit:CHANGELOG.md` and asserts EQUALITY — not a bound. Quoting
 the lines is what makes an edit reviewable: a summarisation with a note
 attached would have to write every line it summarised away into this file,
-where a reader will meet them. Four, three, three and eleven lines, in the
-order the first four are named above, and three, one and twelve for
-`SF-0.2.0-46`, `SF-0.2.0-62` and `SF-0.2.0-64`; the rest of all seven
+where a reader will meet them. Six, three, three and eleven lines, in the
+order the first four are named above; three, one and twelve for
+`SF-0.2.0-46`, `SF-0.2.0-62` and `SF-0.2.0-64`; and five and three for
+`SF-0.2.0-56` and `SF-0.2.0-66`; the rest of all nine
 blocks moved untouched. (`SF-0.2.0-59` was two until 2026-08-23, when its
 destination
 stopped calling ONE document two — *"a hand-built document"* in one
-sentence and *"a traced … persisted through JSON"* in the next.) Those
+sentence and *"a traced … persisted through JSON"* in the next — and four
+until later the same day, when the two lines of its attribution preamble
+that gave a line-count confound as the reason for `NET = raw` stopped
+being true of this tree.) Those
 numerals are restated here for a reader and are held to nothing — each
 block's row carries its own, and the row is what the test measures.
 
@@ -853,9 +879,48 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(2214, 2492),
         src_lines=279,
         src_sha256="abb5c7fb570688396ae52df4e862e1a4e6506e12ba3d33cc86407a5994142a31",
-        dest_sha256="abb5c7fb570688396ae52df4e862e1a4e6506e12ba3d33cc86407a5994142a31",
-        src_lines_not_carried=0,
-        edit_note="",
+        dest_sha256="1f28f90512e107a6f9c59856eb060e8c992a341d2bc225dcbba2cfcebaa3aee8",
+        src_lines_not_carried=5,
+        not_carried=(
+            "  One confound genuinely does have to be subtracted:",
+            "  reds on ANY line-count change in `src/stelling/obligation.py`, because",
+            "  `docs/supported-primitives.md` embeds source line numbers, and",
+            "  Note also what P2 shows: a PROSE revert of `obligation.py` reds the",
+            "  supported-primitives page and nothing else, which is what makes that",
+        ),
+        edit_note=(
+            "the entry's REVERT METHOD went stale underneath it, which is a "
+            "different thing from a stale figure: this block tells a later "
+            "experimenter what to control for, and the control it names has "
+            "stopped existing. As stamped, the entry declared one confound "
+            "that `git clone` could not eliminate by construction -- "
+            "`test_supported_primitives_doc.py::"
+            "test_committed_page_matches_live_registries` red on ANY "
+            "line-count change in `src/stelling/obligation.py`, because the "
+            "generated `docs/supported-primitives.md` embedded source line "
+            "numbers and regenerating it per revert would have made the "
+            "experiment circular -- and its P2 note added that a PROSE "
+            "revert of `obligation.py` red that page AND NOTHING ELSE, which "
+            "is what made the subtraction a line-count effect. Both were "
+            "true when the table was taken. 0.2.0 D15 (`c9083fa`, merged at "
+            "`abab576`) removed all 49 source-line coordinates from that "
+            "page -- 17 emitted by `gen_supported_primitives._site` and 32 "
+            "by `_q` -- so it cites a FILE and a SYMBOL and nothing on it "
+            "moves when a cited file's layout does. Driven at 0.2.0 D16 "
+            "rather than taken from D15's report: two comment lines inserted "
+            "below the imports of `obligation.py`, in a `git clone --shared` "
+            "of each tree with `__pycache__` purged, "
+            "`pytest tests/test_supported_primitives_doc.py -q -p "
+            "no:randomly` gives `1 failed, 1 passed` at `ac00a32` and "
+            "`2 passed` at `abab576`. So a repeat of this experiment has "
+            "nothing to subtract on that account and its raw column IS its "
+            "NET column. THE TABLE AND EVERY FIGURE IN IT ARE LEFT AS "
+            "MEASURED and the stamp is kept and dated; what is added is what "
+            "the tree reads now, which is the only part a later experimenter "
+            "would otherwise get wrong. The `## Log`'s 2026-08-15 B5 "
+            "follow-up entry carries the full note and the enumeration of "
+            "every sentence this change falsified. No behaviour change."
+        ),
     ),
     Block(
         id="SF-0.2.0-57",
@@ -886,15 +951,17 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(2596, 2962),
         src_lines=367,
         src_sha256="d3581e50075343e79b60c8f20f4337f69e6bbae7ee912c42ccce895f040d3ef9",
-        dest_sha256="8d606ece8b93fdb3bcbf34eeca671c258a7e005d4963981f38a35320780add9e",
-        src_lines_not_carried=4,
+        dest_sha256="cb51ed00b8643adb214fbcb31ce90552e7dc37edcbbeab4d2d265950e664edf8",
+        src_lines_not_carried=6,
         not_carried=(
             "  change and not only a type check. A hand-built document carrying",
             "  `[\"dtype\", null]` under a `float64` outvar aval was ACCEPTED at",
             "  `dff95fc` and on `main` at `198a2b5` (both hashing to `64a0ce8d\u2026`) and",
             "  is a `TranscriptionError` here. The refusal is right \u2014",
+            "  `docs/supported-primitives.md` cites line numbers in `obligation.py`,",
+            "  `propagate.py` and `coverage.py`, and the only row that touches one of",
         ),
-        edit_note="replaces an unreproducible hash literal with the property it was standing for, re-derived across the two trees; states the CELL and the `return` the recipe omitted; and says WHICH DOCUMENT, because the source called one document two -- `a hand-built document` in one sentence and `a traced ... persisted through JSON` in the next. It is the traced document, persisted. No behaviour change.",
+        edit_note="SECOND EDIT, 2026-08-23 (0.2.0 D16), and it is a different kind from the first: the block's ATTRIBUTION preamble said `No confound to subtract on any row: docs/supported-primitives.md cites line numbers in obligation.py, propagate.py and coverage.py, and the only row that touches one of those (R7) is line-count neutral. NET = raw.` The conclusion is unchanged and the table is left as measured; the REASON is not true of this tree. 0.2.0 D15 (`c9083fa`) removed all 49 source-line coordinates from that page, so `NET = raw` now holds for every row rather than because `R7` happened to be line-count neutral, and a repeat of this table could not acquire the confound even if a row DID move a line. Driven at 0.2.0 D16: two comment lines below the imports of `propagate.py` and `coverage.py` in a `git clone --shared` of each tree give `1 failed, 1 passed` at `ac00a32` and `2 passed` at `abab576`. The stamp is kept and dated beside the present reading. FIRST EDIT, unchanged: replaces an unreproducible hash literal with the property it was standing for, re-derived across the two trees; states the CELL and the `return` the recipe omitted; and says WHICH DOCUMENT, because the source called one document two -- `a hand-built document` in one sentence and `a traced ... persisted through JSON` in the next. It is the traced document, persisted. No behaviour change.",
     ),
     Block(
         id="SF-0.2.0-60",
@@ -1047,9 +1114,33 @@ _SOUNDNESS_FIXES: tuple[Block, ...] = (
         src_span=(3486, 3563),
         src_lines=78,
         src_sha256="1f72b74efc77be87f826c2ebd77affabb68405ad3c8f599cf80ad31c70ceb0e5",
-        dest_sha256="1f72b74efc77be87f826c2ebd77affabb68405ad3c8f599cf80ad31c70ceb0e5",
-        src_lines_not_carried=0,
-        edit_note="",
+        dest_sha256="4ad061e5fa7fa9bb17a78c3b2ef9fcc1f6182727c314e34691b81b2e05e8b484",
+        src_lines_not_carried=3,
+        not_carried=(
+            "  **F3a's one confound is the line-count one this table already names:**",
+            "  reds on ANY change to `src/stelling/obligation.py`'s line count, and",
+            "  file at constant length and do not red it, which is what makes the",
+        ),
+        edit_note=(
+            "the same stale confound as `SF-0.2.0-56`, in this block's "
+            "mutation table. As stamped, F3a's one confound was "
+            "`test_supported_primitives_doc.py::"
+            "test_committed_page_matches_live_registries`, which red on ANY "
+            "change to `src/stelling/obligation.py`'s line count, F3a being "
+            "the only row that changes it while F1b, F1c and F3b edit the "
+            "same file at constant length. That was true when the table was "
+            "taken. 0.2.0 D15 (`c9083fa`) removed all 49 source-line "
+            "coordinates from `docs/supported-primitives.md`, so that test "
+            "no longer reds on a line-count change at all and F3a's raw and "
+            "NET would now be equal. The row's figures are left as measured; "
+            "the present tense is corrected and what the tree reads now is "
+            "set beside the stamp. Driven at 0.2.0 D16: two comment lines "
+            "below the imports of `obligation.py` in a `git clone --shared` "
+            "of each tree give `1 failed, 1 passed` at `ac00a32` and "
+            "`2 passed` at `abab576`. The `## Log`'s 2026-08-15 B5 follow-up "
+            "entry carries the full note and the enumeration. No behaviour "
+            "change."
+        ),
     ),
 )
 
