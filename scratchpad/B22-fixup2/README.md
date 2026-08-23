@@ -26,7 +26,12 @@ and verify `stelling.__file__` resolves into that worktree first.
 `run <label> <files> <python-snippet> <pytest paths> [venv] [x64]`). It asserts
 the mutation APPLIED before believing any result and restores afterwards.
 `muts_pre.sh` is the battery as it stood BEFORE this round's repairs — twelve
-mutations, twelve green. `muts_post.sh` is the same battery afterwards.
+mutations, twelve green. `muts_post.sh` is the same battery afterwards, with
+the CHANGELOG counts, the dial-on figures and five CODE-SIDE controls added:
+**every one reddens except `N11c`**, which changes the same whole-suite figure
+in BOTH artefacts at once. That one is the declared limit — nothing in the
+tree can hold a whole-suite figure current, which is why the page names the
+command that produces it and a test holds only the two copies equal.
 
 The four-cell full-suite driver is `../B22-fixup/cells3.sh`, repaired in this
 round: as committed at `725edc3` its `WT=` pointed at a deleted worktree and it

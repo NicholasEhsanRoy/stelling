@@ -46,3 +46,34 @@ run "N15 page: control flipped (f8_e5m2 warns)" "$P" \
   't = t.replace("`.astype(jnp.float8_e5m2)` is **silent** and gives `inf`", "`.astype(jnp.float8_e5m2)` **warns** and gives `inf`")' "$PATHS"
 run "N16 page: bfloat16 construction doors declared loud" "$P" \
   't = t.replace("`jnp.array([1e300], jnp.bfloat16)` and `jnp.bfloat16(1e300)` are each `inf`\n  with nothing raised", "`jnp.array([1e300], jnp.bfloat16)` and `jnp.bfloat16(1e300)` each RAISE\n  a RuntimeWarning")' "$PATHS"
+
+# ---- the CHANGELOG's two counts, and the case-6 operand ---------------------
+run "N17 CHANGELOG: five warn eagerly -> four" "CHANGELOG.md" \
+  't = t.replace("**five warn eagerly with x64\n  off, three with x64 on**", "**four warn eagerly with x64\n  off, three with x64 on**")' "$PATHS"
+run "N18 CHANGELOG: five of the six -> all of them" "CHANGELOG.md" \
+  't = t.replace("**five of the six warn inside `jit`**", "**all of them warn inside `jit`**")' "$PATHS"
+
+# ---- the dial-on figures. ONE artefact reddens; BOTH together do not, which
+# ---- is the declared limit: nothing holds a whole-suite figure CURRENT.
+run "N11a page dial-on 4575 -> 9999 (page only)" "$P" \
+  't = t.replace("4575 passed, 10 skipped", "9999 passed, 10 skipped")' "$PATHS"
+run "N11b CHANGELOG dial-on 4575 -> 9999 (changelog only)" "CHANGELOG.md" \
+  't = t.replace("**4575 passed, 10\n  skipped**", "**9999 passed, 10\n  skipped**")' "$PATHS"
+run "N11c BOTH changed together -- STAYS GREEN, and that is the limit" "$P CHANGELOG.md" \
+  't = t.replace("4575 passed, 10\n  skipped", "9999 passed, 10\n  skipped").replace("4575 passed, 10 skipped", "9999 passed, 10 skipped")' "$PATHS"
+run "N11d page permitted 15 at 9 -> 15 at 7 (page only)" "$P" \
+  't = t.replace("region, at 9 site(s)\n4575", "region, at 7 site(s)\n4575")' "$PATHS"
+
+# ---- CODE-SIDE CONTROLS: make the claim false and the gate must notice ------
+run "C1 code: HOST_DOOR_SILENT gains float16 (partition false)" "$T" \
+  't = t.replace("HOST_DOOR_SILENT = (\n    \"bfloat16\",", "HOST_DOOR_SILENT = (\n    \"float16\",\n    \"bfloat16\",")' "$PATHS"
+run "C2 code: a construction door dropped from the drive" "$T" \
+  't = t.replace("    (\"jnp.<dt>(LIT)\", lambda dt, lit: dt(lit)),\n", "")' "$PATHS"
+run "C3 code: FLOAT_OVERFLOW_DEVICE_SILENT loses a case" "$T" \
+  't = t.replace("    (\"a ** 2 on float32 1e30\", lambda: _big_f32() ** 2, \"a ** 2\"),\n", "")' "$PATHS"
+run "C4 code: QUIET_FLOAT_FORMATS loses float8_e3m4" "$T" \
+  't = t.replace("    (\"float8_e3m4\",         15.5,        33, float(\"inf\"), False),\n", "")' "$PATHS"
+run "C5 code: case 6 operand built INSIDE the window" "$T" \
+  't = t.replace("lambda: jax.jit(lambda a: a.astype(jnp.float32))(_six_operand())", "lambda: jax.jit(lambda a: a.astype(jnp.float32))(jnp.asarray([1e300, 1e300]))")' "$PATHS"
+run "N5 report._suggestions door list" "src/stelling/_tripwire/report.py" \
+  't = t.replace("(jnp.array, jnp.asarray, jnp.int8) raise ", "(jnp.full, jnp.full_like, jnp.where) raise ")' "tests/test_tripwire_arm.py"
