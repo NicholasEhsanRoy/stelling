@@ -1621,11 +1621,17 @@ def test_the_host_half_is_the_TARGET_FORMAT_and_not_the_door():
         f"docs/overflow-tripwire.md no longer states the bfloat16 "
         f"construction-door result this test just drove. Expected:\n{doors}"
     )
-    # ...and the three spellings in that sentence are the three doors driven.
+    # ...and the spellings in that sentence are EXACTLY the doors driven, so
+    # a door leaving the drive cannot leave the sentence claiming it.
+    spelt = set()
     for label, _ in _HOST_CONSTRUCTION_DOORS:
         spelling = label.replace("LIT", "1e300").replace("dt", "jnp.bfloat16")
-        spelling = spelling.replace("jnp.<jnp.bfloat16>", "jnp.bfloat16")
-        assert f"`{spelling}`" in doors, (label, spelling, doors)
+        spelt.add(spelling.replace("jnp.<jnp.bfloat16>", "jnp.bfloat16"))
+    assert set(re.findall(r"`([^`]+)`", doors)) == spelt | {"inf"}, (
+        f"the page's bfloat16 sentence names "
+        f"{sorted(re.findall(r'`([^`]+)`', doors))} and this test drives "
+        f"{sorted(spelt)}"
+    )
 
     control_sentence = (
         f"`.astype(jnp.float16)` **{control['float16'][0].lower()}**; "
