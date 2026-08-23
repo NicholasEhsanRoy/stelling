@@ -1,0 +1,90 @@
+load average: 11.74 8.37 4.95
+
+row  reading                              both                 z3 alone             cvc5 alone          
+--------------------------------------------------------------------------------------------------------
+     PAGE ROW 1: both unsat, 78-112 ms | z3 unsat, 8-9 ms | cvc5 unsat, 71-84 ms
+  1  box [1,2]                            unsat, 88-90 ms      unsat, 7-8 ms        unsat, 81-85 ms     
+  1  box [0,1]                            unsat, 92-94 ms      unsat, 7-8 ms        unsat, 80-87 ms     
+  1  box [-10,10]                         unsat, 85-87 ms      unsat, 7-9 ms        unsat, 79-88 ms     
+  1  box [-1000,1000]                     unsat, 90-96 ms      unsat, 7-8 ms        unsat, 80-148 ms    
+  1  box [1,100]                          unsat, 88-90 ms      unsat, 7-7 ms        unsat, 76-77 ms     
+
+     PAGE ROW 2: both unsat, 86-91 ms | z3 unsat, 10-12 ms | cvc5 unsat, 77-87 ms
+  2  reduced, box [1,2]                   unsat, 93-96 ms      unsat, 8-9 ms        unsat, 85-94 ms     
+  2  reduced, box [-10,10]                unsat, 96-104 ms     unsat, 8-9 ms        unsat, 80-88 ms     
+  2  elementwise, box [1,2]               unsat, 91-93 ms      unsat, 9-9 ms        unsat, 82-86 ms     
+  2  elementwise, box [-10,10]            unsat, 89-93 ms      unsat, 10-11 ms      unsat, 82-85 ms     
+
+     PAGE ROW 3: both sat, 86-90 ms | z3 sat, 11-13 ms | cvc5 sat, 75-117 ms
+  3  false at one corner (>= 9)           sat, 89-94 ms        sat, 9-11 ms         sat, 78-87 ms       
+  3  false about half the time (>= 12)    sat, 90-108 ms       sat, 9-10 ms         sat, 81-82 ms       
+  3  false except at one corner (>= 16)   sat, 90-92 ms        sat, 9-12 ms         sat, 81-84 ms       
+
+     PAGE ROW 4: both unsat, 80-83 ms | z3 unsat, 9 ms | cvc5 unsat, 75-87 ms
+  4  box [0,1]^2                          unsat, 91-94 ms      unsat, 9-9 ms        unsat, 78-82 ms     
+  4  box [-1,1]^2                         unsat, 88-94 ms      unsat, 9-10 ms       unsat, 77-80 ms     
+  4  box [-2,2]^2                         unsat, 92-95 ms      unsat, 9-11 ms       unsat, 75-80 ms     
+  4  box [-10,10]^2                       unsat, 88-98 ms      unsat, 9-9 ms        unsat, 78-82 ms     
+  4  box [-100,100]^2                     unsat, 87-101 ms     unsat, 8-9 ms        unsat, 79-84 ms     
+  4  box [1,2]^2                          unsat, 85-95 ms      unsat, 8-10 ms       unsat, 79-82 ms     
+
+     PAGE ROW 5: both unsat, 92-106 ms | z3 unsat, 12-13 ms | cvc5 unsat, 81-83 ms
+  5  assoc A, box [-1,1]^2                unsat, 91-96 ms      unsat, 10-11 ms      unsat, 83-85 ms     
+  5  assoc A, box [-2,2]^2                unsat, 86-103 ms     unsat, 11-12 ms      unsat, 79-83 ms     
+  5  assoc A, box [-3,3]^2                unsat, 92-133 ms     unsat, 10-11 ms      unsat, 80-84 ms     
+  5  assoc A, box [-10,10]^2              unsat, 91-93 ms      unsat, 11-12 ms      unsat, 76-84 ms     
+  5  assoc A, box [-100,100]^2            unsat, 90-94 ms      unsat, 10-13 ms      unsat, 78-92 ms     
+  5  assoc B, box [-1,1]^2                unsat, 91-95 ms      unsat, 10-11 ms      unsat, 77-86 ms     
+  5  assoc B, box [-2,2]^2                unsat, 98-104 ms     unsat, 11-13 ms      unsat, 87-95 ms     
+  5  assoc B, box [-10,10]^2              unsat, 91-110 ms     unsat, 11-11 ms      unsat, 84-91 ms     
+  5  assoc B, box [-100,100]^2            unsat, 102-107 ms    unsat, 10-12 ms      unsat, 83-89 ms     
+  5  rearranged, box [-2,2]^2             unsat, 90-105 ms     unsat, 10-12 ms      unsat, 80-88 ms     
+  5  rearranged, box [-100,100]^2         unsat, 91-99 ms      unsat, 10-11 ms      unsat, 82-86 ms     
+
+     PAGE ROW 6: both sat, 87-88 ms | z3 sat, 11 ms | cvc5 sat, 69-71 ms
+  6  x^3, box [-2,2]                      sat, 87-97 ms        sat, 8-9 ms          sat, 77-89 ms       
+  6  x^3, box [-1,1]                      sat, 87-98 ms        sat, 8-9 ms          sat, 74-82 ms       
+  6  x^3, box [-100,100]                  sat, 88-92 ms        sat, 8-9 ms          sat, 73-74 ms       
+  6  x^3 - x, box [-2,2]                  sat, 85-86 ms        sat, 9-11 ms         sat, 75-79 ms       
+  6  x^3 + x^2 - 2x, box [-2,2]           sat, 85-94 ms        sat, 9-9 ms          sat, 80-82 ms       
+
+Every cell above is one machine's, at the load printed at the top.
+
+DOES THE FREEDOM REACH THE NUMBER?
+
+  `across readings` is min..max over every label-compatible reading
+  AND every repeat.  `worst one cell` is the widest min..max INSIDE
+  a single (reading, portfolio) cell -- one harness, one portfolio,
+  three repeats, nothing chosen differently between them.  If the
+  second is not smaller than the first, the choice is not what
+  moved the number.
+
+row  portfolio  across readings           A  worst 1 cell: B     A/B  outcome
+-----------------------------------------------------------------------------
+  1  both       85-96 ms              1.13x            1.07x   1.06x  unsat   [box [-1000,1000]]
+  1  z3         7-9 ms                1.29x            1.29x   1.00x  unsat   [box [-10,10]]
+  1  cvc5       76-148 ms             1.95x            1.85x   1.05x  unsat   [box [-1000,1000]]
+  2  both       89-104 ms             1.17x            1.08x   1.08x  unsat   [reduced, box [-10,10]]
+  2  z3         8-11 ms               1.38x            1.12x   1.22x  unsat   [reduced, box [1,2]]
+  2  cvc5       80-94 ms              1.18x            1.11x   1.06x  unsat   [reduced, box [1,2]]
+  3  both       89-108 ms             1.21x            1.20x   1.01x  sat   [false about half the time (>= 12)]
+  3  z3         9-12 ms               1.33x            1.33x   1.00x  sat   [false except at one corner (>= 16)]
+  3  cvc5       78-87 ms              1.12x            1.12x   1.00x  sat   [false at one corner (>= 9)]
+  4  both       85-101 ms             1.19x            1.16x   1.02x  unsat   [box [-100,100]^2]
+  4  z3         8-11 ms               1.38x            1.25x   1.10x  unsat   [box [1,2]^2]
+  4  cvc5       75-84 ms              1.12x            1.07x   1.05x  unsat   [box [-2,2]^2]
+  5  both       86-133 ms             1.55x            1.45x   1.07x  unsat   [assoc A, box [-3,3]^2]
+  5  z3         10-13 ms              1.30x            1.30x   1.00x  unsat   [assoc A, box [-100,100]^2]
+  5  cvc5       76-95 ms              1.25x            1.18x   1.06x  unsat   [assoc A, box [-100,100]^2]
+  6  both       85-98 ms              1.15x            1.13x   1.02x  sat   [x^3, box [-1,1]]
+  6  z3         8-11 ms               1.38x            1.22x   1.12x  sat   [x^3 - x, box [-2,2]]
+  6  cvc5       73-89 ms              1.22x            1.16x   1.05x  sat   [x^3, box [-2,2]]
+
+  A is the spread over EVERY reading and every repeat; B is the
+  widest spread inside ONE unchanged (reading, portfolio) cell.
+  A pools three to eighteen times as many samples as B, so A is
+  biased WIDER; A/B near 1 therefore says the reading contributed
+  nothing the clock did not.
+  A/B is exactly 1.00x in 4 of the 18 pairs, and never
+  exceeds 1.22x — worst at row 2 [z3], 8-11 ms,
+  where one millisecond of jitter is a 12% move.
