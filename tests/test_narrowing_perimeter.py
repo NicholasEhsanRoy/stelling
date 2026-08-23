@@ -207,23 +207,38 @@ FLOAT_OVERFLOW_X64_DEPENDENT = (
 #: produces: the overflow is COMPUTED, so there is no literal for any of the
 #: three instruments to read even in principle, and no host cast for numpy to
 #: warn about. Silent in all four cells under ``simplefilter("error")``.
+#: The third field is THE PAGE'S OWN WORDING for the case, because the page's
+#: list of these was rewritten to a different set of operations and nothing
+#: went red. It is compared against the page's bullet in both directions.
 FLOAT_OVERFLOW_DEVICE_SILENT = (
-    ("a * a on float32 1e30", lambda: _big_f32() * _big_f32()),
+    ("a * a on float32 1e30", lambda: _big_f32() * _big_f32(), "a * a"),
     # EAGER, and the same line under `jit` is in the WARNS group above: the
     # weak Python float canonicalises to float32 without overflowing, and the
     # narrowing to float16 is then XLA's. Tracing is what moves it onto the
     # host, and that is the whole distinction.
     ("x_f16 + 70000.0 (eager)",
-     lambda: jnp.zeros((2,), jnp.float16) + 70000.0),
-    ("a ** 2 on float32 1e30", lambda: _big_f32() ** 2),
-    ("jit(a * a) on float32 1e30", lambda: jax.jit(lambda a: a * a)(_big_f32())),
+     lambda: jnp.zeros((2,), jnp.float16) + 70000.0, "x_f16 + 70000.0"),
+    ("a ** 2 on float32 1e30", lambda: _big_f32() ** 2, "a ** 2"),
+    ("jit(a * a) on float32 1e30",
+     lambda: jax.jit(lambda a: a * a)(_big_f32()), None),
     ("jnp.exp(float32 1000.0)",
-     lambda: jnp.exp(jnp.asarray([1000.0], jnp.float32))),
+     lambda: jnp.exp(jnp.asarray([1000.0], jnp.float32)), "jnp.exp"),
     ("a.astype(jnp.float16) on float32 1e30",
-     lambda: _big_f32().astype(jnp.float16)),
+     lambda: _big_f32().astype(jnp.float16), "a.astype(jnp.float16)"),
     ("lax.convert_element_type(a, jnp.float16) on float32 1e30",
-     lambda: jax.lax.convert_element_type(_big_f32(), jnp.float16)),
+     lambda: jax.lax.convert_element_type(_big_f32(), jnp.float16),
+     "lax.convert_element_type(a, jnp.float16)"),
 )
+
+#: The backticked spans in the page's DEVICE bullet that are NOT one of the
+#: cases above: the dtypes and values they are written against, and the
+#: remedy the bullet says does not reach them. Declared so the comparison can
+#: be an EQUALITY -- a bullet that swapped every operation for a different one
+#: passed a membership check with room to spare.
+_DEVICE_BULLET_FURNITURE = frozenset({
+    "jax.Array", "warnings.simplefilter(\"error\")", "float32", "1e30",
+    "1000.0", "inf", "-W error::RuntimeWarning",
+})
 
 
 #: Ordinal suffixes, for the collection-rank sentence below.
@@ -1201,6 +1216,29 @@ def test_the_quiet_float_formats_are_enumerated_not_borrowed():
             f"rather than overflowing"
         )
 
+    # (5) THE ASYMMETRY, IN THE TWO SENTENCES THAT CARRY IT. This is the
+    # page's own counter-example to the claim it made for two rounds that a
+    # host cast warns -- seven silent host casts in the table above -- and it
+    # is the sentence a reader takes the `-W error::RuntimeWarning` advice
+    # from. Both spellings of it are rebuilt from the `warns_traced` column
+    # that was just driven; measured before this, turning "the one format"
+    # into "NO format" left the file green.
+    loud_traced = [row[0] for row in QUIET_FLOAT_FORMATS if row[4]]
+    assert len(loud_traced) == 1, loud_traced
+    only = loud_traced[0]
+    for sentence in (
+        f"traced, `{only}` is the one format where numpy's host cast warns",
+        f"traced, numpy's host cast warns, and `{only}` is the only "
+        f"format below where it does",
+    ):
+        assert sentence in flowed, (
+            f"docs/overflow-tripwire.md no longer says that {only} is the "
+            f"only one of these {n_quiet} formats whose host cast warns when "
+            f"traced, which is what the `warns_traced` column just measured "
+            f"and what makes the other {n_quiet - 1} rows worth a paragraph. "
+            f"Expected:\n  {sentence}"
+        )
+
 
 def test_a_float_VALUE_that_overflows_warns_on_the_HOST_and_is_silent_on_DEVICE():
     """The other half, and B22 had its silence axis INVERTED.
@@ -1279,7 +1317,7 @@ def test_a_float_VALUE_that_overflows_warns_on_the_HOST_and_is_silent_on_DEVICE(
         with perimeter.armed(("tracer", "array")) as status:
             assert status.armed, status.explanation
             before = (recorder.fires, _eager.TRUNCATIONS, perimeter.FINDINGS)
-            for label, build in FLOAT_OVERFLOW_DEVICE_SILENT:
+            for label, build, _ in FLOAT_OVERFLOW_DEVICE_SILENT:
                 jax.clear_caches()
                 with warnings.catch_warnings():
                     warnings.simplefilter("error")
@@ -1565,6 +1603,58 @@ def test_the_host_half_is_the_TARGET_FORMAT_and_not_the_door():
         "docs/overflow-tripwire.md no longer says `-W error::RuntimeWarning` "
         "misses the HOST narrowing into the ml_dtypes formats, which is the "
         "half this test just drove and the half a bfloat16 program lives in"
+    )
+
+    # ---- (7) AND THE THREE PROSE SENTENCES THAT RESTATE THE DRIVE.
+    #
+    # Each is rebuilt here from what was measured above, because a sentence
+    # that merely AGREES with a gate is not held by it: measured before this
+    # block existed, the page could say the three bfloat16 doors "each RAISE
+    # a RuntimeWarning", and the control's silent row could say "**warns**",
+    # with nothing going red.
+    doors = (
+        "`jnp.full((2,), 1e300, jnp.bfloat16)`, "
+        "`jnp.array([1e300], jnp.bfloat16)` and `jnp.bfloat16(1e300)` are "
+        "each `inf` with nothing raised"
+    )
+    assert doors in flowed, (
+        f"docs/overflow-tripwire.md no longer states the bfloat16 "
+        f"construction-door result this test just drove. Expected:\n{doors}"
+    )
+    # ...and the three spellings in that sentence are the three doors driven.
+    for label, _ in _HOST_CONSTRUCTION_DOORS:
+        spelling = label.replace("LIT", "1e300").replace("dt", "jnp.bfloat16")
+        spelling = spelling.replace("jnp.<jnp.bfloat16>", "jnp.bfloat16")
+        assert f"`{spelling}`" in doors, (label, spelling, doors)
+
+    control_sentence = (
+        f"`.astype(jnp.float16)` **{control['float16'][0].lower()}**; "
+        f"`.astype(jnp.float8_e5m2)` is **{control['float8_e5m2'][0]}** and "
+        f"gives `inf`; `.astype(jnp.float8_e4m3fn)` is "
+        f"**{control['float8_e4m3fn'][0]}** and gives `nan`."
+    )
+    assert control_sentence in flowed, (
+        f"docs/overflow-tripwire.md's control sentence is not what the "
+        f"control just did. Expected:\n{control_sentence}"
+    )
+
+    # ...and the DEVICE bullet's case list, as an EQUALITY over the code
+    # spans in it. A membership check passed a bullet in which every
+    # operation had been swapped for a different one.
+    marker = "* **What IS silent whatever the dtype"
+    assert marker in page, page[:200]
+    bullet = page.split(marker, 1)[1].split("\n* ", 1)[0]
+    spans = set(re.findall(r"`([^`\n]+)`", " ".join(bullet.split())))
+    declared = {
+        phrase for _, _, phrase in FLOAT_OVERFLOW_DEVICE_SILENT
+        if phrase is not None
+    }
+    assert spans == declared | set(_DEVICE_BULLET_FURNITURE), (
+        f"the page's DEVICE bullet names {sorted(spans)}; this file drives "
+        f"{sorted(declared)} and declares {sorted(_DEVICE_BULLET_FURNITURE)} "
+        f"as the dtypes and values they are written against. A case in one "
+        f"and not the other is how that bullet came to be rewritable into a "
+        f"different set of operations with nothing going red."
     )
 
 
