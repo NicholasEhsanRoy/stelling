@@ -20,10 +20,20 @@ below was taken against this tool.
 is the provenance of the ORIGINAL figures — the ten-row table below and the
 quoted declines. The 2026-08-22 driving reported further down carries its own,
 taken on a different day and naming the CPU and the load average, neither of
-which this paragraph ever did. All the original figures are from
-`stelling 0.2.0.dev0`,
-`jax 0.11.0`, CPU, `jax_enable_x64=True`, z3 `5.0.0` (wheel) and cvc5
-`1.3.4-modified` (wheel), Linux x86-64, Python 3.12,
+which this paragraph ever did. **The original figures were taken on
+2026-08-05, against the tree as it stood then, which stamped
+`stelling 0.1.0`** — a pre-release 0.1.0 tree, a week before the `v0.1.0`
+tag. This line read `stelling 0.1.0` when the page was written and was
+rewritten to `stelling 0.2.0.dev0` by `a4e4056` on 2026-08-17, one of five
+doc occurrences swapped with the constant and the only one of them that
+nothing re-derives: the other four sit beside blocks
+`tests/test_doc_examples.py` executes and compares byte for byte on every
+run, so their string moves with the tree, and this one is the record of a
+day. Nothing was re-measured, so from then until 2026-08-24 the line
+stamped these figures with a version string that did not exist when they
+were taken. The rest is unchanged and was
+correct: `jax 0.11.0`, CPU, `jax_enable_x64=True`, z3 `5.0.0` (wheel) and
+cvc5 `1.3.4-modified` (wheel), Linux x86-64, Python 3.12,
 `solver_timeout_ms=10000`, three repeats per cell. Single-backend
 configurations were produced by restricting the portfolio and by hiding a
 backend from `stelling._optional.available` — nothing was uninstalled, and

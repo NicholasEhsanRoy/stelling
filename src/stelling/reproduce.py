@@ -239,9 +239,9 @@ NOT_EXECUTED_EXIT = 3
 # the running version is 0.2.0, the schema is still `1-provisional`, and the
 # sentence had become a promise about a release that is in the past — which
 # reads to a consumer either as "this froze and nobody updated the string"
-# or as an abandoned plan, and neither is true. The condition below has not been met, so nothing about
-# the guarantee has changed; only the way it is stated, so that it cannot
-# expire again.
+# or as an abandoned plan, and neither is true. The condition below has not
+# been met, so nothing about the guarantee has changed; only the way it is
+# stated, so that it cannot expire again.
 #
 # The withdrawal is deliberate, and the reason is that the argument for
 # declaring it stable was never an argument for declaring it stable NOW. It

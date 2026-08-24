@@ -25,20 +25,28 @@ is itself a soundness event.
 
 Every verdict object stamps, at minimum:
 
-- stelling version. **A build stamps its own version and never a
-  neighbouring one**: a RELEASE build stamps the release (`0.1.0`,
-  `0.2.0`), and a DEVELOPMENT build stamps a PEP 440 `.dev` version
-  (`0.2.0.dev0` was the whole of the 0.2.0 development line), never the
-  release it precedes and never the release it follows. This matters
-  because the per-finding *"which versions are affected"* rows in the Log
-  below tell the released `v0.1.0`, a 0.2.0 development build and the
-  released `0.2.0` apart, and a reader answers those rows from this
-  stamp. A development build that stamped `0.1.0` misdirected in **both**
-  directions — claiming defects the tree had fixed, and disclaiming the
-  ones scoped to *"0.2.0 development builds only"*; a development build
-  that stamped `0.2.0` would have been the mirror error, indistinguishable
-  from the release, and it is why the string only became `0.2.0` at the
-  release commit. Nothing in the library compares this field, so it is
+- stelling version — **whatever `stelling.__version__` read in the tree
+  the build came from, which is not always enough to tell a release from
+  a development build.** This matters because the per-finding *"which
+  versions are affected"* rows in the Log below tell the released
+  `v0.1.0`, a 0.2.0 development build and the released `0.2.0` apart, and
+  a reader answers those rows from this stamp — so the one window where
+  the stamp cannot separate them is disclosed here rather than left to be
+  found. `v0.1.0` was tagged 2026-08-12 (`e67688e`); the string became
+  `0.2.0.dev0` on 2026-08-17 (`a4e4056`), and exactly one commit touched
+  `src/stelling/__init__.py` between the two — `a4e4056` itself. **So
+  every 0.2.0 development build made between those dates stamps `0.1.0`,
+  the release it follows**, and a `0.1.0`-stamped verdict from that window
+  is indistinguishable by this field from one the release produced. The
+  Log entries dated 2026-08-13 to 2026-08-16 are about builds inside it.
+  That misdirection is what `.dev0` was introduced to end, and it runs in
+  **both** directions — claiming defects the tree had fixed, and
+  disclaiming the ones scoped to *"0.2.0 development builds only"*; a
+  development build that stamped `0.2.0` would have been the mirror error,
+  indistinguishable from the release, which is why the string only became
+  `0.2.0` at the release commit. Where this field is ambiguous the rest of
+  the stamp is what decides — the jax version, the solver versions and
+  the recorded query. Nothing in the library compares this field, so it is
   provenance rather than a gate; that is exactly why it has to be readable
   by a person.
 - jax version used to trace the harness,
@@ -688,14 +696,23 @@ tag.
 MORE THAN ONE NOW.** All three were written while `0.2.0` was a
 development line and `v0.1.0` was the only release; `stelling.__version__`
 became `0.2.0` on 2026-08-24 and every build from that commit stamps the
-release rather than `0.2.0.dev0`. **No phrase changed meaning, and that
-was established row by row rather than assumed.** The development line is
-CLOSED, so *0.2.0 development builds only* now names a bounded set that
-stops at the bump — which makes it a positive claim that the `0.2.0`
-release does NOT carry the defect. Every entry carrying it was re-read
-against the release at the bump, and every one records a fix that landed
-before it; an entry whose defect survived the bump could not have used
-the phrase and would have needed a fourth, and none does.
+release rather than `0.2.0.dev0`. **No phrase changed meaning.** The
+development line is CLOSED, so *0.2.0 development builds only* now names
+a bounded set of builds that stops at the bump. It says what it said
+before — that the entry's own event began after the `v0.1.0` tag and was
+over before the release — and it says it about the ENTRY. Two clauses
+added here at the bump are withdrawn: *"which makes it a positive claim
+that the `0.2.0` release does NOT carry the defect"*, which is the reading
+the next paragraph exists to forbid, and *"every one records a fix"*,
+which is not what the definition above says — it names three kinds of
+event, and two entries carrying the phrase record the other two.
+
+**AND THE RE-READING SAID TO HAVE ESTABLISHED IT — *"row by row rather
+than assumed"* — MISSED SIX ROWS**, all dated after the tag and all
+carrying *0.1.0 pre-release builds only*, which says their event was over
+before it. Four are 0.2.0 development work and now say so; two reach
+`v0.1.0` and carry the reproduction at the tag. Corrected 2026-08-24;
+the accounting is at the end of this log.
 
 **IT SCOPES THE ENTRY, NOT EVERY HAZARD THE ENTRY DISCUSSES**, and the
 2026-08-09 integer-literal-wrap entry is the case that makes the
@@ -5738,13 +5755,18 @@ and a count over entries that happened to say something is not a count.
   qualifier in capitals since B16 — *"THAT FIGURE IS FOR `jit` ON AND THAT
   QUALIFIER IS LOAD-BEARING"* — and this entry did not.
 
-- **2026-08-14 (pre-release): the rational-`pow` row emitted about a
+- **2026-08-14 (0.2.0 development): the rational-`pow` row emitted about a
   DIFFERENT REAL FUNCTION than the program computes, and discharged it —
   `x ** 0.1` was enough.** Direction: **wrong VERIFIED → UNKNOWN**, plus
   **RAISE → Verdict** on the refutation side. Every affected VERIFIED was
   a claim about an expression the harness does not contain.
 
-  *Versions: 0.1.0 pre-release builds only.*
+  *Versions: 0.2.0 development builds only.*
+
+  This field read *0.1.0 pre-release builds only* until 2026-08-24 — a
+  phrase that says the entry's event was over before the 2026-08-12 tag,
+  two days before this entry's date. The body's own **"The row does not
+  exist in `v0.1.0`"** is the evidence, and it was already there.
 
   A non-integer `pow` exponent was rationalised —
   `Fraction(e).limit_denominator(128)` — and admitted whenever
@@ -6025,7 +6047,7 @@ and a count over entries that happened to say something is not a count.
   test can separate it; and `.is_integer()` versus `== int(...)` differs
   only at inf/nan, which the literal decoder refuses earlier.
 
-- **2026-08-14 (0.2.0 development, unreleased): FALSE VERIFIED — a
+- **2026-08-14 (0.2.0 development): FALSE VERIFIED — a
   forwarded relational `assume` was resolved by a bare integer, and a
   bare integer does not say which scope it is an id in.** An `assume`
   whose two sides both vary cannot be applied in the interval domain, so
@@ -6427,7 +6449,7 @@ and a count over entries that happened to say something is not a count.
   invariant, and `tests/test_assume_disclosure_claims.py` for the sentences
   this entry corrects.
 
-- **2026-08-14 (0.2.0 development, unreleased): VACUOUS VERIFIED — an
+- **2026-08-14 (0.2.0 development): VACUOUS VERIFIED — an
   unsatisfiable forwarded `assume` discharged every obligation, and the
   empty-precondition refusal could not see it.** An `assume` whose two
   sides both vary cannot be applied in the interval domain, so the
@@ -7045,12 +7067,18 @@ and a count over entries that happened to say something is not a count.
   branch so the two-environment claim above is a measurement rather than a
   prediction about a merge.
 
-- **2026-08-15 (pre-release): an IEEE divisor box that reaches zero was
-  divided as if the zero had a sign, and it flipped verdicts in ALL FOUR
-  FORMATS.** Audit 0.2.0 S10 (found by that audit's IEEE-formats lens as
-  § F2), fixed in `interval.ieee_div` and `interval.ieee_div_fmt`.
+- **2026-08-15 (0.2.0 development): an IEEE divisor box that reaches zero
+  was divided as if the zero had a sign, and it flipped verdicts in ALL
+  FOUR FORMATS.** Audit 0.2.0 S10 (found by that audit's IEEE-formats lens
+  as § F2), fixed in `interval.ieee_div` and `interval.ieee_div_fmt`.
 
-  *Versions: 0.1.0 pre-release builds only.*
+  *Versions: 0.2.0 development builds only.*
+
+  This field read *0.1.0 pre-release builds only* until 2026-08-24 — a
+  phrase that says the entry's event was over before the 2026-08-12 tag,
+  three days before this entry's date. The body's own **"IT IS A 0.2.0
+  REGRESSION"**, measured at both trees, is the evidence, and it was
+  already there.
 
   **The defect.** Both kernels special-cased a divisor interval touching
   zero at exactly one boundary. `b = [lo, 0]` with `lo < 0` was read —
@@ -7292,13 +7320,38 @@ and a count over entries that happened to say something is not a count.
   composition directly, not the traced pipeline; and it says nothing
   about the transfers this batch did not touch.
 
-- **2026-08-15 (pre-release, same batch): `mul` was the only arithmetic
+- **2026-08-15 (B5, same batch): `mul` was the only arithmetic
   transfer with no exact-rational path, and the missing ulp decided
-  verdicts.** Audit 0.2.0 M16. **Sound in both directions — no verdict
-  was ever wrong — and it is in this log because it MOVED verdicts**, in
-  the UNKNOWN → definite direction, on a shape the release advertises.
+  verdicts. THE MISSING PATH IS IN THE RELEASED `v0.1.0`.** Audit 0.2.0
+  M16. **Sound in both directions — no verdict was ever wrong — and it is
+  in this log because it MOVED verdicts**, in the UNKNOWN → definite
+  direction, on a shape the release advertises.
 
-  *Versions: 0.1.0 pre-release builds only.*
+  *Versions: `v0.1.0` and 0.2.0 development builds.*
+
+  **REPRODUCED AT THE TAG, and this entry was scoped *0.1.0 pre-release
+  builds only* until 2026-08-24** — a phrase that says the event was over
+  before the 2026-08-12 tag, three days before this entry's date.
+  `v0.1.0` extracted with `git archive` and run by `PYTHONPATH` (no
+  worktree, repo untouched), CPython 3.12.3, no jax and no solver:
+
+  ```
+                     v0.1.0                                    0.2.0
+  add([2,3],[2,3])   (4.0, 6.0)                                (4.0, 6.0)
+  mul([2,3],[2,3])   (3.9999999999999996, 9.000000000000002)   (4.0, 9.0)
+  mul([0,4],[0,4])   (-5e-324, 16.000000000000004)             (0.0, 16.0)
+  ```
+
+  The headline is exactly true of the release: at the tag `add` already
+  had the `_exactable`/`Fraction` route and `mul` did not, and the
+  exactly-zero corner bumped below zero there too. **What `v0.1.0` does
+  NOT carry is the verdict movement measured below.** `boundary_div` does
+  not exist at the tag — `hasattr(stelling.interval, "boundary_div")` is
+  `False` there — so a division consuming `Σxᵢ²` declined in `v0.1.0`
+  whether or not the sum floored at exactly zero. The release carries the
+  imprecision and never carried a wrong verdict from it, which is the
+  whole of what a box that only ever widens can and cannot cost: a
+  decision, never soundness.
 
   `add` routes through `_exactable` → `Fraction` and returns the exact
   endpoint when it is representable; `div` has the same branch; `mul`
@@ -7614,12 +7667,18 @@ and a count over entries that happened to say something is not a count.
   shape — a true local claim standing in for an unexamined global one — is
   the recurring failure this log exists to record.
 
-- **2026-08-15 (pre-release, B5 follow-up): a real-mode divisor box that
-  REACHES zero dropped the zero and minted a definite verdict.** Audit
-  0.2.0 B5-1. **FALSE VERIFIED, real mode**, made reachable by the M16 fix
-  above.
+- **2026-08-15 (0.2.0 development, B5 follow-up): a real-mode divisor box
+  that REACHES zero dropped the zero and minted a definite verdict.**
+  Audit 0.2.0 B5-1. **FALSE VERIFIED, real mode**, made reachable by the
+  M16 fix above.
 
-  *Versions: 0.1.0 pre-release builds only.*
+  *Versions: 0.2.0 development builds only.*
+
+  This field read *0.1.0 pre-release builds only* until 2026-08-24 — a
+  phrase that says the entry's event was over before the 2026-08-12 tag,
+  three days before this entry's date. `boundary_div` — the row the
+  defect is in — does not exist at `v0.1.0`, so the shape below is
+  unreachable there; the S10 entry above measured that at both trees.
 
   **The defect.** `div`'s zero-containing divisor had four shapes and
   three of them declined, every one citing the same fact — ℝ has no value
@@ -7921,12 +7980,17 @@ and a count over entries that happened to say something is not a count.
   `CHANGELOG.md` and requires every member to be named, so the next
   member added to the frozenset cannot quietly fall out of the prose.
 
-- **2026-08-15 (pre-release, B5 follow-up): the crash class removed from
-  `ieee_div` was still live in `boundary_div`, and surfaced as a decline
-  reason.** Audit 0.2.0 B5-3. Not a false verdict — a false SENTENCE, out
-  of a public entry point.
+- **2026-08-15 (0.2.0 development, B5 follow-up): the crash class removed
+  from `ieee_div` was still live in `boundary_div`, and surfaced as a
+  decline reason.** Audit 0.2.0 B5-3. Not a false verdict — a false
+  SENTENCE, out of a public entry point.
 
-  *Versions: 0.1.0 pre-release builds only.*
+  *Versions: 0.2.0 development builds only.*
+
+  This field read *0.1.0 pre-release builds only* until 2026-08-24 — a
+  phrase that says the entry's event was over before the 2026-08-12 tag,
+  three days before this entry's date. `boundary_div` does not exist at
+  `v0.1.0`, so neither does the sentence it emitted.
 
   The S10 entry above records: *"the boundary-aware branch also raised
   `IntervalError("NaN endpoint")` on `[-inf,-inf] / [-inf, 0]`; returning
@@ -8565,13 +8629,23 @@ and a count over entries that happened to say something is not a count.
   change still does. Driven at the 2026-08-15 B5 follow-up entry
   above.)**
 
-- **2026-08-15 (pre-release, B4 part 1): the format-parametric ieee mode
-  was still speaking binary64 in four places.** Audit 0.2.0 M12, M13, M14,
-  M15. Two of the four move verdicts; both move them in the
-  more-informative direction, and neither can mint a definite answer that
-  the old code contradicted.
+- **2026-08-15 (B4 part 1): the format-parametric ieee mode was still
+  speaking binary64 in four places, and ONE OF THE FOUR IS IN THE RELEASED
+  `v0.1.0`.** Audit 0.2.0 M12, M13, M14, M15. Two of the four move
+  verdicts; both move them in the more-informative direction, and neither
+  can mint a definite answer that the old code contradicted.
 
-  *Versions: 0.1.0 pre-release builds only.*
+  *Versions: `v0.1.0` and 0.2.0 development builds.*
+
+  **M12 is the one that reaches `v0.1.0`; M13, M14 and M15 do not, and
+  this entry was scoped *0.1.0 pre-release builds only* until
+  2026-08-24** — a phrase that says the event was over before the
+  2026-08-12 tag, three days before this entry's date. The reproduction
+  at the tag is in the M12 section below. M13, M14 and M15 are about the
+  format-parametric ieee mode, which arrived after the tag:
+  `hasattr(stelling.interval, "ieee_div_fmt")` is `False` at `v0.1.0`.
+  The field scopes the ENTRY, and the entry reaches `v0.1.0` because M12
+  does.
 
   **M12 — two of the four catalogued formats could not see a constant.**
   `propagate._STRUCT_FMT` had no `<f2` (float16) and no route for
@@ -8609,9 +8683,36 @@ and a count over entries that happened to say something is not a count.
   moves UNKNOWN to a definite status, and an UNKNOWN claims nothing. A
   recorded UNKNOWN whose notes contain *"literal outside the domain (no
   zero-dep decoder for array dtype '<f2'…)"* is one this fix may now
-  decide; re-`check()` it to find out. No released verdict is affected —
-  float16/bfloat16 support is a 0.2.0 feature, so `v0.1.0` cannot have
-  produced one, and `0.2.0` ships this fix.
+  decide; re-`check()` it to find out.
+
+  **`v0.1.0` PRODUCES THAT NOTE, AND THIS PARAGRAPH SAID IT COULD NOT.**
+  It read *"No released verdict is affected — float16/bfloat16 support is
+  a 0.2.0 feature, so `v0.1.0` cannot have produced one"* until
+  2026-08-24. Measured at the tag, `v0.1.0` extracted with `git archive`
+  and run by `PYTHONPATH` (no worktree, repo untouched), CPython 3.12.3 /
+  jax 0.11.0, the harness this entry's own table uses —
+  `x = any_array((), dtype, (1.0, 2.0)); y = x * 2.0 + 1.0;
+  assert_(y > 0.0)` through `check(vacuity_mode="inputs-only")`, no
+  solver:
+
+  ```
+    float16    UNKNOWN   literal outside the domain (no zero-dep decoder
+                         for array dtype '<f2'; add one before
+                         propagating this query); ⊤
+    bfloat16   UNKNOWN   … for array dtype '<V2' …
+    float32    VERIFIED
+    float64    VERIFIED
+  ```
+
+  Verbatim, including the dtype spelling. `v0.1.0:src/stelling/propagate.py`'s
+  `_STRUCT_FMT` has neither `<f2` nor a `<V2` route, and the note site is
+  the same one it is today — **the gap is IN the release and was closed
+  three days after the tag.** It is not an ieee gap and needs no ieee
+  door: `v0.1.0`'s `check()` has no `semantics` parameter at all and the
+  run above is real mode. What is NOT affected is any DEFINITE released
+  verdict, and that is the whole of what survives the correction: in
+  `v0.1.0` as here the failure was UNKNOWN, an UNKNOWN claims nothing, and
+  `0.2.0` ships the fix.
 
   **M13 — the comparison band was picked alphabetically.**
   `_ieee_cmp_get_min_normal` sorted the equation's float dtypes and took
@@ -12124,15 +12225,15 @@ in place and marked.*
   covers it.
 
 **Releases reached by an entry in this log.** `v0.1.0` is reached by
-**seven** ENTRIES of this log, and `0.2.0` by NONE — this said *"the only
-release"* until the 0.2.0 bump, and the digit did not move, because every
-entry that is not one of the seven records a defect fixed before the
-version string changed. The unit is stated
-because the three counts here are 7, 8 and 7, and this sentence has twice
+**nine** ENTRIES of this log, and `0.2.0` by NONE — this said *"the only
+release"* until the 0.2.0 bump, and it read **seven** until later the same
+day, when two entries dated after the tag were found scoped as though
+their event was over before it. The unit is stated
+because the three counts here are 9, 10 and 8, and this sentence has twice
 been corrected by putting one of them where another belongs. Every
 top-level bullet above carries exactly one `Versions:` field from a closed
-set of three, and these seven are the bullets whose field names `v0.1.0`;
-all seven are audit 0.2.0 findings and all were reproduced at the tag. The
+set of three, and these nine are the bullets whose field names `v0.1.0`;
+all nine are audit 0.2.0 findings and all were reproduced at the tag. The
 2026-08-15 `exp`/`pow` libm-bracket entry (S11) through
 `propagate(closed, semantics="ieee")`; the 2026-08-15 undescended-`assume`
 entry (S13), through the ordinary `check()` path in real mode; the
@@ -12140,10 +12241,26 @@ entry (S13), through the ordinary `check()` path in real mode; the
 2026-08-15 B6 emission-versus-propagation shape entry (S12&prime;), also
 through `from_dict`; the 2026-08-16 B11 mispaired-`Propagation` entry
 (UNSOUND-3), through `make_verdict` / `make_solver_verdict` called
-directly; and the two 2026-08-18 B12 entries (S15, S16), both through
+directly; the two 2026-08-18 B12 entries (S15, S16), both through
 `from_dict` and both re-measured on a `git clone --shared` tree at the tag
-on the day they were written. UNSOUND-3 is the only one of the seven that
-needs neither `semantics="ieee"`, nor a serialized query, nor an `assume`.
+on the day they were written; and the two added on 2026-08-24 — the
+2026-08-15 B4-part-1 narrow-format entry (M12), through the ordinary
+`check()` path in real mode, and the 2026-08-15 M16 exact-`mul` entry, at
+the interval kernel with no jax and no solver at all.
+
+**TWO OF THE NINE ARE PRECISION AND NOT SOUNDNESS, AND THE COUNT DOES NOT
+SAY OTHERWISE.** M12 and M16 reach `v0.1.0` in the sense these fields use
+— the release carries the defect — and neither ever produced a wrong
+verdict there: M12's failure is an UNKNOWN, M16's is a box that is wider
+than it needs to be. The other seven are false VERIFIEDs or false
+REFUTEDs. Which of the two any entry is, is in that entry.
+
+**UNSOUND-3 WAS THE ONLY ONE OF THE SEVEN THAT NEEDED NEITHER
+`semantics="ieee"`, NOR A SERIALIZED QUERY, NOR AN `assume`, AND IT IS NO
+LONGER ALONE.** M12 needs none of the three — the reproduction at the tag
+in its entry is an ordinary `check()` in real mode — and neither does
+M16. What UNSOUND-3 is still alone in among the nine is being a false
+VERDICT reachable that way.
 
 **S12&prime; IS THE ONE THIS SENTENCE LEFT OUT, AND IT IS THE BROADER OF
 THE PAIR.** S12 is an equation the interval transfer refuses outright;
@@ -12159,22 +12276,29 @@ of this paragraph, and none of them noticed it. That is why the digit is
 no longer written: `tests/test_soundness_log_reach.py` counts the fields
 and holds the numerals above and below to what it counts.
 
-**THE THREE UNITS, AND WHY EACH IS STATED.** Seven ENTRIES of this log
-reach `v0.1.0` — the list above. **Eight** audit findings reach it: S11,
-S12, S12&prime;, S13, S14, S15, S16, UNSOUND-3 — one more than the
-entries, because S14 has a routed detail section (`SF-0.2.0-59`) and its
-own reach declaration but no `## Log` bullet of its own. And **seven**
-one-liners in `CHANGELOG.md` carry the `v0.1.0` version field — one fewer
-than the findings, because S15 and S16 share `SF-0.2.0-14`. Three
+**THE THREE UNITS, AND WHY EACH IS STATED.** Nine ENTRIES of this log
+reach `v0.1.0` — the list above. **Ten** audit findings reach it: M12,
+M16, S11, S12, S12&prime;, S13, S14, S15, S16, UNSOUND-3 — one more than
+the entries, because S14 has a routed detail section (`SF-0.2.0-59`) and
+its own reach declaration but no `## Log` bullet of its own. And **eight**
+one-liners in `CHANGELOG.md` carry the `v0.1.0` version field — two fewer
+than the findings, because S15 and S16 share `SF-0.2.0-14`, and because
+M12 has no soundness-fix one-liner at all: it is a bullet of the
+*Float32 / float16 / bfloat16 IEEE mode* section, which carries no
+`Versions:` field. Three
 different questions, three different answers, and a reader who takes any
 one of them for another is reading a number this page did not state.
 
-**AT LEAST THREE OF THE SEVEN NEED NO SOLVER AT ALL — UNSOUND-3, S15 AND
-S16 — and this sentence claimed UNSOUND-3 was the only one.** It was true
-of the four entries `main` had; it is not true of the seven this log now
-carries. Corrected by MEASUREMENT at the tag rather than by reasoning from
-the entries — and stated as "at least three" because what was measured is
-that S15 and S16 join UNSOUND-3, not that the remaining three do not.
+**AT LEAST FIVE OF THE NINE NEED NO SOLVER AT ALL — UNSOUND-3, S15, S16,
+M12 and M16 — and this sentence claimed UNSOUND-3 was the only one.** It
+was true of the four entries `main` had; it is not true of the nine this
+log now carries. Corrected by MEASUREMENT at the tag rather than by
+reasoning from the entries: S15 and S16 joined UNSOUND-3 on 2026-08-21,
+and M12 and M16 arrived among the nine on 2026-08-24 already carrying
+solverless reproductions at the tag in their own entries — M12 an
+ordinary `check()` with no `solver_timeout_ms`, M16 at the interval
+kernel with no jax either. Stated as "at least five" because what was
+measured is those four joining, not that the remaining four do not.
 S11, S13, S12 and S12&prime; are not re-measured here and this sentence
 claims nothing about them.
 
@@ -12195,12 +12319,24 @@ says now. It read *"Every other entry that is a FIX is 0.2.0 development
 only, and no release has yet shipped any fix in this log"* until
 2026-08-24, when `stelling.__version__` became `0.2.0`. The bump falsified
 the second half outright — and the first half was ALREADY wrong, about the
-39 bullets scoped *0.1.0 pre-release builds only*: that phrase means the
+bullets scoped *0.1.0 pre-release builds only*: that phrase means the
 entry's event was over before the `v0.1.0` tag, so those fixes are IN
-`v0.1.0`, and they are not 0.2.0 development work. What the clause was
-reaching for is what the count above actually needs, and it is about
-DEFECTS rather than fixes: no release carries a defect this log records
-except the seven `v0.1.0` carries. The 2026-08-18
+`v0.1.0`, and they are not 0.2.0 development work. **Thirty-three bullets
+carry that phrase, and it was 39 until 2026-08-24**, when six bullets
+dated after the tag were found carrying it; the inference was false about
+those six, and it is true of every bullet that carries the phrase now.
+What the clause was reaching for is what the count above actually needs,
+and it is about DEFECTS rather than fixes — but it is narrower than *"no
+release carries a defect this log records except the ones `v0.1.0`
+carries"*, which is what it said for one day and which this page refutes
+two paragraphs into its own preamble. The nine above are the entries
+whose OWN EVENT a release is inside. A hazard an entry only discusses is
+not counted and cannot be: the 2026-08-09 integer-literal-wrap entry
+scopes the DISCLOSURE gap it closed, which was over before the tag, while
+the wrap itself is open in `v0.1.0`, in `0.2.0` and in this tree — so the
+`0.2.0` release does carry a defect this log records, and no `Versions:`
+field says so, because a field scopes the entry and not every hazard the
+entry discusses. The 2026-08-18
 query-identity entry is not counted in either number, and the reason is
 NOT the one this clause used to give. It said the entry records "no
 verdict moving and nothing in stelling to change"; the entry now carries
@@ -12228,16 +12364,29 @@ in place, but two claims that were each true where they were written. The
 merge re-derived the list rather than taking either side's digit, and the
 no-solver clause above is what re-deriving it turned up.
 
-**AND IT IS SEVEN NOW, WHICH IS THE SIXTH VALUE THIS DIGIT HAS HELD.**
-*(no releases yet)*, S11 alone, three, four-and-five together, six, seven.
-Every one of those corrections was made by a person re-reading the log,
-and not one of them noticed that S12&prime; had been declaring
+**AND IT IS NINE NOW, WHICH IS THE SEVENTH VALUE THIS DIGIT HAS HELD.**
+*(no releases yet)*, S11 alone, three, four-and-five together, six,
+seven, nine.
+Every one of the first five corrections was made by a person re-reading
+the log, and not one of them noticed that S12&prime; had been declaring
 `PRESENT IN THE RELEASED 0.1.0` since `96ab47a` — the omission was live
 through all five. A digit that has been wrong five times and re-read by
 hand five times is not a digit to correct a sixth time; it is one to stop
 writing. It is derived now, from the `Versions:` fields on the bullets
 themselves, and the fields are a closed set of three so that a new entry
 cannot decline to answer the question.
+
+**THE SEVENTH MOVE WAS NOT THE DIGIT'S, AND THAT IS THE LIMIT OF
+DERIVING IT.** Nothing re-read the digit on 2026-08-24; two FIELDS moved
+under it and the derivation followed, which is what a derivation is for.
+But `tests/test_soundness_log_reach.py` checks that every bullet answers
+the reach question and that the numerals match the answers — it cannot
+check that an answer is TRUE. Six bullets dated after the `v0.1.0` tag
+had been answering *0.1.0 pre-release builds only*, which says the
+opposite, from the day the fields were introduced; three of the six said
+so in their own bodies, one of them — at `1242da4` — 65 lines below the
+field it contradicted. A derived count is exactly as good as the fields it is
+derived from, and this is the failure mode that remains.
 
 ## 0.2.0 soundness-fix detail (routed from `CHANGELOG.md`)
 

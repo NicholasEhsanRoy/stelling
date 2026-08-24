@@ -3,10 +3,12 @@
 
 """How many entries of `SOUNDNESS.md`'s `## Log` reach a RELEASE — counted.
 
-**THE DIGIT HAS HELD SIX VALUES.** *"(no releases yet)"*, then S11 alone,
-then three, then four and five at the same moment on two branches, then
-six, and now seven. Each correction was made by a person re-reading the
-log. Not one of the five noticed that the 2026-08-15 B6 entry for audit
+**THE DIGIT HAS HELD SEVEN VALUES.** *"(no releases yet)"*, then S11
+alone, then three, then four and five at the same moment on two branches,
+then six, then seven, and now nine. The first six were corrections made by
+a person re-reading the log; the seventh was not — two `Versions:` fields
+moved and the derived count followed them, which is the paragraph after
+next. Not one of the five noticed that the 2026-08-15 B6 entry for audit
 finding **S12&prime;** had carried the headline `PRESENT IN THE RELEASED
 0.1.0` since `96ab47a` — the commit that added the entry, and left the
 digit at three. The omission was live through every correction, and
@@ -31,20 +33,29 @@ the headline. Nothing countable, so nothing counted.
 Every top-level `## Log` bullet now carries exactly ONE `Versions:` field,
 drawn from a closed set of THREE phrases. Three and not two, because the
 two the changelog uses cannot express a defect that was fixed before
-`v0.1.0` was tagged, which is what 39 of these bullets are about.
+`v0.1.0` was tagged, which is what 33 of these bullets are about.
 
-**THE THREE UNITS, WHICH ARE 7, 8 AND 7.** They are different questions
+**AND A FIELD THIS FILE ACCEPTS CAN STILL BE FALSE.** Every check here is
+over what the bullets DECLARE. Six bullets dated after the 2026-08-12 tag
+declared *0.1.0 pre-release builds only* — which says their event was over
+before it — from the day the fields were introduced until 2026-08-24, and
+this file was green throughout, because a closed set holds the vocabulary
+and not the truth. Four of the six were 0.2.0 development work and two
+reach `v0.1.0`; that correction is what moved the entries count from seven
+to nine.
+
+**THE THREE UNITS, WHICH ARE 9, 10 AND 8.** They are different questions
 and this file keeps them apart, because the count was wrong twice by
 answering one of them with another's answer:
 
 * **entries** — top-level `## Log` bullets whose `Versions:` field names
-  `v0.1.0`. Seven.
-* **findings** — audit 0.2.0 findings reaching `v0.1.0`. Eight: one more
+  `v0.1.0`. Nine.
+* **findings** — audit 0.2.0 findings reaching `v0.1.0`. Ten: one more
   than the entries, because S14 has a routed detail section
   (`SF-0.2.0-59`) and its own reach declaration but no `## Log` bullet.
 * **one-liners** — `CHANGELOG.md` entries carrying the `v0.1.0` version
-  field. Seven: one fewer than the findings, because S15 and S16 share
-  `SF-0.2.0-14`.
+  field. Eight: two fewer than the findings, because S15 and S16 share
+  `SF-0.2.0-14` and M12 has no soundness-fix one-liner at all.
 
 Each numeral in the paragraph is compared against the thing it counts,
 and the findings numeral against the list written beside it in that same
@@ -113,10 +124,14 @@ def _numeral(word: str) -> int | None:
 #: **THE NUMBER IS PINNED BY THE DOCUMENT AND NOT BY THIS COMMENT**, in
 #: `test_an_ENTRY_CANNOT_BE_HIDDEN_IN_THE_LOGS_PREAMBLE` — every other leg
 #: down there derives its plant FROM this constant, so until 2026-08-22 the
-#: constant checked itself and `60 -> 6000` was green. Today's preamble is 21
-#: non-blank lines, not the 20 this comment claimed, and the median `## Log`
-#: entry is 135 — so the 39 lines of headroom admit an explanation and refuse
-#: an entry, which is the argument, measured, at both ends.
+#: constant checked itself and `60 -> 6000` was green. Today's preamble is 42
+#: non-blank lines and the median `## Log` entry is 146 — so the 18 lines of
+#: headroom admit an explanation and refuse a typical entry, which is the
+#: argument, measured, at both ends. **The test below re-derives all three
+#: and asserts the relations between them**, so the digits typed here are
+#: illustration and not the check — which is what they have to be: the
+#: preamble was 21 lines and the median 135 when this comment was last
+#: written by hand, and both moved under it twice in three days.
 _PREAMBLE_MAX_LINES = 60
 
 #: A list item at column 0. `- ` is an entry; `* ` and `+ ` are the other two
@@ -519,8 +534,8 @@ def test_each_permitted_field_is_actually_used(field):
 
     A closed set with a member nothing ever uses is an option that has
     never been exercised, and this campaign has closed that shape often
-    enough to check for it. All three are in use: 39 bullets pre-release
-    only, 8 in 0.2.0 development only, 7 reaching `v0.1.0`. (Named rather
+    enough to check for it. All three are in use: 33 bullets pre-release
+    only, 12 in 0.2.0 development only, 9 reaching `v0.1.0`. (Named rather
     than called "the release": `0.2.0` is a release too now, and no bullet
     reaches it.)
     """

@@ -898,7 +898,7 @@ check.falsify = None
 | `solver` | `None` (the full portfolio), `"z3"` or `"cvc5"` to restrict it; anything else raises `ValueError` at the call. See [Choosing a solver backend](choosing-a-solver-backend.md) |
 | `strict` | `False` (default) returns `DECLINED` for a query that cannot be transcribed; `True` re-raises instead |
 | `libm_budget` | a declared accuracy profile for `exp`/`pow` under `semantics="ieee"`, which decline without one. Passing it under `"real"` raises — see [Checking preconditions](preconditions.md) |
-| `falsify` | the falsification pass; see [Reading a verdict](reading-a-verdict.md) |
+| `falsify` | `None` (default) — nothing changes and `stelling.falsify` is never imported; `"sample"` runs the falsification probe after a VERIFIED, executing the real program at concrete points inside the declared set. **Shipped since 0.2.0, DEFAULT-OFF and UNAUDITED**: it is here to be measured, not to be relied on, and it may be changed or withdrawn in any release without a deprecation cycle. |
 
 **`strict` decides whether an unreadable query is a status or an
 exception.** By default a query stelling cannot transcribe comes back as

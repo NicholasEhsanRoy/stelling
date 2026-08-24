@@ -100,8 +100,10 @@ RELEASE_FILES: tuple[str, ...] = ("CHANGELOG.md", "SOUNDNESS.md")
 #: one thing.
 #:
 #: THREE PHRASES AND NOT TWO. The Log has to be able to say that a defect
-#: reached the 0.1.0 pre-release builds and no release — 39 of its 54
-#: bullets are that — and neither of the two the changelog uses can say it.
+#: reached the 0.1.0 pre-release builds and no release — 33 of its 54
+#: bullets are that, and it was 39 until six bullets dated after the
+#: `v0.1.0` tag were re-scoped on 2026-08-24 — and neither of the two the
+#: changelog uses can say it.
 #: `test_soundness_log_reach.py` derives the reached-release count from
 #: these fields, and a count derived from a vocabulary that cannot express
 #: a third of its entries is a count over the entries that happened to fit.

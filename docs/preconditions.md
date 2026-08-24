@@ -292,6 +292,16 @@ requires/ensures `Contract` whose boundary is proved in the docstring —
 through `contracts.check_contract`, which takes the same `vacuity_mode`,
 `solver_timeout_ms`, `refine` and `falsify` as `check` does.
 
+**`falsify` is not an ordinary parameter, and it is listed beside them
+here because the signature prints it there.** It is **shipped since 0.2.0,
+DEFAULT-OFF and UNAUDITED** — with the default `None` nothing changes and
+`stelling.falsify` is never imported; with `"sample"` a VERIFIED is
+attacked by executing the real program at concrete points inside the
+declared set. No audit has been run against it and it may be changed or
+withdrawn in any release without a deprecation cycle, so it is here to be
+measured rather than to be built on. Its docstring in
+`stelling.preconditions.check` says the same.
+
 **One difference worth knowing before you reach for it:** `check_contract`
 does **not** take `solver=`, so the portfolio cannot be restricted from the
 contracts layer. See

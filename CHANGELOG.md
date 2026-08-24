@@ -969,7 +969,9 @@ reaches NEITHER: it arrived after the `v0.1.0` tag and was fixed before
 `stelling.__version__` became `0.2.0`. An entry marked *`v0.1.0` and 0.2.0
 development builds* reaches `v0.1.0`, was reproduced at the tag, and
 `SOUNDNESS.md` carries its retroactive-invalidation scope and what to
-re-run.
+re-run — which for `SF-0.2.0-46` is *nothing to re-run*: it reaches
+`v0.1.0` as a precision loss that never produced a wrong verdict there,
+and reaching a release is about the defect, not about how bad it was.
 
 *The IDs are positional.* They were minted once, at 0.2.0, in the order
 the entries stood in this file at `8f0adf2`; they are stable labels and
@@ -1166,8 +1168,8 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
   [Detail](SOUNDNESS.md#sf-020-45)
 
 - **SF-0.2.0-46** — `mul` is exact when its corner products are
-  representable (audit 0.2.0 M16). Versions: 0.2.0 development builds only.
-  [Detail](SOUNDNESS.md#sf-020-46)
+  representable (audit 0.2.0 M16). Versions: `v0.1.0` and 0.2.0
+  development builds. [Detail](SOUNDNESS.md#sf-020-46)
 
 - **SF-0.2.0-47** — A relational `assume` over two variable operands is
   forwarded to the solver as a positive axiom instead of being dropped by the
@@ -1411,8 +1413,11 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
   S7 closed it in `1dc1b52` five and a half hours later the same day, and
   the bullet did not move* — see the SOUNDNESS.md entry of 2026-08-14 and
   `tests/test_vacuous_precondition.py`.
-- *WITHDRAWN, and kept rather than deleted because it shipped as a
-  limitation and stopped being one.* This bullet said that an obligation
+- *WITHDRAWN, and kept rather than deleted because it stood here as a
+  limitation and stopped being one. **No release ever carried it**: it
+  existed between 2026-08-14 and 2026-08-15, after the `v0.1.0` tag and
+  nine days before `0.2.0`, and this line said "shipped" for one day.*
+  This bullet said that an obligation
   discharged with a forwarded relational axiom **cannot narrow the
   VERIFIED bar**, because the bar's re-derivation re-sliced without the
   query's relational assumes and so re-emitted the recorded script minus
