@@ -226,7 +226,7 @@ EXECUTION_RESULTS = (CONFIRMED, DIVERGED, UNREACHABLE)
 RESULT_EXIT = 0
 NOT_EXECUTED_EXIT = 3
 
-# ── the sidecar schema, PROVISIONAL for 0.1.0 ────────────────────────────────
+# ── the sidecar schema, PROVISIONAL — on a CONDITION, not a version ──────────
 #
 # **The schema is PROVISIONAL / UNSTABLE.** Fields may be added, removed or
 # renamed in any release without a deprecation cycle. It FREEZES ON A
@@ -235,11 +235,11 @@ NOT_EXECUTED_EXIT = 3
 #
 # THE CONDITION IS THE COMMITMENT, AND NAMING A RELEASE INSTEAD BROKE IT.
 # This said "may be added, removed or renamed in 0.1.1 ... planned to FREEZE
-# in 0.1.1". 0.1.1 came and went; the running version is 0.2.0.dev0, the
-# schema is still `1-provisional`, and the sentence had become a promise
-# about a release that is in the past — which reads to a consumer either as
-# "this froze and nobody updated the string" or as an abandoned plan, and
-# neither is true. The condition below has not been met, so nothing about
+# in 0.1.1". 0.1.1 came and went, and a second release arrived without it;
+# the running version is 0.2.0, the schema is still `1-provisional`, and the
+# sentence had become a promise about a release that is in the past — which
+# reads to a consumer either as "this froze and nobody updated the string"
+# or as an abandoned plan, and neither is true. The condition below has not been met, so nothing about
 # the guarantee has changed; only the way it is stated, so that it cannot
 # expire again.
 #

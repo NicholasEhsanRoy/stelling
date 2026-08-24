@@ -394,8 +394,9 @@ tool for numbers; what is written down here is what the driving SETTLED, which
 is not a number.
 
 **Provenance for every figure quoted in this section.** Run of **2026-08-22**
-in this tree at `stelling 0.2.0.dev0`, `jax 0.11.0`, `jax_enable_x64=True`, z3
-`5.0.0` (wheel), cvc5 `1.3.4` (wheel), CPU, Python 3.12, Linux x86-64, a
+in this tree as it stood then, at `stelling 0.2.0.dev0`, `jax 0.11.0`,
+`jax_enable_x64=True`, z3 `5.0.0` (wheel), cvc5 `1.3.4` (wheel), CPU,
+Python 3.12, Linux x86-64, a
 12th-gen i7-12850HX, **load average 4.0**, `solver_timeout_ms=10000`, three
 repeats per cell — the page's own budget and repeat count. A second full run
 immediately before it, at **load 5.7**, gave every answer and every direction

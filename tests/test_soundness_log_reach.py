@@ -30,8 +30,8 @@ the headline. Nothing countable, so nothing counted.
 
 Every top-level `## Log` bullet now carries exactly ONE `Versions:` field,
 drawn from a closed set of THREE phrases. Three and not two, because the
-two the changelog uses cannot express a defect that was fixed before the
-only release was tagged, which is what 39 of these bullets are about.
+two the changelog uses cannot express a defect that was fixed before
+`v0.1.0` was tagged, which is what 39 of these bullets are about.
 
 **THE THREE UNITS, WHICH ARE 7, 8 AND 7.** They are different questions
 and this file keeps them apart, because the count was wrong twice by
@@ -520,7 +520,9 @@ def test_each_permitted_field_is_actually_used(field):
     A closed set with a member nothing ever uses is an option that has
     never been exercised, and this campaign has closed that shape often
     enough to check for it. All three are in use: 39 bullets pre-release
-    only, 8 in 0.2.0 development only, 7 reaching the release.
+    only, 8 in 0.2.0 development only, 7 reaching `v0.1.0`. (Named rather
+    than called "the release": `0.2.0` is a release too now, and no bullet
+    reaches it.)
     """
     used = [line for line, text in log_bullets() if field in text]
     assert used, (

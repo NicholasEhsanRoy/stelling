@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Changelog
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-08-24
 
 ### New transfers and precision improvements
 
@@ -147,8 +147,10 @@ corrected — and the eleven source lines it did not carry are quoted in
 pre-routing file. The check is a partition in both directions, so an entry
 cannot be brought into compliance by deleting it.
 
-*Versions.* `v0.1.0` is the only release, and nothing in this section
-reaches it: Mode 2 is 0.2.0 development work throughout.
+*Versions.* Nothing in this section reaches a release. Mode 2 is 0.2.0
+development work throughout, so `v0.1.0` predates all of it and every M2
+finding below was fixed before `stelling.__version__` became `0.2.0`.
+(This read *"`v0.1.0` is the only release"* while that was so.)
 
 - **M2-0.2.0-01** — An out-of-range integer constant narrowed at array
   construction RAISES at the line that wrote it, under the opt-in
@@ -184,8 +186,10 @@ inline here rather than routed to `SOUNDNESS.md`: routing is for text that
 LEFT this file and is pinned by the sha256 of what it left as
 (`tests/_soundness_routing_manifest.py`), and none of this was ever here.
 
-*Versions.* `v0.1.0` is the only release and nothing here reaches it: Mode 3
-is 0.2.0 development work throughout.
+*Versions.* Nothing here reaches a release. Mode 3 is 0.2.0 development work
+throughout, so `v0.1.0` predates all of it and every finding here was fixed
+before `stelling.__version__` became `0.2.0`. (This read *"`v0.1.0` is the
+only release"* while that was so.)
 
 - **The defect it closes.** `x <= 2**31 - 1` on a `float32` array is a
   program about `2147483648.0` — the literal has no `float32` and jax
@@ -639,7 +643,11 @@ is 0.2.0 development work throughout.
 ### Verification pipeline
 
 - **`check(..., falsify="sample")` — the falsification probe, DEFAULT-OFF
-  and UNRELEASED.** A new keyword on `stelling.preconditions.check`,
+  and UNAUDITED.** It SHIPS in 0.2.0 — this entry read *"and UNRELEASED"*
+  while 0.2.0 was a development line, and the version bump is what made
+  that false. Nothing about the keyword changed: it is off by default, no
+  audit has been run against it, and it is not a surface to build on. A new
+  keyword on `stelling.preconditions.check`,
   `stelling.contracts.check_contract` and
   `stelling.inductive.check_inductive_step`. With the default `None`
   nothing changes: `stelling.falsify` is never imported and the verdict
@@ -955,10 +963,13 @@ is a partition in both directions: an ID missing from either file, an ID
 in one and not the other, and a detail section nothing links to are each
 a failure, so **an entry cannot be made to comply by deleting it.**
 
-*Versions.* `v0.1.0` is the only release. An entry marked *0.2.0
-development builds only* does not reach it. An entry marked *`v0.1.0` and
-0.2.0 development builds* was reproduced at the tag, and `SOUNDNESS.md`
-carries its retroactive-invalidation scope and what to re-run.
+*Versions.* `v0.1.0` was the only release when these IDs were minted and
+`0.2.0` is the second. An entry marked *0.2.0 development builds only*
+reaches NEITHER: it arrived after the `v0.1.0` tag and was fixed before
+`stelling.__version__` became `0.2.0`. An entry marked *`v0.1.0` and 0.2.0
+development builds* reaches `v0.1.0`, was reproduced at the tag, and
+`SOUNDNESS.md` carries its retroactive-invalidation scope and what to
+re-run.
 
 *The IDs are positional.* They were minted once, at 0.2.0, in the order
 the entries stood in this file at `8f0adf2`; they are stable labels and
@@ -1385,20 +1396,34 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
 - A relational `assume` inside a `lax.cond` branch is **not** forwarded to
   the solver, and is not emitted as an implication either — the drop says
   so. Branch-scoped preconditions therefore buy no solver precision.
-- An **unsatisfiable** set of relational assumes makes the emitted script
-  `unsat` for a reason unrelated to the obligation, and the discharge that
-  follows is vacuous. The unsatisfiable-precondition refusal consults the
-  interval domain, which by construction cannot decide a relational
-  assume, so it does not see this. Correct forwarding widens the reach of
-  this pre-existing limitation from top-level assumes to `jit`-carried
-  ones; see the SOUNDNESS.md entry of 2026-08-14.
-- An obligation discharged with a **forwarded relational axiom cannot
-  narrow the VERIFIED bar**: the bar's re-derivation re-slices without the
-  propagation, so its script does not carry the axiom and the two do not
-  match. In a query containing a barred primitive the bar therefore falls
-  back to the whole query. Conservative (a wider bar, never a narrower
-  one), pre-existing, and made more frequently reachable by this release;
-  see the SOUNDNESS.md entry of 2026-08-14.
+- An **unsatisfiable** set of relational assumes is now REFUSED, not
+  discharged — but only when a backend can decide the admitted region.
+  Before an `unsat` is credited on an obligation whose script carries a
+  forwarded relational axiom, the same backend is asked the same script
+  with the negated obligation removed: `unsat` there raises
+  `UnsatisfiableAssumptionError`, `sat` with every assume accounted for
+  leaves the discharge clean, and an UNDECIDED region leaves the discharge
+  standing with a `[MAY BE VACUOUS: …]` obligation detail and a
+  `precondition satisfiability uncertified` stamp line. That last case is
+  the limitation that remains: a region the backend cannot decide is
+  DISCLOSED, not refused. *This bullet said the refusal "does not see
+  this" from `f54990c` (2026-08-14 17:53) until the 0.2.0 release; audit
+  S7 closed it in `1dc1b52` five and a half hours later the same day, and
+  the bullet did not move* — see the SOUNDNESS.md entry of 2026-08-14 and
+  `tests/test_vacuous_precondition.py`.
+- *WITHDRAWN, and kept rather than deleted because it shipped as a
+  limitation and stopped being one.* This bullet said that an obligation
+  discharged with a forwarded relational axiom **cannot narrow the
+  VERIFIED bar**, because the bar's re-derivation re-sliced without the
+  query's relational assumes and so re-emitted the recorded script minus
+  its `(assert …)` axiom lines. That was true from `f54990c` until audit
+  0.2.0 **M10** (B7, `48e836f`, 2026-08-15), which hands the re-derivation
+  the same assumes; the bar narrows on such a query now, and
+  `tests/test_verified_bar.py::test_a_FORWARDED_AXIOM_does_not_cost_the_verdict_its_scope`
+  is the anti-vacuity-guarded measurement of it. The bullet stood
+  unamended for nine days and was found by re-reading this section against
+  the release at the 0.2.0 bump; see the SOUNDNESS.md entry of
+  2026-08-15 (B7).
 
 ---
 

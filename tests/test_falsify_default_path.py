@@ -3,10 +3,12 @@
 
 """With the flag off, NOTHING changed — and that is measured, not asserted.
 
-The falsification probe is unreleased and unaudited. The constraint on it
-is therefore not "it should be safe" but "a caller who does not set
-``falsify`` must get exactly the verdict they got before it existed", and
-a claim of that shape is only worth what its measurement is worth.
+The falsification probe ships in 0.2.0, default-off and unaudited — it was
+unreleased when this file was written, and the 0.2.0 version bump is what
+changed that half. The constraint on it is therefore not "it should be
+safe" but "a caller who does not set ``falsify`` must get exactly the
+verdict they got before it existed", and a claim of that shape is only
+worth what its measurement is worth.
 
 **THREE MEASUREMENTS, BECAUSE "UNCHANGED" HAS THREE MEANINGS.**
 

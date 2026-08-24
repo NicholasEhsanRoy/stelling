@@ -196,9 +196,13 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     :mod:`stelling.falsify` is never imported, and every existing path is
     byte-identical) or ``"sample"`` to try, after a VERIFIED, to FALSIFY
     it by executing the real program at concrete points inside the
-    declared set. **UNRELEASED AND UNAUDITED**; it is here to be
-    measured, not to be relied on, and it exists because this library is
-    asymmetric about its two answers: a REFUTED's witness is replayed
+    declared set. **SHIPPED SINCE 0.2.0, DEFAULT-OFF AND UNAUDITED**; it
+    is here to be measured, not to be relied on, and it may be changed or
+    withdrawn in any release without a deprecation cycle. (This read
+    *"UNRELEASED AND UNAUDITED"* while 0.2.0 was a development line; the
+    keyword is in the 0.2.0 release, so only the first half changed.) It
+    exists because this library is asymmetric about its two answers: a
+    REFUTED's witness is replayed
     through the real program, and a VERIFIED — a universal claim with no
     witness — has had nothing downstream at all.
 

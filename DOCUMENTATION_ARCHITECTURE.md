@@ -13,7 +13,7 @@ tree describe the tree it was written against. Three of them said in so many
 words that *"the repository is pre-Stage-0"* and that harness primitives, the
 query object and the z3 encoder do **not** exist — in the executive summary, in
 §2.3 and in Appendix B, in a file that ships in the sdist. All three exist.
-`v0.1.0` is tagged, `stelling.__version__` is `0.2.0.dev0`, and the suite is
+`v0.1.0` is tagged, `stelling.__version__` is `0.2.0`, and the suite is
 thousands of tests — run `pytest --collect-only -q` for the figure; it moves
 with every commit and is deliberately not written down here, which is
 `docs/norms.md`'s rule about figures and the same reason
@@ -134,7 +134,7 @@ it is a consequence of what a witness is.
 **What is cheap now and impossible later.** *Written when the repository was
 pre-Stage-0 — the IR and the jax boundary existed and the first verdict did
 not.* **That stopped being true before `v0.1.0` and the sentence stood for
-another five weeks.** On this tree `stelling.__version__` is `0.2.0.dev0`,
+another five weeks.** On this tree `stelling.__version__` is `0.2.0`,
 `v0.1.0` is a tag, the suite is thousands of tests, and verdicts are minted,
 stamped and routed through a solver portfolio. The three things below were fixed at the
 moment the paragraph describes, which is why the paragraph is kept: it is the
@@ -1450,7 +1450,9 @@ Neither accepts a green CI badge. Both accept a retained, versioned record.
    record that reports only the first is not a record of anything.**
 
 Point 4 inverts the instinct, and it needs care in two directions.
-`SOUNDNESS.md`'s log is currently `*(empty — no releases yet)*`, and an empty log
+`SOUNDNESS.md`'s log read `*(empty — no releases yet)*` when this was written
+and carries 54 entries on this tree; the argument below is about the empty
+case and is kept because it is what decided the rule. An empty log
 is **not** in itself a liability: a soundness event is a *verdict flip*
 (`SOUNDNESS.md`), so the first release has no prior verdicts to flip and
 structurally cannot have one, and an honest release that changes no verdicts

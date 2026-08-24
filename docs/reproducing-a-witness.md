@@ -382,8 +382,8 @@ a consumer comparing `schema` against the string it was written for fails
 closed.
 
 *This section named 0.1.1 as both the release fields could move in and the
-release the schema would freeze in. 0.1.1 has been and gone, the running
-version is `0.2.0.dev0`, and the schema is still
+release the schema would freeze in. 0.1.1 has been and gone, a second
+release has arrived, the running version is `0.2.0`, and the schema is still
 `stelling.reproducer/1-provisional` — so the promise had become one about a
 release in the past, which reads either as "this froze and nobody updated
 the page" or as an abandoned plan, and neither is true. Nothing about the

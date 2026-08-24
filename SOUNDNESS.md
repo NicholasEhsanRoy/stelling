@@ -25,16 +25,22 @@ is itself a soundness event.
 
 Every verdict object stamps, at minimum:
 
-- stelling version. **A development build stamps a PEP 440 `.dev`
-  version** (`0.2.0.dev0`), never the release it precedes and never the
-  release it follows. This matters because the per-finding *"which versions
-  are affected"* rows in the Log below distinguish the released `v0.1.0`
-  from a 0.2.0 development build, and a reader answers those rows from this
+- stelling version. **A build stamps its own version and never a
+  neighbouring one**: a RELEASE build stamps the release (`0.1.0`,
+  `0.2.0`), and a DEVELOPMENT build stamps a PEP 440 `.dev` version
+  (`0.2.0.dev0` was the whole of the 0.2.0 development line), never the
+  release it precedes and never the release it follows. This matters
+  because the per-finding *"which versions are affected"* rows in the Log
+  below tell the released `v0.1.0`, a 0.2.0 development build and the
+  released `0.2.0` apart, and a reader answers those rows from this
   stamp. A development build that stamped `0.1.0` misdirected in **both**
   directions — claiming defects the tree had fixed, and disclaiming the
-  ones scoped to *"0.2.0 development builds only"*. Nothing in the library
-  compares this field, so it is provenance rather than a gate; that is
-  exactly why it has to be readable by a person.
+  ones scoped to *"0.2.0 development builds only"*; a development build
+  that stamped `0.2.0` would have been the mirror error, indistinguishable
+  from the release, and it is why the string only became `0.2.0` at the
+  release commit. Nothing in the library compares this field, so it is
+  provenance rather than a gate; that is exactly why it has to be readable
+  by a person.
 - jax version used to trace the harness,
 - solver name and version, **and transport** — Python wheel vs. external
   binary. **The wheel-vs-binary distinction is carried; the path and the
@@ -673,9 +679,23 @@ THREE, AND IT SCOPES THE ENTRY'S OWN EVENT.** *0.1.0 pre-release builds
 only* means the thing this entry records — a defect fixed, a disclosure
 gap closed, a claim narrowed — was over before the `v0.1.0` tag, so no
 release is reached by it. *0.2.0 development builds only* means it
-arrived after that tag. *`v0.1.0` and 0.2.0 development builds* means the
-release is reached, and those entries also say so in their own words and
-carry the reproduction at the tag.
+arrived after that tag and was over before the 0.2.0 release. *`v0.1.0`
+and 0.2.0 development builds* means `v0.1.0` is reached, and those
+entries also say so in their own words and carry the reproduction at the
+tag.
+
+**THE THIRD PHRASE NAMES `v0.1.0` AND NOT "THE RELEASE", BECAUSE THERE IS
+MORE THAN ONE NOW.** All three were written while `0.2.0` was a
+development line and `v0.1.0` was the only release; `stelling.__version__`
+became `0.2.0` on 2026-08-24 and every build from that commit stamps the
+release rather than `0.2.0.dev0`. **No phrase changed meaning, and that
+was established row by row rather than assumed.** The development line is
+CLOSED, so *0.2.0 development builds only* now names a bounded set that
+stops at the bump — which makes it a positive claim that the `0.2.0`
+release does NOT carry the defect. Every entry carrying it was re-read
+against the release at the bump, and every one records a fix that landed
+before it; an entry whose defect survived the bump could not have used
+the phrase and would have needed a fourth, and none does.
 
 **IT SCOPES THE ENTRY, NOT EVERY HAZARD THE ENTRY DISCUSSES**, and the
 2026-08-09 integer-literal-wrap entry is the case that makes the
@@ -7095,8 +7115,9 @@ and a count over entries that happened to say something is not a count.
   zero at exactly one boundary** — `[0, hi]` or `[lo, 0]`. Only the
   DEFINITE directions are at risk: a VERIFIED or a set-level REFUTED that
   the interval leg decided downstream of such a division. An UNKNOWN was
-  never wrong, and no released verdict is affected because 0.2.0 has not
-  shipped.
+  never wrong, and no released verdict is affected: `3328c9b` is 0.2.0
+  development work that `v0.1.0` predates, and the fix is in `0.2.0`
+  itself, so neither release ever produced one.
 
   Three shapes reach it, and the third needs no signed-zero reasoning in
   the harness at all:
@@ -8589,7 +8610,8 @@ and a count over entries that happened to say something is not a count.
   recorded UNKNOWN whose notes contain *"literal outside the domain (no
   zero-dep decoder for array dtype '<f2'…)"* is one this fix may now
   decide; re-`check()` it to find out. No released verdict is affected —
-  float16/bfloat16 support is a 0.2.0 feature and 0.2.0 has not shipped.
+  float16/bfloat16 support is a 0.2.0 feature, so `v0.1.0` cannot have
+  produced one, and `0.2.0` ships this fix.
 
   **M13 — the comparison band was picked alphabetically.**
   `_ieee_cmp_get_min_normal` sorted the equation's float dtypes and took
@@ -11245,9 +11267,11 @@ in place and marked.*
   `c - c + 0.0 >= 0.5` is false everywhere and `c - c + 1.0 >= 0.5` is true
   everywhere; the mispairing swaps the two answers.
 
-  **WHICH STELLING VERSIONS ARE AFFECTED.** `v0.1.0` (the only release) and
-  every 0.2.0 development revision up to and including `207faca`. Fixed on
-  `fix/B11-propagation-identity`.
+  **WHICH STELLING VERSIONS ARE AFFECTED.** `v0.1.0` and every 0.2.0
+  development revision up to and including `207faca`. Fixed on
+  `fix/B11-propagation-identity`, so the `0.2.0` release is NOT affected —
+  at the time this was written `v0.1.0` was the only release and this line
+  said so.
 
   **WHICH PRIOR VERDICTS ARE RETROACTIVELY INVALID, and how to recognise
   one.** A verdict is in scope **only if the propagation it was assembled
@@ -12086,15 +12110,24 @@ in place and marked.*
   **NOT A SOUNDNESS EVENT, and it is not counted as one below.** No
   verdict flips and nothing is retroactively invalid. **THERE IS ONE FIX
   HERE, and this paragraph said there was none** — the refusal message in
-  `reproduce._require_same_program`, above. No release is reached by it:
-  it is 0.2.0 development, `v0.1.0` predates it, and a refusal message is
+  `reproduce._require_same_program`, above. No release is reached by it,
+  in the sense this log's `Versions:` fields use — the wrong-cause refusal
+  message existed in 0.2.0 development builds only, `v0.1.0` predates the
+  whole file, and the `0.2.0` release carries the corrected message. This
+  read *"No release is reached by it: it is 0.2.0 development"* while
+  0.2.0 was a development line; the conclusion survived the bump and the
+  reason had to be restated, because "it is 0.2.0 development" stopped
+  being a reason the day 0.2.0 became a release. And a refusal message is
   not a verdict. It is in this log
   because the failure is silent and the policy above forbids true things
   going unsaid, not because the policy's soundness-event definition
   covers it.
 
-**Releases reached by an entry in this log.** `v0.1.0`, the only release,
-is reached by **seven** ENTRIES of this log — and the unit is stated
+**Releases reached by an entry in this log.** `v0.1.0` is reached by
+**seven** ENTRIES of this log, and `0.2.0` by NONE — this said *"the only
+release"* until the 0.2.0 bump, and the digit did not move, because every
+entry that is not one of the seven records a defect fixed before the
+version string changed. The unit is stated
 because the three counts here are 7, 8 and 7, and this sentence has twice
 been corrected by putting one of them where another belongs. Every
 top-level bullet above carries exactly one `Versions:` field from a closed
@@ -12157,16 +12190,27 @@ the split the S15 entry above already records. And `assert_(a > 0)` over
 solverless route. The clause that survives is the first one: UNSOUND-3 is
 the entry that needs no serialized query either.
 
-Every other entry that is a FIX is 0.2.0 development only, and **no
-release has yet shipped any fix in this log**. The 2026-08-18
+**`0.2.0` CARRIES EVERY FIX IN THIS LOG**, and that is what this clause
+says now. It read *"Every other entry that is a FIX is 0.2.0 development
+only, and no release has yet shipped any fix in this log"* until
+2026-08-24, when `stelling.__version__` became `0.2.0`. The bump falsified
+the second half outright — and the first half was ALREADY wrong, about the
+39 bullets scoped *0.1.0 pre-release builds only*: that phrase means the
+entry's event was over before the `v0.1.0` tag, so those fixes are IN
+`v0.1.0`, and they are not 0.2.0 development work. What the clause was
+reaching for is what the count above actually needs, and it is about
+DEFECTS rather than fixes: no release carries a defect this log records
+except the seven `v0.1.0` carries. The 2026-08-18
 query-identity entry is not counted in either number, and the reason is
 NOT the one this clause used to give. It said the entry records "no
 verdict moving and nothing in stelling to change"; the entry now carries
 one thing to change — the refusal message in
 `reproduce._require_same_program` — so the second half of that reason is
 gone. What survives is the half that decides the count: the fix is 0.2.0
-development, `v0.1.0` predates it, and no verdict moves, so the entry
-reaches no release. The entry's own last paragraph says the same, and
+development and `v0.1.0` predates it, so no release carries the defect,
+and no verdict moves — so the entry reaches no release. (The `0.2.0`
+release carries the FIX; reaching a release, here, is about the defect.)
+The entry's own last paragraph says the same, and
 this clause exists so the count above cannot be read as having overlooked
 it. This line read *"(no releases yet)"* until
 2026-08-15, a

@@ -54,7 +54,7 @@ calling `check` in a JAX-less environment raises the same error.
 
 Every ```` ```python ```` block on this page is executed verbatim by
 `tests/test_doc_examples.py` and the fence under it is compared byte for byte
-against what it printed (stelling 0.2.0.dev0, jax 0.11.0, CPU,
+against what it printed (stelling 0.2.0, jax 0.11.0, CPU,
 `jax_enable_x64=True`). That is a gate on every run, not a hand-check.
 
 *It was a hand-check, and it was already false when it said so: the
