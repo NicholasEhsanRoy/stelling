@@ -22,6 +22,63 @@ kind can run: **after a discharge, execute the real program at concrete
 points and try to find one that violates the obligation.**
 
 --------------------------------------------------------------------------
+STABILITY: SHIPPED, DEFAULT-OFF, AND PROVISIONAL — AND THE WORD IT
+REPLACES WAS ``UNAUDITED``
+--------------------------------------------------------------------------
+
+``falsify="sample"`` ships in 0.2.0. It is **default-off** — with
+``falsify=None`` this module is never imported and every path is
+byte-identical — and it is **provisional**: what it does when it fires is
+settled, its SIGNATURE is not. ``probe()``'s first parameter changed name
+and type inside this release cycle, and it is in ``__all__``.
+
+**``UNAUDITED`` IS RETIRED, AND ON EVIDENCE RATHER THAN ON AGE.** The fire
+condition was audited blind against an independent ``Fraction`` oracle
+that shares no code with this package: **363 gate readings, 363
+agreements**, over 266 driven base-versus-fix comparisons, and the three
+defects that audit was pointed at are fixed and driven. That is what the
+word was withheld for and it is what retires it.
+
+**WHAT "PROVISIONAL" NAMES IS A LIST, NOT A MOOD.** Every item is
+disclosed in full at its own site; they are gathered here so that a reader
+deciding whether to switch this on does not have to find them:
+
+1. **THE ANALYSIS'S REGION IS NEVER READ.** The assume gate reads the
+   program's assume TEXT; what the analysis discharged over is a
+   CONSTRAINED BOX this module may not look at. Nothing checks that the
+   second contains the first. It is the mirror of every defect this module
+   has fixed and it is **open** — see the section of that name below,
+   which also says why it is not fixable inside this module's import rule.
+2. **REACH ON ORDINARY ``jnp`` CODE IS ROUGHLY HALF**, measured: 17 of 31
+   one-line programs fire, all 17 on an exact refutation. ``dot_general``,
+   ``sort``, ``cumsum``, ``stack``, ``rem``, ``scatter`` and
+   ``scatter-add`` all HAVE exact rational readings and are simply not in
+   this file's tables. That is a work list, not a limit of the approach.
+3. **``semantics="ieee"`` IS THE WEAKEST SETTING AND KEEPS THE LOUDEST
+   CAVEAT.** It is the one path on which the EXECUTED FLOAT admits a
+   firing with no exact test behind it, guarded only by a second
+   compilation route (:func:`_whole_program_route`); and an ``ieee``
+   verdict is the one that can rest on a caller's ``libm_budget``, which
+   stelling stamps as declared and unverified. :func:`_fire` splits the
+   message for that, and **cannot** tell you whether the declaration bears
+   on the obligation that fired — it says so in the message and prints
+   what the obligation is computed from instead of guessing.
+4. **THE ASSUME CONFIRMATION'S BUDGET SATURATES ON ORDINARY SHAPES.** A
+   ``(60000,)`` float64 declaration with one assume leaves 90 of 91
+   admissible points unconfirmed; the numbers are in :func:`probe`. That
+   costs evidence, never soundness, and the count is reported.
+5. **THE CLOCK IS PART OF THE FIRE CONDITION.** ``REPLAY_SECONDS_BUDGET``
+   is a wall-clock backstop, so whether this instrument fires on a given
+   program can depend on the machine. It can only ABSTAIN, so a slow
+   machine buys fewer firings and never wrong ones; the reasoning is at
+   that constant.
+
+Nothing in that list is a reason to distrust a FIRING: only an exact test
+may admit one, and the message names which test did. They are reasons a
+run that found nothing says nothing, which is the first sentence of the
+next section.
+
+--------------------------------------------------------------------------
 WHAT THIS CAN AND CANNOT DO, SAID BEFORE ANYTHING ELSE
 --------------------------------------------------------------------------
 
@@ -1039,9 +1096,22 @@ DECLINE_REASONS = (
     "obligation-count-changed",
     "assume-unsatisfied",
     "assume-not-fully-executed",
+    # AND THE EXACT HALF OF THE SAME GATE, WHICH IS WHERE THIS REASON NOW
+    # BELONGS.  It was filed below, under "an executed VIOLATION the fire
+    # condition would not report", and that was true of it when `_confirm`
+    # was the only place it could be emitted: back then the point had
+    # already violated the obligation in floats and the exact re-reading
+    # of the assumes was what took the firing back.  The re-reading now
+    # runs at the GATE, on every admissible point, so the overwhelming
+    # majority of these are points at which NO VIOLATION WAS EVER LOOKED
+    # FOR -- measured on the `assume(y*0.1*10.0 <= y)` fixture, 47 of 47
+    # come from the gate and none from `_confirm`.  The `_confirm` site
+    # remains and is now the residue (see the `point_unassumed` branch in
+    # `probe.run_one`), so the reason genuinely lives in both groups; it
+    # is filed with the gate because that is where a reader will meet it.
+    "assume-unsatisfied-over-the-rationals",
     # an executed VIOLATION the fire condition would not report
     "float-rounding-artefact",
-    "assume-unsatisfied-over-the-rationals",
     "no-exact-reading-of-this-program",
     "executed-float-depends-on-granularity",
     "whole-program-route-unavailable",
@@ -1127,6 +1197,17 @@ class VerifiedFalsified(AssertionError):
     Exception`` in a batch caller should not quietly swallow a soundness
     event that ``except AssertionError`` would have to be written on
     purpose to catch.
+
+    **AND THAT IDIOM MUST NOT ALSO CATCH
+    :class:`ProbeInvariantViolated`,** which is why that class is NOT an
+    ``AssertionError`` and not an ``Exception`` at all.  A batch caller
+    who writes ``except AssertionError`` around ``check()`` is asking for
+    *"tell me when a verdict was falsified"*; a broken probe invariant is
+    the opposite statement -- the probe has nothing to say about the
+    verdict -- and answering the first question with the second is how a
+    silent instrument gets read as a clean run.  The two classes are now
+    disjoint in both directions: no ``except`` clause catches both without
+    naming both.
     """
 
     def __init__(self, message: str, report: "ProbeReport"):
@@ -1134,7 +1215,7 @@ class VerifiedFalsified(AssertionError):
         self.report = report
 
 
-class ProbeInvariantViolated(AssertionError):
+class ProbeInvariantViolated(BaseException):
     """A fact this probe's readings rest on did not hold.
 
     **NOT A FIRING**, and deliberately a different class from
@@ -1147,7 +1228,62 @@ class ProbeInvariantViolated(AssertionError):
     ones where declining would be a quieter form of the same wrong answer:
     the probe would report "nothing was executed" when what happened is
     that an invariant somewhere else in the package changed underneath it.
-    An :class:`AssertionError` because that is what it is.
+
+    **``BaseException``, ON THIS PACKAGE'S OWN PRECEDENT, AND IT SHIPPED
+    AS AN ``AssertionError`` FOR ONE RELEASE CANDIDATE.**  The two other
+    instruments this project builds on the same argument --
+    :class:`stelling.EagerTruncationError` and
+    :class:`stelling.NarrowingError` -- both inherit directly from
+    ``BaseException`` and both carry the reason in their own docstrings:
+    *an ordinary ``except Exception:`` must not be able to swallow an
+    instrument's alarm.*  This class had exactly the property those two
+    were written to avoid, in the module least able to afford it: **this
+    file contains seven bare ``except Exception`` handlers**, and three of
+    them sit on the paths an invariant check would be placed on.  Driven,
+    with a raise injected at each site on the tree that shipped it:
+
+    * inside :func:`_replay` during the assume gate -> caught by
+      ``probe.assumes_over_the_rationals``'s ``except Exception: return
+      None``, and the point is counted as an ordinary UNCONFIRMED;
+    * inside :func:`_replay` during :func:`_confirm` -> caught by that
+      function's ``except Exception``, and the stamp line prints
+      *"8 x ProbeInvariantViolated: ..."* among the ordinary abstentions,
+      as though the exact reading had merely been unavailable;
+    * inside :func:`_read` -> caught by :func:`probe`'s ``except
+      Exception``, and the whole probe reports the ordinary decline *"the
+      probe could not read the traced program"*.
+
+    It was **also** caught by ``except AssertionError``, which is the
+    idiom :class:`VerifiedFalsified`'s own docstring tells a batch caller
+    to write in order to catch a soundness event on purpose -- so the one
+    caller who had followed this module's advice was the one guaranteed to
+    swallow this.  Both properties are now impossible by construction:
+    ``BaseException`` is outside ``Exception`` and outside
+    ``AssertionError``.
+
+    **WHAT THAT LETS ESCAPE IS THE POINT, AND THE PATHS WERE CHECKED ONE
+    BY ONE.**  Every ``except`` in this module and in
+    ``stelling.preconditions`` was read against this change.  Five of the
+    seven bare handlers wrap work an invariant check does or could sit
+    inside -- :func:`_execute`'s equation loop,
+    :func:`_granularity_stable`'s second route, :func:`probe`'s read,
+    ``probe.assumes_over_the_rationals``'s confirmation replay, and
+    :func:`_confirm`'s replay -- and all five now let this class through
+    instead of converting it into a skip, a decline, an unconfirmed point
+    or an abstention; each says so at its own site.  The other two wrap a
+    single arithmetic conversion apiece (reading a ``pow`` literal in
+    :func:`_read`, reading a margin in :func:`_execute`) and can raise
+    nothing but the numeric errors they are for.  The remaining handlers
+    name concrete types (``TypeError``,
+    ``ValueError``, ``OverflowError``, :class:`_Unreplayable`,
+    :class:`_AssumesComplete`) and are unaffected.  ``preconditions``
+    catches only ``ir.TranscriptionError`` and ``NestedDeclaration`` and
+    wraps the :func:`probe` call in nothing at all, so a violated
+    invariant reaches the caller's frame, which is where it belongs.
+
+    A caller who genuinely wants to survive one must name it.  That is the
+    same contract ``EagerTruncationError`` and ``NarrowingError`` offer,
+    and it is why this class is in ``__all__``.
     """
 
 
@@ -1198,6 +1334,15 @@ class Falsification:
     # naming the adjudicator is what makes a firing auditable, and because
     # the next weak test to be proposed will have to say its own name.
     adjudication: str = "unrecorded"
+    # WHAT THIS OBLIGATION'S VALUE IS COMPUTED FROM: every primitive in
+    # the backward slice of the violated `stelling_assert`, at every
+    # depth, read off the traced program by
+    # :func:`_obligation_operations`.  It is here because :func:`_fire`
+    # needs a PER-OBLIGATION fact and the only per-obligation facts the
+    # probe is handed are the status and the program; the stamped
+    # assumptions arrive per VERDICT.  See :func:`_fire` for what the
+    # message may and may not conclude from it.
+    operations: tuple[str, ...] = ()
 
     def render(self) -> str:
         margin = "" if self.margin is None else f", margin {self.margin!r}"
@@ -1363,7 +1508,7 @@ class ProbeReport:
         the built point against the declared endpoints themselves.  The
         second half is a reading that can be taken two ways, and saying
         which was taken is the difference between a number and a number
-        that reads as coverage.  Four cases, and each one is a different
+        that reads as coverage.  Five cases, and each one is a different
         fact:
 
         * **no assume in the program.**  There is nothing to read: the
@@ -1382,6 +1527,14 @@ class ProbeReport:
           and the sentence gives both halves.  Never folded into one
           number: a point whose exact reading could not be taken is not a
           point shown to be in the assumed region.
+        * **``real``, NO point admissible.**  Zero points re-read is not
+          "every one of them re-read"; it is no reading.  This case used
+          to fall through the branch above and print *"0 ... every one of
+          them re-read over ℚ and confirmed"*, a confirmation clause on a
+          run that confirmed nothing.  It is reached by any program whose
+          assume rejects every sampled point over ℚ, which is not exotic:
+          ``assume(y*0.1*10.0 <= y)`` over ``float64 [0, 2]`` gets there
+          whenever the sampler happens to draw only positive points.
         """
         if self.assumes_in_program <= 0:
             return (
@@ -1395,6 +1548,24 @@ class ProbeReport:
                 f"the arithmetic this ieee verdict is about"
             )
         unread = self.points_admissible_unconfirmed
+        if self.points_admissible <= 0:
+            # AND ZERO IS NOT "ALL OF THEM".  The branch below reads
+            # `unread <= 0` and says *"every one of them re-read over
+            # ℚ and confirmed"*, which at zero admissible points
+            # rendered *"0 inside the declared set and admitted by every
+            # assume, every one of them re-read over ℚ and confirmed"* --
+            # a sentence claiming exact evidence for a run that took no
+            # exact reading at all, in the report whose entire job is to
+            # say which reading stands behind which number.  Vacuous
+            # truth is not the standard this method is held to: the
+            # clause exists to stop a number reading as coverage, and a
+            # confirmation clause on a run that confirmed nothing is that
+            # failure in miniature.
+            return (
+                f"{head} — none, so no assume was re-read over ℚ here "
+                f"and this run carries no exact evidence about the "
+                f"assumed region"
+            )
         if unread <= 0:
             return f"{head}, every one of them re-read over ℚ and confirmed"
         confirmed = self.points_admissible - unread
@@ -2102,6 +2273,77 @@ def _read(closed) -> _Census:
     )
 
 
+def _obligation_operations(census, k) -> tuple[str, ...]:
+    """Every primitive ONE obligation's value is computed from, at every depth.
+
+    The backward slice of the ``k``-th top-level ``stelling_assert``: the
+    equations its operand transitively depends on, plus every primitive
+    inside any call body those equations reach.  The four ``stelling_*``
+    declaration primitives are left out -- they are the query's own
+    scaffolding, not arithmetic -- and the result is sorted and
+    de-duplicated so it can be printed.
+
+    **IT EXISTS BECAUSE :func:`_fire` NEEDS A PER-OBLIGATION FACT AND IS
+    HANDED ALMOST NONE.**  ``statuses`` is per obligation; ``assumptions``
+    is per VERDICT.  So when a verdict carries a declaration stelling does
+    not check, nothing the probe is given says whether THIS obligation's
+    discharge is one of the ones that declaration paid for.  This is the
+    part of that question that is answerable exactly, off the program, and
+    :func:`_fire` prints it and says plainly that the rest is not
+    answerable here.
+
+    **IT IS AN OVER-APPROXIMATION, DELIBERATELY, IN THE SAFE DIRECTION.**
+    Where the slice reaches a call equation it takes EVERY primitive in
+    that body rather than slicing the body too.  A cone that is too large
+    can only make a declaration look more likely to bear on this
+    obligation, which is the direction that keeps the message cautious; a
+    cone that was too small could tell a reader a declaration is
+    irrelevant when it is not, and that is the misdirection this whole
+    function exists to remove.
+
+    Returns ``()`` for an obligation whose operand is a literal or a bare
+    declared input -- there is no arithmetic between the declaration and
+    the assert -- and :func:`_fire` renders that case in words.
+    """
+    jaxpr = getattr(census.closed, "jaxpr", None)
+    if jaxpr is None or k >= len(census.assert_positions):
+        return ()
+
+    producer = {}
+    for eqn in jaxpr.eqns:
+        for ov in eqn.outvars:
+            producer[ov] = eqn
+
+    def every_name(jx, out):
+        for eqn in jx.eqns:
+            nm = eqn.primitive.name
+            if nm not in ("stelling_any", "stelling_assume",
+                          "stelling_assert", "stelling_nonvacuity"):
+                out.add(nm)
+            for sub in _sub_jaxprs(eqn):
+                every_name(sub, out)
+
+    names: set[str] = set()
+    seen: set[int] = set()
+    frontier = list(jaxpr.eqns[census.assert_positions[k]].invars)
+    while frontier:
+        atom = frontier.pop()
+        if isinstance(atom, jex_core.Literal):
+            continue
+        src = producer.get(atom)
+        if src is None or id(src) in seen:
+            continue
+        seen.add(id(src))
+        nm = src.primitive.name
+        if nm not in ("stelling_any", "stelling_assume",
+                      "stelling_assert", "stelling_nonvacuity"):
+            names.add(nm)
+        for sub in _sub_jaxprs(src):
+            every_name(sub, names)
+        frontier.extend(src.invars)
+    return tuple(sorted(names))
+
+
 def _declaration_totals(jaxpr) -> dict[str, int]:
     """How many of each stelling declaration primitive the program contains.
 
@@ -2452,6 +2694,13 @@ def _execute(census: _Census, point) -> _Run:
         # The program raising at a sampled point is information about the
         # point, not about the verdict: a declared box may contain inputs
         # the program refuses.  Counted as a skip, never as a violation.
+        #
+        # AND `ProbeInvariantViolated` IS NOT SUCH INFORMATION, which is
+        # why it is a `BaseException` and passes this clause untouched.
+        # A broken invariant is a statement about this MODULE, and
+        # recording it in `run.raised` would file it under
+        # `program-raised` -- a decline reason that names the USER's
+        # program for a defect in this one.  See that class's docstring.
         run.raised = f"{type(exc).__name__}: {exc}"
     return run
 
@@ -2550,6 +2799,10 @@ def _granularity_stable(route, point, run, k):
     try:
         assumes, asserts = route(*point)
     except Exception:  # noqa: BLE001 - an unavailable route, never a firing
+        # `ProbeInvariantViolated` is a `BaseException` and is NOT
+        # absorbed here: "the second route could not be run" is a fact
+        # about jax and this program, and a broken invariant of this
+        # module is not that fact wearing a different name.
         return None
     if len(asserts) != len(run.asserts) or len(assumes) != len(run.assumes):
         # The two routes walk the same equation list, so this cannot
@@ -2788,6 +3041,37 @@ def _points_for(strategy, decls, windows, exponents, rng, budget):
 # --------------------------------------------------------------------------
 
 
+# THE MODULE THIS ONE MAY NOT READ, SPELLED AS A STRING BECAUSE THAT IS
+# THE WHOLE POINT.  `probe`'s door has to be able to say *"you handed me
+# the transcription"*, and the only object that can carry that name is a
+# name: importing `stelling.ir` to write `isinstance` would break the
+# independence rule the guard exists to protect.  Matched against
+# `type(x).__module__` for every class in the MRO, so a subclass of
+# `stelling.ir.ClosedJaxpr` is caught as well as the class itself.
+#
+# It is a MODULE and not a single qualified name deliberately: no object
+# from `stelling.ir` is ever the right argument here, and `ClosedJaxpr` is
+# merely the one that gets all the way into `_read` before failing.
+_FORBIDDEN_MODULE = "stelling.ir"
+
+
+def _is_transcription(obj):
+    """``"stelling.ir.ClosedJaxpr"`` when ``obj`` is one, else ``None``.
+
+    Reads ``__module__``/``__qualname__`` off the MRO rather than asking
+    :func:`isinstance`, because asking would mean importing the module
+    this one is forbidden to import.  A name comparison is weaker than an
+    ``isinstance`` in general -- a second module of the same name would
+    fool it -- and it is exactly strong enough here: the failure it is
+    guarding against is a variable slip inside this package, between two
+    objects produced by one line of ``preconditions._pipeline``.
+    """
+    for klass in type(obj).__mro__:
+        if getattr(klass, "__module__", None) == _FORBIDDEN_MODULE:
+            return f"{_FORBIDDEN_MODULE}.{klass.__qualname__}"
+    return None
+
+
 def probe(
     closed,
     *,
@@ -2875,6 +3159,49 @@ def probe(
             f"unknown falsification strateg(ies) {unknown!r}; known: "
             f"{list(STRATEGIES)}"
         )
+    transcription = _is_transcription(closed)
+    if transcription is not None:
+        # THE ONE WRONG OBJECT THE STRUCTURAL GUARD BELOW CANNOT SEE, AND
+        # THE ONE WHOSE COST IS SILENCE RATHER THAN AN ERROR.
+        # `stelling.ir.ClosedJaxpr` is not callable and DOES carry a
+        # `.jaxpr`, so it satisfies every structural test this door can
+        # ask -- its `.jaxpr` even carries `.eqns` -- and it then dies
+        # inside `_read` with `AttributeError: 'str' object has no
+        # attribute 'name'`, which `probe` converts into the ordinary
+        # whole-probe DECLINE *"the probe could not read the traced
+        # program"*.
+        #
+        # WHY THAT IS WORTH A NAMED GUARD RATHER THAN A BETTER MESSAGE.
+        # `preconditions._pipeline` holds BOTH objects from one trace --
+        # `cj, jaxpr = trace_with_jaxpr(...)` -- and passes `jaxpr`.  A
+        # one-token slip to `cj` there would do two things at once: it
+        # would feed this module the TRANSCRIPTION, laundering the
+        # independence rule that says the probe may not consume the object
+        # it is checking; and it would silently turn the probe OFF for
+        # every VERIFIED in the corpus, because every call would decline
+        # with *"DECLINED, nothing was executed"* and a stamp line that
+        # reads like a probe that ran.  Same call, `FIRED` on jax's object
+        # and silent on the transcription.  A probe that quietly stops
+        # probing is this project's recurring defect in its purest form,
+        # so the door says it.
+        #
+        # BY NAME, AND WITHOUT IMPORTING `stelling.ir`.  The independence
+        # rule forbids the import (see this module's docstring), and an
+        # `isinstance` check would need it.  The type is therefore
+        # identified by its module and qualified name, walking the MRO so
+        # a subclass is caught too -- which is also the only test that
+        # separates the two objects at all, since structurally they agree.
+        raise TypeError(
+            f"probe() takes jax's own ClosedJaxpr for the program the "
+            f"analysis judged, and was handed stelling's own "
+            f"TRANSCRIPTION of it ({transcription}). Those are different "
+            f"objects and this one is the object the probe exists to "
+            f"check: it may not read `stelling.ir`, and it cannot execute "
+            f"a transcription. Pass the SECOND member of "
+            f"`stelling._jax_compat.trace_with_jaxpr(harness)` (or "
+            f"`jax.make_jaxpr(harness)()` when there is no analysis to "
+            f"agree with); the first member is what you passed"
+        )
     if callable(closed) or not hasattr(closed, "jaxpr"):
         # SAID AT THE DOOR, because the thing that used to be passed here
         # is a harness and passing one now would fail deep inside `_read`
@@ -2906,6 +3233,12 @@ def probe(
     # this file.
     try:
         census = _read(closed)
+    # `ProbeInvariantViolated` is deliberately outside `Exception` and so
+    # is NOT converted into the decline below.  Driven on the tree that
+    # shipped it as an `AssertionError`: a raise inside `_read` came back
+    # as the ordinary whole-probe *"the probe could not read the traced
+    # program: ProbeInvariantViolated: ..."*, i.e. a broken invariant
+    # rendered in the same sentence as a malformed program.
     except Exception as exc:  # noqa: BLE001
         return ProbeReport(
             declined=(
@@ -3006,9 +3339,40 @@ def probe(
     # So all of the confirmations share ONE guard: the whole confirmation
     # pass costs at most `REPLAY_SECONDS_BUDGET`, and past it every
     # remaining admissible point is counted UNCONFIRMED and said to be
-    # unconfirmed. Measured, the ordinary case is nowhere near it: the
-    # 55-point `assume(y*0.1*10.0 <= y)` fixture confirms at 0.039 ms a
-    # point, and a `(1000,)` float64 program at 6 ms.
+    # unconfirmed.
+    #
+    # **AND THE ORDINARY CASE IS NOT "NOWHERE NEAR IT", WHICH IS WHAT THIS
+    # COMMENT USED TO SAY.** The per-point figures it quoted re-derive --
+    # a scalar `assume(y*0.1*10.0 <= y)` confirms in 0.025 ms and a
+    # `(1000,)` float64 one in 4.9 ms, measured on this tree, jax 0.11.0,
+    # x64 on -- but the budget is not per point, and a probe confirms up
+    # to `budget` of them. What one confirmation costs is linear in the
+    # DECLARED ARRAY, and 5.0 seconds buys this many of them:
+    #
+    #     declaration     ms/confirmation   5.0s buys   admissible  unconfirmed
+    #     -----------     ---------------   ---------   ----------  -----------
+    #     ()                        0.025     196,437            8            0
+    #     (1000,)                   4.935       1,013            8            0
+    #     (10000,)                 42.971         116           11            3
+    #     (20000,)                 94.977          52           57           55
+    #     (60000,)                287.602          17           91           90
+    #
+    # The last two columns are a real `probe()` at the default budget of
+    # 256 on `assume(all(y*0.1*10.0 <= y))` with a trivially-true assert.
+    # **A `(60000,)` float64 declaration with one assume saturates the
+    # backstop and reports 90 of its 91 admissible points unconfirmed**,
+    # and there is nothing exotic about it: it is one array and one
+    # elementwise assume.
+    #
+    # THAT IS THE BUDGET WORKING, NOT FAILING, and it is written down
+    # because a reader who believed the old sentence would read
+    # `points_admissible_unconfirmed = 90` as a defect rather than as the
+    # bound doing its job. What the saturation costs is EVIDENCE, never
+    # soundness: an unconfirmed point is counted, named in the stamp line
+    # (`_admissible_clause`), and still attacked -- `_confirm` re-reads
+    # the assumes on its own fresh budget before anything may fire. The
+    # alternative, one full backstop per point, is 256 x 5.0s = twenty-one
+    # minutes for a probe that finds nothing, which is why it is shared.
     #
     # IT IS A BUDGET OF CONFIRMATION WORK, NOT A DEADLINE FROM THE START
     # OF THE PROBE.  A single shared `_Guard` would have been simpler and
@@ -3057,6 +3421,12 @@ def probe(
             assumes, _ = _replay(
                 census, point, guard=guard, assumes_only=True
             )
+        # `ProbeInvariantViolated` passes: it is a `BaseException`.  An
+        # unread assume and a broken invariant are different answers --
+        # the first counts the point UNCONFIRMED and says so, the second
+        # means no count taken here is a count of anything -- and on the
+        # tree that shipped it as an `AssertionError` the second was
+        # driven and came back as the first.
         except Exception:  # noqa: BLE001 - an unread assume, never a firing
             return None
         finally:
@@ -3245,6 +3615,7 @@ def probe(
                     margin=run.margins.get(k),
                     detail=detail,
                     adjudication=how,
+                    operations=_obligation_operations(census, k),
                 ),
                 None,
             )
@@ -3417,29 +3788,123 @@ def _fire(hit: Falsification, report: ProbeReport):
     point must stop a CI run whichever half of the composition failed, and
     the caller has just been handed the point at which to check their
     declaration.
+
+    **AND THE SPLIT IS PER-VERDICT WHILE THE FIRING IS PER-OBLIGATION,
+    WHICH IS WHERE THE FIRST VERSION OF THIS MESSAGE MISDIRECTED.**
+    ``report.assumptions`` is the verdict's stamped lines; the condition
+    is *"does the phrase appear ANYWHERE in them"*.  A verdict has many
+    obligations and one set of assumptions, so an `ieee` verdict whose
+    obligation 0 goes through ``exp`` — the thing the ``libm_budget``
+    declaration is about — softens the headline for obligation 1 as well,
+    however unrelated obligation 1 is.  Driven through this module's own
+    public entry point with the statuses supplied and nothing mutated,
+    two obligations over ``float64 [0, 9]``::
+
+        assert_(jnp.exp(x) >= 0.0)     # obligation 0, uses exp
+        assert_(x * x <= 40.0)         # obligation 1, PURE MULTIPLY,
+                                       #   false at x = 9
+
+    With no assumptions, the firing on obligation 1 reads *"stelling is
+    UNSOUND at this query"*.  With the real shipped ``xla-cpu-2026-08``
+    line present — which is about ``exp``, and reaches this verdict
+    through obligation 0 — **the same firing on the same pure-multiply
+    obligation** got the softened headline and a tail telling the reader
+    to go and check their libm profile.  The disjunction stayed true and
+    the ACTIONABLE INSTRUCTION was wrong: there is no libm anywhere in
+    ``x * x``.
+
+    **THE HONEST KEY IS NOT REACHABLE, SO THE MESSAGE SAYS THAT INSTEAD
+    OF GUESSING.**  Keying the split on *"does THIS obligation rest on a
+    declared assumption"* needs a per-obligation attribution of the
+    assumptions, and the probe is not given one: ``statuses`` is per
+    obligation, ``assumptions`` is per verdict, and the module that knows
+    the answer is the module this one may not import.  Nor can the
+    attribution be reconstructed from the text: a heuristic that read
+    ``exp@float32`` out of the declaration and compared it with the
+    obligation's primitives would be RIGHT on today's one shipped line and
+    would fail SILENTLY and in the unsafe direction on a declaration that
+    does not name its operations — printing the categorical *"stelling is
+    UNSOUND"* on a verdict a declaration paid for, which is the exact
+    failure this split was added to remove.
+
+    So the split stays conservative — any unverified declaration on the
+    verdict softens the headline — and the two things that were wrong with
+    the message are fixed in the message:
+
+    * it no longer asserts that THIS obligation rests on the declaration.
+      It says the VERDICT does, which is what the stamp establishes, and
+      it says in plain words that the probe cannot tell which obligation a
+      verdict-level declaration was carried for;
+    * it prints, for the fired obligation, the exact list of primitives
+      its value is computed from (:func:`_obligation_operations`), so the
+      reader can settle the question in one glance instead of being sent
+      to the wrong file.  On the driven case above that list is ``mul``,
+      and no libm profile has anything to do with ``mul``.
+
+    **AND THE ASYMMETRY THIS SPLIT DOES NOT COVER, RECORDED HERE BECAUSE
+    IT IS AN ACCIDENT AND NOT A DESIGN.**  The split keys on the phrase
+    :data:`DECLARED_NOT_VERIFIED`, and only the ``libm_budget`` line
+    carries it.  A ``real`` verdict over ``exp`` carries a DIFFERENT
+    stamped assumption — *"exp endpoints assume a faithfully-rounded libm
+    (error <= 1 ulp), bumped 1 ulp outward"* — which is equally unchecked
+    by stelling, equally a claim about somebody else's libm, and which
+    this function does NOT see: a firing on such a verdict would print the
+    categorical *"stelling is UNSOUND at this query"*.  Nothing reaches it
+    today for one reason only: under ``real`` semantics only an exact test
+    may admit, and :func:`_replay` has no rational reading of ``exp``, so
+    every violation on such a program declines with ``'exp' has no exact
+    rational reading``.  **That is a decline standing in for a guard.**
+    Add ``exp`` to the replay's tables — a plausible reach improvement,
+    and ``dot_general``/``sort``/``cumsum`` are already on that work list
+    — and this message starts accusing stelling for an unverified host-libm
+    assumption, with nothing here to notice.  The repair, when it is
+    wanted, is on the emitting side: a stamped assumption that stelling
+    does not check should carry the phrase that says so, and then this
+    split sees it.
     """
     conditioned = unverified_declarations(report.assumptions)
+    if hit.operations:
+        computed = (
+            f"  assert #{hit.obligation_position} is computed from: "
+            f"{', '.join(hit.operations)}\n"
+        )
+    else:
+        computed = (
+            f"  assert #{hit.obligation_position} is computed from NO "
+            f"operation at all: its value comes straight from a declared "
+            f"input or a literal.\n"
+        )
     if conditioned:
         head = (
             "FALSIFICATION PROBE FIRED — this VERIFIED is FALSE at a "
-            "declared point, and it RESTS ON A DECLARATION stelling does "
-            "not check.\n"
+            "declared point, and THIS VERDICT rests on a DECLARATION "
+            "stelling does not check.\n"
         )
         tail = (
             "\n\nNo verdict is returned. THIS IS NOT A REPORT THAT STELLING "
             "IS UNSOUND, and it is not a finding about the program under "
             "test either: the program did what it does, the analysis "
             "discharged an obligation the program violates at a point the "
-            "analysis admitted, and that discharge was made UNDER THE "
+            "analysis admitted, and THIS VERDICT was made UNDER THE "
             "FOLLOWING DECLARATION(S), which stelling accepted from you and "
             "states it cannot verify:\n\n  - "
             + "\n  - ".join(conditioned)
-            + "\n\nEither the declaration above does not hold on this "
-            "backend, or stelling is unsound here. The probe executed the "
-            "program and cannot tell those two apart — but the declaration "
-            "is the half nothing checked, so check it first, at the point "
-            "reported above. If it holds there, this is a soundness event "
-            "in stelling: see stelling/falsify.py.\n\n"
+            + "\n\nWHETHER THE DECLARATION(S) ABOVE BEAR ON *THIS* "
+            "OBLIGATION IS NOT SOMETHING THIS PROBE CAN TELL YOU. They are "
+            "stamped on the VERDICT AS A WHOLE, and a verdict has many "
+            "obligations: the probe is handed a status per obligation but "
+            "the assumptions only per verdict, and it may not import the "
+            "analysis to ask which discharge used which. What it CAN tell "
+            "you exactly, read off the traced program itself, is what the "
+            "obligation that just fired is computed from:\n\n"
+            + computed
+            + "\nSo, in this order. If a declaration above bears on those "
+            "operations, CHECK IT FIRST, at the point reported above: a "
+            "declaration that does not hold on this backend produces "
+            "exactly this counterexample, and the point is where to look. "
+            "If none of them does, then no declaration licensed THIS "
+            "discharge and this IS a soundness event in stelling: see "
+            "stelling/falsify.py.\n\n"
         )
     else:
         head = (
@@ -3884,6 +4349,41 @@ _CALL_PRIMITIVES = (
     "checkpoint",
 )
 
+# EVERY NAME ABOVE IS A BODY THAT RUNS EXACTLY ONCE PER EQUATION, AND ONE
+# READING IN THIS FILE DEPENDS ON THAT AND NOT ON ANYTHING ELSE.
+#
+# `_replay`'s `assumes_only` early stop compares `len(assumes)` -- a count
+# of READINGS -- with `census.assumes_in_program` -- a count of
+# `stelling_assume` EQUATIONS, taken at every depth.  The two are the same
+# number only while each assume equation is read exactly once, which is
+# true only while every descent this walk makes enters its body once.
+#
+# `scan`, `while` and the rest below carry a jaxpr in a param, so
+# `_sub_jaxprs` (and therefore `assumes_in_program`) already counts an
+# assume inside one; what stops the replay reading it is that the name is
+# not in `_CALL_PRIMITIVES` and the primitive has no exact reading, so the
+# replay abstains and the point declines.  That is a decline standing in
+# for a guard: descending loop bodies is a plausible reach improvement --
+# `_execute` faces the same wall from the other side -- and adding one
+# name above would silently convert the early stop into *"one iteration's
+# assume, reported as the program's"*.
+#
+# So the requirement is a NAMED DENY-LIST checked at the descent, not a
+# property inferred from tuple membership.  A `cond`/`switch` arm is here
+# for the neighbouring reason: its body runs zero or one times depending
+# on a value, so an assume inside one is not read on every execution and a
+# reading of it is not a reading of the program either.
+_REPEATING_OR_CONDITIONAL_BODIES = frozenset({
+    "scan",
+    "while",
+    "while_loop",
+    "fori_loop",
+    "cond",
+    "switch",
+    "cond_p",
+    "platform_index",
+})
+
 
 def _call_jaxpr_of(eqn):
     """The nested jaxpr a call primitive carries, and the consts to run it.
@@ -4303,6 +4803,21 @@ def _replay(census, point, guard=None, assumes_only=False):
     importantly -- an ABSTENTION after the last assume no longer costs the
     gate a reading it had already completed.
 
+    **AND ITS STOP CONDITION IS A DYNAMIC COUNT COMPARED WITH A STATIC
+    ONE, WHICH IS SAFE FOR A REASON THAT IS NOT IN THIS FUNCTION.**
+    ``len(assumes) >= census.assumes_in_program`` is *readings taken* on
+    the left and *equations written* on the right, and they agree only
+    while this walk reads each assume occurrence exactly once -- which
+    holds because every primitive it descends is in
+    :data:`_CALL_PRIMITIVES` and a call body is entered once per call
+    equation.  Nothing in this module states that as a requirement, and
+    descending a ``scan`` body is a reach improvement someone will
+    reasonably propose.  The requirement is therefore CHECKED at the
+    assume itself, and violating it raises
+    :class:`ProbeInvariantViolated` rather than silently reporting one
+    iteration's assume as the whole program's; the argument is at that
+    check.
+
     THAT IS NOT TRUE UNDER ``jax_enable_x64=0``, and the sentence used to
     claim it unconditionally.  With x64 off, jax truncates a ``float64``
     declaration to ``float32`` when the point is handed to it, so the
@@ -4326,8 +4841,16 @@ def _replay(census, point, guard=None, assumes_only=False):
     guard = _Guard() if guard is None else guard
     assumes: list = []
     asserts: list = []
+    # ONE ENTRY PER `stelling_assume` OCCURRENCE THIS WALK HAS READ, keyed
+    # by the CALL PATH that reached it and not by the equation alone: a
+    # `jit` body called twice is two occurrences of one equation object,
+    # and `census.assumes_in_program` counts occurrences.  `_alive` holds
+    # a reference to every object whose `id` appears in a key, so no id
+    # can be recycled underneath the set while the walk is running.
+    assume_sites: set = set()
+    _alive: list = []
 
-    def run(jaxpr, consts, args, decl):
+    def run(jaxpr, consts, args, decl, path=()):
         env: dict = {}
 
         def read(atom):
@@ -4352,6 +4875,29 @@ def _replay(census, point, guard=None, assumes_only=False):
                 a.val if isinstance(a, jex_core.Literal) else None
                 for a in eqn.invars
             ]
+            if name in _REPEATING_OR_CONDITIONAL_BODIES and (
+                name in _CALL_PRIMITIVES
+            ):
+                # See `_REPEATING_OR_CONDITIONAL_BODIES`.  Unreachable
+                # today by construction -- the two tuples are disjoint --
+                # and it is a guard rather than a comment because the one
+                # edit that makes it reachable is the one edit a reader
+                # improving this walk's reach would make.
+                raise ProbeInvariantViolated(
+                    f"the rational replay is about to descend {name!r}, "
+                    f"whose body does not run exactly once per equation. "
+                    f"`census.assumes_in_program` counts assume EQUATIONS "
+                    f"and `_replay` counts assume READINGS; the "
+                    f"`assumes_only` early stop compares the two, so a "
+                    f"body entered more than once (or fewer than once) "
+                    f"would let it stop on a PARTIAL reading and report "
+                    f"one iteration's assume as the program's. The "
+                    f"ASSERT reading has the same problem one level up: "
+                    f"walking such a body once evaluates it at the wrong "
+                    f"arguments, and the replay's answer would then be "
+                    f"about a program that was never executed. Re-derive "
+                    f"both before adding {name!r} to `_CALL_PRIMITIVES`."
+                )
             if name in _CALL_PRIMITIVES:
                 # `jnp` puts most of its work behind `jit` -- `jnp.where`,
                 # `jnp.clip`, `jnp.power` and the rest of the wrappers all
@@ -4360,7 +4906,8 @@ def _replay(census, point, guard=None, assumes_only=False):
                 # real programs.  It DID, until this batch: see the
                 # commentary on `_CALL_PRIMITIVES`.
                 body, body_consts = _call_jaxpr_of(eqn)
-                inner = run(body, body_consts, ins, decl)
+                _alive.append(eqn)
+                inner = run(body, body_consts, ins, decl, path + (id(eqn),))
                 if len(inner) != len(eqn.outvars):
                     raise _Unreplayable(
                         f"{name!r} returned {len(inner)} value(s) for "
@@ -4371,6 +4918,57 @@ def _replay(census, point, guard=None, assumes_only=False):
                 continue
             if name in ("stelling_assume", "stelling_nonvacuity"):
                 if name == "stelling_assume":
+                    # THE EARLY STOP BELOW COMPARES A DYNAMIC COUNT WITH A
+                    # STATIC ONE, AND THAT IS ONLY SOUND WHILE EACH ASSUME
+                    # OCCURRENCE IS READ ONCE.  `census.assumes_in_program`
+                    # counts `stelling_assume` EQUATIONS -- what is written
+                    # in the program -- while `len(assumes)` counts
+                    # READINGS.  Today they cannot diverge, for a reason
+                    # that is not written in this function: every primitive
+                    # this walk descends is in `_CALL_PRIMITIVES`, and a
+                    # call body is entered exactly once per call equation.
+                    # `scan`, `while` and `cond` are not in that tuple, so
+                    # nothing here iterates.
+                    #
+                    # If that ever changes -- and descending loop bodies is
+                    # a plausible reach improvement, since `_execute` faces
+                    # the same wall -- the stop would fire on the FIRST
+                    # iteration's reading of a loop-carried assume, and
+                    # `probe.assumes_over_the_rationals` would then find
+                    # `len(assumes) == census.assumes_in_program`, call the
+                    # reading complete, and admit ONE ITERATION'S assume as
+                    # the whole program's.  That is not a decline; it is a
+                    # wrong exact reading standing behind the sentence
+                    # *"re-read over ℚ and confirmed"*.
+                    #
+                    # So the precondition is CHECKED rather than argued.
+                    # An occurrence is (call path, equation); a second
+                    # reading of the same occurrence can only come from a
+                    # walk that iterated, and it raises rather than being
+                    # counted.  `ProbeInvariantViolated` is a
+                    # `BaseException` and therefore is NOT absorbed by the
+                    # `except Exception` in `assumes_over_the_rationals`
+                    # that this reading is taken under -- which is the
+                    # whole reason that class stopped being an
+                    # `AssertionError`.
+                    site = path + (id(eqn),)
+                    if site in assume_sites:
+                        raise ProbeInvariantViolated(
+                            f"the rational replay read the same "
+                            f"`stelling_assume` occurrence twice, so its "
+                            f"assume count is a count of READINGS and "
+                            f"`census.assumes_in_program` "
+                            f"({census.assumes_in_program}) is a count of "
+                            f"EQUATIONS. The `assumes_only` early stop "
+                            f"compares the two and would stop on a "
+                            f"PARTIAL reading -- one iteration's assume, "
+                            f"reported as the program's. Some walker in "
+                            f"this module now descends a repeating "
+                            f"construct; the early stop must be re-derived "
+                            f"before this probe reads an assume again."
+                        )
+                    assume_sites.add(site)
+                    _alive.append(eqn)
                     assumes.append(all(bool(v) for v in ins[0].reshape(-1)))
                     if (
                         assumes_only
@@ -4686,6 +5284,11 @@ def _confirm(census, statuses, point, k, semantics):
         assumes, asserts = _replay(census, point)
     except _Unreplayable as exc:
         why = str(exc)
+    # AND NOT `ProbeInvariantViolated`, which is a `BaseException` and
+    # passes.  Driven on the tree that shipped it as an `AssertionError`:
+    # the stamp line printed *"8 x ProbeInvariantViolated: ..."* among
+    # `ProbeReport.abstentions`, where every other entry is a primitive
+    # this replay cannot read -- a broken invariant filed as a reach cost.
     except Exception as exc:  # noqa: BLE001 - an abstention, never a firing
         why = f"{type(exc).__name__}: {exc}"
     else:

@@ -196,11 +196,18 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     :mod:`stelling.falsify` is never imported, and every existing path is
     byte-identical) or ``"sample"`` to try, after a VERIFIED, to FALSIFY
     it by executing the real program at concrete points inside the
-    declared set. **UNRELEASED AND UNAUDITED**; it is here to be
-    measured, not to be relied on, and it exists because this library is
-    asymmetric about its two answers: a REFUTED's witness is replayed
-    through the real program, and a VERIFIED — a universal claim with no
-    witness — has had nothing downstream at all.
+    declared set. **SHIPPED AND PROVISIONAL**: audited — the fire
+    condition was checked blind against an independent ``Fraction``
+    oracle sharing no code with this package, 363 gate readings and 363
+    agreements — and its SIGNATURE is not frozen; ``probe()``'s own first
+    parameter changed name and type inside this release cycle.
+    :mod:`stelling.falsify`'s docstring opens with the list of what
+    "provisional" names, including the one hole that is disclosed and
+    open (the analysis's constrained region is never read) and the
+    measured reach on ordinary ``jnp`` code. It exists because this
+    library is asymmetric about its two answers: a REFUTED's witness is
+    replayed through the real program, and a VERIFIED — a universal claim
+    with no witness — has had nothing downstream at all.
 
     Two properties of it are not negotiable and are enforced rather than
     described. First, **it can only refute**: finding nothing adds no
