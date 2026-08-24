@@ -107,11 +107,15 @@ excluded set — writable, non-circular, non-Intentional on that region
 (`∀ x, ‖x‖ ≥ ε: tangent_out = ⟨x, tx⟩/‖x‖`). The Intentional-set
 structure is exactly the guard experiment's bucket discipline, reused.
 
-**The kill inside the survival:** all six concrete rules return their own
-primal verbatim — **the primal-agreement obligation has zero real surface
-in this corpus.** The lying-primal hazard is real as an API property
-(probed, twice) and unpopulated in the wild: every author discharges it
-by construction. The Stage-2 flagship must be reshaped accordingly: the
+**The narrowing inside the survival:** all six concrete rules return their
+own primal verbatim — **the primal-agreement obligation has zero real
+surface in this corpus.** The lying-primal hazard is real as an API
+property (probed, twice), and **six library-authored rules are what this
+project has looked at**: every one of those authors discharges it by
+construction. *Read "unpopulated in the wild" until 2026-08-24 — "the
+wild" is a population no instrument here reaches, and
+`design/primitive-census.md` states the rule: a low count is a fact about
+this corpus and these harnesses.* The Stage-2 flagship must be reshaped accordingly: the
 live obligation is tangent-region agreement on two named norm rules, not
 primal consistency.
 

@@ -264,6 +264,10 @@ can *detect* semantic drift downstream (in differential form — the
 circularity limit in the probe's registration).
 
 **Ecosystem lag of zero is the best news in this file** — seven mature
-libraries traced on a day-old jax release. It is the only quantitative
-evidence anyone has bearing on the no-upper-caps rule, and it points the
-right way.
+libraries traced on a day-old jax release, which is a positive
+observation about seven libraries on one release and is the only
+quantitative reading anyone has bearing on the no-upper-caps rule. *It
+read "the only quantitative evidence … and it points the right way",
+which promotes one observation of a non-event into support for a
+standing policy. One release is one draw; the rule is defended on its own
+argument, and this observation has not contradicted it.*

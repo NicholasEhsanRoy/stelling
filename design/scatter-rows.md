@@ -50,14 +50,22 @@ on jax's index-normalization arithmetic; integer scatter-add emission
 declines wholesale; int64 magnitudes past ulp>1 stay honestly
 undecided (pinned as intended).
 
-## The audit (fresh context; zero UNSOUND, third round in a row)
+## The audit (fresh context; six findings, none UNSOUND)
 
-The central question — does anything disagree about accumulate? —
-was resolved by construction: four-way agreement (jax execution /
-transfer / emission / replay) across 1600+ duplicate-heavy samples,
-and a REFUTED whose witness is valid **only** under accumulate-all,
-replay-confirmed, with collapse-only points rejected. Six findings,
-all instrument/posture-grade:
+The central question — does anything disagree about accumulate? — was
+attacked from four sides at once: jax execution, transfer, emission and
+replay **agreed on 1600+ duplicate-heavy samples**, and a REFUTED whose
+witness is valid **only** under accumulate-all was replay-confirmed with
+collapse-only points rejected. **The replay-confirmed REFUTED is the
+reading; the four-way agreement is the size of the search.** Four
+implementations that did not disagree have not resolved anything by
+construction — they share the same accumulate reading, which is the
+thing under test. Six findings, all instrument/posture-grade:
+
+*Headed "zero UNSOUND, third round in a row" and opened "was resolved by
+construction: four-way agreement" until 2026-08-24. A streak of quiet
+rounds is a property of the rounds, and agreement among instruments that
+share a premise is the weakest form of the strongest-sounding evidence.*
 
 1. **F1 MISLEADING** — the coverage denominator dropped the recorded
    combiner equation on decline paths (real 9 vs ieee 8 on the same

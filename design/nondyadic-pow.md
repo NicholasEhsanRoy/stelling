@@ -5,6 +5,15 @@ by the principal's ruling the same day, after an argument that building
 it before the falsification probe (roadmap item: B10) inverts the
 dependency between a new discharge route and the check that catches it.
 
+**THE SEQUENCING PREMISE DID NOT SURVIVE THE PROBE BEING BUILT, and the
+ruling is dated in place rather than rewritten** (2026-08-24). The probe
+shipped, and **it cannot fire on a non-dyadic `pow` at all** — the
+measurement and the one-line reason are in section 5, which is rewritten.
+The 0.3.0 scoping stands on its own merits; what does not stand is the
+clause calling the probe *"the check that catches it"*. Nothing downstream
+catches this class. Section 4 is therefore not one of two enforcers; it
+is the only one, and section 5 says what that costs.
+
 **Why this note exists.** Every claim below is either a measurement
 taken on 2026-08-18 against `main` at `3482822`, or an argument that
 names the measurement it rests on. The design it describes is one
@@ -110,12 +119,21 @@ emits an exact algebraic relation, and how that relates to the computed
 float is UNVERIFIED IN THIS NOTE and must be established before
 designing against it.
 
-## 4. The gauge — the shipping condition, and three sharpenings it needs
+## 4. The gauge — a gate on the SUITE, and three sharpenings it needs
 
 **The condition (principal, 2026-08-18):** a dedicated, hardcoded
 mutation that sets `eta` to 0 during the SMT emission of a non-dyadic
 `pow`. If the gauge does not instantly go red and catch the false
 VERIFIED, the suite is inadequate and the feature cannot ship.
+
+**Read the direction carefully, because only one of the two is a
+reading.** A RED here is a measurement of the suite's power: the battery
+demonstrably discriminates the factor being gauged. A GREEN is not a
+measurement of anything about the feature — section 4.2 exhibits a green
+produced by a friendly domain, and section 4.3 lists five mutations
+`eta = 0` never perturbs. **The gate is on the instrument. The feature's
+soundness is the containment argument of section 3, and no battery
+supplies it** (section 5).
 
 The instinct is right and is the same move that made B7's bar/gauge
 work: gauge the load-bearing factor directly, and read a surviving
@@ -184,12 +202,72 @@ battery required to have no unexplained survivors — the bar
   derived from the fixture table and asserted equal to measured reach —
   so a flag that silently disables coverage is itself a red.
 
-## 5. Sequencing
+## 5. Sequencing — and the enforcer this note used to expect
 
-**After the falsification probe, not before.** The probe is the
-downstream check for exactly this class: a wrong discharge with no
-witness to replay is the S4 asymmetry, and `eta = 0` is a textbook
-instance of it. Built after, the probe covers the feature for free and
-the shipping condition gains a second, independent enforcer. Built
-before, the mutation battery is the only thing between the feature and
-a false VERIFIED.
+**THE PROBE CANNOT FIRE ON THIS FEATURE. Measured against the shipped
+module, and it is one line.** `stelling.falsify` admits a violation only
+through an EXACT test, and its exact-rational replay refuses a
+non-integer exponent outright — a rational raised to a non-integer power
+is irrational except on a measure-zero set, and the module declines
+rather than guess which side of that it is on. `falsify.py`'s own
+docstring lists the class first among the steps with no exact rational
+reading at all: *"`exp`, `log`, trigonometry, **a fractional `pow`**, a
+non-square `sqrt`. These are inherent. An exactness-only fire condition
+will never reach them."* **A non-dyadic exponent is a fractional
+exponent by definition.** So on precisely the programs this note is
+about, the probe declines under `no-exact-reading-of-this-program`,
+counts the decline, and names the primitive in its stamp line. It cannot
+catch `eta = 0`, and it could not have caught audit 0.2.0 S1 either.
+
+***This section read: "After the falsification probe, not before. The
+probe is the downstream check for exactly this class … Built after, the
+probe covers the feature for free and the shipping condition gains a
+second, independent enforcer."*** Two errors, and the second is the one
+worth reading. The first is factual: the probe does not cover this
+feature, for free or at any price, and *"covers"* was written before
+there was a probe to check the claim against. The second is the class the
+whole tree is built to refuse — **the probe can only refute, so even on a
+class it CAN read, a quiet run is not an enforcement of anything.** A
+search that finds nothing has not enforced a shipping condition; it has
+spent a budget. An instrument that cannot fire and an instrument that
+did not fire look identical in a pass record, which is exactly why the
+first error was invisible.
+
+**So what the shipping condition actually is, without the probe.** Two
+parts, and only the first is a licence:
+
+1. **The containment argument of section 3 is the soundness of the
+   feature.** `x^e ∈ x^r · [1 ± eta]` with `eta` computed by outward
+   rounding is a *proof* — a containment, sound by construction, which
+   degrades to a decline as `eta` grows rather than lying. That argument
+   is what makes a discharge on this route legitimate, and nothing
+   measured can substitute for it. It carries two prerequisites this
+   note already names and does not discharge: the odd-`q` emission arm,
+   whose root guard is written for an even `q` and is *"exactly why a
+   wrong encoding there would be silent"*; and the relation between the
+   algebraic encoding and jax's computed float `pow`, which section 3
+   marks UNVERIFIED IN THIS NOTE.
+2. **The battery of section 4 is a gate on the INSTRUMENT, not evidence
+   about the feature.** A mutation battery is a positive control, and a
+   positive control is the one thing in this family that establishes
+   something: a mutant that survives is a measurement of the SUITE's
+   blindness. Section 4.3 already says the right thing — `eta = 0` is
+   necessary and not sufficient — and section 4.2 already shows the
+   battery going green for a reason that says nothing about the code.
+   **Read the battery's outcome as a statement about the suite's
+   discriminating power, never as a statement about the feature's
+   soundness.** Its green does not license the route; its red is
+   decisive and blocks it.
+
+**And the disclosure that has to travel with the feature.** If this ships,
+it ships into a tree where **no downstream instrument can read it** — not
+the probe, for the reason above; not the solver, which is where the
+obligation goes rather than where it is checked; and not exact-rational
+replay, which is the same refusal wearing the probe's hat. Every other
+discharge route in this library has at least one mechanism that could
+contradict it after the fact. This one would have none, and the right
+place for that sentence is `SOUNDNESS.md` rather than a design note.
+Sequencing after the probe was the correct call for a different reason
+than the one recorded: not because the probe would catch this, but
+because building a can-only-refute check first is cheap and building the
+route first is not reversible.

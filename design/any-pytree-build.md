@@ -104,7 +104,10 @@ census-recorded for any future round, none built.
 
 ## The audit gate, closed (2026-07-18)
 
-**No unsound verdict path.** All nine mandated constructions passed:
+**No unsound verdict path was found by the nine mandated constructions,
+and all nine passed** — the list is the audit's reach, not a property of
+the build (*read as the bare claim "No unsound verdict path" until
+2026-08-24*). The constructions:
 aliasing both directions (one declaration per shared object — the traced
 `x − x` is the *same var twice*; equal-but-distinct never merged); the
 convert whitelist verified **exhaustively value-preserving** (all 65536
@@ -131,8 +134,12 @@ The pattern held for the third audit in a row: the findings clustered in
 the *newest* surfaces (the decoders the builder added under the guard
 rule; the structural ops' edge cases), the core survived, and the
 predicted fourth guard instance did not occur — the builder's guards all
-declined correctly, because the rule was in the spec before the build
-instead of in a fix after it.
+declined correctly. *This read "…because the rule was in the spec before
+the build instead of in a fix after it." One build in which a predicted
+defect did not appear cannot carry a because; it is equally consistent
+with this build not being a place the defect would have appeared. The
+convention is worth keeping on the three occurrences that motivated it —
+see `design/jax-verification-categories.md`, corrected the same day.*
 
 ## What this pass does not do
 

@@ -94,8 +94,13 @@ field was added; ieee mode is its first test.
 **Class 4 — subnormal / FTZ.** All three out of band: dfx#417's values
 lie in `[−3, 3]`; npy#249's `exp` image bottoms at `1.25e−9`
 (≈ 10²⁹⁹ × MIN_NORMAL); hit386's declared `x₁ ∈ [6.8, 415]` and its
-field values are order 10⁰–10⁴. **Nothing approaches 2⁻¹⁰²².** Predicted
-filtered; the run confirms by observing no haze note.
+field values are order 10⁰–10⁴. **Nothing approaches 2⁻¹⁰²².** Predicted filtered — and the prediction is
+carried by the three declared ranges above, which are enumerated and
+exact. *The run's absence of a haze note is consistent with that and
+confirms nothing on its own: an instrument that stays quiet has spoken
+only if it could have spoken (`design/lessons-ledger.md` L23), and this
+run never established that a haze note was reachable. Read "the run
+confirms by observing no haze note" until 2026-08-24.*
 
 **Class 5 — dtype.** All three declare `float64` under
 `jax_enable_x64=True`; the binary64-only guard is not engaged. Predicted

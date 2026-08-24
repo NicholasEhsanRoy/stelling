@@ -34,15 +34,34 @@ letter said "into err" and was internally inconsistent with its own
 known answer; the builder's deviation is the correct resolution.
 Sharing is keyed by form content only at `err == 0` (where a form IS an
 exact function of its symbols) and by `(var_id, element)` identity
-otherwise; the auditor could not construct two shared-symbol products
-with differing deviation functions, and `(x·y)·z` vs `x·(y·z)`
-correctly do not share.
+otherwise; `(x·y)·z` vs `x·(y·z)` correctly do not share, which is a
+checked positive. **The auditor could not construct two shared-symbol
+products with differing deviation functions — recorded as the auditor's
+result, not as the key's soundness.** One person failing to build a
+counterexample bounds the effort spent, not the class; the argument that
+the keying is right is the exactness clause above it, and that argument
+is what carries the design.
 
-## The audit (fourth consecutive zero-UNSOUND round)
+## The audit — seven findings, and what the round's zeros do and do not say
 
-Containment survived ~4,000 exact-rational fuzz queries (0 violations;
-2,643 decided obligations, no false discharge, no false set-refute) and
-thirteen targeted constructions. Seven findings, all instrument-grade:
+**The measurements, unchanged.** ~4,000 exact-rational fuzz queries over
+containment: 0 violations, across 2,643 decided obligations, with no
+false discharge and no false set-refute observed; plus thirteen targeted
+constructions. Seven findings, all instrument-grade.
+
+***This heading read "fourth consecutive zero-UNSOUND round", and the
+round below refutes the reading.*** A streak counts rounds that found
+nothing and reports it as a property of the code; it is a property of the
+rounds. **Finding F2 is this round's own counter-evidence**: four
+mutation classes the auditor invented, each *demonstrated* unsound by
+exact-rational measurement, **survived every shipped gate** — so at the
+moment the streak reached four, the gates were measurably blind to four
+unsound constructions, and nothing in the streak could say so. The zeros
+above are retained because they record what ran and at what size; the
+readings that carry this build are the seven findings, the thirteen
+targeted constructions, and the containment invariant's argument — none
+of which is a null. (`design/lessons-ledger.md` L21 and L23 are the
+standing rules; this is what they look like when applied to a heading.)
 
 1. **F1 MISLEADING (L20's family, third instance)** — the vacuity
    stamp's "envelope is load-bearing" clause was narration beyond the
@@ -97,8 +116,9 @@ exactly as the probe predicted. **The v2 frontier, named by
 measurement, in expected-value order:** scatter routing in the slice
 layer (unlocks the HeatNode flagship — the largest measured prize),
 `select_n` join handling (the ratchet class), strict-root support for
-ℝ-side claims (`t+dt > t`). No false discharge anywhere; the controls
-stayed honest.
+ℝ-side claims (`t+dt > t`). No false discharge was observed on any case
+in this evaluation, and the controls fired where they were built to fire
+— the second half is a reading, the first is the size of a search.
 
 ## Suite state at commit
 

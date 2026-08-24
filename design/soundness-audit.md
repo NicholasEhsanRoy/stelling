@@ -21,13 +21,17 @@ disqualifies it as their reviewer.
 | 6 | FRAGILE | the flat shared environment let one branch read another's internals, silently defeating the promised unbound-var error | fixed: isolated scopes per branch/call run |
 | 7 | FRAGILE | `join` silently truncated mismatched shapes; structural ops trust params | shape guards added to `join`/`select_n`; full structural-param validation recorded as a work item |
 
-Clean areas, checked explicitly by the auditor: the interval arithmetic
+Areas the auditor attacked and did not break: the interval arithmetic
 itself (mixed 0/±inf products, half-infinite division, exp endpoints,
 overflow saturation), the three-valued comparisons in both definite
-directions, the unknown-primitive ⊤ path for `while`/`scan` (no silent
-truncation anywhere), the obligation classifier, and the literal decoder's
-refusals. **Every wrong status the auditor produced came through findings
-1–3, never through the classifier or the arithmetic.**
+directions, the unknown-primitive ⊤ path for `while`/`scan` (**no silent
+truncation seen on the constructions attempted** — not "anywhere"), the
+obligation classifier, and the literal decoder's refusals. **Every wrong
+status the auditor produced came through findings 1–3, never through the
+classifier or the arithmetic** — which is a fact about the statuses this
+auditor produced, and a bound on the attack set rather than on the code.
+*Headed "Clean areas" until 2026-08-24; the heading is what made a list of
+attacks that did not land read as a list of properties that hold.*
 
 ## No verdict flipped — verified, not asserted
 
@@ -46,7 +50,12 @@ f32 case in `tests/test_harness.py`).
   all in or adjacent to the control-flow pass — the machinery built
   fastest, under a hypothesis, in one commit. The MVP core (arithmetic,
   comparisons, classifier), built under the paranoia budget, survived
-  every attack. Speed of construction predicted defect density exactly.
+  every attack **this auditor constructed** — and the section four screens
+  down says why that is worth little on its own: a clean pass on the
+  interesting primitive says little about the boring ones. Speed of
+  construction and defect density lined up **in this one audit's
+  findings**; that is one observation, not a law, and it read as one
+  ("predicted defect density exactly") until 2026-08-24.
   *Attribution sharpened (2026-07-18, follow-on):* speed was a variable —
   **so was stake**. The core was built before there was a hypothesis to
   confirm; the control-flow machinery was built *to make the six
@@ -86,10 +95,20 @@ about the boring ones.
 | 4-A | correct-under-ℝ | `(x+x)·0` over a finite box: the analysis's overflow saturation gives `[maxfloat, ∞]`, the 0·∞ convention gives 0, `z < 1` discharges — **true in ℝ, false in IEEE for every declared input** (`inf·0 = NaN`). End-to-end through `cond` and `select_n`: a concretely-always-false predicate reached the index position as definite | **not a code defect under the registered `semantics: real` dial** — it is the *strongest exhibit of the registered gap yet*: an ℝ-true definite discharge, false in floats, from **straight-line arithmetic on a finite box**. It **refutes** the earlier scope claim that outward rounding makes monotone arithmetic float-conservative (`design/semantics-classification.md`, amended): overflow→NaN paths are not guarded. Pinned as a marker test that flips the day the dial moves |
 | 1/2 | correct-under-ℝ | ⊤ = [−∞, ∞] contains every *real* but not NaN; `r ≤ +∞` over a ⊤ loop output discharges while the concrete run yields NaN | same dial; same marker treatment. **The clause that stood here — *"and the ⊤-widening vacuity guard already fences this shape out of every count"* — is WITHDRAWN (2026-08-21) as false**, in `SOUNDNESS.md`'s entry for this audit and here. The guard's predicate is whole-obligation — does it still discharge with every declared bound widened to (−inf, +inf)? — so it fences this shape where the obligation is a tautology *entire* — and it fences other things too, an `assume` surviving the rewrite among them, so it is not a *characterisation* of the shape in either direction (`assume(3 ≤ x ≤ 4); assert_(x·x ≤ 16)` is false at x = 5 and the guard still FIRES, both x64 cells). Driven with a control, both x64 cells, `vacuity_mode="inputs-only"`: `r ≤ +∞` **alone** over a ⊤ `while` output is VERIFIED and the guard FIRES; the same `r`, times `0.0` and conjoined with `x ≥ 0` over `[0.5, 1.0]`, is VERIFIED with the stamp reading *"no obligation discharges with the declared bounds widened"* while jax is False at 25 of 25 grid points. What catches it is the `semantics="ieee"` dial (UNKNOWN, same run), which is this row's first disposition and is now its only one |
 
-## PASSes — the first audit's assertion, now witnessed
+## PASSes — the first audit's claim, now witnessed on named constructions
 
-The "no silent truncation anywhere" claim is no longer an assertion:
-executed witnesses show a 1000-iteration `while` yields `unknown` for both
+**What a witness upgrades, and what it does not.** Each item below is an
+executed construction with a checked outcome, which is a positive result
+about that construction. **None of them makes "no silent truncation
+anywhere" true**, because a universal negative is not reachable by adding
+witnesses — more of them widens the set that was checked and leaves the
+complement exactly where it was. *This section was headed "the first
+audit's assertion, now witnessed" and opened "the claim is no longer an
+assertion", which is the promotion-by-sampling move this repository refuses
+elsewhere (`design/lessons-ledger.md` L21, L23). Corrected 2026-08-24: the
+scoped claim is the honest one and it is what the witnesses buy.*
+
+Executed witnesses show a 1000-iteration `while` yields `unknown` for both
 a concretely-true and a concretely-false obligation with body equations
 counted unreached; a concretely-zero-trip `while` is not exploited; an
 obligation *inside* a loop body is never judged (counted unreached, never

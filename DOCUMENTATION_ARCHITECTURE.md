@@ -42,8 +42,14 @@ and unverified** — §12.6 is the standing disclaimer and it is not decorative.
 Link 7 was mischaracterised as the bet Kani makes on rustc's backend; it is not,
 and the correction runs through §2.3, §4.2, §4.3, and §11.1 (**a precision field
 in the stamp**). Fuzz-on-verified was under-scoped at links 3–6; its oracle is the
-compiled program, so it reaches **2–8**, and it is the only defence links 2 and 7
-will ever have before Phase 5 (§6.1). The chain stopped at 7 and now stops at
+compiled program, so it reaches **2–8** — and *reaches* is the whole of it.
+***Corrected 2026-08-24:*** that clause continued *"and it is the only defence
+links 2 and 7 will ever have before Phase 5"*, which §2.5's own capability table
+forbids two screens later — **the probe is a search, and absence of evidence is
+not evidence**. It is the only mechanism this architecture ever *points at*
+links 2 and 7 before Phase 5, which is a weaker claim by a category: it leaves
+those links with no defence at all, only a chance of being caught. §2.3.1
+re-derives the whole column against the tree. The chain stopped at 7 and now stops at
 **8 — hardware**, which is unclosable and named for that reason (§2.3). §13 is new
 and asks what §12 does not. `design/value-model.md` is new and is the half of the
 decision this document was missing.
@@ -98,9 +104,15 @@ who does not trust stelling at all — **stelling could be a random number
 generator and a witness that survives both checks would still stand.** A verified
 verdict is a *universal* claim, and **no execution of the program can confirm
 it**, because you cannot run all of R. It rests instead on a chain of eight links
-(§2.3), **three of which — 4, 5 and 6 — have nothing but a sampling budget
-behind them today**, a fourth of which has that plus one constraint of use, and
-one of which — hardware — no roadmap item will ever close. Three of the founding
+(§2.3), **five of which — 2, 4, 5, 6 and 7 — have nothing behind them today that
+could license a green verdict** (§2.3.1), one of which — hardware — no roadmap
+item will ever close, and the rest of which are held by refusals narrower than
+the links they sit on. *This sentence read "three of which — 4, 5 and 6 — have
+nothing but a sampling budget behind them today, a fourth of which has that plus
+one constraint of use". A sampling budget is not something behind a link: the
+sampler can only refute, so a budget spent and quiet leaves the link exactly
+where it was. The count changed because the quantity changed, not because the
+tree did.* Three of the founding
 roadmap's "hard and strategic" items close a link each; the rest are capability,
 not trust. **That subset of the roadmap is a trust-debt schedule** (§2.3).
 
@@ -329,7 +341,7 @@ reading of it.
 | Responsibility | Owner | Evidence |
 |---|---|---|
 | The verdict means what it says (scope, tiers, arithmetic, trust boundary all stamped) | **stelling** | The verdict artifact (§2.6); `SOUNDNESS.md` |
-| Transfer functions are as sound as their declared tier | **stelling** | Tier arguments (§5.1); differential testing (§6.1) |
+| Transfer functions are as sound as their declared tier | **stelling** | Tier arguments (§5.1). *Differential testing stood in this cell and does not belong in an Evidence column: it can refute a tier and can never establish one (§6.1, §2.3.1). The argument is the evidence; the testing is the search for its refutation* |
 | Witnesses are checked — in R, and the assertion fails under `jit` | **stelling** | A construction invariant, not a test (§10.2) |
 | Soundness events are logged, scoped, and mechanically queryable | **stelling** | The ledger (§7); `stelling audit` |
 | Coverage — which primitives fell to ⊤, where precision died | **stelling** | The coverage artifact (§6.3) |
@@ -339,7 +351,7 @@ reading of it.
 | The qualification argument, if a verdict is load-bearing | **User** | The qualification package (§11) as input; the argument is theirs |
 | The ℝ ⇒ float gap, until it closes | **User** (named in every verdict) | `arithmetic` field; `docs/semantics/arithmetic.md` |
 | The traced ⇒ compiled gap, until it closes | **User** (named in every verdict) | `trust_boundary` field; `docs/qualification/trust_boundary.md` |
-| The solver is correct on this query | **Shared, unresolved** | Cross-solver agreement today; certificates eventually (§11.3) |
+| The solver is correct on this query | **Shared, unresolved** | **Nothing today** — certificates eventually (§11.3). *This cell read "cross-solver agreement today". Agreement is not evidence (§6.1, §11.2): two backends that agree have failed to disagree, which is a fact about the pair. The portfolio is real, it runs, and it belongs in the row above as a refutation channel — not here, where the column is headed Evidence* |
 | Deciding a verdict is good enough for a given SIL/ASIL/DAL | **User and their assessor** | Everything above |
 
 The last four rows are the honest ones and must never be softened. Two of them
@@ -489,15 +501,45 @@ here. The qualification package's copy of this table (§11.1) must carry the
 *actual* state at each release rather than this one — and until it does, read
 this column as the plan of record and not as an inventory.
 
-| # | Link | The claim | If it fails | Planned defence | What would close it | Phase |
+**AND "DEFENCE" IS THE WRONG WORD FOR MOST OF WHAT IS IN IT.** Held to §2.5's
+capability table — ***it is a search; absence of evidence is not evidence*** —
+the cells sort into four kinds, and only one of them defends anything:
+
+- a **licence** — a mechanism whose success is a reason to believe the link
+  holds. Two shapes are available and no others: a **refusal** that cannot be
+  talked past (transcription that raises on a param it has no rule for has
+  *proved* that no such param was silently dropped), and a **checkable
+  artifact** (a proof certificate an independent checker validates). A licence
+  is always narrower than the link; the question to ask of one is *what exactly
+  did it prove.*
+- a **refutation channel** — a mechanism that can only fail. Its firing is
+  decisive; **its null result licenses nothing**, and recording that null result
+  as though it did is the defect §2.6 now refuses. Fuzz-on-verified, cross-solver
+  agreement, the oracle property, every mutation battery and every containment
+  sweep are of this kind, and so is every technique in §6.1 whose oracle is
+  execution.
+- a **constraint of use** — not a defence of the link but a narrowing of the
+  claim, so the link's failure mode falls outside what was asserted. Pinning the
+  precision (§4.2) is the example, and it earns more than the label suggests:
+  it converts link 7's *silent* failure into a compile-time error, which closes
+  the silent half and nothing else.
+- a **naming** — a stamp field that discloses the gap and closes none of it
+  (`arithmetic`, `trust_boundary`, `precision`, `vacuity`).
+
+A column of refutation channels read as a column of defences is how a trust
+argument comes to report four links as covered when every one of them is bare.
+**The kind is marked in every cell below**, and §2.3.1 re-derives them against
+the tree, which is the inventory this table is not.
+
+| # | Link | The claim | If it fails | Planned mechanism, and its kind | What would close it | Phase |
 |---|---|---|---|---|---|---|
-| 1 | **Harness** | R and B say what the engineer meant | Verified answers a question nobody asked | Vacuity guard — **R ≠ ∅ only** | Positive controls; cover obligations; review (§10.8) | 1 |
-| 2 | **Transcription** | the IR is the jaxpr | Everything downstream concerns a different program | Raise-on-unknown-param; per-primitive pinned traces; **fuzz-on-verified** (§2.5) | Property-based transcription tests over the corpus | 1–2 |
-| 3 | **Query construction** | (B, R) is the property | Verified concerns the wrong formula | Witness checking (red path); **fuzz-on-verified** | Positive controls; cross-engine agreement (§2.5) | 1 |
-| 4 | **Transfer soundness** | each transfer is as sound as its declared tier | A `sound` tier that isn't ⇒ **false verified** | **fuzz-on-verified** only | Differential testing; tier arguments; per-transfer proofs | 3 |
-| 5 | **Solver** | the solver is right on this query under these options | False UNSAT ⇒ **false verified** | **fuzz-on-verified** only | Cross-solver agreement; **proof certificates + independent checker** | 3 / 5 |
-| 6 | **ℝ ⇒ float** | the margin absorbs rounding | Proven over ℝ, false in float | **fuzz-on-verified** only; named in the verdict, carried by the user | FPTaylor-style per-step bounds; the margin-absorption argument | 5 |
-| 7 | **jaxpr ⇒ executed program** | the jaxpr denotes the computation XLA runs on this device | Verified the traced program, ran a different one | **Pinning the precision** (§4.2) — a constraint of use, and a real partial defence; **fuzz-on-verified**, on the device that will run it | Translation validation to HLO | 2 (pin) / 5 |
+| 1 | **Harness** | R and B say what the engineer meant | Verified answers a question nobody asked | Vacuity guard — **R ≠ ∅ only** (*licence*, for exactly that much: a point in R is exhibited, not searched for and missed) | Positive controls; cover obligations; review (§10.8) | 1 |
+| 2 | **Transcription** | the IR is the jaxpr | Everything downstream concerns a different program | Raise-on-unknown-param (*licence*, narrow: no param was dropped for want of a rule); per-primitive pinned traces (*refutes*); **fuzz-on-verified** (§2.5) — *refutes* | Property-based transcription tests over the corpus | 1–2 |
+| 3 | **Query construction** | (B, R) is the property | Verified concerns the wrong formula | Witness checking (*licence* — and only for a `falsified`; it says nothing about a green one); **fuzz-on-verified** — *refutes* | Positive controls. *Cross-engine agreement stood here and closes nothing — it is a refutation channel and belongs in the column to the left* | 1 |
+| 4 | **Transfer soundness** | each transfer is as sound as its declared tier | A `sound` tier that isn't ⇒ **false verified** | **fuzz-on-verified** only — *refutes*, so **no defence: a chance of being caught** | Differential testing; tier arguments; per-transfer proofs | 3 |
+| 5 | **Solver** | the solver is right on this query under these options | False UNSAT ⇒ **false verified** | **fuzz-on-verified** only — *refutes*, so **no defence** | **Proof certificates + independent checker** — the only thing that closes it. *Cross-solver agreement stood first in this cell; it is real, it runs, and it refutes. It does not close a link* | 3 / 5 |
+| 6 | **ℝ ⇒ float** | the margin absorbs rounding | Proven over ℝ, false in float | **fuzz-on-verified** only (*refutes*); named in the verdict (*naming*), carried by the user — **no defence** | FPTaylor-style per-step bounds; the margin-absorption argument | 5 |
+| 7 | **jaxpr ⇒ executed program** | the jaxpr denotes the computation XLA runs on this device | Verified the traced program, ran a different one | **Pinning the precision** (§4.2) — a *constraint of use*: it narrows the claim rather than defending the link, and closes the **silent** half by making the unhonourable case a compile error; **fuzz-on-verified**, on the device that will run it — *refutes* | Translation validation to HLO | 2 (pin) / 5 |
 | 8 | **hardware** | the machine computed what it was told to compute | Verified and compiled correctly, executed wrongly | *Nothing, and nothing will* — see below | **Unclosable.** Redundancy and re-execution are mitigations, not closures | — |
 
 And the red direction, in full:
@@ -558,15 +600,36 @@ useful single artifact in this document. Six readings of it:
   states itself.)* So the constraint of use is not "prefer HIGHEST" — it is
   **"state the algorithm, not the preference, and let it fail loudly on a device
   that cannot honour it."** Link 7's Planned-defence cell is not *Nothing*.
-- **Three links have nothing but the fuzzer, a fourth has the fuzzer plus a
-  constraint of use, and link 8 has nothing at all.** Read off the table above:
-  links **4, 5 and 6** are the rows whose Planned-defence cell is
-  *"**fuzz-on-verified** only"*; link **7**'s cell leads with *"Pinning the
-  precision (§4.2) — a constraint of use, and a real partial defence"*, which is
-  what the bullet immediately above this one says in as many words; and link 8's
-  is *"Nothing, and nothing will"*. So **four** links are unchecked by any
-  *dedicated* mechanism before Phase 3 — but none of the four is bare, because
-  fuzz-on-verified (§2.5, §6.1) points at all of them at once.
+- **Four links are bare, and the fuzzer is why that was not obvious.** Read off
+  the table above: links **4, 5 and 6** are the rows whose mechanism cell is
+  *"**fuzz-on-verified** only"*; link **7**'s cell leads with the precision pin,
+  which narrows the claim rather than defending the link; and link 8's is
+  *"Nothing, and nothing will"*. So **four** links are unchecked by any
+  *dedicated* mechanism before Phase 3 — **and all four of them are bare.**
+
+  ***That last clause read "but none of the four is bare, because
+  fuzz-on-verified (§2.5, §6.1) points at all of them at once", and it is the
+  error this whole document exists to catch other people making.*** §2.5's
+  capability table, one screen down, bars the sampler from `verified` on the
+  ground that **absence of evidence is not evidence**. A mechanism that can only
+  refute does not stop a link being bare — it gives a broken link a chance of
+  being noticed. Pointing one such mechanism at four links does not cover four
+  links; it gives four links one chance each, and a chance is not a defence.
+  Nor is it a small correction: this sentence is what the qualification package
+  would have carried into §12.2's TD row, where "the link has a defence" and
+  "the link has a detector that has never been shown to detect anything on it"
+  are the difference between two confidence levels. **Four bare links in a
+  trust argument are a disclosure, and §2.3.1 makes it.**
+
+  **Two counts, two quantities, and this is the one place they must not be
+  conflated.** *Four* is the number of links with no dedicated mechanism
+  before Phase 3 — 4, 5, 6 and 7, read straight off the table. *Five* is the
+  number with **no licence for a green verdict** — 2, 4, 5, 6 and 7 — which
+  §2.3.1 derives against the tree, and which includes link 2 because the
+  mechanisms in its cell either refuse (a licence narrower than the link) or
+  refute (no licence at all). The paragraph below is about a bullet that used
+  three numerals for *one* quantity; these are two quantities and each is
+  named where it is used.
 
   *This bullet said* **five** *and then enumerated* **four**, *in one sentence,
   and the executive summary repeated the five where a reviewer meets it first.
@@ -575,8 +638,10 @@ useful single artifact in this document. Six readings of it:
   of them contradicted by the bullet directly above it.*
 
   Link 4 is the one **stelling owns entirely and can close by
-  itself** — differential testing needs no research, only work — which is why it
-  outranks the others despite being the least glamorous. Links 6 and 7 the *user*
+  itself** — differential testing needs no research, only work, and even then it
+  buys a refutation channel rather than a licence, which is the ceiling on every
+  route to link 4 short of a per-transfer proof — which is why it outranks the
+  others despite being the least glamorous. Links 6 and 7 the *user*
   carries (§1.4); link 5 is shared and unresolved; link 8 is nobody's and stays
   open forever.
 - **Part of the roadmap is a trust-debt schedule — not all of it.** Exactly three
@@ -607,6 +672,287 @@ useful single artifact in this document. Six readings of it:
   machine, not of the run.
 - **Link 1 is the user's, and it is the least defended.** See §10.8: the
   vacuity guard catches R = ∅ and nothing else. It does not catch B ≡ true.
+
+#### 2.3.1 What actually defends each link — the column re-derived against the tree
+
+**Derived 2026-08-24 against `main` at `115d771`**, by reading the shipped
+modules and the shipped suite. The table above is July 2026's plan and says so;
+this is the inventory it told the reader to go and take, and it exists because
+the plan column was being read as one. It is dated the way every other empirical
+claim in this repository is dated: **re-derive it at each release, and do not
+quote it as current without doing so.**
+
+**The result, stated first because it is the finding and not a summary:**
+*nothing in this tree licenses a `verified` at links 2, 4, 5, 6 or 7.* Every
+mechanism that bears on the truth of those links is a refutation channel, and a
+refutation channel that has not fired has said nothing. What differs between the
+five links is not whether they are defended — none of them is — but **how many
+refutation channels point at them, whether those channels run without being
+asked for, and whether any of them has ever been shown capable of firing on that
+link.** Those three questions have different answers per link and they are the
+honest content of this section.
+
+**And the claim that a single probe covers four links at once is not merely
+unlicensed — it is measured false in this tree.**
+`tests/test_falsify_wrap_reach.py::test_NEITHER_instrument_reaches_the_jnp_full_door`
+records an open, disclosed false `VERIFIED` — an out-of-dtype-range integer
+literal narrowed before tracing — that **neither** the falsification probe nor
+the overflow tripwire reaches. A defect the tree knows about, has written down,
+and cannot detect is the strongest possible answer to *"but the fuzzer points at
+all of them at once"*: the fuzzer is pointed at it and does not see it.
+
+**Link 2 — transcription.**
+
+- *Licence, and it is real but narrow.* The transcriber's param whitelist
+  (`_jax_compat`'s `_Transcriber.param`) **refuses** rather than drops: a param
+  type with no transcription rule raises `ir.UnsupportedParamError`, and so do a
+  non-empty mesh, a non-trivial sharding, an unmaterialisable const and a
+  non-static dimension. `ir.py` states the asymmetry that makes this the right
+  shape — unknown *primitives* are fine, because the registry sends them to ⊤;
+  unknown *params* are not, because dropping one changes the semantics of the
+  equation it configures. **What it licenses is one sentence:** *no equation in
+  this IR lost a param for want of a rule.* It licenses nothing about whether a
+  param that was transcribed was transcribed rightly.
+  `ir.CANONICALIZATIONS` is the same shape one level up — it licenses *the
+  canonicalizations are exactly these*, with a witness apiece in
+  `tests/test_ir_canonicalization.py`, so an entry that stops describing the code
+  reds and a witness with no entry reds.
+- *A licence that does not run where the reader assumes.* `_REQUIRED_PARAMS`
+  refuses an equation missing a param jax always supplies — **on the load path
+  only, deliberately**, because hand-built IR legitimately omits params. It
+  defends a *deserialized* document, not a traced one.
+- *Refutation channels that run.* The oracle property in `tests/property/`
+  evaluates the obligation **as the user wrote it**, in unbounded Python
+  integers, and refutes a `VERIFIED` that has a violating admitted point. It is
+  the only instrument in the tree whose ground truth is the *source text* rather
+  than an execution, and that is exactly why it reaches link 2: the defect it was
+  built around wraps a literal mod `2**bits` *before* tracing, which an execution
+  oracle wraps too and then agrees with. Its power is demonstrated rather than
+  asserted — `tests/property/positive_controls.py` pins, per property, a commit
+  at which it is known to fail, and a property whose control cannot be
+  demonstrated does not ship. Its limits are stated by its own README and are
+  severe: **integers only**, one declaration, boxes small enough to enumerate
+  exactly, and at the per-push budget it is *"a rot detector, not a defect
+  finder"* in as many words. The metamorphic properties beside it need no ground
+  truth and are stronger than an execution oracle precisely where a defect is in
+  the translation. The cross-series differential refutes drift between the two
+  tested jax series and **skips** unless a second interpreter is supplied.
+- *Refutation channel that is opt-in.* The overflow tripwire, armed as a pytest
+  plugin. Armed, it refuses a verdict on a trace it saw narrow a constant — and,
+  in its **third state**, refuses one on a trace it could not fully watch, in its
+  own sentence: *"none was seen, and none was seen not to be."* That third state
+  is this document's doctrine already implemented in shipped code, by an author
+  who declined to report an unmade measurement as a clean one.
+- *Refutation channel that does not run.* Fuzz-on-verified. As built it is
+  `check(..., falsify="sample")`, **default-off** — with the default the module
+  is never imported — and no job under `.github/` and no script under `tools/`
+  turns it on. Its reach is bounded again by its own fire condition: only an
+  **exact** reading may admit a violation, so a program its exact-rational replay
+  cannot read through is a program it cannot fire on however false the
+  obligation is.
+- *Absent.* **Per-primitive pinned traces do not exist.** Nothing in the suite
+  compares a live `make_jaxpr` against a committed jaxpr or IR document; what
+  exists pins which transfer *name* fired, which is a name binding, not a shape.
+  Property-based transcription tests over the corpus — the table's "What would
+  close it" — do not exist either. And the IR round-trip is not a transcription
+  check: its oracle is the IR, so a transcriber that dropped an equation would
+  round-trip perfectly (§6.1 says this already).
+
+**Link 4 — transfer soundness.**
+
+- *No licence, and the reason is one line.* The tier is a **label**. `propagate`
+  declares `TIER_EXACT`, `TIER_SOUND` and `TIER_SOUND_LIBM` beside each row of
+  its registry and the stamp carries the pairs that fired. **There is no `Tier`
+  type and no `TransferMeta` in the source tree**, no `argument_ref`, and no
+  registration-time refusal of a tier whose argument does not resolve; those are
+  §10.1's Phase-2 items and Appendix E's boxes for them are unchecked. So a tier
+  today is the author's assertion, carried faithfully to the reader, with nothing
+  behind it the reader can open. The arguments themselves are real where they
+  exist — outward-rounded brackets in the interval kernel, exact-rational
+  coefficients with outward snaps in the affine refinement, a measured
+  per-decline-class error table in `dot_general`'s docstring — but **nothing in
+  the tree binds a label to its argument**, which is the entire content of the
+  Phase-2 item. `transfer_provenance` is a related trap: it is a stamp field
+  whose every entry is the constant `"core"`, so it reads as a provenance and
+  records nothing.
+- *A shipped mitigation that is a policy, not a check.*
+  `verdict.VERIFIED_BARRED_PRIMITIVES` downgrades a `VERIFIED` whose emitted
+  slice contains `scatter`, on the stated ground that a *missed* violation would
+  mint a false `VERIFIED` with nothing downstream to catch it. It is
+  hand-maintained and currently holds one primitive; it is a real, shipped,
+  fail-closed narrowing of what green can be claimed on, and it defends nothing
+  about the rows it does not name.
+- *Refutation channels that run, and this is where the tree is strongest.* The
+  mutation batteries — the `pow` and `square` row gauges, the scatter gauges, and
+  the `fidelity.gauge` bar they are held to — **do not report an absence. They
+  report detection power.** A mutant that survives is a statement about the
+  suite, an unexplained survivor is a red, and a gauge's zero is only meaningful
+  against the surface it drove, which is why every report carries its scope. That
+  is the one shape in this repository that supports a claim stronger than *"we
+  looked"*, and it is the shape any TD argument would have to be built from
+  (§12.2). Beside it sit the containment gauges, which sample the true value set
+  **eagerly and under `jit`** and assert the computed box contains it, and the
+  exact-rational containment sweep behind the ledger's S10 entry, whose counts
+  are module constants so drift reddens the suite rather than leaving prose to be
+  believed. That sweep's own disclaimer is the model for this whole section: it
+  is *"a containment BATTERY, not a proof"*, it drives the kernels rather than
+  the traced pipeline, and *"it says nothing about transfers it does not name."*
+- *Absent, and the gap is a ratio.* Containment gauges exist for a handful of
+  primitives against a registry of some eighty-odd rows. There is no
+  registry-wide containment sweep, and there is no `tests/differential/`.
+  Differential testing against concrete corpus runs — the table's "What would
+  close it" — is not built. Note the ceiling even when it lands: **differential
+  testing is a refutation channel too. The only route from link 4 to a licence is
+  a per-transfer proof**, and that is on no phase in this document.
+
+**Link 5 — the solver.**
+
+- *Licences, and they are about the record rather than the answer.* Several
+  mechanisms in `solvers` refuse to emit a verdict over a record that does not
+  describe the work: `ProvenanceError` (a spawn counter and an invocation ledger
+  maintained from disjoint code sites, deliberately anti-correlated, checked for
+  agreement before any escalated verdict emits), the **query-pairing gate** (an
+  escalation carrying work must reproduce the `content_hash` of the query it is
+  stamped against, and an absent hash is refused too), and the
+  **semantics-pairing gate** (an escalation may not be stamped against a
+  propagation of the other semantics, in either direction). Together these
+  license *this stamp is about this query, under these semantics, and the
+  invocations it names are the ones that happened.* That is worth having, it is
+  the mechanised form of `ir.py`'s own *"did both solvers see the same query"*,
+  and it is not a claim about whether the solver was right.
+- *A licence about the region.* After an `unsat`, the same backend is asked
+  whether the boxes and axioms alone are unsatisfiable; if they are, the
+  discharge is refused as an unsatisfiable assumption rather than reported as a
+  proof. Nothing has to be believed across solvers for that reading — it is one
+  backend's two answers — and it catches the *relational* vacuity the interval
+  detector structurally cannot see.
+- *Refutation channel, and it is the best-instrumented one in the tree.* The
+  portfolio is **two backends, independently, on the same emitted text** —
+  `PORTFOLIO_SIZE` is the constant 2 rather than `len(backends)`, precisely so
+  that *"did this verdict get the cross-check the design promises"* is
+  answerable — and a sat/unsat disagreement **raises** and is never a tiebreak.
+  When fewer than two answered, the verdict carries a portfolio-degradation
+  disclosure that says what was lost, in the right direction: *"a discharge is a
+  universal claim over the whole declared box, so nothing downstream re-derives
+  it the way exact-rational replay re-derives a witness."* Two qualifications
+  that matter: escalation is **opt-in** (the solver timeout has no default;
+  omit it and the verdict is interval-only), and agreement licenses nothing —
+  **agreement is not evidence** (§6.1, §11.2), because two solvers wrong the
+  same way on a shared emission is the case it cannot see.
+- *Absent.* Proof certificates and an independent checker: nothing in the tree
+  requests, stores, replays or checks a proof object. An `unsat` is believed on
+  the backends' word, qualified only by the fact that two of them said it. This
+  is the only item on this document's roadmap that would turn link 5 into a
+  licence (§11.3).
+
+**Link 6 — ℝ ⇒ float.**
+
+- *A licence the table does not have, and it should.* `semantics="ieee"` exists,
+  is shipped, and is **format-parametric** — binary64, float32, float16 and
+  bfloat16 are each judged in their own format. In that mode obligations are
+  judged with rounding modelled rather than in ℝ, so **for the censused
+  behaviours the ℝ⇒float gap does not arise, because the verdict is not about
+  ℝ.** It is fail-closed at two seams that matter: **IEEE-mode propagation
+  refuses solver escalation** (the SMT backends emit over the reals, so
+  escalating would prove the ℝ obligation under a float-stamped claim), enforced
+  twice from anti-correlated sites; and comparisons or converts it cannot judge
+  in the narrower formats decline rather than reuse the binary64 rule.
+- *Disclosure that is doing real work.* Every IEEE verdict stamps its
+  assumptions: endpoint arithmetic, subnormal indeterminacy (the band is hulled
+  with zero so the verdict is sound under **both** flush and gradual), equation
+  order, contraction, NaN hygiene — and each of those texts is itself
+  format-parametric, after an audit found binary64 sentences being stamped
+  verbatim on float16 verdicts where they were false. The `libm_budget` is the
+  sharpest of these: it is **declared, not verified**, and the door says so —
+  *"a budget smaller than your backend's real error mints a VERIFIED stelling
+  cannot catch."*
+- *Naming, in the default mode.* Under the default `semantics="real"`, link 6 is
+  open exactly as the table says, and the stamp names it — the semantics line
+  says in as many words that the traced program's IEEE behaviour is not modelled
+  and a predicate can hold in ℝ and fail in floats. Naming is disclosure and
+  closes nothing.
+- *Absent, and this one is worth correcting elsewhere in this document.*
+  **There is no `real-with-margin` mode and no margin.** No margin is computed,
+  no margin rides on a verdict, and the string `real-with-margin` occurs in this
+  document and nowhere in the source tree; the stamp field is `arithmetic_mode`
+  and it names how brackets are computed. §2.4's `arithmetic` row and §2.6's
+  artifact are describing a dial position that does not exist yet. FPTaylor-style
+  per-step bounds and the margin-absorption argument are absent as the table
+  says.
+- *So the honest statement is not "link 6 is bare".* It is: **link 6 is bare in
+  the default mode, and in the opt-in mode it is replaced by a narrower claim
+  that does not need it** — at the price of the solver, which that mode refuses.
+
+**Link 7 — jaxpr ⇒ executed program.**
+
+- *Two licences, both shipped, both narrow, and both only in IEEE mode.* The
+  **FMA contraction hull** is the tree's one mechanism that models an XLA
+  freedom rather than assuming it away: the contracted value of `a*b + c` is
+  computed exactly and hulled with the uncontracted one, so the verdict is sound
+  whichever the compiler chose, and a form that cannot be bracketed declines.
+  And **intra-equation order freedom declines** — a `reduce_sum` over more than
+  two elements, an `integer_pow` past the first power — rather than assuming an
+  accumulation order. These are real closures of small pieces of link 7.
+- *An assumption, stamped rather than checked.* IEEE mode judges each equation as
+  the binary64 operation it names, which assumes the compiler does not
+  reassociate *across* equations. The stamp says so, and says it was verified on
+  one measured target and is *"a compiler assumption, not a language guarantee."*
+- *A shipped partial licence in both modes.* `dot_general` declines to ⊤, with
+  the reason quoted into the notes, on an unrecognised precision, a non-`None`
+  `out_sharding`, an integral operand with no accumulation type, or an
+  accumulation type narrower than an operand. It **admits** `DEFAULT`, `HIGH` and
+  `HIGHEST` as equivalent, on the ground that they measure identical on the
+  backend it was measured on and that ℝ semantics does not model float rounding
+  anyway — with the residue deferred to `device_class`, which is the next bullet.
+- *Naming that does not name.* `precision_config` is a live reading of the
+  actual `jax_enable_x64` state at trace time and is genuinely informative.
+  `device_class` is a required stamp field whose value at every shipped call site
+  is the same literal — *"no concrete execution in this verdict"*. That is true of
+  the pipeline and it is not what §2.4's precision row promises, which is the
+  devices the verdict was asserted for. **And `trust_boundary` does not exist in
+  the source tree at all**; it is a field this document specifies and a commitment
+  `design/founding.md` states, and it is not yet a thing a verdict carries.
+- *Constraint of use, and it is prose.* Pinning the precision (§4.2) is
+  documented, argued, and unimplemented: **`DotAlgorithmPreset` appears nowhere
+  in `src/` or `tests/`.** Nothing requires it, nothing refuses an unpinned run.
+- *Refutation channel that does not run.* Fuzz-on-verified is the only mechanism
+  in this architecture that executes the compiled artifact against a green claim.
+  It is default-off; it declines on any program its exact-rational replay cannot
+  read through; and it carries its own granularity guard, which declines when the
+  violation's truth value moves between the equation-at-a-time walk and the whole
+  program compiled as one region — a guard that *can only ever decline*.
+- *Absent.* Translation validation to HLO, and any programmatic lowering or
+  comparison of HLO at all. Also absent: the one-line differential this document
+  proposes twice — check a witness on CPU as well as on the accelerator — which
+  Appendix E still lists as an unchecked box, and which in any case bears on the
+  red direction.
+
+**Where that leaves the trust argument.**
+
+1. **Five links are bare and one of them was double-counted as covered.** Links
+   2, 4, 5, 6 and 7 have no licence for a green verdict. Link 6 has an opt-in
+   mode that replaces the claim rather than defending it; link 7 has two shipped
+   licences that live only inside that mode, which is the mode that refuses the
+   solver — **so the strongest link-5 mechanism and the strongest link-7
+   mechanisms in this tree are mutually exclusive by construction.** That is a
+   fact about the design worth knowing before it is discovered by someone
+   assembling a qualification argument.
+2. **The refutation channels that exist are worth much more than the plan column
+   gave them credit for, and saying so is not a retreat from point 1.** A
+   two-backend portfolio that raises on disagreement and discloses its own
+   degradation; exact-rational containment sweeps with pinned counts; a
+   source-text oracle with a demonstrated control per property; mutation
+   batteries that measure their own detection power; a trace gate with a third
+   state for *"nobody looked"*; a widen re-check that reports that neither of its
+   own outcomes is evidence — none of these is in the July table, and together
+   they are why a defect in this tree has a decent chance of being found. **None
+   of them is a reason to believe any particular green verdict.**
+3. **The qualification package (§11.1) must carry this section's shape, not the
+   plan column's**, and a bare link is a **disclosure**, not a work item. It
+   belongs beside the policy that governs verdict flips, where a reader deciding
+   whether to rely on a green verdict will meet it — not only here, where a
+   reader has already decided to read an architecture document. Routing it into
+   `SOUNDNESS.md` is that file's owner's call; this section is the input.
 
 #### Link 8: hardware, and why the chain must not stop at 7
 
@@ -715,8 +1061,20 @@ Design commitment 1 says the fuzzer, the SMT encoder, and the abstract
 interpreter are three interpreters of one object. Read as an evidence
 architecture rather than a design convenience, that is **three independent
 implementations of one specification** — an N-version diversity argument handed
-over for free, and the strongest TD (error-detection) argument stelling has
+over for free, and the strongest **error-detection** mechanism stelling has
 before certificates exist.
+
+***Detection, and not the TD argument, and the two are not the same thing.***
+This read *"the strongest TD (error-detection) argument stelling has"*, which
+smuggles a confidence level out of a mechanism that produces information only
+when it disagrees with itself. N-version diversity earns its reputation from
+*disagreements observed*; three implementations that have never disagreed have
+told you nothing, and the classical objection to N-version arguments — correlated
+faults from a shared specification — bites hardest here, because these three
+share a specification **by construction** (commitment 1: they are three
+interpreters of *one object*). So the lattice is the strongest detector, its
+firings are decisive, and what it supports in §12.2 is worked out there and is
+not a level.
 
 The engines are constrained by soundness into a lattice. **The constraints depend
 on whether the chain contains a ⊤**, and that dependency is the whole subtlety:
@@ -771,6 +1129,8 @@ of has this as a first-class output.
 offered for adoption rather than as a restatement:
 
 > **The fuzzer should run on every verdict, not only on `unknown`/timeout.**
+> *Built, and not yet adopted: the probe exists as an opt-in keyword and runs on
+> no verdict unless a caller asks for it (§2.3.1).*
 
 `design/founding.md` Stage 1 scopes the fuzzer as a *fallback* on
 unknown/timeout. Running it on a `verified` verdict costs the same and is not a
@@ -783,9 +1143,32 @@ differential testing applies verbatim: *"replay only exercises paths where a
 violation was already found."* Fuzz-on-verified exercises the paths where one was
 claimed impossible.
 
-Budget: unbounded in CI over the corpus (where it is the cheapest soundness
-evidence available); a small time budget by default in interactive use;
-`--no-crosscheck` to opt out, never silently.
+**What a contradiction hunt is, and what it is not.** Everything in the
+paragraph above survives the correction in §2.3.1 because none of it claims the
+hunt *finds* anything: a mechanism with *"a real chance of catching"* a defect is
+described honestly by that phrase and by no stronger one. The moment it does
+catch something the result is decisive — a `verified` and a checked violating
+point cannot both stand, and §2.5's whole apparatus exists to route that. **The
+moment it catches nothing, nothing has happened.** The budget argument below had
+to be rewritten because it did not hold that line.
+
+Budget: unbounded in CI over the corpus; a small time budget by default in
+interactive use; `--no-crosscheck` to opt out, never silently.
+
+***This read "unbounded in CI over the corpus (where it is the cheapest soundness
+evidence available)", and the parenthesis is the error the capability table two
+paragraphs up forbids.*** **A search that finds nothing is not cheap evidence; it
+is not evidence.** The budget is worth spending for the opposite reason, and
+§6.1 already argues it correctly: this is the only mechanism pointed at links 2
+and 7 before Phase 5, a firing is decisive, and **the cost of a null result is
+the whole point of paying it** — you are buying the chance of a refutation, not
+a quantity of assurance. A budget defended as "cheap extra assurance" is a
+budget that gets cut the first time CI is slow, which is exactly what §6.1 says
+in as many words; a budget defended as the compilation gap's only detector is
+defended correctly. **And it must be spent to buy anything at all:** as built,
+the probe is `check(..., falsify="sample")` and **default-off**, and no CI job in
+this repository turns it on, so the corpus budget described here is a plan and
+not a running cost (§2.3.1).
 
 ### 2.6 The verdict artifact
 
@@ -872,7 +1255,15 @@ by users who want a record:
   ],
   "obligations": [],
   "coverage_ref": "evidence/coverage/0.2.1/positivity.json",
-  "crosscheck": {"fuzzer": "no-counterexample", "budget_s": 30}
+  "probe": {
+    "ran": true,
+    "budget_s": 30,
+    "points_executed": 1188,
+    "points_admissible": 964,
+    "obligations_unprobed": 0,
+    "declined": {"no-exact-reading-of-this-program": 3},
+    "licence": "work done, not a finding: this probe can only refute, it did not fire, and a null result is a fact about the sampler and not about the verdict"
+  }
 }
 ```
 
@@ -880,6 +1271,67 @@ by users who want a record:
 needs to ask "is this verdict still valid?" — and everything `stelling audit`
 needs to answer it — is here, and nothing that would rot (source locations,
 timings, machine names) is.
+
+#### The probe field, and why it is not `"crosscheck": {"fuzzer": "no-counterexample"}`
+
+**That is what this block said, and it was the worst sentence in this document**,
+because of where it stood rather than what it claimed. §2.5's capability table
+bars the sampler from `verified` on the ground that **absence of evidence is not
+evidence**; this block then made *"the sampler did not find one"* a **retained,
+content-addressed field of the record that this same section calls the spine of
+the whole evidence architecture** — durable, quotable out of context, and sitting
+in a list of fields every one of which is either a fact the verdict depends on or
+a named limitation of it. A null search result is neither. The shipped module,
+the banned-field test over `ProbeReport`, the banned-word test over its stamp
+line and `preconditions.py`'s comment at the call site were all built to stop
+exactly this, and the design of record specified it anyway.
+
+**The position taken here, and it is the second of the two available.** The
+field is **retained**, and it records **only what it can** — work done and work
+declined — **with its licence written into the field itself**. It is not
+deleted, and the three reasons are worth stating because the first instinct is
+to delete it:
+
+- **A finding is not the reachable value.** On an artifact whose `verdict` is
+  `verified`, the probe cannot have fired: had it fired there would be no
+  `verified` to write the artifact about. So a field holding the *finding* has
+  exactly one reachable value and distinguishes nothing. A field holding the
+  *work* has many, and they are the ones a reader actually needs.
+- **The skip rate is part of the result**, and deleting the field would make
+  "probed hard" and "declined everything" print the same — which is the failure
+  mode the module's own second heading names. A probe that declined every
+  obligation on a program its exact reading could not reach has done nothing, and
+  a record that cannot say so lets *"the probe ran"* be claimed with nothing
+  behind it.
+- **What is retained is falsifiable, and `"no-counterexample"` was not.** A count
+  of points executed can be wrong, and someone can go and check it.
+  *"No counterexample"* cannot be checked, cannot be wrong, and cannot be
+  re-derived; it is the shape of a claim that survives every audit by asserting
+  nothing.
+
+**The licence string is constant, and that is the argument for putting it in the
+record rather than in the schema document.** Fields are quoted out of their
+artifacts. A reader who lifts this one lifts the disclaimer with it, which is the
+same reason `ProbeReport.stamp_line` carries its disclaimer in the same sentence
+as its counts rather than in a note beside them. The name `crosscheck` is retired
+**as a field name** — it named an adjudication between engines (§2.5's lattice),
+and a sampler that found nothing has adjudicated nothing. The `--no-crosscheck`
+flag and `tests/crosscheck/` keep the word, because there the word names a run
+and a lattice rather than a stored result.
+
+**What this field must never grow**, stated so the next schema version has to
+argue with it rather than around it: a `passed`/`clean`/`ok` boolean; a
+`confidence`, `score` or `coverage` number; a count of *points that did not
+violate* presented as an achievement; or any aggregation across verdicts that
+turns many null results into one summary. The first three are the exact strings
+the shipped `ProbeReport` refuses to grow a field matching, and a schema that
+grew them would have moved the defect from the module to the record.
+
+**One caveat on this whole block.** It is a schema sketch and parts of it are
+still plan rather than tree: `arithmetic: real-with-margin` names a dial position
+the source tree does not have, and the `Verdict` type in §10.2 carries no probe
+field at all. §2.3.1 says which of these fields exist today; **the artifact is the
+record and may be wider than the type, but it may not be wider than the truth.**
 
 ---
 
@@ -1301,7 +1753,18 @@ as such rather than silently omitted. CI checks every qualified name resolves �
 
 - Test: `tests/differential/test_<primitive>_<domain>.py`
 - Corpus entries exercising it: [list or query]
-- Concrete runs landing inside computed bounds: [count, per release]
+- Concrete runs executed against the computed bounds: [count, per release]
+- **Runs landing OUTSIDE the bounds: [count — and any number above zero is a
+  soundness event (§7), not a line item]**
+- **The scope this figure is a null over**: which shapes, dtypes and ranges were
+  drawn, and which were not
+
+*A count of runs that landed inside the bounds is a null result, and this
+template used to record only that. It licenses nothing about the transfer (§6.1,
+§2.3.1); what it records is that a search ran and how big it was, which is worth
+retaining and is worth nothing without its scope beside it. A transfer document
+that reports the first figure and not the last two is reporting how tired the
+searcher got.*
 
 ## Known imprecision and failure modes
 
@@ -1371,7 +1834,7 @@ their limits follow from what they are checking instead.
 | **Raise-on-unknown-param** | The transcriber's whitelist | A param type with no transcription rule — refuses to guess | A faithful transcription of a *misunderstood* primitive; anything about primitives it does recognise | 2 | done |
 | **Per-primitive pinned traces** | Execute `make_jaxpr`; compare | Transcription that drops or mangles a covered primitive; jax lowering changes on the pinned series | **Any primitive not pinned.** Note what does *not* belong here: `test_ir.py`'s round-trip is IR → dict → IR and never touches jax, so it checks *serialization*, not transcription. A transcriber that dropped an eqn would round-trip perfectly | 2 | 2 |
 | **Positive controls** (§10.8) | The harness's own mutation | Harnesses that cannot fail — B ≡ true | A harness that is merely *weaker* than intended | 1 | 1 |
-| **Fuzz-on-verified** (§2.5) | Execute sampled points under `jit` — **the compiled program, on the real device** | A `verified` that is false, from **any** cause below the harness: a mis-transcription (2), a wrong query (3), an unsound transfer (4), a solver bug (5), the ℝ/float gap biting (6), XLA's precision selection (7), even a faulty machine (8) | A false `verified` whose counterexamples are sparse in R; **and it cannot say which link broke** (§2.5) | **2–8** | 1 |
+| **Fuzz-on-verified** (§2.5) | Execute sampled points under `jit` — **the compiled program, on the real device** | A `verified` that is false, from **any** cause below the harness: a mis-transcription (2), a wrong query (3), an unsound transfer (4), a solver bug (5), the ℝ/float gap biting (6), XLA's precision selection (7), even a faulty machine (8) | A false `verified` whose counterexamples are sparse in R; **and it cannot say which link broke** (§2.5). **A run that finds nothing licenses nothing** — the same cut as the cross-solver row below | **2–8** | 1 |
 | **Corpus breadth** | Real code | Primitives, lowerings, and shapes the author did not imagine | Anything the corpus does not contain | 2, 4 | 2 |
 | **Differential testing** | Execute corpus programs concretely | Transfer functions whose bounds exclude real behaviour | Imprecision (bounds too wide is not a bug); regions the corpus does not reach | 4 | 3 |
 | **Cross-solver agreement** | **None** — the solvers only check each other | One solver wrong where the other is right; encoding divergence | Both wrong the same way (shared theory bugs are not hypothetical). **Agreement is not evidence** — it is the absence of one kind of disagreement | 5 | 3 |
@@ -1400,12 +1863,22 @@ Two entries deserve emphasis because they are stelling's, not inherited:
   > has no oracle. Certificates check the proof, not the program.
 
   That changes what the sampling budget buys. It is not insurance against a solver
-  bug that probably isn't there — it is **the compilation gap's only defence**, and
+  bug that probably isn't there — it is **the compilation gap's only detector**, and
   the compilation gap is the one this document spends §4.3 and §2.3's first reading
   establishing is worse for JAX than for anything Kani faces. A budget argued for on
   those grounds is argued for correctly; one argued as "cheap extra assurance"
   invites being cut first. Run it on the accelerator *and* on CPU (§2.3, link 8) and
   it is a differential against 7 as well as a check of it.
+
+  ***"Detector", not "defence", and the word was changed rather than softened.***
+  A detector that has not detected anything has not defended anything, and the
+  block quote above is careful to say *pointed at* where the sentence under it
+  said *defence* — two spellings of one quantity, one screen apart, in the
+  paragraph whose whole subject is scoping this mechanism honestly. Link 7 has a
+  detector and no defence; the correct disclosure is that link 7 is bare, and
+  §2.3.1 makes it against the tree. Nothing else in this bullet changes: the reach
+  argument is right, the budget argument is right, and the CPU differential is
+  still worth its one line.
 - **The cross-engine lattice** requires no extra implementation: commitment 1
   already mandates three interpreters of one object. The only work is to *compare
   them, and to treat a disagreement as a fault to be located rather than as a
@@ -1444,10 +1917,19 @@ Neither accepts a green CI badge. Both accept a retained, versioned record.
    even when there are none.** Both frameworks ask for observed malfunctions as a
    component of a usage history; the ledger (§7) is where stelling's live. What
    makes the record credible is not that it has entries — it is that the *search*
-   is documented: which techniques ran, over what corpus, at what budget, finding
-   what. **A record that reports "no soundness events" alongside "the corpus,
-   differential suite, and cross-checks that ran and found none" is strong. A
-   record that reports only the first is not a record of anything.**
+   is documented: which techniques ran, over what corpus, at what budget, **over
+   what scope**, finding what. **A record that reports "no soundness events"
+   alongside "the corpus, differential suite, and cross-checks that ran, over
+   this scope, and found none" is a record. A record that reports only the first
+   is not a record of anything.**
+
+   *This said the first kind of record "is strong", and strong is a word about
+   evidence. It is not: a documented search that found nothing is a documented
+   search that found nothing, and its whole value is that a reader can see what
+   was looked for and go and look somewhere else. The scope clause is added for
+   the same reason — a search record without its scope cannot be read at all,
+   which is `design/lessons-ledger.md`'s standing rule that an instrument's
+   silence is a reading only if the instrument could have spoken.*
 
 Point 4 inverts the instinct, and it needs care in two directions.
 `SOUNDNESS.md`'s log is currently `*(empty — no releases yet)*`, and an empty log
@@ -1985,8 +2467,11 @@ row up into the checklist as its infrastructure lands.
 - [ ] Counterexample replay works: every model this backend produces converts to
       concrete arrays and reproduces under `jit`. **Replay is the encoder's unit
       test** (`design/founding.md`, Stage 0) — a backend without it is not done
-- [ ] Cross-solver agreement test against an existing backend on the corpus,
-      keyed on `query_hash` so "same query" is a fact and not a hope
+- [ ] Cross-solver **disagreement** test against an existing backend on the
+      corpus, keyed on `query_hash` so "same query" is a fact and not a hope —
+      **a sat/unsat disagreement must fail loudly and must never be resolved by
+      picking.** Passing means no disagreement was found on what was run; it is a
+      merge condition, not evidence that the backend is right (§6.1)
 - [ ] The engine's position in the §2.5 lattice is declared and enforced by test
 - [ ] `python -m stelling` reports it, its transport, and its feature set
 ```
@@ -2400,14 +2885,33 @@ Rendered from evidence/soundness.yaml at this version. Every event, its class,
 its scope predicate, and whether it invalidates. Plus: how to run
 `stelling audit` against your own retained verdicts.
 
-## 7. Evidence
+## 7. Evidence, and what each item is evidence OF
+**Read the two groups separately. They are not the same kind of claim.**
+
+*Established facts — each is a positive result about a specific artifact:*
 - Corpus: N entries, M primitives exercised, results at evidence/corpus/<v>.json
-- Differential: concrete runs inside computed bounds — count, coverage
-- Replay: every reported counterexample reproduced — count
-- Cross-solver: queries where z3 and cvc5 agreed / disagreed, by query_hash
-- Cross-engine: lattice violations detected — count (should be 0; if not, §6)
+- Replay: every reported counterexample reproduced — count, and any that did not
+- Tier arguments resolved: N of M registered transfers, with the unresolved named
+
+*Searches conducted — each is a record of work done and of the scope it covered.
+**None of these licenses a verdict; a firing of any of them refutes one:***
+- Differential: concrete runs executed against computed bounds — count, coverage,
+  **and the shapes/dtypes/ranges NOT drawn**; runs landing outside: count
+- Cross-solver: queries where z3 and cvc5 disagreed, by query_hash; and how many
+  ran with fewer than the full portfolio answering
+- Cross-engine: lattice violations detected — count, **and the scope searched**
 - Usage history: releases, dates, corpus results retained since v[…]
 - Test suite: count, platforms, jax series
+
+*This block was one undifferentiated list under the heading "Evidence", and four
+of its seven rows were null results — a differential count, an agreement count, a
+lattice count annotated "should be 0", and a test-suite count. **"Should be 0" is
+the error in its purest form and it was in the artifact handed to an assessor.**
+A zero there means the search did not fire; it is not a target and it is not a
+score. The split above is the fix, and the second group is only worth retaining
+because §6.2 is right that a record of "no events" is worth nothing without the
+record of the search beside it — which makes these rows the *search record* and
+not the evidence.*
 
 ## 8. Dependencies and the solver
 §11.2. The solvers are separate, unqualified programs. Identification, not
@@ -2569,7 +3073,7 @@ The base framework, and the one the SIL 3/4 audience will reach for first.
 | What the standard asks | What stelling provides | Gap |
 |---|---|---|
 | **Tool classification** (T1/T2/T3) | **T2**, argued from architecture: stelling emits no code and touches no build artifact, so it cannot introduce a defect into the executable; it can fail to reveal one (§1.2) | **Certified parameter ranges will test this** — a tool that outputs a number the user pastes into their code contributes indirectly to the executable (§1.2's T2 exception) |
-| **T2/T3: evidence the tool conforms to its specification or documentation** (§7.4.4.4) | The decision problem in one sentence plus the semantics tier (§11.1 §3); the corpus record; differential, witness-checking, and cross-solver evidence; the coverage report as a per-query scope statement | **Substantial today.** Everything in the middle column is Phase 2–3; at v0.1 this row is a plan |
+| **T2/T3: evidence the tool conforms to its specification or documentation** (§7.4.4.4) | The decision problem in one sentence plus the semantics tier (§11.1 §3); the corpus record; the witness-checking record (a positive result: each replay reproduced); the *search* record — differential, cross-solver and probe runs, with their scopes and their firings (§11.1 §7); the coverage report as a per-query scope statement. *This cell read "differential, witness-checking, and cross-solver evidence", which offered two searches as conformance evidence; a search that did not fire is not evidence that the tool conforms to its documentation (§6.1, §2.3.1)* | **Substantial today.** Everything in the middle column is Phase 2–3; at v0.1 this row is a plan |
 | **Specification / manual defining behaviour and constraints of use** | `docs/qualification/constraints_of_use.md`, plus the **per-verdict coverage report** — a machine-generated constraints statement, which no other tool in Appendix A ships | Structurally none; the coverage report is Phase 2 and the content grows with the registry |
 | **History of successful use in similar environments** | Retained per-release corpus records (§6.2) — the only qualification route a solo project supports unaided | **Starts empty and can only be earned.** This is why retention starts before there is anything to retain |
 | **Tool validation results documented: strategy, activities, tools, results, test cases, discrepancies** | The evidence directory is exactly this, retained and versioned rather than written as a report | Format, not substance — once the directory has contents |
@@ -2594,9 +3098,37 @@ jaxpr. (Clause and table specifics: see §12.6.)
 | Step | stelling |
 |---|---|
 | **Tool Impact (TI)** | TI1 when a tool malfunction cannot introduce *or fail to detect* errors in the item — available exactly when the verdict removed no work. TI2 otherwise. **The user's determination** (§1.3) |
-| **Tool error Detection (TD)** | **Only the green direction ever reaches this step** — see below. Green's detection mechanisms are fuzz-on-verified, cross-solver, and the cross-engine lattice (§6.1): a TD2 argument at best today, and the user must judge. With certificates, a green verdict has a checkable artifact and the argument changes qualitatively |
+| **Tool error Detection (TD)** | **Only the green direction ever reaches this step** — see below. Green's candidate detection mechanisms are fuzz-on-verified, cross-solver, and the cross-engine lattice (§6.1). **stelling offers no TD level for the green direction and the row below says why.** With certificates, a green verdict has a checkable artifact and the argument changes qualitatively |
 | **TCL** | Falls out of TI × TD. TI1 → TCL1 regardless of TD. TI2 × TD1 → TCL1; TI2 × TD2 → TCL2; TI2 × TD3 → TCL3 |
 | **Qualification methods** (if TCL2/3) | 1a *increased confidence from use* — **supported directly** via the retained corpus record (§6.2). 1c *validation of the software tool* — **inputs supplied**: the corpus, differential suite, witness-checking record, the specification. 1b *evaluation of the tool development process* and 1d *development in accordance with a safety standard* — **not supported**; stelling has no certified process and §15 says so |
+
+**Why this row now offers no level, and what would change that.** ***It read
+"a TD2 argument at best today, and the user must judge", and the correction is
+not a softening — the row was arguing from the wrong quantity.*** The TD step
+asks for **confidence that a malfunction or an erroneous output is prevented or
+detected**. All three mechanisms named are refutation channels: each can find a
+defect and none can report that there is not one, so a run of any of them that
+ends quietly contributes nothing to a confidence claim. One of them,
+fuzz-on-verified, is **default-off in the shipped library** and runs on no
+verdict unless a caller asks for it (§2.3.1); one of them, cross-solver, is
+opt-in with the solver escalation and licenses nothing when it agrees — *agreement
+is not evidence* (§6.1, §11.2); and the cross-engine lattice is not built. **A
+confidence level offered on that basis would be a number with nothing under it,
+in the one document written for an assessor.**
+
+What a level above the floor would need is not more mechanisms, it is **measured
+detection power** — for each mechanism, the class of defect it is demonstrated to
+catch, established by planting defects of that class and showing it catches them.
+The tree already has that discipline and does not yet have it here: the mutation
+batteries report a surviving mutant as a statement about the *suite*, the
+property suite ships a per-property positive control and refuses a property whose
+control cannot be demonstrated, and `fidelity.gauge` refuses to bless a gate
+stack with an unexplained survivor (§2.3.1). **Detection power measured that way,
+per link, is the input a TD argument is made of. Until it exists per mechanism
+and per link, this document offers no TD level and the user determines one, or
+does not.** Two things bound how far this row can ever go on its own: **the
+determination is the user's** (§1.2, §1.3), and the clause and level numbering
+here is cited from working knowledge and unverified (§12.6).
 
 **The asymmetry lands on TI, not TD, and getting this backwards matters.** The
 instinct is to say "witness checking detects malfunctions with near-certainty,
@@ -2986,7 +3518,7 @@ stelling's documentation or discover it after relying on an implication.
 |---|---|
 | Document and version control | Git, tagged releases, immutable PyPI, PEP 740 attestations binding artifact to commit |
 | Change control | PRs, DCO sign-off, `CHANGELOG.md`, the ledger for anything verdict-affecting |
-| Verification of the tool | Corpus, differential testing, replay, cross-solver, cross-engine lattice (§6.1) — all retained per release |
+| Verification of the tool | Replay and the corpus record (positive results), plus a retained record of the searches — differential, cross-solver, cross-engine lattice (§6.1) — each with its scope. *Listing the searches as "verification" was the substitution this whole table exists to avoid: they retain what was looked for, not what was established (§2.3.1)* |
 | Defect management | GitHub issues; **plus the ledger, which does something no defect tracker does: retroactive invalidation of evidence already produced** (§7) |
 | Independent review | Open source; every tier argument is public and attackable. Not equivalent to independent review, and not claimed to be |
 | Requirements traceability | The specification is one sentence (§11.1 §3); the transfer registry and its documents are the detailed design; CI enforces that neither drifts (§5.5) |
@@ -3202,7 +3734,9 @@ Nothing here requires a working verifier.
 14. **Fuzz-on-verified** (§2.5) — the fuzzer exists at Stage 0 for the vacuity
     guard; pointing it at verified queries is a small delta, and it is **the only
     mechanism this architecture ever points at links 2 and 7** before Phase 5
-    (§6.1).
+    (§6.1). **It can only refute, so pointing it at those links does not defend
+    them** (§2.3.1) — and as built it is default-off, so the item is not "the
+    probe exists" (it does) but "it runs without being asked for" (it does not).
 15. **`docs/semantics/backends/z3.md`** with the full emitted option set and the
     reason for each (§5.4).
 16. **The verdict artifact written to `evidence/`** (§2.6).
@@ -3231,7 +3765,7 @@ Nothing here requires a working verifier.
     just going red.
 26. **Tier surfacing in the coverage report and the verdict**; `soundness`
     derived by weakest link (§5.1).
-27. **Cross-solver agreement on the corpus**, keyed on `query_hash` (§6.1).
+27. **Cross-solver disagreement hunt on the corpus**, keyed on `query_hash` (§6.1) — the deliverable is the hunt and its scope, not a tally of agreements (§2.3.1).
 28. **The cross-engine lattice as a test**, with "stelling contradicted itself" as
     a distinct exit code (§2.5, §10.9).
 29. **`docs/semantics/arithmetic.md`** — link 6 in full, with the `arithmetic`
@@ -3257,7 +3791,7 @@ Nothing here requires a working verifier.
     artifact (§11.3).
 36. **Translation validation to HLO** — link 7.
 37. **Sphinx site** (§3.2).
-38. **Per-transfer verification reports generated from the differential suite.**
+38. **Per-transfer search reports generated from the differential suite** — what was drawn, what was not, what fell outside the bounds. *Not "verification reports": the suite refutes a tier and cannot establish one (§2.3.1).*
 
 ---
 
@@ -3395,7 +3929,11 @@ Each item is a yes/no verifiable by inspection. Organised by Appendix B's phases
 - [ ] A query whose B is syntactically constant-true is a hard error, not a `VERIFIED` (§10.8)
 - [ ] `obligations` exists as a field and renders next to every verdict that has one (§10.8). The induction API that populates it is Phase 3 — the field lands now so the API cannot ship without somewhere to put the base case
 - [ ] Exit codes per §10.9; `unknown` does **not** exit 0; `--allow-unknown` is opt-in
-- [ ] The fuzzer runs on `verified` queries, not only on unknown/timeout (§2.5)
+- [ ] The fuzzer runs on `verified` queries **by default**, not only on
+      unknown/timeout and not only when a caller passes a keyword (§2.5, §2.3.1).
+      *Built and reachable as `check(..., falsify="sample")`; unticked because the
+      box is about the default, and because a probe nothing runs defends nothing
+      and detects nothing*
 - [ ] Engine disagreement produces exit code 5, **names the candidate links, and does not assert that stelling is at fault** (§2.5, §10.9)
 - [ ] `docs/semantics/backends/z3.md` lists every emitted option with its justification (§5.4)
 - [ ] Verdict artifacts are written to `evidence/` per the schema (§2.6)
@@ -3425,7 +3963,7 @@ Each item is a yes/no verifiable by inspection. Organised by Appendix B's phases
 - [ ] A differential failure classifies into the ledger (§7.2), not only into a red build
 - [ ] Every transfer's tier appears in the coverage report and in `Verdict.tiers`
 - [ ] A heuristic-chain `VERIFIED` never renders as a bare `VERIFIED` (§2.1 rule 3)
-- [ ] Cross-solver agreement runs on the corpus, keyed on `query_hash` (§6.1)
+- [ ] Cross-solver disagreement hunt runs on the corpus, keyed on `query_hash`, and a disagreement fails loudly rather than being resolved by picking (§6.1)
 - [ ] The cross-engine lattice (§2.5) is enforced by test, **including the ⊤ row**: an SMT chain containing a ⊤ may not report `falsified` on an unchecked model
 - [ ] A lattice violation is triaged before it becomes a ledger event — links 6 and 7 are findings about the program, not stelling bugs (§2.5)
 - [ ] The induction harness API discharges the base case **or** records it in `obligations` — Stage 2 is where induction ships, so this is where the Phase-1 field gets used (§10.8 gap 6)
@@ -3447,7 +3985,7 @@ Each item is a yes/no verifiable by inspection. Organised by Appendix B's phases
 - [ ] Certificates emitted and checked; the checker is a separate, small artifact with no JAX dependency (§11.3)
 - [ ] Translation validation to HLO; `trust_boundary: hlo` becomes reachable (§2.3 link 7)
 - [ ] Sphinx site builds; API reference generated
-- [ ] Per-transfer verification reports generated from the differential suite
+- [ ] Per-transfer **search** reports generated from the differential suite, each carrying the scope it drew from (§2.3.1)
 
 ---
 

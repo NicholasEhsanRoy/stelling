@@ -79,8 +79,8 @@ for the case that taught it and blind to a sibling — the answer stays
 L12's axis-named sweep, not more care. **Second convergence signature,
 recorded with the arc:** the array-arc catches were progressively
 narrower (public API → 2 coordinated from_dict lies → 3 lies →
-direct-construction-only residual), and the final round confirmed the
-stated invariant *for its scope* — the rule kept catching, but each
+direct-construction-only residual), and the final round **found nothing
+new inside the scope it attacked** — the rule kept catching, but each
 catch was strictly smaller, and the honest terminus was a **decision**
 (stop and surface the residual class as an owner posture question)
 rather than a clean round. A net that only ever returns clean was
@@ -113,7 +113,12 @@ audit's float→int fix introduced the ±2³¹ admission (4-B); shape guards
 crashed legal forms; the predicted fourth instance did NOT occur twice
 (any_pytree, solver build) when the rule was spec-carried.
 **(c)** **Convention** (spec-carried guard rule in every builder spec) +
-**watch** (instances vs. non-occurrences: 3 occurred, 2 prevented).
+**watch** (**3 occurrences observed; 2 builds in which the predicted
+instance did not appear**). *The second figure read "2 prevented" until
+2026-08-24, which counts two non-events as two successes of the
+convention. A build in which a defect did not appear is not evidence the
+convention prevented it — L23 in this file is the general rule, and the
+convention rests on the three occurrences, which are readings.*
 **(d)** Every builder spec; every fix round.
 
 ## L6 — An audit inherits its auditor's attention gradient
@@ -223,8 +228,13 @@ supplying precision or coverage. Disclosing the choice is necessary and
 **not sufficient**: the disclosure records *that* a hand step happened,
 never *what capability it stood in for*. **Every disclosed hand step
 should be priced: re-run without it and record what the tool alone
-returns.** The gap that appears is a censusable tool finding; the absence
-of a gap is evidence the step was cosmetic.
+returns.** The gap that appears is a censusable tool finding; **no gap on
+the re-run means the step bought nothing ON THAT CASE**, which is a
+reading only because the re-run is a re-execution of a named case rather
+than a search. *This read "the absence of a gap is evidence the step was
+cosmetic", stated as a general convention — and stated that way it
+licenses the whole class L23 forbids. The narrow form is what the
+mechanism supports: one case, re-executed, with both answers recorded.*
 **(b)** F1's `a²/a` cancellation (`design/regional-obligation.md`,
 Part A) was recorded as one of "two disclosed derivations" and read as
 convenience — measured, the uncancelled code-shaped form is **UNKNOWN
@@ -649,3 +659,40 @@ generalise is a single code object for all five — the altitudes differ
 every skip, xfail or escape whose condition is wider than the thing it
 excuses; every enumerated inventory that stands for an open domain;
 any future statement of the form "no lane/test/seed found X".
+
+**(e) THE SHAPES THIS RULE GOVERNS IN `design/` ITSELF, NAMED AFTER A
+SWEEP** (2026-08-24). Every build record and pass record in this
+directory was read for the shape, and it recurs in four spellings. They
+are named here rather than rewritten one by one, because a dated pass
+record is a record of what a round measured and rewriting it destroys the
+thing it exists to keep — **but a record's HEADING and its SUMMARY
+SENTENCE are live prose, and those were corrected where they converted a
+null into a conclusion.** The four:
+
+1. ***"N findings, zero UNSOUND"*, and worse, *"Nth consecutive
+   zero-UNSOUND round"***. The count of findings is a reading; the
+   absence of one class among them is a fact about the round, and a
+   streak is a fact about the rounds. Corrected in `roadmap.md`,
+   `affine-refinement.md` and `scatter-rows.md`, where it had reached a
+   heading or a living list. **The sharpest counter-example is in the
+   affine round itself: at the moment the streak reached four, that same
+   round demonstrated four unsound mutation classes surviving every
+   shipped gate.**
+2. ***"X survived every attack" / "X held" / "no route to Y was
+   reachable"***. Each is the attack set's bound wearing the subject's
+   clothes. Corrected in `soundness-audit.md`, `constraining-assume.md`,
+   `la-contract-build.md` and `solver-integration-build.md`.
+3. ***"Suites: N passed" under a heading reading "Verification" or
+   "Gates, verified"***. Left standing as pass records, because a suite
+   count is a fact and the heading is the load-bearing part; the general
+   correction is here rather than in each file. **A passing suite is not
+   a verification of anything but the suite** — the property suite's own
+   README says the per-push profile is *"a rot detector, not a defect
+   finder"*, and that is the reading to carry to all of them.
+4. ***An existential negative from a search*** — "no tool exists", "in
+   existence", "in the wild", "nothing anywhere". Corrected in
+   `d4-wrap-disclosure.md`, `eager-truncation-detector.md`,
+   `jax-verification-categories.md`, `tracker-probe-2.md` and
+   `registration-rules-and-capacity.md`. This is the spelling that
+   travels furthest from its evidence, because the sentence that results
+   is short, quotable, and carries no scope.

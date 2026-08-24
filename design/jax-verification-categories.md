@@ -75,12 +75,19 @@ Predictions this frame made that tonight's measurements then confirmed:
   defence exists upstream. Dead.
 - *vmap-of-cond primal leakage is defended at the site by `select` itself
   → should be a non-hazard.* Probed: `vmap(cond)` over `[-1, 4]` with a
-  `sqrt` branch yields `[0, 2]`, no NaN — **the folklore hazard does not
-  exist at the value level**; the real leak is in differentiation (below).
+  `sqrt` branch yields `[0, 2]`, no NaN — **the folklore hazard did not
+  appear at the value level on the case probed**; the real leak is in
+  differentiation (below). *(Read "does not exist at the value level"
+  until 2026-08-24. One probe finding no NaN bounds the probe.)*
 - *Integer overflow is local → either defended or incident-bearing.*
   Probed: computed int32 overflow wraps silently (50 000² = −1 794 967 296),
   boundary literals are loud (`OverflowError`); tracker sweep across five
-  projects: **zero field incidents of arithmetic overflow**. Dead.
+  projects: **zero field incidents of arithmetic overflow — and the sweep
+  cannot see this class, so the zero is uninterpretable.** Silent wrap is
+  the probed behaviour and *"silent means not filed"*
+  (`design/semantics-drift-probe.md`); a tracker measures what somebody
+  noticed. **Not dead — unmeasured**, and the instrument that would
+  measure it is not a tracker.
 - *Termination and interaction properties are global → should be alive.*
   The registered `stuck`/`hang` reads produced them on cue (below).
 
@@ -119,7 +126,7 @@ by something a point method verifies.
 | D6 | **NaN at zero (backward-pass NaN)** | **dead — defended, two idioms** | measured defence surface: jax-md ships **11 distinct `safe_*` symbols across 18 files**; the equinox family ships zero `safe_*` because it implements the same defence as **custom_jvp rules** (lineax `_two_norm` read: a hand derivative for the norm at 0 — 7 of the corpus's 8 custom rules are this idiom). Probed: coincident-particle gradient is finite |
 | D7 | **Custom-derivative primal disagreement** | **dead — the defence is a point method and it works** | probed with controls: `check_grads` passes honest rules, catches lying tangents, **catches lying primals**. Population correctly counted: 8 distinct rules in the corpus, all library-authored. Residual: rules never run through `check_grads` — unprobed, recorded, not a category until measured |
 | D8 | **PRNG key reuse / correlation** | **dead — upstream tooling** | probed: reuse is silent (identical draws, no error), and `jax.config.jax_debug_key_reuse` exists. The right tool is a linter/runtime checker and JAX ships it |
-| D9 | **Integer arithmetic overflow** | **dead on field evidence** | probed: silent wrap in-trace, loud `OverflowError` for boundary literals, default index dtype int32. Registered sweep over five trackers: zero arithmetic-overflow incidents. (jax-md's ten `overflow` threads are its neighbor-list *capacity-flag protocol* — see L3) |
+| D9 | **Integer arithmetic overflow** | **UNMEASURED — the instrument cannot see this class** | probed: silent wrap in-trace, loud `OverflowError` for boundary literals, default index dtype int32. Registered sweep over five trackers: zero arithmetic-overflow incidents — **and a tracker counts what a user noticed, while the probed behaviour is a silent wrap.** *Read "dead on field evidence" until 2026-08-24. `design/semantics-drift-probe.md` states the rule this row broke — silent means not filed, so a near-zero from a tracker grep is uninterpretable — and `design/value-model.md` states it again: absence from issue trackers means nothing for a failure nobody sees. Two live sentences in this directory said the opposite of this row; the row was the wrong one.* (jax-md's ten `overflow` threads are its neighbor-list *capacity-flag protocol* — see L3) |
 | D10 | **vmap-of-cond value totality** | **dead — folklore** | probed: batched `cond` becomes `select`, and `select` masks the untaken branch's value correctly. The genuine hazard is the *derivative* of the untaken branch — the where/NaN-gradient surface, which lives in L3 |
 | D11 | **Statistical sampler correctness** (wrong posterior, acceptance drift) | **out of scope, honestly** | the probe-1 property test excluded both wild instances (numpyro#154, #1786): the only properties are statistical equality with a reference or expectation bounds — supermartingale territory, named on the founding roadmap's far end, not reachable by region methods |
 | — | **Device nondeterminism** (GPU scatter atomics; platform variance) | **unmeasured — unranked** | two field hints (numpyro#1120 same-key-different-machines; #1427 pmap changes results) and no probe possible on CPU tonight. A paragraph, not a finding; ranks below everything measured |
@@ -306,8 +313,13 @@ region property is a new candidate, registered before reading
 (`design/registration-rules-and-capacity.md`) — and the reading returned
 a narrow survival with a kill inside it. All six concrete corpus rules
 return their own primal verbatim: **the primal-agreement obligation has
-zero surface in the wild** — every author discharges it by construction,
-and the Stage-2 "primal consistency" flagship is reshaped accordingly.
+zero surface in THIS CORPUS — six rules, all library-authored** — and the
+Stage-2 "primal consistency" flagship is reshaped accordingly. *Read
+"zero surface in the wild" until 2026-08-24. Six samples from one corpus
+bound the corpus; "the wild" is a population this project has no
+instrument over, and `design/primitive-census.md` already says what a low
+count in this corpus can and cannot support. The reshaping stands: it was
+the right call on the corpus, which is the evidence that exists.*
 What survives is precise: two lineax norm rules whose tangents are
 *intended* to equal the true Jacobian away from a stated excluded set
 (`∀ x, ‖x‖ ≥ ε: tangent_out = ⟨x, tx⟩/‖x‖`) — writable, non-circular,
@@ -448,9 +460,10 @@ stencil code before anything leans on it.
    says: jax_verify archived, auto_LiRPA active-but-PyTorch — reachable
    only across a process boundary (the `STELLING_CVC5` pattern).
 
-Six kills by construction, five by measurement, one honest "unmeasured" —
-plus one kill *inside a survival* (primal agreement: zero wild surface;
-every author discharges it by construction).
+Six kills by construction, four by measurement, two honest "unmeasured"
+(D9 moved on 2026-08-24) — plus one narrowing *inside a survival* (primal
+agreement: zero surface in this corpus's six rules; every one of those
+authors discharges it by construction).
 
 ## The byproduct policy
 
@@ -513,10 +526,18 @@ and the fourth instance **did not occur**: every guard the builder wrote
 declined correctly on first contact (`design/any-pytree-build.md`; the
 audit gate found posture escapes only in surfaces the rule had not yet
 reached — literal decoding, zero-size coordinates — not in the builder's
-guards). This is the first controlled test of the project's own
-discipline, and the discipline won: **the spec carried the discipline,
-not the main agent's vigilance** — which is the justification for the
-subagent-orchestration model going forward.
+guards). **What that is, exactly: one build in which a predicted defect
+was not observed.** It is consistent with the spec having carried the
+discipline and equally consistent with this build not having been a place
+the defect would have appeared; N = 1 and the two are not separable here.
+*This paragraph concluded "the discipline won … which is the
+justification for the subagent-orchestration model going forward", and a
+non-occurrence cannot justify a standing process (L23: an instrument's
+silence is a reading only if it could have spoken — and a build is an
+instrument). Corrected 2026-08-24. The convention is kept because it is
+cheap and because the three OCCURRENCES that motivated it are real
+readings; it is not kept on the strength of the two that did not
+happen.*
 
 **The abstraction boundary, relabeled (2026-07-18,
 `design/second-bill.md`).** The corpus splits by **whether the property's

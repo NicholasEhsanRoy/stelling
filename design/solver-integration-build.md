@@ -118,8 +118,12 @@ invocations, `nl-cov`/`nl-ext` exclusion pinned, script hashes),
 single-solver degradation runs, and the no-solver path (UNKNOWN,
 absence stamped, `sys.modules` clean of z3/cvc5) in the dedicated
 **venv-solverfree** surface (jax present, no solver installed — the
-mechanical proof of "no solver is a required dependency", alongside
-venv-nojax).
+mechanical **demonstration** that the suite runs and the no-solver path
+stamps its absence with z3/cvc5 out of `sys.modules`, alongside
+venv-nojax). *Called "the mechanical proof of 'no solver is a required
+dependency'" until 2026-08-24: a passing suite in an environment is a
+demonstration over what the suite covers, and the import-hygiene check is
+what makes the claim structural.*
 
 ## The audit — mandate, findings, adjudication
 
@@ -135,9 +139,10 @@ cross-run isolation.
 
 **Outcome: 1 UNSOUND, 4 FRAGILE, 2 COSMETIC — all seven confirmed at
 adjudication and fixed before landing; the emission core survived every
-attack** (no wrong-VERIFIED-via-mistranslation was reachable through
-any constructed emission attack; witnesses landed exactly on closed-box
-endpoints; the exact-dyadic discipline held down to
+attack this audit constructed** (**no constructed emission attack reached
+a wrong-VERIFIED-via-mistranslation** — the attack set is the bound, and
+the sentence claimed reachability until 2026-08-24; witnesses landed
+exactly on closed-box endpoints; the exact-dyadic discipline held down to
 fl(0.1) = 3602879701896397/36028797018963968).
 
 1. **F1 UNSOUND — witness box-membership was never checked.** A fake
@@ -185,7 +190,9 @@ standing rule: a fix touching the emission or stamp boundary carries
 its own witnessed construction). Pattern note, fourth time: findings
 cluster in the newest surface (model handling and disclosure around
 the oracles), and the oracles themselves — disagreement checked before
-model handling, replay before belief — held.
+model handling, replay before belief — were not broken by anything this
+round built. *Read "held" until 2026-08-24; an oracle nothing broke is an
+oracle nothing attacked successfully, which is a fact about the round.*
 
 ## Fix round — verification
 
@@ -198,8 +205,8 @@ re-verification, independent of the builder's report:
 
 - Suites: **venv-jax 299 passed** / **venv-nojax 227 passed + 7
   skipped** / **venv-solverfree 291 passed + 8 skipped** — the last
-  being the jax-present-no-solver surface, the mechanical proof of the
-  boundary.
+  being the jax-present-no-solver surface, which exercises the boundary
+  rather than proving it (see the note above).
 - The 22-check independent acceptance run: all pass, h_A/h_B behavior
   unchanged (VERIFIED with two stamps; REFUTED with in-box,
   replay-confirmed witness).

@@ -11,6 +11,13 @@ is not evidence; an item whose evidence line is empty stays parked no
 matter how tractable. This document claims order-of-work, not
 commitment: any item can be displaced by a measured result.
 
+**And a null is not an evidence line (L9, L23).** A round that found
+nothing, a streak of such rounds, a suite that passed, and a search that
+did not fire are records of work done. They belong in the build records
+this page points at; they may not stand here as the reason an item is
+ranked, closed, or safe. **A count of consecutive quiet rounds is the
+shape this page corrected on 2026-08-24** — see the affine entry below.
+
 ## Built (the record pointers are the evidence)
 
 - Interval/AI propagation core, real + opt-in IEEE semantics, zero-dep
@@ -114,8 +121,14 @@ gap is a known unknown, not an invisible one.
 *Update 2026-07-22:* unparked — the parking condition was met by the
 LA work's own measured straddles (the probe's dependency case; the
 socket's solver-discharged symmetry pair) and the build was ordered.
-**Landed** as the opt-in `refine="affine"` (zero-UNSOUND audit, fourth
-consecutive; built blind to a held-out evaluation measured first).
+**Landed** as the opt-in `refine="affine"` (audit record in
+`design/affine-refinement.md`; built blind to a held-out evaluation
+measured first). *This read "zero-UNSOUND audit, fourth consecutive". A
+streak of rounds that found no UNSOUND is not a property of the code —
+and that same round measured why: four auditor-invented mutation classes,
+each demonstrated unsound, survived every shipped gate. The round's real
+output was the gates' blindness, and a streak counted over the rounds
+would have counted that one as a success.*
 The reading (`design/affine-refinement.md`,
 `corpus/supply/affine_holdout/`): v1 buys the commuted-product class
 on real code (the MIME symmetry pair: 4 QF_NRA invocations → 0),
@@ -141,9 +154,18 @@ every exponent, so the lost class is exactly the RELATIONAL properties
 (`x**e <= x` declines for 1/3, 0.1, 0.7 and verifies for 0.5).
 *Rank rationale:* below the items above because it ADDS a discharge
 route rather than checking one, and its whole safety argument is one
-factor away from re-minting audit 0.2.0 S1. Sequenced after the
-falsification probe deliberately: the probe is the downstream check for
-this exact class, and building the route first inverts the dependency.
+factor away from re-minting audit 0.2.0 S1. **And it ships with no
+downstream check at all:** the falsification probe admits a violation
+only through an exact reading, and it refuses a non-integer exponent
+outright, so it declines on every program this item is about
+(`design/nondyadic-pow.md` section 5, measured against the shipped
+module). *This line read "Sequenced after the falsification probe
+deliberately: the probe is the downstream check for this exact class."
+The probe is now built and it is not that check. The sequencing still
+holds — a can-only-refute check is cheap to build first and a discharge
+route is not reversible — but the reason recorded was wrong, and the
+route's safety rests entirely on the containment argument and the
+mutation battery in that note.*
 
 ## Irreducible — named so the ceiling is honest
 

@@ -139,8 +139,13 @@ with the detector armed session-wide reaches the same set of sites, each now
 carrying a region declaration naming why the truncation is the subject of the
 code.
 
-So the radius in which the choice matters at all is small, and every site
-inside it is one this repository owns.
+So the radius in which the choice was OBSERVED to matter is small, and every
+site inside it is one this repository owns. *This read "the radius in which
+the choice matters at all is small". The sweeps behind it found no
+truncation outside this repository's own code; they did not establish that
+none is there, and this sentence is load-bearing for shipping a
+`BaseException` — which is the reason to state the bound rather than the
+conclusion.*
 
 **IT NEEDS AN ORIGIN FILTER, AND THIS PARAGRAPH SAID IT DID NOT.** What stood
 here was: the const-fold tripwire fires on jax's OWN constants —
@@ -242,13 +247,18 @@ It is a reasonable proxy and it failed twice, measured:
 **And the problem it generalises over has ONE INSTANCE.** Measured twice,
 independently. A hand sweep of 649 scalar integer conversions across
 `jax.random.*` and `jnp`'s integer ops over six integer dtypes, under
-`JAX_DISABLE_JIT=1`, finds **exactly one** eager truncation of jax's own in
-existence — the threefry mask — byte-identically on jax 0.11.0 and 0.10.2.
+`JAX_DISABLE_JIT=1`, finds **exactly one** eager truncation of jax's own **within that swept
+surface** — the threefry mask — byte-identically on jax 0.11.0 and 0.10.2.
+*Read "of jax's own in existence" until 2026-08-24: a 649-conversion hand
+sweep and a wider shipped re-derivation both bound their own surface, and
+"in existence" is a claim about jax.*
 `_adapter_jax.eager_jax_constant_sweep` then re-derives it as SHIPPED CODE
 over a wider surface — every key implementation and seed spelling as well —
 and sees 675 conversions and 13 truncation events, all 13 of them that one
 row, again byte-identically on both series. A predicate is the right shape for
-a class. This is not a class; it is a list of length one.
+a class. **On every surface either sweep reached, this is not a class; it is a
+list of length one** — and the design choice rests on that, with the surface
+named, rather than on a claim about jax entire.
 
 ### THE ANSWER THAT SHIPPED: AN ENUMERATION, AT JAX'S OWN SITE
 
