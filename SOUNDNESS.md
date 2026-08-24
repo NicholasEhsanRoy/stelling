@@ -21,6 +21,305 @@ gets an entry in the log below stating:
 Silent fixes are forbidden. A soundness fix that ships without a log entry
 is itself a soundness event.
 
+## What a green verdict licenses, and what it does not
+
+**THIS IS A STRUCTURAL DISCLOSURE AND NOT A `## Log` ENTRY, and the choice
+is argued rather than defaulted.** The Policy above defines an entry by four
+things it must state: the defect or behaviour change, the versions affected,
+the prior verdicts retroactively invalidated, and what to re-run to
+re-establish trust. Nothing below is any of those. No verdict flips, no
+recorded verdict becomes invalid, and there is nothing to re-run — this is a
+standing property of every build this project has ever made, the released
+`0.2.0` included, and it will still hold of the next one. The `Versions:`
+vocabulary the Log is counted with is closed at three phrases
+(`tests/_release_record.py`), and **not one of them is true of a disclosure
+that scopes to every build there has been**: filing this as an entry would
+put a false scope in the field the Log's derived counts are computed from,
+to record something that is not an event. It belongs where this page says
+what a verdict means, which is here.
+
+### The chain, and which links a green verdict crosses unaided
+
+`DOCUMENTATION_ARCHITECTURE.md` §2.3 sets out the eight links that must all
+hold for a `verified` verdict to mean *"this property holds of the program
+that runs"*: harness (1), transcription (2), query construction (3),
+transfer soundness (4), solver (5), ℝ ⇒ float (6), jaxpr ⇒ executed program
+(7), hardware (8). That table's *Planned defence* column is a plan — its own
+header says so, and says it has not been re-derived against the tree. This
+is that re-derivation, for the green direction only.
+
+**FOR A `VERIFIED` VERDICT, NOTHING IN THIS TREE ESTABLISHES LINKS 2, 4, 5,
+6 (in the default `semantics="real"`) OR 7.** Every mechanism bearing on
+those five is one of two shapes, and neither shape yields the claim:
+
+* a **REFUTATION CHANNEL** — it can only fail. A firing is decisive; silence
+  is worth nothing at all. The clearest statement of this in the tree is
+  written by the code itself, and it is what a probed VERIFIED prints today.
+  Measured on jax 0.11.0 with `JAX_ENABLE_X64` set, the README's own
+  quickstart harness run through `check(..., falsify="sample")`, 156 points
+  executed and all 156 inside the declared set: *"NO VIOLATION WAS FOUND,
+  WHICH IS NOT EVIDENCE THAT THERE IS NONE: this probe can only refute, and
+  a null result is a fact about the sampler, not about the verdict."* That
+  is a design constraint rather than a modesty phrase —
+  `test_the_stamp_line_refuses_to_read_as_confirmation` holds the sentence
+  shut and `test_the_report_carries_no_summary_of_how_well_the_verdict_held`
+  refuses the report any shape that could be read as a score, both in
+  `tests/test_falsify_probe.py`;
+* a **CONFIRMATION OVER A FINITE, ENUMERATED SUBDOMAIN** — it proves
+  something, and what it proves is strictly smaller than what the verdict
+  claims. `tests/test_tier_clause.py` is the honest example and says so in
+  its own words: *"a per-box proof is NOT evidence for the tier"*.
+
+**MORE SAMPLING DOES NOT CLOSE THIS**, and that is a statement about shape
+rather than about budget. A refutation channel run longer refutes more; it
+never confirms. A subdomain confirmation grown wider still does not quantify
+over the boxes, devices and solver inputs a verdict does. The five links are
+bare in one specific sense: **a green verdict carries no positive evidence
+about them, and does not claim to.**
+
+**LINKS 1 AND 3 ARE NOT ON THAT LIST, AND THE DIFFERENCE IS REAL RATHER
+THAN CHARITABLE.** Each has a green-side instrument that establishes
+something positive about the run in hand — the vacuity widen re-check, which
+re-runs the identical query with the declared bounds widened and stamps
+*"this VERIFIED was not re-derivable without the declared envelope"*, and
+the `nonvacuity` membership conditions, which tie the declared set to
+concrete data through the same transforms the set is stated in. Neither
+closes its link; link 1 is the least defended of the eight and §10.8 of the
+architecture says why. But both produce a fact about this verdict, which is
+exactly what 2, 4, 5, 6 and 7 have none of. Link 8 is unclosable and both
+documents name it as such.
+
+### Link by link, against this tree
+
+- **2, transcription.** On the live path every guard is a refusal:
+  `stelling._jax_compat` raises `TranscriptionError` on what it cannot
+  represent, and the two faces of an equation are held to one shape per
+  value rather than to a pinned trace. **Per-primitive pinned traces do not
+  exist.** The refusal that will not accept an equation missing a param jax
+  always supplies — `ir._REQUIRED_PARAMS` — is reached from
+  `ClosedJaxpr.from_dict` and from nowhere else, deliberately and in its own
+  docstring's words: it guards a LOADED document, not a live trace. Nothing
+  produces evidence that a transcribed IR equals the jaxpr it came from.
+- **4, transfer soundness.** A tier is a string literal beside its transfer
+  in `stelling.propagate`'s registry, carried faithfully into the stamp and
+  asserted by the author. There is no `Tier` type, no `TransferMeta` and no
+  `argument_ref` — §10.1 of the architecture designs all three, and designs
+  with them the registration that would **refuse** a `sound` tier whose
+  written argument does not resolve, saying of that mechanism *"without it,
+  the rule is a wish"*. It is a wish. `transfer_provenance` is derived as
+  the constant `"core"` at both of the sites that populate it — the interval
+  path and the solver path — and is empty on the paths that reach no
+  propagation at all, so the field is present, honest and uninformative.
+  The one confirming instrument is
+  `test_every_exact_row_is_proven_exact_on_its_seeded_boxes`, and its reach
+  is two rows — `abs` and `neg` — on boxes seeded from each row's own branch
+  boundaries. Its scope section says the rest: *"It cannot check `sound` or
+  `sound-libm`"*, which is the tier `add`, `sub`, `mul`, `div`, `sqrt`,
+  `reduce_sum`, `dot_general` and `integer_pow` all carry, and *"a per-box
+  proof is NOT evidence for the tier"*, which is the tier's own universal
+  quantifier. The registry's tier population is derived from the
+  registry in `docs/supported-primitives.md` rather than retyped here, and
+  which faces of which primitives have been gauged at all is the subject of
+  `docs/gauge-coverage.md`, which exists because the word *gauged* had
+  covered three different scopes without saying which.
+- **5, solver.** There are no proof certificates and no independent checker:
+  nothing in `src/` asks a backend for proofs or an unsat core, and no
+  second program re-derives an `unsat`. Escalation is opt-in —
+  `stelling.preconditions.check` takes `solver_timeout_ms=None`, and the
+  default stamp reads *"no solver invoked: escalation was NOT ATTEMPTED
+  (solver_timeout_ms not set); every obligation was judged by
+  outward-rounded interval arithmetic alone"*. What runs when it is asked
+  for is a two-backend portfolio, which is a real mechanism and is described
+  below — but it is agreement between two programs, not a proof either can
+  hand over.
+- **6, ℝ ⇒ float, in the default `semantics="real"`.** This link is **NAMED
+  and not closed, and naming is not licensing.** The default stamp says it
+  in the verdict itself — *"the traced program's IEEE float behaviour is NOT
+  modeled — a predicate can hold in ℝ and fail in floats"* — and the section
+  below measures, row by row, where real mode is ℝ and where it is
+  execution-faithful. **There is no margin.** Nothing in `src/` computes,
+  carries or discharges one; the mode the architecture calls
+  `real-with-margin` appears **zero** times there, and the field that does
+  exist, `arithmetic_mode`, records how endpoints are computed rather than
+  what absorbs rounding. The `ieee` dial is the mechanism that answers this
+  link, it is opt-in, and it stamps itself.
+- **7, jaxpr ⇒ executed program.** **No verdict in this tree carries a
+  device.** `device_class` holds one of two fixed strings and both say there
+  was none: *"none: no concrete execution in this verdict"* on the interval
+  path, and *"none: no device execution; any witness replay is exact
+  rational arithmetic in pure Python (device-independent)"* on the solver
+  path. That is honest, and it is also the shape of the gap — the field
+  records the device class of any concrete execution **the verdict relies
+  on**, and a green verdict relies on none. Measured: with the probe armed
+  and 156 points genuinely executed on this machine, the field still reads
+  *"none"*, correctly, because a null probe result is not relied on. There
+  is no `trust_boundary` field on any verdict, and `DotAlgorithmPreset` —
+  the jax contract the architecture identifies as link 7's real partial
+  defence — appears nowhere in `src/` or `tests/`.
+
+**FOUR NAMES THE ARCHITECTURE USES AND `src/` DOES NOT HAVE**, each
+confirmed at **zero** occurrences under `src/` and under `tests/`:
+`real-with-margin`, `trust_boundary`, `DotAlgorithmPreset` and
+`TransferMeta`, with `argument_ref` beside them. They are design vocabulary,
+and a reader who came to this tree looking for the fields they name would
+find none of them.
+
+**AND THIS PAGE HAS BEEN ONE OF THOSE READERS.** The first of the six
+further commitments below opens *"An ℝ-with-margin proof is
+device-independent"* and closes on *"every artifact recording the deferred
+margin obligation"*. It binds a mode that does not exist: no artifact in
+this tree records a deferred margin obligation, because nothing computes a
+margin to defer. It stands as a commitment, and it is narrowed where it is
+written.
+
+### The two strongest mechanisms for links 5 and 7 cannot both be on
+
+The strongest thing this tree does for link 5 is the two-backend portfolio.
+The strongest things it does for link 7 are `ieee` mode's contraction hull —
+which MODELS XLA's freedom to fuse a multiply into a following add, measured
+on the target rather than assumed away — and its intra-equation order
+decline, which refuses a `reduce_sum` of three or more contributors because
+the association freedom lives INSIDE the equation, where no equation-faithful
+model can reach it. **The two are mutually exclusive by construction**,
+because the SMT backends emit over the reals. That is not an internal
+detail: the public front door refuses the combination outright. Measured,
+`check(harness, vacuity_mode="inputs-only", semantics="ieee",
+solver_timeout_ms=20000)` raises *"solver_timeout_ms and semantics='ieee'
+are contradictory: the SMT backends emit over the reals (QF_LRA/QF_NRA) and
+cannot model format-specific rounding or overflow"*. The same invariant is
+held a second time, anti-correlated, inside the library:
+`test_ieee_escalation_declines_every_unknown_with_zero_invocations` in
+`tests/test_ieee_escalation_guard.py` drives an `ieee` propagation past an
+eager fake solver that would answer `unsat`, and gets zero invocations. So
+no verdict this tree produces can carry both.
+
+**And `ieee` mode buys link 7 in one direction only**, which its own stamped
+assumption says: judging each equation as the binary64 operation it names
+*"assumes the compiler does not REASSOCIATE ACROSS equations"*. The freedom
+inside an equation is refused; the freedom between equations is assumed away
+and disclosed.
+
+### The tree's one known-open false VERIFIED, and which link it sits on
+
+The integer-literal wrap entry in the Log below records a harness whose
+predicate is false at all eleven declared points as written, and which comes
+back VERIFIED. **It is not an instance of a broken link 2.** That entry's
+own measurement is that the transcribed tree for the wrapped `256` is
+byte-identical to the tree for an honestly written `0`: the transcription is
+faithful, and the corruption is upstream of it, at eager time, before the
+harness is traced at all. It is a link 1 failure with jax rather than the
+author as its cause, and the instruments that reach that axis at all are
+source-text ones — the three opt-in narrowing instruments the README
+enumerates — rather than an execution probe of any budget.
+
+**AND THE INSTRUMENT COLUMN IS NOT UNIFORM ACROSS THE TWO DOORS THAT ENTRY
+PRICES.** `test_NEITHER_instrument_reaches_the_jnp_full_door` in
+`tests/test_falsify_wrap_reach.py` measures that neither the execution probe
+nor the trace-time narrowing gate — the one `check()` consults — counts
+anything at the `jnp.full` door, on the fence and on a variant that builds
+the constant inside the traced harness; it is asserted in the direction of
+the gap, so the day something starts reaching that door the test reds and
+the disclosure gets rewritten rather than quietly aged. The door is not
+uninstrumented: the eager construction-site detector IS the answer to it,
+and the same file has to suppress that detector, through
+`stelling._tripwire.eager`'s intentional-truncation region, in order to
+destroy the constant on purpose. It is a third, separately armed dial, and
+it RAISES at the line that wrote the constant rather than reporting into a
+verdict — `check()` reads whether its hook has been displaced and never
+reads a finding from it — so a run without that dial armed sees nothing at
+that door and says nothing about it. **Two doors, three instruments, and the
+one wired into the verdict reaches one of the two doors.**
+
+### What DOES run, and what it is worth
+
+The five bare links are not the whole account, and a page that stopped there
+would mislead as badly as one that never named them. What follows is real,
+it is stronger than the architecture's *Planned defence* column credits, and
+every item is measured rather than asserted:
+
+- **A solver portfolio that RAISES rather than picks.** Two backends — the
+  number is `stelling.solvers`' own `PORTFOLIO_SIZE` and every message
+  derives from it. A definitive disagreement raises `SolverDisagreement`
+  carrying both verdicts, both option sets and both scripts, never a
+  tiebreak. When fewer than two backends *answer* —
+  the wider condition than fewer being installed — the obligation carries a
+  `PORTFOLIO DEGRADED` clause on its own detail line, and on a discharge a
+  second note saying that this is the direction with no backstop, because a
+  universal claim has nothing downstream to re-derive it.
+- **Absence recorded as it happens, never narrated after.** Every invocation
+  appends its full record before any result exists; absence is the derived
+  fact of zero appends, cross-checked against a spawn counter incremented at
+  a mechanically disjoint site, and a divergence refuses to emit the verdict
+  at all.
+- **Exact-rational replay on the red side, and a reproducer that does not
+  trust this tool.** A `sat` becomes REFUTED only after an independent
+  exact-rational replay confirms both box membership and predicate
+  violation, and `stelling.reproduce` emits a file that runs the witness
+  through the caller's own program with stelling uninstalled. Every emitted
+  file in `tests/test_reproduce_acceptance.py` is executed as a SUBPROCESS
+  whose working directory is outside this repository and whose import path
+  carries a blocker that raises on any attempt to import this package, which
+  is the only arrangement that measures the property the feature rests on.
+  It is the strongest independent check in the project, and two things bound
+  it: **it exists on the REFUTED side only**, and its two external-code
+  targets are third-party packages, so those cells run where those packages
+  are installed and SKIP where they are not — a lane without them measures
+  the constructed cases and not the external ones.
+- **Exact-rational containment sweeps with pinned counts.** Every ordered
+  endpoint pair from an adversarial pool, paired box against box, driven
+  through the kernel at each catalogued format, with containment checked in
+  EXACT RATIONAL arithmetic so that no rounding can mask a miss. The grid
+  size and the per-row counts are module constants in
+  `tests/ieee_containment_sweep.py`, asserted on all four columns exactly
+  and in either direction by `test_the_S10_sweep_table_reproduces_exactly`
+  in `tests/test_ieee_zero_divisor_and_mul_exact.py` — the figures are not
+  retyped here, which is this project's own rule applied to a figure an
+  instrument prints. And the zero in the live rows is a measurement rather
+  than a battery that has never fired:
+  `test_the_S10_sweep_CATCHES_the_defect_it_certifies_gone` re-drives the
+  same sweep against the kernel the S10 fix replaced and asserts it finds
+  violations, at a count pinned the same way.
+- **A property suite where every property has a demonstrated place it
+  FAILS.** Not a comment saying a property would have caught something: a
+  registered control in `tests/property/positive_controls.py` that is
+  EXECUTED against a tree carrying the defect, asserting the run comes back
+  RED. A property whose control cannot be demonstrated does not ship — a
+  rule that has cost one property, and that gave a second one back when the
+  premise for dropping it turned out to have been written down without being
+  run. Each entry declares whether its control is a commit that shipped the
+  defect or a mutant somebody invented, because a mutant is honestly the
+  weaker evidence, and `tests/property/test_suite_disclosure.py` holds that
+  declaration to every entry.
+- **Mutation batteries that measure their own detection power.**
+  `stelling.fidelity` refuses to bless a gate stack that has no battery, a
+  failing baseline, an unexplained survivor or a stale survivor
+  explanation: a stack's discriminating power is a thing measured against
+  deliberately wrong variants, not a thing asserted.
+- **A trace gate with a third state for "nobody looked".** *"No narrowing
+  was seen"* and *"no narrowing occurred"* are different claims and only the
+  second licenses a VERIFIED, so a run that could not watch the whole trace
+  returns UNKNOWN with a note that says, in as many words, that this is not
+  a report that a constant was narrowed.
+
+**They are why a defect here has a decent chance of being found. None of
+them is a reason to believe any particular green verdict.** The two
+sentences are not in tension. A project can be well instrumented against its
+own mistakes and still be unable to hand a reader positive evidence for a
+specific claim, and the honest thing is to say both.
+
+### What this section is, and is not
+
+It is a **sharpening, with one correction inside it.** Nothing in this tree
+claims the five links are closed: the default stamp names the ℝ/float gap in
+the verdict itself, `docs/reading-a-verdict.md`'s status table spends its
+*does not mean* column on that gap, the README's disclaimer says a VERIFIED
+is a statement about a mathematical model under stated assumptions, and the
+architecture's table has carried these rows from the start. **What was
+missing was the aggregate** — that the five are bare TOGETHER, for one
+structural reason, and that no run of anything closes them. The correction
+is the ℝ-with-margin commitment named above, which described a mode this
+tree does not have.
+
 ## What every verdict must carry
 
 Every verdict object stamps, at minimum:
@@ -460,6 +759,21 @@ verdicts:
   comes due per-deployment, not a finished claim, and every artifact
   recording the deferred margin obligation must say so.
 
+  **AND IT BINDS A MODE THAT DOES NOT EXIST, WHICH IS SAID HERE RATHER THAN
+  LEFT TO BE INFERRED FROM ITS TENSE.** Read in a list of six whose other
+  five describe things this tree does, this one reads as a description of
+  what a verdict is. It is not: **nothing in `src/` computes, carries or
+  discharges a margin**, no artifact in this tree records a deferred margin
+  obligation because there is none to defer, and the mode the architecture
+  calls `real-with-margin` appears **zero** times under `src/`. The default
+  `semantics="real"` judges in exact real arithmetic with no margin at all
+  and names that gap in the verdict; `ieee` mode models the float behaviour
+  instead of absorbing it. The commitment stands as a commitment — the day a
+  margin exists this is what it will be held to — and until then it is a
+  rule with no subject. *"What a green verdict licenses, and what it does
+  not"* above carries this and the three other architecture names `src/`
+  does not have.
+
 - **Never invoke a solver on defaults.** stelling always emits the complete
   option set explicitly — including options whose emitted value currently
   coincides with the solver's default — and the stamp records the emitted
@@ -513,6 +827,15 @@ against the tree; fourteen findings came back, a fifteenth was found while
 repairing them, and the repairs are in place above and in
 `DOCUMENTATION_ARCHITECTURE.md`. **What that does NOT mean:**
 
+* **THE SECTION ABOVE IT DID NOT EXIST WHEN THE SWEEP RAN, AND THAT IS SAID
+  HERE SO THIS PARAGRAPH DOES NOT OVER-COVER.** *"What a green verdict
+  licenses, and what it does not"* was written on 2026-08-24, after this
+  pass, and no claim in it was reached by it. It carries its own
+  measurements with the environment each was taken in, which is this page's
+  standard for a measured claim and is not the same thing as having been
+  swept — a paragraph naming what a sweep reached must move when the page
+  grows a section the sweep never saw, or the reach statement quietly
+  widens to cover text nobody drove.
 * **The `## Log` below was not read line by line.** It is **14,926 lines** as
   this is written — the `## Log` heading to the end of the file, and that is
   the population — and it was swept EXHAUSTIVELY BY INSTRUMENT — every
@@ -638,12 +961,22 @@ the two: a path under `scratchpad/` cited anywhere else on this page and
 missing from this table reddens, a row here naming a path the page no longer
 cites reddens too, and every numeral in the two paragraphs above is
 recomputed rather than trusted — five of the six from this page, and the
-**135**, which is a fact about the repository and not about the page, from
-`git ls-files` in a test of its own, because a skip raised inside a test
-skips the whole test. The same test derives the sdist allowlist from
-`pyproject.toml` — not a hand-copied list — and reddens on a reference to an
-unshipped path in **any** shipped file, so the next one cannot land the way
-these did.
+`git ls-files scratchpad` total, which is a fact about the repository and
+not about the page, from `git ls-files` in a test of its own, because a skip
+raised inside a test skips the whole test. **THAT NUMERAL WAS NAMED HERE BY
+ITS VALUE, `135`, AND THE VALUE MOVED.** The paragraph above no longer
+states 135 — it states what the tree holds, and the git-gated test asserts
+that against `git ls-files` — so *"the 135"* pointed at a figure this page
+does not carry, in the very sentence that says the numerals are derived. It
+is the same rot the test's own failure message records one level down
+(*"it read 80 against a tree holding 135"*), and it is repaired the only way
+that cannot rot again: the numeral is named by what it COUNTS, and not
+retyped here at any value. The page's rule against retyping a figure applies
+to a figure used as a HANDLE exactly as it does to one used as a claim.
+
+The same test derives the sdist allowlist from `pyproject.toml` — not a
+hand-copied list — and reddens on a reference to an unshipped path in
+**any** shipped file, so the next one cannot land the way these did.
 
 | cited path | what it is | what the distribution carries |
 |---|---|---|
