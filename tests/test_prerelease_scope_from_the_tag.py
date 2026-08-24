@@ -55,6 +55,21 @@ under an amendment, and measured unique across both documents (33 at the tag,
 54 here, no collisions) by
 :func:`test_the_identity_is_unique_in_both_documents`.
 
+**WHAT THIS DOES NOT COVER, AND IT IS TWO THIRDS OF THE VOCABULARY.** The
+bijection exists because *0.1.0 pre-release builds only* is a claim about the
+DOCUMENT at the tag. The other two phrases are not, and no comparison of
+documents can reach them: *0.2.0 development builds only* and *`v0.1.0` and
+0.2.0 development builds* both describe entries written up AFTER the tag, and
+what separates them is whether the defect was **present in the released
+code** — a question about `src/` at `v0.1.0`, which `SOUNDNESS.md` at
+`v0.1.0` cannot answer, because a defect can be in the shipped code and in
+nobody's log. A bullet that says *0.2.0 development builds only* about
+something that shipped in `v0.1.0` is the same class of false field as the
+six below and this file cannot see it. Settling one of those means
+REPRODUCING the entry at the tag, which is a harness question and not a text
+one; `tests/test_soundness_log_reach.py`'s docstring is where the reach
+declarations that DO carry a reproduction at the tag are described.
+
 **THIS NEEDS GIT AND THE TAG, SO IT SKIPS RATHER THAN DEGRADING.** There is
 no weaker version of "compare against the tagged document" that is worth
 running — a fallback to the date proxy would be this file quietly becoming the
