@@ -92,11 +92,25 @@ def _x64():
     jax.config.update("jax_enable_x64", old)
 
 
+def traced(harness):
+    """jax's own ``ClosedJaxpr`` for ``harness`` — what :func:`probe` takes.
+
+    The probe no longer traces anything: it is handed the program the
+    ANALYSIS judged, because a probe that traces for itself can probe a
+    different program than the verdict is about (measured, with the
+    overflow tripwire armed). In the pipeline that object comes from
+    ``_jax_compat.trace_with_jaxpr``; here, where there is no analysis to
+    agree with, one trace is all there is.
+    """
+    return jax.make_jaxpr(harness)()
+
+
 def attack(harness, *, semantics="real", n=1, **kw):
     """Probe ``harness`` as if the analysis had discharged everything."""
     try:
         return None, probe(
-            harness, statuses=["discharged"] * n, semantics=semantics, **kw
+            traced(harness), statuses=["discharged"] * n, semantics=semantics,
+            **kw
         )
     except VerifiedFalsified as exc:
         return exc.report.falsification, exc.report
@@ -949,7 +963,7 @@ def test_the_firing_message_does_not_end_by_saying_nothing_was_found():
     THERE IS NONE"* three lines under *"FALSIFICATION PROBE FIRED"*.
     """
     with pytest.raises(VerifiedFalsified) as caught:
-        probe(lying_pow, statuses=["discharged"])
+        probe(traced(lying_pow), statuses=["discharged"])
     text = str(caught.value)
     assert "FALSIFICATION PROBE FIRED" in text
     assert "NO VIOLATION WAS FOUND" not in text, (
@@ -962,7 +976,7 @@ def test_the_firing_message_does_not_end_by_saying_nothing_was_found():
 def test_the_stamp_line_still_refuses_to_read_as_confirmation_when_it_fires():
     """The firing branch is under the same wording constraint as the others."""
     with pytest.raises(VerifiedFalsified) as caught:
-        probe(lying_pow, statuses=["discharged"])
+        probe(traced(lying_pow), statuses=["discharged"])
     lowered = caught.value.report.stamp_line().lower()
     for word in ("confidence", "validated", "corroborat", "clean", "passed"):
         assert word not in lowered, lowered
@@ -971,7 +985,7 @@ def test_the_stamp_line_still_refuses_to_read_as_confirmation_when_it_fires():
 def test_the_firing_names_which_test_admitted_the_violation():
     """A reader has to be able to tell a ℚ-proof from a proxy."""
     with pytest.raises(VerifiedFalsified) as caught:
-        probe(lying_pow, statuses=["discharged"])
+        probe(traced(lying_pow), statuses=["discharged"])
     assert "test:" in caught.value.report.falsification.render()
 
 
@@ -1293,7 +1307,7 @@ def test_the_admissibility_guard_rejects_a_point_the_sampler_should_not_build(
         x = any_array((), "float64", (0.0, 1.0))
         return assert_(x <= 1.0)
 
-    report = F.probe(h, statuses=["discharged"])
+    report = F.probe(traced(h), statuses=["discharged"])
     assert dict(report.skips).get("point-outside-declaration"), (
         f"every point the sampler built left the declared box and none was "
         f"counted as such: {report.skips}"
@@ -1364,7 +1378,7 @@ def test_a_literal_operand_in_an_assert_is_not_reported_as_a_TRACE_failure():
         x = any_array((), "float64", (0.0, 1.0))
         return assert_(jnp.asarray(True))
 
-    report = probe(folded, statuses=["discharged"])
+    report = probe(traced(folded), statuses=["discharged"])
     assert report.declined is None or "could not be traced" not in (
         report.declined
     ), report.declined
@@ -1492,9 +1506,24 @@ def test_an_assume_that_rounds_across_its_boundary_declines_over_Q():
     assert found is None, found and found.render()
     counts = dict(report.skips)
     assert counts.get("assume-unsatisfied-over-the-rationals", 0) > 0, counts
+    # AND IT IS DECLINED AT THE GATE, NOT ADJUDICATED AS A VIOLATION.
+    # The exact re-reading of the assumes now runs on EVERY admissible
+    # point rather than only where the obligation had already evaluated
+    # FALSE, so a point outside the assumed region over ℚ never becomes a
+    # violation to adjudicate -- which is what the count is FOR. It used
+    # to arrive through `_confirm` and be counted under
+    # `exact-replay-outside-the-assumed-region`, i.e. as an executed
+    # violation the probe had declined, which those points were not.
+    assert report.points_declined == 0, (
+        f"a point outside the assumed region over ℚ is not a declined "
+        f"violation: {report.points_declined}, {report.adjudications}"
+    )
     assert dict(report.adjudications).get(
         "exact-replay-outside-the-assumed-region", 0
-    ) == counts["assume-unsatisfied-over-the-rationals"], report.adjudications
+    ) == 0, report.adjudications
+    # and the number that used to read as coverage now carries its evidence
+    assert report.points_admissible_unconfirmed == 0, report
+    assert "re-read over ℚ and confirmed" in report.stamp_line()
 
 
 # ------------------------------------- a reading of the program can be PARTIAL
@@ -2704,3 +2733,475 @@ def test_the_float_to_float_reading_is_the_IDENTITY_and_says_why():
         "float32 no longer rounds 1/3, so this test no longer states the "
         "distinction it exists for"
     )
+
+
+# ==========================================================================
+# THE PROBE'S PROGRAM IS THE VERDICT'S PROGRAM
+# ==========================================================================
+#
+# The probe used to call `jax.make_jaxpr(harness)()` for ITSELF, and
+# whether that re-ran the harness body was decided by jax's own trace
+# memo. `preconditions._pipeline` defeats that memo on purpose when the
+# overflow tripwire is armed -- `jax.clear_caches()` and a fresh closure,
+# so the trace happens under the instrument -- so an impure harness handed
+# the probe a genuinely different program from the one the verdict is
+# about, and NOTHING compared the two. Every totality guard in the module
+# compares the probe's reading against the probe's own second trace.
+#
+# The subprocess is not decoration: arming the tripwire is process-global
+# and reaches a private jax registry, so a test that armed it in-process
+# would leave four other test files running under an instrument they did
+# not ask for.
+
+_IMPURE = '''
+import jax
+jax.config.update("jax_enable_x64", True)
+from stelling.harness import any_array, assert_
+from stelling.preconditions import check
+from stelling.falsify import VerifiedFalsified
+
+CALLS = []
+
+def harness():
+    x = any_array((), "float64", (0.0, 10.0))
+    CALLS.append(1)
+    if len(CALLS) == 1:
+        return assert_(x >= 0.0)      # TRUE on [0, 10]: the VERIFIED is right
+    return assert_(x <= 1.0)          # a DIFFERENT program, false on (1, 10]
+
+if %(arm)r:
+    from stelling import _tripwire
+    _tripwire.arm()
+    assert _tripwire.fires_count() is not None, "the tripwire did not arm"
+
+try:
+    v = check(harness, vacuity_mode="inputs-only", falsify="sample")
+    print("STATUS", v.status)
+except VerifiedFalsified as exc:
+    print("FIRED", str(exc).splitlines()[0])
+print("BODY-CALLS", len(CALLS))
+'''
+
+
+def _run_isolated(script):
+    src = pathlib.Path(stelling.__file__).resolve().parent
+    proc = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(script)],
+        capture_output=True,
+        text=True,
+        env={
+            "PYTHONPATH": str(src.parent),
+            "PATH": "/usr/bin:/bin",
+            "JAX_PLATFORMS": "cpu",
+            "HOME": "/tmp",
+        },
+    )
+    return proc
+
+
+@pytest.mark.parametrize("arm", [False, True])
+def test_the_probe_reads_the_program_the_VERDICT_is_about(arm):
+    """Same call, same stelling: the answer may not depend on an instrument.
+
+    A harness that returns a different obligation on its second call is
+    VERIFIED, correctly, on its first program. With the probe tracing for
+    itself, arming the overflow tripwire — which ``check()``'s own
+    docstring recommends — turned that into *"FALSIFICATION PROBE FIRED —
+    stelling is UNSOUND at this query"*, because the tripwire's gate
+    evicts jax's caches and traces through a fresh closure and the probe's
+    ``make_jaxpr`` then genuinely re-ran the body.
+
+    The impurity is the INSTRUMENT here and not the subject: what is being
+    measured is that the probe reads the analysis's program, and an impure
+    harness is simply the only way to make "a second trace" visible from
+    outside.
+
+    ``_tripwire.arm()`` rather than a nested ``pytest -p
+    stelling.overflow`` because it is the same call —
+    ``stelling._tripwire.plugin`` makes it at ``pytest_configure`` — and a
+    subprocess is cheaper than a session inside a session. The documented
+    spelling was driven by hand on both trees and gives the same two
+    answers: on ``115d771``, ``pytest`` -> VERIFIED with one body call and
+    ``pytest -p stelling.overflow`` -> *"FALSIFICATION PROBE FIRED —
+    stelling is UNSOUND at this query"* with two; here, VERIFIED with one
+    body call under both.
+    """
+    proc = _run_isolated(_IMPURE % {"arm": arm})
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    assert "STATUS VERIFIED" in proc.stdout, (
+        f"arm={arm}: the correct VERIFIED did not survive.\n{proc.stdout}\n"
+        f"{proc.stderr[-2000:]}"
+    )
+    assert "FIRED" not in proc.stdout, proc.stdout
+    assert "BODY-CALLS 1" in proc.stdout, (
+        f"arm={arm}: the harness body ran more than once, so something "
+        f"traced a second program.\n{proc.stdout}"
+    )
+
+
+def test_the_probe_refuses_a_harness_and_says_what_to_pass_instead():
+    """The parameter change is the fix; the door has to say so.
+
+    The minimum acceptable outcome for this defect was a guard that
+    compares the probe's program with the analysis's and declines when
+    they differ. What shipped is stronger and is why no such guard exists:
+    the probe cannot obtain a second program, because it is handed one and
+    has no tracer call left in it.
+    """
+    def h():
+        x = any_array((), "float64", (0.0, 1.0))
+        return assert_(x <= 1.0)
+
+    with pytest.raises(TypeError, match="not a harness"):
+        probe(h, statuses=["discharged"])
+    with pytest.raises(TypeError, match="trace_with_jaxpr"):
+        probe(h, statuses=["discharged"])
+    # and the object the pipeline hands it is accepted
+    from stelling._jax_compat import trace_with_jaxpr
+
+    query, closed = trace_with_jaxpr(h)
+    report = probe(closed, statuses=["discharged"])
+    assert report.declined is None and report.points_executed > 0, report
+
+
+def test_one_trace_feeds_the_transcription_and_the_probe():
+    """``trace_with_jaxpr`` returns both halves of ONE trace.
+
+    The transcription is what the analysis judges and jax's object is what
+    the probe executes. Two traces of the same callable are not
+    independence — it is the same tracer on the same function — and they
+    are the failure mode above, so the pipeline takes one.
+    """
+    from stelling._jax_compat import trace, trace_with_jaxpr
+
+    calls = []
+
+    def h():
+        calls.append(1)
+        x = any_array((), "float64", (0.0, 1.0))
+        return assert_(x <= 1.0)
+
+    query, closed = trace_with_jaxpr(lambda: h())
+    assert len(calls) == 1, calls
+    # jax's object, not the transcription: the probe may not read `ir`
+    assert hasattr(closed, "jaxpr") and not hasattr(closed, "content_hash")
+    assert hasattr(query, "content_hash")
+    # content hash, not object equality: `source_info` records the frame
+    # the declaration was written in and the two lambdas here are on
+    # different lines
+    assert query.content_hash() == trace(lambda: h()).content_hash()
+
+
+# ==========================================================================
+# A FIRING NAMES THE RIGHT PARTY
+# ==========================================================================
+
+
+def _under_declared_exp():
+    """A harness whose ``ieee`` VERIFIED exists ONLY because of a bad budget.
+
+    ``exp`` at ``X`` in float32: XLA's answer is about six ulps below the
+    correctly-rounded one, which is what the shipped profile declares. A
+    hand-written 0-ulp profile brackets ``exp`` too tightly, discharges an
+    obligation the executed program violates, and the honest profile
+    returns UNKNOWN on the same harness — so the counterexample is real
+    and it is the DECLARATION that is wrong, not stelling.
+    """
+    from stelling.propagate import LibmBudget
+
+    X = np.float32(88.72167205810547)
+    L = np.float32(3.398854604474046e+38)
+
+    def harness():
+        x = any_array((), "float32", (float(X), float(X)))
+        return assert_(jnp.exp(x) >= jnp.float32(L))
+
+    wishful = LibmBudget(
+        name="wishful-exp-0ulp",
+        basis="written by hand for this test; NOT a measurement of any backend",
+        ulps={("exp", "float32"): 0.0},
+    )
+    return harness, wishful
+
+
+def test_the_shipped_libm_budget_line_carries_the_phrase_the_probe_splits_on():
+    """The coupling is a PHRASE in data, so a test holds it.
+
+    ``falsify`` may not import ``propagate``; it recognises an unverified
+    caller declaration by the words the stamp uses. A test is under no
+    such constraint, so it reads the real line and asserts the phrase is
+    in it — otherwise the split below would silently stop happening.
+    """
+    from stelling.falsify import DECLARED_NOT_VERIFIED, unverified_declarations
+    from stelling.propagate import LIBM_PROFILES
+
+    profile = LIBM_PROFILES["xla-cpu-2026-08"]
+    line = profile.render({op for (op, _d), _u in profile.ulps})
+    assert DECLARED_NOT_VERIFIED in line, line
+    assert unverified_declarations((line, "some other assumption")) == (line,)
+    assert unverified_declarations(("some other assumption",)) == ()
+
+
+def test_a_firing_on_a_DECLARED_verdict_does_not_accuse_stelling():
+    """The counterexample is real; the attribution was not.
+
+    ``_confirm`` returns on ``ieee-executed-float`` before any exact test,
+    and an ``ieee`` VERIFIED can rest on a ``libm_budget`` the stamp marks
+    *"DECLARED, NOT VERIFIED … stelling checks NEITHER"*. Under-declaring
+    it made the probe raise *"stelling is UNSOUND at this query"* — an
+    ``AssertionError`` that stops the caller's CI and points them at
+    ``stelling/falsify.py`` — for the caller's own declaration.
+    """
+    harness, wishful = _under_declared_exp()
+
+    # the honest profile does not mint the VERIFIED at all, which is what
+    # makes this a defect in the declaration rather than in the analysis
+    honest = check(harness, vacuity_mode="inputs-only", semantics="ieee",
+                   libm_budget="xla-cpu-2026-08", falsify="sample")
+    assert honest.status == "UNKNOWN", honest.status
+
+    with pytest.raises(VerifiedFalsified) as caught:
+        check(harness, vacuity_mode="inputs-only", semantics="ieee",
+              libm_budget=wishful, falsify="sample")
+    text = str(caught.value)
+    assert "FALSIFICATION PROBE FIRED" in text
+    assert "RESTS ON A DECLARATION stelling does not check" in text
+    assert "stelling is UNSOUND at this query" not in text, text
+    assert "THIS IS NOT A REPORT THAT STELLING IS UNSOUND" in text
+    # and it names the profile, which is the thing to go and check
+    assert "wishful-exp-0ulp" in text, text
+    # the violation is still REPORTED and still RAISES: declining would
+    # throw away the point at which to check the declaration
+    assert caught.value.report.falsification is not None
+    assert isinstance(caught.value, AssertionError)
+
+
+def test_an_unconditioned_firing_still_says_stelling_is_unsound():
+    """The split must not soften the message it was carved out of.
+
+    A verdict carrying no unverified caller declaration is stelling's own
+    claim, and a firing on it is a soundness event in this tool.
+    """
+    with pytest.raises(VerifiedFalsified) as caught:
+        probe(traced(lying_pow), statuses=["discharged"])
+    text = str(caught.value)
+    assert "stelling is UNSOUND at this query" in text
+    assert "RESTS ON A DECLARATION" not in text
+
+
+# ==========================================================================
+# points_admissible CARRIES ITS EVIDENCE
+# ==========================================================================
+
+
+def test_the_admissible_count_is_re_read_over_Q_on_a_CLEAN_run():
+    """The take-back used to run only where a violation was already found.
+
+    ``_confirm``'s exact re-reading of the assumes is consulted at a point
+    where the obligation evaluated FALSE — so on a clean run, the common
+    case, it never ran and ``points_admissible`` stood as a count of
+    points *"admitted by every assume"* with no exact evidence behind it.
+    Measured before this batch: 55 admissible, **47 of them not in the
+    assumed region over ℚ**, under a stamp line ending *"NO VIOLATION WAS
+    FOUND"*.
+    """
+    def clean():
+        y = any_array((), "float64", (0.0, 2.0))
+        # TRUE in floats, FALSE over ℚ for every y > 0
+        a = assume(y * 0.1 * 10.0 <= y)
+        # trivially true, so no violation anywhere and no take-back
+        return a, assert_(y >= 0.0)
+
+    import stelling.falsify as F
+
+    found, report = attack(clean)
+    assert found is None and report.declined is None, report
+    counts = dict(report.skips)
+    assert counts.get("assume-unsatisfied-over-the-rationals", 0) > 0, counts
+    assert report.points_declined == 0, report.points_declined
+    assert report.violations_seen == 0, report.violations_seen
+
+    # every counted point is one an exact reading placed inside the region
+    assert report.points_admissible_unconfirmed == 0, report
+    census = F._read(traced(clean))
+    checked = 0
+    for point in _points_of(clean, report):
+        assumes, _ = F._replay(census, point)
+        assert all(assumes), (
+            f"a point counted as admissible is outside the assumed region "
+            f"over ℚ: {point}"
+        )
+        checked += 1
+    assert checked == report.points_admissible, (checked, report)
+
+    line = report.stamp_line()
+    assert f"{report.points_admissible} inside the declared set" in line
+    assert "re-read over ℚ and confirmed" in line
+
+
+def _points_of(harness, report):
+    """Re-run the probe recording every point it counted as admissible.
+
+    Re-run rather than instrumented in place: the probe is deterministic
+    for a fixed seed, and a report that carried its points would be a
+    report that grew a field for a test's convenience.
+    """
+    import stelling.falsify as F
+
+    kept = []
+    census = F._read(traced(harness))
+    original = F._execute
+
+    def spy(c, point):
+        run = original(c, point)
+        if run.raised is None and len(run.assumes) == c.assumes_in_program:
+            if all(bool(np.all(a)) for a in run.assumes):
+                exact = None
+                try:
+                    assumes, _ = F._replay(c, [np.asarray(a) for a in point])
+                    exact = (len(assumes) == c.assumes_in_program
+                             and all(assumes))
+                except Exception:  # noqa: BLE001
+                    exact = None
+                if exact is not False:
+                    kept.append([np.asarray(a) for a in point])
+        return run
+
+    F._execute = spy
+    try:
+        try:
+            F.probe(traced(harness), statuses=["discharged"] * 1)
+        except VerifiedFalsified:
+            pass
+    finally:
+        F._execute = original
+    return kept
+
+
+def test_the_stamp_line_says_which_reading_the_assume_half_rests_on():
+    """Four cases, four different facts, and none of them is silence."""
+    from stelling.falsify import ProbeReport
+
+    none = ProbeReport(points_admissible=5, assumes_in_program=0)
+    assert "states no assume" in none.stamp_line()
+
+    ieee = ProbeReport(points_admissible=5, assumes_in_program=1,
+                       semantics="ieee")
+    assert "AS THE PROGRAM EXECUTED THEM IN FLOATS" in ieee.stamp_line()
+
+    exact = ProbeReport(points_admissible=5, assumes_in_program=1)
+    assert "every one of them re-read over ℚ" in exact.stamp_line()
+
+    mixed = ProbeReport(points_admissible=5, assumes_in_program=1,
+                        points_admissible_unconfirmed=2)
+    line = mixed.stamp_line()
+    assert "3 of them re-read over ℚ and confirmed" in line
+    assert "2 on the executed float reading" in line
+    assert "not evidence that those 2 are in the assumed region" in line
+
+
+# ==========================================================================
+# the two smaller ones
+# ==========================================================================
+
+
+def test_the_bool_window_intersects_with_the_declaration():
+    """The one ``_window`` branch that ignored the numbers it was handed.
+
+    ``any_array((), "bool", (0.0, 0.0))`` declares FALSE and nothing else.
+    The bool branch returned ``(0, 1)`` flat, the sampler built ``True``,
+    and only ``_admissible`` stopped it — at four wasted
+    ``point-outside-declaration`` skips per run, which are also the only
+    rejections that guard had ever made on a live corpus.
+    """
+    false_only = Declaration(position=0, shape=(), dtype="bool",
+                             lo=0.0, hi=0.0)
+    assert _window(false_only) == ((0, 0), None)
+    assert _window(Declaration(position=0, shape=(), dtype="bool",
+                               lo=1.0, hi=1.0)) == ((1, 1), None)
+    assert _window(Declaration(position=0, shape=(), dtype="bool",
+                               lo=0.0, hi=1.0)) == ((0, 1), None)
+    # an infinite endpoint never leaves a two-element set unbounded
+    assert _window(Declaration(position=0, shape=(), dtype="bool",
+                               lo=float("-inf"),
+                               hi=float("inf"))) == ((0, 1), None)
+    # and a box with no bool in it declines by name rather than sampling
+    assert _window(Declaration(position=0, shape=(), dtype="bool",
+                               lo=2.0, hi=3.0)) == (None, "empty-integer-box")
+
+    def only_false():
+        b = any_array((), "bool", (0.0, 0.0))
+        return assert_(jnp.logical_or(b, jnp.logical_not(b)))
+
+    _, report = attack(only_false)
+    assert dict(report.skips).get("point-outside-declaration", 0) == 0, (
+        f"the sampler still builds points the declaration excludes: "
+        f"{report.skips}"
+    )
+    assert report.points_built == report.points_executed, report
+
+
+@pytest.mark.filterwarnings("ignore:Explicitly requested dtype")
+def test_the_sampled_point_must_survive_conversion_to_jax():
+    """An invariant that holds because of a decline in ANOTHER module.
+
+    ``run_one`` hands ``jnp.asarray`` the numpy point and ``_confirm`` and
+    ``_replay`` the un-narrowed one. Under ``jax_enable_x64=0`` that
+    conversion NARROWS float64 to float32, and the two halves of the fire
+    condition would then be about different programs. Nothing reaches it
+    today — ``propagate`` refuses the value-changing convert a float64
+    declaration produces with x64 off, so no VERIFIED exists — but that is
+    a fact about another module, and an invariant that rests on one is an
+    invariant one line elsewhere can remove.
+    """
+    from stelling.falsify import ProbeInvariantViolated
+
+    def h():
+        x = any_array((), "float64", (0.0, 9.0))
+        return assert_(x * x <= 40.0)
+
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", False)
+    try:
+        closed = traced(h)
+        assert str(np.asarray(jnp.asarray(np.asarray(1.5, "float64")).dtype)) \
+            == "float32", "jax no longer narrows here; the test is inert"
+        with pytest.raises(ProbeInvariantViolated, match="did not survive"):
+            probe(closed, statuses=["discharged"])
+    finally:
+        jax.config.update("jax_enable_x64", old)
+
+    assert not issubclass(ProbeInvariantViolated, VerifiedFalsified), (
+        "a broken invariant must not be catchable as a firing"
+    )
+    assert issubclass(ProbeInvariantViolated, AssertionError)
+
+
+def test_the_assume_confirmation_stops_at_the_last_assume():
+    """An abstention AFTER the last assume must not cost a reading already made.
+
+    The gate needs the assumes and nothing else. A whole-program replay
+    would abstain on ``exp`` and report every point of this program
+    unconfirmed — while the assume itself has a perfectly exact reading
+    over ℚ, and it is FALSE, so those points are outside the assumed
+    region and must not be attacked at all.
+    """
+    import stelling.falsify as F
+
+    def exp_after_assume():
+        x = any_array((), "float64", (0.5, 2.0))
+        a = assume(x * 0.1 * 10.0 <= x)      # exactly readable; false over ℚ
+        return a, assert_(jnp.exp(x) >= 0.0)  # no exact rational reading
+
+    census = F._read(traced(exp_after_assume))
+    point = [np.asarray(1.0)]
+    assert F._replay(census, point, assumes_only=True)[0] == [False]
+    with pytest.raises(_Unreplayable, match="no exact rational reading"):
+        F._replay(census, point)
+
+    _, report = attack(exp_after_assume)
+    assert dict(report.skips).get(
+        "assume-unsatisfied-over-the-rationals", 0
+    ) > 0, report.skips
+    assert report.points_admissible_unconfirmed == 0, report
+    assert report.points_admissible == 0, report

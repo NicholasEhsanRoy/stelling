@@ -79,6 +79,19 @@ def _x64():
     jax.config.update("jax_enable_x64", old)
 
 
+def traced(harness):
+    """jax's own ``ClosedJaxpr`` for ``harness`` — what :func:`probe` takes.
+
+    The probe no longer traces anything: it is handed the program the
+    ANALYSIS judged, because a probe that traces for itself can probe a
+    different program than the verdict is about (measured, with the
+    overflow tripwire armed). In the pipeline that object comes from
+    ``_jax_compat.trace_with_jaxpr``; here, where there is no analysis to
+    agree with, one trace is all there is.
+    """
+    return jax.make_jaxpr(harness)()
+
+
 def run(harness, *, strategies=STRATEGIES, semantics="real", n=1):
     """Probe ``harness`` as if the analysis had discharged everything.
 
@@ -88,7 +101,7 @@ def run(harness, *, strategies=STRATEGIES, semantics="real", n=1):
     """
     try:
         report = probe(
-            harness,
+            traced(harness),
             statuses=["discharged"] * n,
             strategies=strategies,
             semantics=semantics,
@@ -678,7 +691,7 @@ def test_the_report_carries_no_summary_of_how_well_the_verdict_held():
 def test_a_firing_raises_and_carries_the_report():
     """The disposition. Not a status, and not a note on one."""
     with pytest.raises(VerifiedFalsified) as caught:
-        probe(pow_endpoint, statuses=["discharged"])
+        probe(traced(pow_endpoint), statuses=["discharged"])
     exc = caught.value
     assert isinstance(exc, AssertionError), (
         "VerifiedFalsified must be an AssertionError so that a batch "
@@ -700,7 +713,7 @@ def test_the_probe_does_not_attack_what_the_analysis_did_not_claim():
     Falsifying it would be reporting a defect that is not there: the tool
     said it could not decide, and it was right.
     """
-    report = probe(pow_endpoint, statuses=["unknown"])
+    report = probe(traced(pow_endpoint), statuses=["unknown"])
     assert report.falsification is None
     assert report.declined == "no obligation was discharged"
 
@@ -708,7 +721,8 @@ def test_the_probe_does_not_attack_what_the_analysis_did_not_claim():
 def test_an_unknown_strategy_name_raises_eagerly():
     """Same discipline as every other dial in the pipeline."""
     with pytest.raises(ValueError, match="unknown falsification strateg"):
-        probe(pow_true, statuses=["discharged"], strategies=("corners",))
+        probe(traced(pow_true), statuses=["discharged"],
+              strategies=("corners",))
 
 
 # --------------------------------------------------- it executes the PROGRAM

@@ -92,6 +92,7 @@ import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
 
 from stelling.falsify import VerifiedFalsified, probe  # noqa: E402
+from stelling._jax_compat import trace_with_jaxpr  # noqa: E402
 from stelling.harness import any_array, assert_, trace  # noqa: E402
 from stelling.propagate import propagate  # noqa: E402
 from stelling.verdict import make_verdict  # noqa: E402
@@ -142,10 +143,16 @@ def _probe(harness):
     A firing would RAISE, so this converts that into a returned marker
     rather than letting it escape: the point of these tests is to record
     which of the two happened, not to propagate one of them.
+
+    ONE TRACE FEEDS BOTH HALVES, exactly as the pipeline now does it:
+    `trace_with_jaxpr` returns the transcription the analysis judges and
+    jax's own object the probe executes, so the statuses and the probed
+    program cannot be about two different programs.
     """
-    statuses = _statuses(harness)
+    query, closed = trace_with_jaxpr(harness)
+    statuses = [o.status for o in propagate(query).obligations]
     try:
-        return probe(harness, statuses=statuses), None
+        return probe(closed, statuses=statuses), None
     except VerifiedFalsified as exc:
         return exc.report, exc
 

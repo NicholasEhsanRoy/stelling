@@ -305,7 +305,7 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     import dataclasses
 
     import stelling as _stelling
-    from stelling._jax_compat import jax_version, trace, x64_enabled
+    from stelling._jax_compat import jax_version, trace_with_jaxpr, x64_enabled
     from stelling.propagate import propagate
     from stelling.vacuity import (
         _MODES, NestedDeclaration, declaration_bounds, unwidened, widen,
@@ -408,7 +408,7 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
             # Fresh closure defeats jax.make_jaxpr's identity cache; the
             # eviction above defeats every trace cache BELOW it, which the
             # fresh closure never reached.
-            cj = trace(lambda: harness())
+            cj, jaxpr = trace_with_jaxpr(lambda: harness())
         finally:
             narrowings = _pop_gate()
         # THREE ways the watch can be PARTIAL, and none of them is a
@@ -465,7 +465,7 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
                 f"under the instrument"
             )
     else:
-        cj = trace(harness)
+        cj, jaxpr = trace_with_jaxpr(harness)
         narrowings = 0
 
     if narrowings > 0 or unobserved is not None:
@@ -609,13 +609,43 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     # where `VERIFIED_BARRED_PRIMITIVES` lives and where an emission defect
     # that MISSED a violation would be. The claim under attack is the one
     # the verdict makes, so it is the one the probe is handed.
+    #
+    # AND THE PROGRAM UNDER ATTACK IS THE ONE THE VERDICT IS ABOUT, WHICH
+    # USED TO BE LEFT TO A JAX MEMO. The probe was handed `harness` and
+    # traced it AGAIN for itself; whether that second `jax.make_jaxpr`
+    # re-ran the body was decided by jax's trace cache, and the armed
+    # branch above defeats that cache deliberately (a fresh closure, after
+    # `jax.clear_caches()`). Measured: harness-body invocations per
+    # `check()` were 1 unarmed and 2 under `pytest -p stelling.overflow`
+    # with `falsify="sample"` -- so an impure harness gave the probe a
+    # genuinely different program, and NOTHING compared the two. Driven
+    # through the public API, both directions: a CORRECT VERIFIED made to
+    # raise "stelling is UNSOUND at this query", and a VERIFIED carrying a
+    # "NO VIOLATION WAS FOUND" work report about a program the verdict is
+    # not about -- the same call, the same stelling, VERIFIED under
+    # `pytest` and "UNSOUND" under `pytest -p stelling.overflow`, which
+    # `check()`'s own docstring recommends. `jaxpr` here is jax's own
+    # object from the ONE trace this pipeline took, so the probe has no
+    # second program to disagree with. The transcription `cj` is NOT
+    # passed: the probe may not read `stelling.ir`, and that rule is
+    # untouched by handing it the jax object it was tracing for itself.
+    #
+    # THE STAMPED ASSUMPTIONS GO WITH THE STATUSES, and for the same
+    # reason. A firing says "stelling is UNSOUND at this query", but an
+    # `ieee` VERIFIED resting on a caller-declared `libm_budget` is not
+    # stelling's own claim -- the stamp says so in the words "DECLARED,
+    # NOT VERIFIED" -- and under-declaring it made the probe raise a
+    # soundness alarm against stelling for the caller's declaration.
+    # Passed as plain strings, exactly as `statuses` is, so the probe
+    # still imports nothing that produced them.
     if falsify is not None:
         from stelling.falsify import probe as _probe
 
         _report = _probe(
-            harness,
+            jaxpr,
             statuses=[o.status for o in v.obligations],
             semantics=semantics,
+            assumptions=v.stamp.assumptions,
         )
         v = dataclasses.replace(v, notes=v.notes + (_report.stamp_line(),))
 

@@ -1407,7 +1407,42 @@ def nonvacuity(pred):
 def trace(harness) -> ir.ClosedJaxpr:
     """Trace a nullary harness (inputs declared via :func:`any_array`) and
     transcribe it. The caller owns jax config (e.g. ``jax_enable_x64``)."""
-    return transcribe(jax.make_jaxpr(harness)())
+    return trace_with_jaxpr(harness)[0]
+
+
+def trace_with_jaxpr(harness):
+    """:func:`trace`, and jax's own ``ClosedJaxpr`` alongside it.
+
+    Returns ``(ir_query, jax_closed_jaxpr)`` from **one** trace. Use this
+    wherever something downstream needs to work on the very program that
+    was transcribed rather than on a program traced a second time from the
+    same callable.
+
+    **WHY THE JAX OBJECT IS RETURNED AND NOT DROPPED.** It used to be
+    dropped, and :func:`stelling.falsify.probe` therefore called
+    ``jax.make_jaxpr(harness)()`` a second time to get one. Whether that
+    second call re-ran the harness body was decided by jax's own trace
+    memo, which is not a guarantee anything here owns: with the overflow
+    tripwire armed, ``preconditions._pipeline`` evicts jax's caches and
+    traces through a fresh closure, so the probe's call was a genuine
+    SECOND trace — and an impure harness then handed the probe a DIFFERENT
+    PROGRAM from the one the verdict is about, with nothing comparing the
+    two. Measured on this tree: harness-body invocations per ``check()``
+    were 1 unarmed and **2** with ``pytest -p stelling.overflow`` and
+    ``falsify="sample"``. Returning the object closes that by construction
+    — there is no second trace to disagree with the first.
+
+    **AND IT DOES NOT WEAKEN THE PROBE'S INDEPENDENCE ARGUMENT.** That
+    argument is *"the probe does not read ``stelling.ir``"* — it must not
+    consume the transcription, because the transcription is part of what
+    it is checking. It is not *"the probe must trace the harness itself"*.
+    What is handed over here is jax's object, which is exactly what the
+    probe's own ``jax.make_jaxpr`` call produced; the transcribed
+    :class:`stelling.ir.ClosedJaxpr` is a separate return value and the
+    probe never sees it.
+    """
+    closed = jax.make_jaxpr(harness)()
+    return transcribe(closed), closed
 
 
 def transcribe(closed_jaxpr) -> ir.ClosedJaxpr:
