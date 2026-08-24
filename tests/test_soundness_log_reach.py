@@ -3,11 +3,12 @@
 
 """How many entries of `SOUNDNESS.md`'s `## Log` reach a RELEASE — counted.
 
-**THE DIGIT HAS HELD SEVEN VALUES.** *"(no releases yet)"*, then S11
+**THE DIGIT HAS HELD EIGHT VALUES.** *"(no releases yet)"*, then S11
 alone, then three, then four and five at the same moment on two branches,
-then six, then seven, and now nine. The first six were corrections made by
-a person re-reading the log; the seventh was not — two `Versions:` fields
-moved and the derived count followed them, which is the paragraph after
+then six, then seven, then nine, and now eleven. The first six were
+corrections made by a person re-reading the log; the seventh and the
+eighth were not — `Versions:` fields moved and the derived count followed
+them, which is the paragraph after
 next. Not one of the five noticed that the 2026-08-15 B6 entry for audit
 finding **S12&prime;** had carried the headline `PRESENT IN THE RELEASED
 0.1.0` since `96ab47a` — the commit that added the entry, and left the
@@ -44,18 +45,34 @@ and not the truth. Four of the six were 0.2.0 development work and two
 reach `v0.1.0`; that correction is what moved the entries count from seven
 to nine.
 
-**THE THREE UNITS, WHICH ARE 9, 10 AND 8.** They are different questions
+**AND THE SECOND HALF OF THAT IS THE HALF NO CHECK CAN REACH.** Those six
+are visible to a comparison between a bullet's DATE and its field: a
+post-tag date cannot have an event that was over pre-tag. Two more moved
+on 2026-08-25 — S12&Prime; and M17 — and they are the mirror: post-tag
+dates carrying *0.2.0 development builds only* for defects the released
+`v0.1.0` already had. Nothing about those bullets is internally
+inconsistent, so the date comparison is structurally silent over them;
+they were found by driving each entry against an extracted `v0.1.0`. That
+correction moved the entries count from nine to eleven, and it is why the
+paragraph above says a closed set holds the vocabulary and not the truth
+rather than saying the fields have now been checked.
+
+**THE THREE UNITS, WHICH ARE 11, 12 AND 9.** They are different questions
 and this file keeps them apart, because the count was wrong twice by
 answering one of them with another's answer:
 
 * **entries** — top-level `## Log` bullets whose `Versions:` field names
-  `v0.1.0`. Nine.
-* **findings** — audit 0.2.0 findings reaching `v0.1.0`. Ten: one more
+  `v0.1.0`. Eleven.
+* **findings** — audit 0.2.0 findings reaching `v0.1.0`. Twelve: one more
   than the entries, because S14 has a routed detail section
   (`SF-0.2.0-59`) and its own reach declaration but no `## Log` bullet.
 * **one-liners** — `CHANGELOG.md` entries carrying the `v0.1.0` version
-  field. Eight: two fewer than the findings, because S15 and S16 share
-  `SF-0.2.0-14` and M12 has no soundness-fix one-liner at all.
+  field IN `### Soundness fixes`. Nine: three fewer than the findings,
+  because S15 and S16 share `SF-0.2.0-14`, and because M12 and M17 have
+  no soundness-fix one-liner at all — their bullets are in *Float32 /
+  float16 / bfloat16 IEEE mode* and *Verification pipeline*, and both
+  now carry the version field there, where this count does not look and
+  a changelog-only reader does.
 
 Each numeral in the paragraph is compared against the thing it counts,
 and the findings numeral against the list written beside it in that same
@@ -462,11 +479,16 @@ def test_the_finding_count_is_the_length_of_the_list_written_beside_it():
 def test_the_one_liner_count_is_the_number_of_one_liners_that_carry_the_field():
     """The ONE-LINER numeral, against `CHANGELOG.md`.
 
-    The third unit, and the one that would be easiest to confuse with the
-    first because today they are both seven. They are not the same
+    The third unit, and the one easiest to confuse with the first — they
+    were both seven on the day this file was written, and they are 9 and
+    11 today. They are not the same
     question: entries are bullets of this log, one-liners are entries of
     the changelog, and S15 and S16 are two of the former and one of the
-    latter.
+    latter. It is also the NARROWEST unit: it reads
+    `### Soundness fixes` only, so a `v0.1.0` disclosure carried by a
+    bullet of another changelog section — M12's and M17's both are — is
+    deliberately outside it, and the findings numeral is where those two
+    are counted.
     """
     changelog = CHANGELOG.read_text(encoding="utf-8")
     section = next(s for s in SECTIONS if s.key == "soundness")
@@ -535,9 +557,9 @@ def test_each_permitted_field_is_actually_used(field):
     A closed set with a member nothing ever uses is an option that has
     never been exercised, and this campaign has closed that shape often
     enough to check for it. All three are in use: 33 bullets pre-release
-    only, 12 in 0.2.0 development only, 9 reaching `v0.1.0`. (Named rather
-    than called "the release": `0.2.0` is a release too now, and no bullet
-    reaches it.)
+    only, 10 in 0.2.0 development only, 11 reaching `v0.1.0`. (Named
+    rather than called "the release": `0.2.0` is a release too now, and no
+    bullet reaches it.)
     """
     used = [line for line, text in log_bullets() if field in text]
     assert used, (

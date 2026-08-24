@@ -107,6 +107,20 @@ RELEASE_FILES: tuple[str, ...] = ("CHANGELOG.md", "SOUNDNESS.md")
 #: `test_soundness_log_reach.py` derives the reached-release count from
 #: these fields, and a count derived from a vocabulary that cannot express
 #: a third of its entries is a count over the entries that happened to fit.
+#:
+#: EIGHT BULLETS HAVE NOW BEEN RE-SCOPED AND THE 33 ABOVE ONLY MOVED FOR
+#: SIX OF THEM, which is the arithmetic and not a rounding: 39 − 6 = 33,
+#: and the other two came out of a DIFFERENT phrase. On 2026-08-25
+#: S12&Prime; and M17 left `Versions: 0.2.0 development builds only` for
+#: the `v0.1.0` phrase, because the released tag carries both defects —
+#: so the second phrase went from 12 bullets to 10 and the third from 9
+#: to 11, and the first did not move at all. The two rounds failed for
+#: opposite reasons, too: the six were post-tag dates claiming a pre-tag
+#: event, which a date-versus-field comparison catches on its own; these
+#: two are post-tag dates carrying a post-tag phrase, internally
+#: consistent, and false only against an extracted `v0.1.0`. A closed set
+#: holds the vocabulary and not the truth, and nothing in this module
+#: knows which of the three a given entry OUGHT to carry.
 VERSION_FIELDS: tuple[str, ...] = (
     "Versions: 0.1.0 pre-release builds only.",
     "Versions: 0.2.0 development builds only.",

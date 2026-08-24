@@ -88,6 +88,16 @@ SPDX-License-Identifier: Apache-2.0
   anything else stays ⊤-with-a-note rather than being read as a float.
   Verdicts move **UNKNOWN → VERIFIED/REFUTED** on float16 and bfloat16
   harnesses with constants, in both `real` and `ieee` semantics.
+  **Versions: `v0.1.0` and 0.2.0 development builds.** The two missing
+  decoder entries are in the released tag — `v0.1.0`'s `_STRUCT_FMT` has
+  neither `<f2` nor a `<V2` route, and an ordinary real-mode `check()`
+  there answers UNKNOWN on both formats with that note, measured at the
+  tag under `jax_enable_x64=True` with no solver. `v0.1.0` has no
+  `semantics` parameter at all, so this is not an ieee-only gap. No
+  definite released verdict is affected: the failure is an UNKNOWN, and
+  an UNKNOWN claims nothing. The reproduction is in
+  [`SOUNDNESS.md`](SOUNDNESS.md)'s `## Log`, under the 2026-08-15 B4
+  part 1 entry.
 
 - **A mixed-format comparison gets the WIDEST operand band, never the
   alphabetically-first** (audit 0.2.0 M13). `_ieee_cmp_get_min_normal`
@@ -844,6 +854,20 @@ only release"* while that was so.)
   109 of the 208 nested-containing harnesses moved UNKNOWN → REFUTED. The
   38 all-top-level control harnesses were byte-identical.
 
+  **Versions: `v0.1.0` and 0.2.0 development builds.** The count check is
+  in the released tag: `v0.1.0:src/stelling/obligation.py`'s
+  `slice_unknown_obligations` carries it verbatim, and driven there under
+  jax 0.11.0 with `JAX_ENABLE_X64=1` and both solver wheels, a query of
+  one top-level `assert_` plus one `@jax.jit`-nested one comes back
+  UNKNOWN with **both** obligations quoting *"escalation declined: 2
+  obligation(s) but 1 top-level stelling_assert equation(s)"*, where the
+  top-level one alone is REFUTED. **If you are holding a stored verdict
+  whose per-obligation detail carries that sentence, it came from a build
+  with this defect — `v0.1.0` included — and 0.2.0 may now decide it.** No
+  verdict was ever wrong: the old behaviour declined, it never asserted.
+  The drive at the tag is in [`SOUNDNESS.md`](SOUNDNESS.md)'s `## Log`,
+  under the 2026-08-15 B6 entry for M17.
+
   **A nested `assert_` is still not sliceable**, and its own obligation
   still declines — with a reason that now names the actual cause instead of
   an arithmetic mismatch. Every obligation still undecided after this fix,
@@ -1056,9 +1080,11 @@ on 2026-08-16 — how their figures relate* —
   (audit 0.2.0 **S12′**). Versions: `v0.1.0` and 0.2.0 development builds.
   [Detail](SOUNDNESS.md#sf-020-19)
 
-- **SF-0.2.0-20** — `interval.dot_general_geometry` keeps its documented
-  contract on non-integer `dimension_numbers` (audit 0.2.0 **S12″**).
-  Versions: 0.2.0 development builds only. [Detail](SOUNDNESS.md#sf-020-20)
+- **SF-0.2.0-20** — A non-integer `dimension_numbers` entry no longer
+  raises a raw `TypeError` out of the public `propagate()`, and
+  `interval.dot_general_geometry` keeps its documented contract (audit
+  0.2.0 **S12″**). Versions: `v0.1.0` and 0.2.0 development builds.
+  [Detail](SOUNDNESS.md#sf-020-20)
 
 - **SF-0.2.0-21** — A guard that refuses a malformed extent can no longer be
   stopped by the extent (audit 0.2.0 B6 **audit 3**, F1/F2/F3). Versions:

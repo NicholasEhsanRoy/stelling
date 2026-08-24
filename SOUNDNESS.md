@@ -836,7 +836,7 @@ repairing them, and the repairs are in place above and in
   swept — a paragraph naming what a sweep reached must move when the page
   grows a section the sweep never saw, or the reach statement quietly
   widens to cover text nobody drove.
-* **The `## Log` below was not read line by line.** It is **14,926 lines** as
+* **The `## Log` below was not read line by line.** It is **15,628 lines** as
   this is written — the `## Log` heading to the end of the file, and that is
   the population — and it was swept EXHAUSTIVELY BY INSTRUMENT — every
   `path::name` citation, every backticked module-qualified identifier, every
@@ -849,13 +849,24 @@ repairing them, and the repairs are in place above and in
   shape in a Log that size. *(This said "11,000-odd lines", and then "in
   11,000 lines". Neither is the Log at any revision it has had: 14,924 at
   `391e50e`, the commit that wrote the sentence, and 14,823 back at
-  `5ad906f`. The only derivation that yields 11,000-odd is the Log MINUS the
-  72 routed detail sections, which `tests/test_soundness_routing.py`'s own
-  splitter measures at 3,349 lines: 14,926 − 3,349 = 11,577. That is a real
-  population, it is not the one the sentence stated, and the routed regions
-  are what the NEXT bullet treats. `docs/norms.md`'s "A figure in a norm
-  states the UNIT it counts" is the rule, and it is the rule this page
-  invokes above against the `105` figure.)*
+  `5ad906f`. The only derivation that yielded 11,000-odd is the Log MINUS
+  the 72 routed detail sections, which `tests/test_soundness_routing.py`'s
+  own `_detail_sections` reader measured at 3,349 lines when this
+  parenthetical was written at `3fe29d3`: 14,926 − 3,349 = 11,577. That is
+  a real population, it is not the one the sentence stated, and the routed
+  regions are what the NEXT bullet treats. **The three numerals in that
+  arithmetic were all stale by 2026-08-25 and are re-derived here rather
+  than left**: measured on this tree by the same two rules — physical lines
+  from the `## Log` heading to the last line of the file, and
+  `_detail_sections` over the 72 routed bodies — the Log is **15,628**
+  lines, the routed sections **3,470**, and the difference **12,158**,
+  which is not 11,000-odd any more either. The two rules are stated because
+  they are what reproduce the historical figures: they give 14,926 at
+  `3fe29d3`, 14,924 at `391e50e` and 14,823 at `5ad906f`, so nothing above
+  had to be taken on trust to be repaired. `docs/norms.md`'s "A figure in a
+  norm states the UNIT it counts" is the rule, and it is the rule this page
+  invokes above against the `105` figure — a figure whose unit is stated
+  and whose value has rotted is the same defect one bullet later.)*
 * **The large stamped measurement tables inside the two routed regions were
   read but NOT re-derived** — SF-0.2.0-14's 20,424-cell partition and its
   583,792-document product, SF-0.2.0-19's cost census, SF-0.2.0-51's timing
@@ -1046,6 +1057,13 @@ carrying *0.1.0 pre-release builds only*, which says their event was over
 before it. Four are 0.2.0 development work and now say so; two reach
 `v0.1.0` and carry the reproduction at the tag. Corrected 2026-08-24;
 the accounting is at the end of this log.
+
+**AND THE PASS THAT CORRECTED THOSE SIX MISSED TWO MORE, WHICH ARE THEIR
+MIRROR.** S12&Prime; and M17 are post-tag dates carrying *0.2.0
+development builds only* for defects the released `v0.1.0` already had —
+consistent with their own dates, so no date-versus-field comparison can
+see them, and false only against the artefact. Both were driven at the
+tag before the field moved. Corrected 2026-08-25, in the same accounting.
 
 **IT SCOPES THE ENTRY, NOT EVERY HAZARD THE ENTRY DISCUSSES**, and the
 2026-08-09 integer-literal-wrap entry is the case that makes the
@@ -9023,8 +9041,8 @@ and a count over entries that happened to say something is not a count.
   a 0.2.0 feature, so `v0.1.0` cannot have produced one"* until
   2026-08-24. Measured at the tag, `v0.1.0` extracted with `git archive`
   and run by `PYTHONPATH` (no worktree, repo untouched), CPython 3.12.3 /
-  jax 0.11.0, the harness this entry's own table uses —
-  `x = any_array((), dtype, (1.0, 2.0)); y = x * 2.0 + 1.0;
+  jax 0.11.0, **`jax_enable_x64=True`**, the harness this entry's own
+  table uses — `x = any_array((), dtype, (1.0, 2.0)); y = x * 2.0 + 1.0;
   assert_(y > 0.0)` through `check(vacuity_mode="inputs-only")`, no
   solver:
 
@@ -9036,6 +9054,21 @@ and a count over entries that happened to say something is not a count.
     float32    VERIFIED
     float64    VERIFIED
   ```
+
+  **THE x64 SETTING IS PART OF THAT TABLE AND WAS NOT STATED UNTIL
+  2026-08-25.** Without it the float64 row reads **UNKNOWN**, not
+  VERIFIED: jax refuses the requested `float64` and truncates it to
+  `float32` (`UserWarning: Explicitly requested dtype float64 … will be
+  truncated`), the traced program grows a `convert_element_type`, and
+  `v0.1.0` answers *"'convert_element_type' declined this form"* — a
+  coverage gap in the harness, nothing to do with M12. Re-driven both
+  ways at the tag on 2026-08-25: **the two rows that carry the disclosure
+  reproduce either way** — float16 and bfloat16 are UNKNOWN with those
+  exact notes at `jax_enable_x64` True and False alike, and float32 is
+  VERIFIED in both — so the finding does not rest on the setting; only
+  the float64 control row does, and a reader reproducing the table
+  without x64 would have found one row of it wrong and no way to tell
+  which claim that falsified.
 
   Verbatim, including the dtype spelling. `v0.1.0:src/stelling/propagate.py`'s
   `_STRUCT_FMT` has neither `<f2` nor a `<V2` route, and the note site is
@@ -11130,7 +11163,54 @@ in place and marked.*
   behaviours, one malformation — the S12 shape, in the oracle's own
   contract.
 
-  *Versions: 0.2.0 development builds only.*
+  *Versions: `v0.1.0` and 0.2.0 development builds.*
+
+  **THE CRASH IS IN THE RELEASED TAG, AND THIS ENTRY WAS SCOPED *0.2.0
+  development builds only* UNTIL 2026-08-25 — a field its own body
+  contradicts in one word, in the paragraph beginning *"The crash is
+  **pre-existing**"* below.** It is also the shape a date-versus-field
+  consistency check cannot see. The six bullets re-scoped on 2026-08-24
+  were post-tag dates carrying *0.1.0 pre-release builds only* — a claim
+  that the entry's event was over before a tag the entry's own date
+  postdates, which is inconsistent on its face. This one is a post-tag
+  date carrying the DEVELOPMENT phrase: consistent with every date on the
+  entry, and false anyway. A check on dates tests date consistency, not
+  truth.
+
+  **Driven at the tag rather than reasoned from the body**, on a
+  `git worktree` of `v0.1.0` reached by absolute `PYTHONPATH` with
+  `__pycache__` purged, using the entry's own document: a traced
+  `assert_(dot(a, b) <= 99.0)` over `a` in `[1,2]^3` and `b` in `[1,1]^3`,
+  whose serialized `dimension_numbers` is edited to
+  `(((0.0,), (0,)), ((), ()))` and reloaded through `from_dict`. **NO
+  SOLVER** — `propagate()` alone, nothing escalates — and the reload and
+  the propagation were run twice, once beside jax and once in the zero-dep
+  interpreter where `import jax` raises `ModuleNotFoundError`, on the JSON
+  the traced query had been dumped to. Same four lines both times:
+
+  ```
+  v0.1.0      from_dict ACCEPTED; propagate() RAISED
+              TypeError: tuple indices must be integers or slices, not float
+  this tree   from_dict ACCEPTED; propagate() returned;
+              obligations [(0, 'unknown')]
+  ```
+
+  So the reproduction needs the tag, a serialized query and neither a
+  solver nor jax; only PRODUCING the document needed a tracer, and any
+  saved `.json` a user already has does instead.
+
+  **`dot_general_geometry` is 0.2.0 work and the crash does not need it.**
+  The oracle does not exist at the tag —
+  `hasattr(stelling.interval, "dot_general_geometry")` is `False` on
+  `v0.1.0:src/stelling/interval.py`, and so is the docstring sentence this
+  entry's finding is half about. What `v0.1.0` has is the same two lines,
+  in `interval.dot_general` itself: the range test
+  `if not 0 <= d < len(arr.shape)`, which `0 <= 0.0 < 1` passes, and then
+  `a.shape[i]`, which is where python raises — reached through the same
+  public door, and refusing nothing else about the dim on the way. The
+  field scopes the ENTRY, on the standard the 2026-08-24 M12 and M16
+  re-scopings stated, and the entry reaches `v0.1.0` because the crash
+  does; the false promise is the part that does not.
 
   The crash is **pre-existing**; what was new in `4d793cf` is the sentence
   *"Raises `IntervalError` on any malformation"* in
@@ -11384,7 +11464,52 @@ in place and marked.*
   about which direction they flip in: measured below, this change moves 109
   queries from UNKNOWN to REFUTED.
 
-  *Versions: 0.2.0 development builds only.*
+  *Versions: `v0.1.0` and 0.2.0 development builds.*
+
+  **THE DEFECT IS IN THE RELEASED TAG, AND THIS ENTRY WAS SCOPED *0.2.0
+  development builds only* UNTIL 2026-08-25.**
+  `v0.1.0:src/stelling/obligation.py`'s `slice_unknown_obligations`
+  carries the count check verbatim — `if len(asserts) !=
+  len(propagation.obligations):`, and on the mismatch a
+  `DeclinedObligation` for EVERY unknown obligation, composed from the
+  same f-string this entry quotes below. Driven end-to-end on a
+  `git worktree` of `v0.1.0` reached by absolute `PYTHONPATH` with
+  `__pycache__` purged, CPython 3.12.3 / jax 0.11.0 / z3 5.0.0 (wheel) /
+  cvc5 1.3.4 (wheel) / Linux x86_64, `JAX_ENABLE_X64=1` — one top-level
+  `assert_` beside one written inside a `@jax.jit` helper, the two
+  obligations of `one_nested` being exactly what `top_only` and the jit
+  body state on their own:
+
+  ```
+  v0.1.0     top_only    REFUTED  #0 violated-witness, replay-confirmed
+  v0.1.0     one_nested  UNKNOWN  #0 escalation declined: 2 obligation(s)
+                                     but 1 top-level stelling_assert
+                                     equation(s): asserts nested in
+                                     sub-jaxprs cannot be mapped to slices
+                                  #1 the same sentence
+  this tree  one_nested  REFUTED  #0 violated-witness, replay-confirmed
+                                  #1 declines alone, naming sub-jaxprs
+  ```
+
+  Run again with a TRUE top-level predicate in place of the refutable one,
+  same environment: `v0.1.0` reads VERIFIED / UNKNOWN and this tree
+  discharges `#0` inside the nested query — so what the tag throws away is
+  the sibling's verdict in either direction, and the row above is not one
+  direction's accident.
+
+  **THE STING IS IN THIS ENTRY'S OWN RE-RUN ADVICE**, below under *"How to
+  recognise one worth re-running"*: the sentence it tells a reader to look
+  for in a stored verdict IS the decline this fix removed, so every reader
+  who can act on that advice is holding a verdict produced by a build that
+  still has the defect — and the largest such build is the released
+  `v0.1.0`. Until 2026-08-25 the field told exactly that audience the
+  defect was 0.2.0 development work and did not concern them. **A
+  date-versus-field consistency check is structurally silent over this
+  shape**: the entry is dated 2026-08-15, three days after the tag, and
+  *0.2.0 development builds only* is perfectly consistent with a post-tag
+  date. It is only false. The six bullets re-scoped on 2026-08-24 were the
+  mirror — post-tag dates carrying *0.1.0 pre-release builds only*, which
+  a date check CAN see.
 
   **THE MECHANISM.** Solver escalation slices a top-level
   `stelling_assert` equation. It decided which one an obligation belonged
@@ -11464,10 +11589,17 @@ in place and marked.*
   this changes was an UNKNOWN, and an UNKNOWN claims nothing. **How to
   recognise one worth re-running**: its per-obligation `detail` reads
   *"escalation declined: N obligation(s) but M top-level stelling_assert
-  equation(s)"*. No code path produces that sentence any more — it survives
-  in the tree only in this entry, in `CHANGELOG.md`, and as a `not in`
-  assertion in `tests/test_nested_assert_escalation.py` — so a verdict
-  carrying it was produced before this fix, and is one this change may now
+  equation(s)"*. **NO CODE PATH IN THIS TREE PRODUCES THAT SENTENCE, AND
+  `v0.1.0` DOES** — this read *"no code path produces that sentence any
+  more"* until 2026-08-25, which is true of the tree a maintainer reads
+  and false of the artefact the reader is running, and the reader is the
+  one this advice is addressed to. In this tree it survives only in this
+  entry, in `CHANGELOG.md`, and as a `not in` assertion in
+  `tests/test_nested_assert_escalation.py`; in
+  `v0.1.0:src/stelling/obligation.py` it is a live f-string, and the drive
+  at the top of this entry prints it. So a verdict carrying it was
+  produced by a build that still had the defect — `v0.1.0`, or a 0.2.0
+  development build before this fix — and is one this change may now
   decide.
 
   **THE FIX IS A CARRIED ASSOCIATION, CHECKED RATHER THAN GUESSED.** The
@@ -12558,15 +12690,16 @@ in place and marked.*
   covers it.
 
 **Releases reached by an entry in this log.** `v0.1.0` is reached by
-**nine** ENTRIES of this log, and `0.2.0` by NONE — this said *"the only
-release"* until the 0.2.0 bump, and it read **seven** until later the same
+**eleven** ENTRIES of this log, and `0.2.0` by NONE — this said *"the only
+release"* until the 0.2.0 bump, it read **seven** until later the same
 day, when two entries dated after the tag were found scoped as though
-their event was over before it. The unit is stated
-because the three counts here are 9, 10 and 8, and this sentence has twice
-been corrected by putting one of them where another belongs. Every
+their event was over before it, and it read **nine** until 2026-08-25,
+when two more were found scoped the OTHER way. The unit is stated
+because the three counts here are 11, 12 and 9, and this sentence has
+twice been corrected by putting one of them where another belongs. Every
 top-level bullet above carries exactly one `Versions:` field from a closed
-set of three, and these nine are the bullets whose field names `v0.1.0`;
-all nine are audit 0.2.0 findings and all were reproduced at the tag. The
+set of three, and these eleven are the bullets whose field names `v0.1.0`;
+all eleven are audit 0.2.0 findings and all were reproduced at the tag. The
 2026-08-15 `exp`/`pow` libm-bracket entry (S11) through
 `propagate(closed, semantics="ieee")`; the 2026-08-15 undescended-`assume`
 entry (S13), through the ordinary `check()` path in real mode; the
@@ -12576,24 +12709,54 @@ through `from_dict`; the 2026-08-16 B11 mispaired-`Propagation` entry
 (UNSOUND-3), through `make_verdict` / `make_solver_verdict` called
 directly; the two 2026-08-18 B12 entries (S15, S16), both through
 `from_dict` and both re-measured on a `git clone --shared` tree at the tag
-on the day they were written; and the two added on 2026-08-24 — the
+on the day they were written; the two added on 2026-08-24 — the
 2026-08-15 B4-part-1 narrow-format entry (M12), through the ordinary
 `check()` path in real mode, and the 2026-08-15 M16 exact-`mul` entry, at
-the interval kernel with no jax and no solver at all.
+the interval kernel with no jax and no solver at all; and the two added on
+2026-08-25 — the 2026-08-15 B6 non-integer-`dimension_numbers` entry
+(S12&Prime;), through `from_dict` with no solver and no jax, and the
+2026-08-15 B6 nested-`assert_` escalation entry (M17), through the
+ordinary `check()` path with the solver portfolio it needs.
 
-**TWO OF THE NINE ARE PRECISION AND NOT SOUNDNESS, AND THE COUNT DOES NOT
-SAY OTHERWISE.** M12 and M16 reach `v0.1.0` in the sense these fields use
-— the release carries the defect — and neither ever produced a wrong
-verdict there: M12's failure is an UNKNOWN, M16's is a box that is wider
-than it needs to be. The other seven are false VERIFIEDs or false
-REFUTEDs. Which of the two any entry is, is in that entry.
+**THE TWO ADDED ON 2026-08-25 ARE THE MIRROR OF THE SIX RE-SCOPED THE DAY
+BEFORE, AND THAT IS WHY NO CHECK HAD SEEN THEM.** The six were post-tag
+dates carrying *0.1.0 pre-release builds only* — a field saying the event
+was over before a date it postdates, which a date-versus-field comparison
+catches without knowing anything about the code. These two are post-tag
+dates carrying *0.2.0 development builds only* for a defect the released
+`v0.1.0` already had: consistent with every date on the entry, and false
+anyway. Both were re-derived against an extracted `v0.1.0` before the
+field was moved, and both drives are in their own entries above — the
+S12&Prime; crash reproduces there with no solver and no jax at all, and
+M17's decline sentence is a live f-string in
+`v0.1.0:src/stelling/obligation.py`. Neither was found by a checker; both
+were found by reading an entry against the artefact it is about.
+
+**FOUR OF THE ELEVEN NEVER PRODUCED A WRONG VERDICT, AND THE COUNT DOES
+NOT SAY OTHERWISE.** M12, M16, M17 and S12&Prime; reach `v0.1.0` in the
+sense these fields use — the release carries the defect — and none of them
+ever produced a wrong verdict there: M12's failure is an UNKNOWN, M16's is
+a box that is wider than it needs to be, M17's is an UNKNOWN produced by a
+decline that threw away a sibling obligation's answer, and S12&Prime;'s is
+a raw `TypeError`, which produces no verdict at all. The other seven —
+S11, S12, S12&prime;, S13, S15, S16 and UNSOUND-3 — are false VERIFIEDs or
+false REFUTEDs. Which of the two any entry is, is in that entry. **This
+read *"two of the nine are precision and not soundness"* until 2026-08-25,
+and neither half of that survives the two additions**: M17 is a capability
+loss and S12&Prime; is a crash, and neither is a precision question.
 
 **UNSOUND-3 WAS THE ONLY ONE OF THE SEVEN THAT NEEDED NEITHER
 `semantics="ieee"`, NOR A SERIALIZED QUERY, NOR AN `assume`, AND IT IS NO
 LONGER ALONE.** M12 needs none of the three — the reproduction at the tag
 in its entry is an ordinary `check()` in real mode — and neither does
-M16. What UNSOUND-3 is still alone in among the nine is being a false
-VERDICT reachable that way.
+M16, and neither does M17, whose drive at the tag is an ordinary `check()`
+over two `assert_`s in real mode. S12&Prime; is not in that group: it
+needs a serialized query, and reaches the crash through `from_dict`. What
+UNSOUND-3 is still alone in among the eleven is being a false VERDICT
+reachable that way. **These are two different axes and the page states
+both**: needing none of the three is not the same as needing no solver,
+and M17 is the entry that separates them — it needs none of the three and
+it DOES need a solver, which is the next paragraph.
 
 **S12&prime; IS THE ONE THIS SENTENCE LEFT OUT, AND IT IS THE BROADER OF
 THE PAIR.** S12 is an equation the interval transfer refuses outright;
@@ -12609,31 +12772,51 @@ of this paragraph, and none of them noticed it. That is why the digit is
 no longer written: `tests/test_soundness_log_reach.py` counts the fields
 and holds the numerals above and below to what it counts.
 
-**THE THREE UNITS, AND WHY EACH IS STATED.** Nine ENTRIES of this log
-reach `v0.1.0` — the list above. **Ten** audit findings reach it: M12,
-M16, S11, S12, S12&prime;, S13, S14, S15, S16, UNSOUND-3 — one more than
+**THE THREE UNITS, AND WHY EACH IS STATED.** Eleven ENTRIES of this log
+reach `v0.1.0` — the list above. **Twelve** audit findings reach it: M12,
+M16, M17, S11, S12, S12&prime;, S12&Prime;, S13, S14, S15, S16, UNSOUND-3
+— one more than
 the entries, because S14 has a routed detail section (`SF-0.2.0-59`) and
-its own reach declaration but no `## Log` bullet of its own. And **eight**
-one-liners in `CHANGELOG.md` carry the `v0.1.0` version field — two fewer
-than the findings, because S15 and S16 share `SF-0.2.0-14`, and because
-M12 has no soundness-fix one-liner at all: it is a bullet of the
-*Float32 / float16 / bfloat16 IEEE mode* section, which carries no
-`Versions:` field. Three
+its own reach declaration but no `## Log` bullet of its own. And **nine**
+one-liners in `CHANGELOG.md` carry the `v0.1.0` version field — three
+fewer than the findings, for three separate reasons: S15 and S16 share
+`SF-0.2.0-14`, and M12 and M17 have no `### Soundness fixes` one-liner at
+all. M12's bullet is in *Float32 / float16 / bfloat16 IEEE mode* and
+M17's is in *Verification pipeline*, and until 2026-08-25 neither section
+carried a `Versions:` field of any kind — so a reader of `CHANGELOG.md`
+alone got NO `v0.1.0` disclosure for either, about an artefact that is on
+PyPI today. Both bullets now carry the field in their own sections; the
+changelog's *strict one-liner* rule still governs `### Soundness fixes`
+alone, and this count still counts only that section's one-liners, which
+is why nine and not eleven. Three
 different questions, three different answers, and a reader who takes any
 one of them for another is reading a number this page did not state.
 
-**AT LEAST FIVE OF THE NINE NEED NO SOLVER AT ALL — UNSOUND-3, S15, S16,
-M12 and M16 — and this sentence claimed UNSOUND-3 was the only one.** It
-was true of the four entries `main` had; it is not true of the nine this
+**AT LEAST SIX OF THE ELEVEN NEED NO SOLVER AT ALL — UNSOUND-3, S15, S16,
+M12, M16 and S12&Prime; — and this sentence claimed UNSOUND-3 was the only
+one.** It
+was true of the four entries `main` had; it is not true of the eleven this
 log now carries. Corrected by MEASUREMENT at the tag rather than by
 reasoning from the entries: S15 and S16 joined UNSOUND-3 on 2026-08-21,
 and M12 and M16 arrived among the nine on 2026-08-24 already carrying
 solverless reproductions at the tag in their own entries — M12 an
 ordinary `check()` with no `solver_timeout_ms`, M16 at the interval
-kernel with no jax either. Stated as "at least five" because what was
-measured is those four joining, not that the remaining four do not.
-S11, S13, S12 and S12&prime; are not re-measured here and this sentence
-claims nothing about them.
+kernel with no jax either. S12&Prime; joined on 2026-08-25 and was
+measured rather than inherited: its document reaches `propagate()` through
+`from_dict` and raises there, in an interpreter with no solver installed
+AND no jax, so it needs neither.
+**AND M17 IS THE FIRST ENTRY MEASURED TO NEED ONE**, which is why the
+clause is no longer "at least five and nothing said about the rest".
+Driven at the tag on the same query, with the solver portfolio removed
+from the call — an ordinary `check()` with no `solver_timeout_ms` — both
+obligations come back `unknown` with an interval note and the count-check
+decline never appears, before the fix or after it: with no escalation
+there is no escalation to throw away. M17 reproduces only with z3 and
+cvc5 in the chain. Stated as "at least six" because what was
+measured is those five joining and M17 not joining — which accounts for
+seven of the eleven. The remaining four, S11, S12, S12&prime; and S13,
+are not re-measured here and this sentence claims nothing about them in
+either direction.
 
 On a `git clone --shared` tree at `e67688e`, through `propagate` and
 `verdict.make_verdict` with no solver anywhere in the chain: `assert_(a > 0); assert_(a < 0)` over the declared `(1.0, 2.0)`
@@ -12662,7 +12845,7 @@ What the clause was reaching for is what the count above actually needs,
 and it is about DEFECTS rather than fixes — but it is narrower than *"no
 release carries a defect this log records except the ones `v0.1.0`
 carries"*, which is what it said for one day and which this page refutes
-two paragraphs into its own preamble. The nine above are the entries
+two paragraphs into its own preamble. The eleven above are the entries
 whose OWN EVENT a release is inside. A hazard an entry only discusses is
 not counted and cannot be: the 2026-08-09 integer-literal-wrap entry
 scopes the DISCLOSURE gap it closed, which was over before the tag, while
@@ -12697,9 +12880,9 @@ in place, but two claims that were each true where they were written. The
 merge re-derived the list rather than taking either side's digit, and the
 no-solver clause above is what re-deriving it turned up.
 
-**AND IT IS NINE NOW, WHICH IS THE SEVENTH VALUE THIS DIGIT HAS HELD.**
+**AND IT IS ELEVEN NOW, WHICH IS THE EIGHTH VALUE THIS DIGIT HAS HELD.**
 *(no releases yet)*, S11 alone, three, four-and-five together, six,
-seven, nine.
+seven, nine, eleven.
 Every one of the first five corrections was made by a person re-reading
 the log, and not one of them noticed that S12&prime; had been declaring
 `PRESENT IN THE RELEASED 0.1.0` since `96ab47a` — the omission was live
@@ -12709,9 +12892,10 @@ writing. It is derived now, from the `Versions:` fields on the bullets
 themselves, and the fields are a closed set of three so that a new entry
 cannot decline to answer the question.
 
-**THE SEVENTH MOVE WAS NOT THE DIGIT'S, AND THAT IS THE LIMIT OF
-DERIVING IT.** Nothing re-read the digit on 2026-08-24; two FIELDS moved
-under it and the derivation followed, which is what a derivation is for.
+**NEITHER OF THE LAST TWO MOVES WAS THE DIGIT'S, AND THAT IS THE LIMIT OF
+DERIVING IT.** Nothing re-read the digit on 2026-08-24 or on 2026-08-25;
+FIELDS moved under it and the derivation followed, which is what a
+derivation is for.
 But `tests/test_soundness_log_reach.py` checks that every bullet answers
 the reach question and that the numerals match the answers — it cannot
 check that an answer is TRUE. Six bullets dated after the `v0.1.0` tag
@@ -12720,6 +12904,22 @@ opposite, from the day the fields were introduced; three of the six said
 so in their own bodies, one of them — at `1242da4` — 65 lines below the
 field it contradicted. A derived count is exactly as good as the fields it is
 derived from, and this is the failure mode that remains.
+
+**AND THE SECOND HALF OF THAT FAILURE MODE IS WORSE, BECAUSE THE OBVIOUS
+CHECK CANNOT SEE IT.** The six above are catchable without reading any
+code: a bullet dated after 2026-08-12 that claims its event was over
+before the tag is inconsistent on its face, and a date-versus-field
+comparison finds every one of them. The two moved on 2026-08-25 —
+S12&Prime; and M17 — are post-tag dates carrying *0.2.0 development
+builds only*, which is what an honest post-tag entry usually says. Nothing
+about the entry is inconsistent; the field is simply false about the
+released artefact, and only running the artefact says so. Both were found
+by driving the entry against an extracted `v0.1.0`, and both entries now
+carry that drive. **So the residual risk is not "a field nobody checked";
+it is "a field only the tag can refute", and this page has no instrument
+for it.** Eight bullets have now been re-scoped on that account, six out
+of *0.1.0 pre-release builds only* and two out of *0.2.0 development
+builds only*, and the two phrases failed for opposite reasons.
 
 ## 0.2.0 soundness-fix detail (routed from `CHANGELOG.md`)
 
