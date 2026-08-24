@@ -19,7 +19,12 @@ suite green and the skip-inventory verdict `made`. The six:
    a NARROWED session;
 4. `publish: needs: [test, build]` -> `[build]` — the suite stops gating the
    upload while still running, so a red suite and a green publish;
-5. the header's `EIGHT` -> `TWELVE` — a count of refusals nobody can check;
+5. the header's `EIGHT` -> `TWELVE` — a count of refusals nobody can check
+   (`release.yml` now says TWELVE and MEANS it: three refusals landed when the
+   tag comparison was carried to the sdist. That is not mutation 5 surviving —
+   :func:`test_the_headers_refusal_COUNT_is_the_count_of_refusals` derives the
+   number from the file's own `exit 1` sites, so the word and the arithmetic
+   are checked against each other whatever the word is);
 6. `comm -23` -> `comm -12` — the "every sdist member is committed" comparison
    inverted, so it reports the INTERSECTION, is empty exactly when the tree is
    healthy, and can never fire.
@@ -460,8 +465,18 @@ def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
 
     IT MOVED A SECOND TIME, and this test is what made that a decision rather
     than an oversight: the tag step's "dist/ does not hold exactly one wheel"
-    refusal is a SEVENTH `exit 1` site, so the header reads NINE. The literals
-    here — `seven` and `7` — are the claim; the arithmetic below is what holds
+    refusal is a SEVENTH `exit 1` site, so the header read NINE.
+
+    IT MOVED A THIRD TIME, by three, when the tag comparison was carried to the
+    OTHER artefact: `dist/` must hold exactly one SDIST, that sdist's filename
+    version must carry the tag, and the sdist step establishes the count for
+    itself instead of trusting a step that ran earlier. Ten `exit 1` sites,
+    TWELVE with the two implicit ones. `TWELVE` is also the wrong number
+    mutation 5 planted when the right one was EIGHT, and that collision costs
+    nothing here: the word is compared to `len(exit_sites) + _IMPLICIT_REFUSALS`
+    rather than to a constant, so a header that says TWELVE while the file
+    holds nine `exit 1` sites is exactly as red as it was before. The literals
+    here — `ten` and `10` — are the claim; the arithmetic below is what holds
     them to the file.
 
     Derived from the file, not from a constant here: the `exit 1` sites are
@@ -487,8 +502,8 @@ def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
         "the arithmetic changed — this count was already wrong once."
     )
     # ...and the header's own breakdown must agree with the same arithmetic
-    assert "seven `exit 1` sites" in text and len(exit_sites) == 7, (
-        f"the header's breakdown says seven `exit 1` sites and there are "
+    assert "ten `exit 1` sites" in text and len(exit_sites) == 10, (
+        f"the header's breakdown says ten `exit 1` sites and there are "
         f"{len(exit_sites)}"
     )
 
@@ -668,7 +683,8 @@ def _drive(body: str, cwd: pathlib.Path, **env):
 
 
 _SDIST_STEP = "every sdist member is a committed file of the tagged tree"
-_TAG_STEP = "the tag and the artifact must agree"
+_TAG_STEP = "the tag and the artifacts must agree"
+_MANIFEST_STEP = "the sdist manifest, for the record"
 
 # Enough of a tree for the sdist body to agree to compare anything: it demands
 # PKG-INFO, pyproject.toml, README.md and LICENSE by name before it looks at
@@ -830,6 +846,144 @@ def test_the_sdist_gate_refuses_a_member_that_is_not_committed(tmp_path):
     assert "not committed to this tree" in bad.stdout
 
 
+def _dist_of(base: pathlib.Path, name: str, *, wheels=("0.1.0",),
+             sdists=("0.1.0",)) -> pathlib.Path:
+    """A checkout whose `dist/` holds the named wheels and sdists, and nothing.
+
+    The tag step reads FILENAMES and never opens either file, so empty files
+    are the whole artefact here. `sdists` defaults to one because that is what
+    a single `uv build` leaves beside the wheel — a `dist/` with a wheel and no
+    tarball is not the shape this release path produces, and after the sdist
+    count landed it is not a shape the step accepts either.
+    """
+    tree = base / name
+    (tree / "dist").mkdir(parents=True)
+    for version in wheels:
+        (tree / "dist" / f"stelling-{version}-py3-none-any.whl").write_bytes(b"")
+    for version in sdists:
+        (tree / "dist" / f"stelling-{version}.tar.gz").write_bytes(b"")
+    return tree
+
+
+@_needs_a_shell
+def test_the_sdist_gate_refuses_a_dist_it_cannot_read(tmp_path):
+    """THE ELEVENTH `exit 1` SITE, AND IT REPLACED A DEATH WITH NO ANNOTATION.
+
+    `sdist="$(ls dist/*.tar.gz)"` is quoted, so two matches are ONE string with
+    a newline in it and `tar tzf` is handed a filename that does not exist;
+    with no match at all `ls` fails on the unexpanded glob. Driven on the body
+    that shipped before this, a `dist/` holding `stelling-0.0.9.tar.gz` and
+    `stelling-0.2.0.tar.gz`::
+
+        rc=2   tar (child): dist/stelling-0.0.9.tar.gz<LF>dist/stelling-
+               0.2.0.tar.gz: Cannot open: No such file or directory
+
+    — red, and not by this gate: no `::error` annotation, nothing in the job
+    summary, and a reviewer reading the log meets a `tar` error rather than a
+    statement about `dist/`. That is the state the no-wheel case in the tag
+    step was repaired out of, one step above and by the same argument.
+
+    WHY THIS COUNT IS MADE TWICE. The tag step establishes it already and runs
+    first, so this refusal cannot fire in the workflow as it stands. It is here
+    because a `run:` block is a script that has to be correct on the input it
+    is given: nothing is carried between steps, this drive extracts and runs
+    THIS body alone, and "an earlier step would have caught it" is the same
+    shape of argument as "same build, so it agrees by construction" — the
+    sentence this whole change exists to retract.
+    """
+    body = _step_body(_SDIST_STEP)
+    env = _step_env(_SDIST_STEP)
+
+    healthy = _plant_tree(tmp_path / "one")
+    ok = _drive(body, healthy, **env)
+    assert ok.returncode == 0, (
+        f"the sdist gate refuses a one-tarball `dist/`.\n{ok.stdout}\n{ok.stderr}"
+    )
+
+    two = _plant_tree(tmp_path / "two")
+    shutil.copyfile(two / "dist" / "stelling-0.1.0.tar.gz",
+                    two / "dist" / "stelling-0.0.9.tar.gz")
+    pair = _drive(body, two, **env)
+    assert pair.returncode != 0, (
+        "THE SDIST GATE PASSED A `dist/` HOLDING TWO TARBALLS. It reads ONE "
+        "and speaks only for that one, while the publish step uploads every "
+        f"file in the directory. It reported:\n{pair.stdout}"
+    )
+    assert "cannot tell which tarball to read" in pair.stdout, (
+        "the two-tarball `dist/` is not reaching this step's own refusal — it "
+        "is dying inside `tar` on a filename with a newline in it, with no "
+        f"annotation:\n{pair.stdout}\n{pair.stderr}"
+    )
+    for name in ("stelling-0.1.0.tar.gz", "stelling-0.0.9.tar.gz"):
+        assert name in pair.stdout, (
+            f"the refusal did not name {name}:\n{pair.stdout}"
+        )
+
+    none = _plant_tree(tmp_path / "none")
+    (none / "dist" / "stelling-0.1.0.tar.gz").unlink()
+    gone = _drive(body, none, **env)
+    assert gone.returncode != 0, gone.stdout
+    assert "cannot tell which tarball to read" in gone.stdout, (
+        "an empty `dist/` is dying on `ls`'s own exit code again, with no "
+        f"annotation:\n{gone.stdout}\n{gone.stderr}"
+    )
+
+
+@_needs_a_shell
+def test_the_manifest_step_records_every_tarball_and_refuses_nothing(tmp_path):
+    """`release.yml` calls this step NOT A REFUSAL, and that is now driven.
+
+    It carried the LAST `ls dist/` in the file — the second of the two
+    `ls dist/*.tar.gz` sites — which made a step whose entire job is to PRINT
+    capable of failing the release: two tarballs died inside `tar`, none died
+    on the unexpanded glob. Adding a count refusal
+    here would have contradicted the claim beside it, so the glob is a LOOP —
+    every tarball the release would publish is recorded, and nothing is
+    asserted about any of them.
+
+    Both halves are driven: it exits 0 on every shape, and the summary it
+    writes NAMES every tarball. A loop that silently recorded one of two would
+    satisfy the exit code and lose the record.
+    """
+    body = _step_body(_MANIFEST_STEP)
+
+    def _summary(name: str, sdists: tuple[str, ...]):
+        tree = tmp_path / name
+        (tree / "dist").mkdir(parents=True)
+        for version in sdists:
+            member = tree / f"stelling-{version}" / "PKG-INFO"
+            member.parent.mkdir(parents=True, exist_ok=True)
+            member.write_text("Metadata-Version: 2.4\n", encoding="utf-8")
+            with tarfile.open(tree / "dist" / f"stelling-{version}.tar.gz",
+                              "w:gz") as tar:
+                tar.add(member, arcname=f"stelling-{version}/PKG-INFO")
+        out = tree / "summary.md"
+        out.write_text("", encoding="utf-8")
+        result = _drive(body, tree, GITHUB_STEP_SUMMARY=str(out))
+        return result, out.read_text(encoding="utf-8")
+
+    for label, sdists in (("one", ("0.2.0",)),
+                          ("two", ("0.2.0", "0.0.9")),
+                          ("none", ())):
+        result, written = _summary(label, sdists)
+        assert result.returncode == 0, (
+            f"the manifest step FAILED on a `dist/` with {len(sdists)} "
+            "tarball(s). `release.yml` says beside it that it is not a refusal "
+            "and asserts nothing about what it prints; a step that can fail "
+            f"the release is a refusal nobody counted.\n{result.stdout}\n"
+            f"{result.stderr}"
+        )
+        for version in sdists:
+            assert f"stelling-{version}.tar.gz" in written, (
+                f"the manifest for stelling-{version}.tar.gz is not in the "
+                f"job summary, so the record of this release does not include "
+                f"a file it would publish:\n{written}"
+            )
+        assert written.count("PKG-INFO") == len(sdists), (
+            f"expected one manifest per tarball, got:\n{written}"
+        )
+
+
 @_needs_a_shell
 def test_the_tag_gate_refuses_a_tag_the_artifact_does_not_carry(tmp_path):
     """THE TAG GATE, DRIVEN. Nothing in the repository pinned this line at all.
@@ -852,21 +1006,26 @@ def test_the_tag_gate_refuses_a_tag_the_artifact_does_not_carry(tmp_path):
     the step no longer picks, and the sorting explanation was false — see
     :func:`test_the_tag_gate_refuses_a_dist_it_cannot_reason_about`, which
     drives that refusal, and `release.yml`'s own comment, which corrects the
-    record. This test keeps its original subject, which is the tag comparison
-    on a `dist/` the step CAN reason about: exactly one wheel.
+    record. This test keeps its original subject, which is the WHEEL's version
+    compared to the tag on a `dist/` the step CAN reason about. The sdist's
+    version is the same question asked of the other artefact and is driven in
+    :func:`test_the_tag_gate_refuses_an_sdist_the_tag_does_not_name`.
+
+    THE `dist/` HERE NOW CARRIES A TARBALL TOO, and that is not decoration: the
+    step refuses a `dist/` without exactly one sdist, so a wheel-only plant
+    would go red for a reason that has nothing to do with this test's subject
+    and would say nothing about the tag comparison at all.
     """
     body = _step_body(_TAG_STEP)
-    dist = tmp_path / "tree" / "dist"
-    dist.mkdir(parents=True)
-    (dist / "stelling-0.1.0-py3-none-any.whl").write_bytes(b"")
-    tree = tmp_path / "tree"
+    tree = _dist_of(tmp_path, "tree")
 
     agreeing = _drive(body, tree, TAG="v0.1.0")
     assert agreeing.returncode == 0, (
-        "the tag gate refuses a tag that MATCHES the built artifact, so it "
+        "the tag gate refuses a tag that MATCHES the built artifacts, so it "
         f"would refuse every release.\n{agreeing.stdout}\n{agreeing.stderr}"
     )
-    assert "artifact version=0.1.0" in agreeing.stdout
+    assert "wheel version=0.1.0" in agreeing.stdout
+    assert "sdist version=0.1.0" in agreeing.stdout
 
     for tag in ("v9.9.9", "0.2.0", "", "V0.1.0"):
         r = _drive(body, tree, TAG=tag)
@@ -877,7 +1036,92 @@ def test_the_tag_gate_refuses_a_tag_the_artifact_does_not_carry(tmp_path):
             "\nCheck that `version` is still read from the ARTEFACT's filename "
             "and not from ${TAG}, which would be the tag compared with itself."
         )
-        assert "tag and artifact disagree" in r.stdout
+        assert "tag and wheel disagree" in r.stdout
+
+
+@_needs_a_shell
+def test_the_tag_gate_refuses_an_sdist_the_tag_does_not_name(tmp_path):
+    """THE HOLE THIS CLOSES SHIPPED A TARBALL NOBODY TAGGED, AND EVERY GATE IN
+    THE FILE WAS GREEN ON IT.
+
+    `release.yml` used to end with: *"The sdist's own filename version is still
+    never compared to the tag; same build, so it agrees by construction."*
+    "Same build" is the premise the wheel COUNT refusal stopped accepting one
+    step earlier, and the sdist inherited it. REPRODUCED on the bodies the
+    parent branch shipped, `dist/` holding `stelling-0.2.0-py3-none-any.whl`
+    beside a `stelling-0.0.9.tar.gz` whose every member is committed,
+    `TAG=v0.2.0`::
+
+        the tag step     rc=0   tag=v0.2.0 artifact version=0.2.0
+        the sdist step   rc=0   every one of 5 sdist members is committed to
+                                this tree
+
+    Two green gates and `stelling-0.0.9.tar.gz` on PyPI under a release called
+    `v0.2.0`, permanently. The sdist is not the lesser artefact here: it is
+    what `pip install stelling` builds from wherever the wheel does not apply,
+    and it is the artefact three steps of this workflow exist to check the
+    CONTENTS of while nothing read its name.
+
+    BOTH DIRECTIONS, and the accepting direction is half the point — a gate
+    that refuses the shape one `uv build` produces is not a gate.
+    """
+    body = _step_body(_TAG_STEP)
+
+    matched = _dist_of(tmp_path, "matched", wheels=("0.2.0",), sdists=("0.2.0",))
+    ok = _drive(body, matched, TAG="v0.2.0")
+    assert ok.returncode == 0, (
+        "the tag gate refuses a `dist/` in which BOTH artefacts carry the "
+        f"tag.\n{ok.stdout}\n{ok.stderr}"
+    )
+    assert "sdist version=0.2.0" in ok.stdout, (
+        "the step no longer prints the sdist version it compared, so a "
+        f"release log cannot show what was checked:\n{ok.stdout}"
+    )
+
+    # THE REPRODUCTION, exactly: the tag names the wheel and not the tarball.
+    stale = _dist_of(tmp_path, "stale-sdist", wheels=("0.2.0",), sdists=("0.0.9",))
+    bad = _drive(body, stale, TAG="v0.2.0")
+    assert bad.returncode != 0, (
+        "THE TAG GATE PASSED A `dist/` HOLDING A 0.2.0 WHEEL AND A 0.0.9 "
+        "SDIST UNDER TAG v0.2.0. `upload-artifact` takes the whole directory "
+        "and the publish step uploads every file in it, so the tarball this "
+        "comparison never examined goes to PyPI permanently — and an sdist "
+        "cannot be unpublished, only yanked. It reported:\n" + bad.stdout
+    )
+    assert "tag and sdist disagree" in bad.stdout
+    assert "0.0.9" in bad.stdout, (
+        "the refusal did not name the version it refused, so the release log "
+        f"does not say what to fix:\n{bad.stdout}"
+    )
+
+    # AND THE MIRROR IMAGE, so the two comparisons are not one comparison
+    # applied twice to the same filename: the tarball carries the tag and the
+    # wheel does not.
+    other = _dist_of(tmp_path, "stale-wheel", wheels=("0.0.9",), sdists=("0.2.0",))
+    flipped = _drive(body, other, TAG="v0.2.0")
+    assert flipped.returncode != 0, flipped.stdout
+    assert "tag and wheel disagree" in flipped.stdout
+
+    # A PEP 440 DEV SEGMENT, which is the shape `cut -d- -f2` on a `.tar.gz`
+    # gets wrong if the `.tar.gz` is not stripped first: `basename` alone
+    # yields `0.2.0.dev0.tar.gz`, which matches no tag and would refuse the
+    # RIGHT tarball too. Driven in both directions.
+    dev = _dist_of(tmp_path, "dev-sdist", wheels=("0.2.0",), sdists=("0.2.0.dev0",))
+    r = _drive(body, dev, TAG="v0.2.0")
+    assert r.returncode != 0, r.stdout
+    assert "tag and sdist disagree" in r.stdout
+    assert "0.2.0.dev0" in r.stdout, (
+        "the sdist version was not extracted from the filename as "
+        f"`0.2.0.dev0`:\n{r.stdout}"
+    )
+    dev_ok = _dist_of(tmp_path, "dev-both", wheels=("0.2.0.dev0",),
+                      sdists=("0.2.0.dev0",))
+    r = _drive(body, dev_ok, TAG="v0.2.0.dev0")
+    assert r.returncode == 0, (
+        "the tag gate refuses a pre-release whose two artefacts and tag all "
+        f"agree, so `.tar.gz` is being stripped wrong:\n{r.stdout}\n{r.stderr}"
+    )
+    assert "sdist version=0.2.0.dev0" in r.stdout
 
 
 def _locales_to_drive() -> list[str]:
@@ -942,34 +1186,47 @@ def test_the_tag_gate_refuses_a_dist_it_cannot_reason_about(tmp_path):
     THE ZERO-WHEEL CASE IS DRIVEN HERE TOO. `release.yml` used to record it as
     a shortcoming — `ls` died on its own rc=2 with no annotation, "red, but not
     by this gate". It is this gate's refusal now, with a message.
+
+    AND THE TARBALL COUNT, which did not exist until the tag comparison was
+    carried to the sdist: two tarballs and none, both refused, under every
+    locale as well. The construct was the same `ls dist/*.tar.gz` retired here
+    for wheels, but the SYMPTOM was not a pick — the assignment is quoted, so
+    two matches become ONE string with a newline in it and `tar` fails on a
+    filename that does not exist. Driven on the shipped bodies, two tarballs in
+    `dist/`: the sdist step exited 2 on tar's own error and printed no
+    annotation at all. Same repair, and it belongs here because "will this
+    release publish anything the tag does not name" is a question about the
+    whole directory. The locale loop covers the tarball shapes for the same
+    reason it covers the wheel ones: it is the regression guard on `LC_ALL=C`
+    and on the count being read before any element is.
     """
     body = _step_body(_TAG_STEP)
 
-    def _dist(name: str, *wheels: str) -> pathlib.Path:
-        tree = tmp_path / name
-        (tree / "dist").mkdir(parents=True)
-        for version in wheels:
-            (tree / "dist" / f"stelling-{version}-py3-none-any.whl").write_bytes(b"")
-        return tree
-
-    one = _dist("one", "0.2.0")
-    stale = _dist("stale", "0.2.0", "0.2.0.dev0")
-    stray = _dist("stray", "0.0.9", "0.1.0")
-    empty = _dist("empty")
+    one = _dist_of(tmp_path, "one", wheels=("0.2.0",), sdists=("0.2.0",))
+    stale = _dist_of(tmp_path, "stale", wheels=("0.2.0", "0.2.0.dev0"),
+                     sdists=("0.2.0",))
+    stray = _dist_of(tmp_path, "stray", wheels=("0.0.9", "0.1.0"),
+                     sdists=("0.1.0",))
+    empty = _dist_of(tmp_path, "empty", wheels=(), sdists=("0.2.0",))
+    two_tarballs = _dist_of(tmp_path, "two-tarballs", wheels=("0.2.0",),
+                            sdists=("0.2.0", "0.0.9"))
+    no_tarball = _dist_of(tmp_path, "no-tarball", wheels=("0.2.0",), sdists=())
 
     locales = _locales_to_drive()
     assert "C" in locales, locales
 
     for locale in locales:
         # A GATE THAT REFUSES EVERYTHING IS NOT A GATE. The shape this release
-        # path actually produces — one `uv build`, one wheel — must still pass.
+        # path actually produces — one `uv build`, one wheel, one sdist — must
+        # still pass.
         ok = _drive(body, one, TAG="v0.2.0", LC_ALL=locale)
         assert ok.returncode == 0, (
-            f"the tag gate refuses the one-wheel `dist/` a single `uv build` "
-            f"leaves, under LC_ALL={locale}, so it would refuse every "
-            f"release.\n{ok.stdout}\n{ok.stderr}"
+            f"the tag gate refuses the one-wheel one-sdist `dist/` a single "
+            f"`uv build` leaves, under LC_ALL={locale}, so it would refuse "
+            f"every release.\n{ok.stdout}\n{ok.stderr}"
         )
-        assert "artifact version=0.2.0" in ok.stdout
+        assert "wheel version=0.2.0" in ok.stdout
+        assert "sdist version=0.2.0" in ok.stdout
 
         # THE STALE PRE-RELEASE BESIDE ITS OWN RELEASE — the shape whose
         # verdict used to be the runner's locale.
@@ -1007,14 +1264,41 @@ def test_the_tag_gate_refuses_a_dist_it_cannot_reason_about(tmp_path):
         # NO WHEEL AT ALL is this gate's refusal now, not `ls`'s exit code.
         gone = _drive(body, empty, TAG="v0.2.0", LC_ALL=locale)
         assert gone.returncode != 0, (
-            f"the tag gate passed an EMPTY `dist/` under LC_ALL={locale}: "
+            f"the tag gate passed a wheel-less `dist/` under LC_ALL={locale}: "
             f"{gone.stdout}\n{gone.stderr}"
         )
         assert "does not hold exactly one wheel" in gone.stdout, (
-            "an empty `dist/` no longer reaches this step's own refusal — it "
-            "is dying on a command's exit code with no annotation, which is "
+            "a wheel-less `dist/` no longer reaches this step's own refusal — "
+            "it is dying on a command's exit code with no annotation, which is "
             f"the state this repaired:\n{gone.stdout}\n{gone.stderr}"
         )
+
+        # TWO TARBALLS — the shape that used to reach the SDIST step and die
+        # inside `tar` with nothing said. The tag step never opens either file,
+        # so it is the count and only the count that refuses.
+        pair = _drive(body, two_tarballs, TAG="v0.2.0", LC_ALL=locale)
+        assert pair.returncode != 0, (
+            "THE TAG GATE PASSED A `dist/` HOLDING TWO TARBALLS under "
+            f"LC_ALL={locale}. One of them is a tarball nobody tagged and the "
+            "publish step uploads every file in the directory. It "
+            f"reported:\n{pair.stdout}"
+        )
+        assert "does not hold exactly one sdist" in pair.stdout
+        for sdist in ("stelling-0.2.0.tar.gz", "stelling-0.0.9.tar.gz"):
+            assert sdist in pair.stdout, (
+                f"the refusal did not name {sdist}, so the publish log does "
+                f"not say what is in `dist/`:\n{pair.stdout}"
+            )
+
+        # NO TARBALL AT ALL. `uv build` produces one; a `dist/` without one is
+        # a `dist/` this job did not fill, and the release would publish a
+        # wheel with no source distribution behind it.
+        alone = _drive(body, no_tarball, TAG="v0.2.0", LC_ALL=locale)
+        assert alone.returncode != 0, (
+            f"the tag gate passed a `dist/` with no sdist under "
+            f"LC_ALL={locale}: {alone.stdout}\n{alone.stderr}"
+        )
+        assert "does not hold exactly one sdist" in alone.stdout
 
 
 @_needs_a_shell
@@ -1030,24 +1314,50 @@ def test_the_drives_are_reading_the_real_step_bodies():
     """
     sdist = _step_body(_SDIST_STEP)
     tag = _step_body(_TAG_STEP)
-    for needle in ("tar tzf", "git ls-files", "comm -23", "explained.txt"):
+    manifest = _step_body(_MANIFEST_STEP)
+    for needle in ("tar tzf", "git ls-files", "comm -23", "explained.txt",
+                   "dist/*.tar.gz", "${#sdists[@]}", "shopt -s nullglob"):
         assert needle in sdist, f"{needle!r} is gone from the sdist step body"
     # `ls dist/*.whl` USED TO BE ON THIS LIST and is deliberately not: reading
     # the LAST line of `ls` is the defect that step was repaired for, so a pin
     # demanding it back would pin the defect. What replaces it is the glob
     # itself (the step must still be looking in `dist/`), the array count that
     # makes "the wheel" a well-defined noun, and the `LC_ALL` the file argues
-    # for — each of which a rewrite back to `ls` would drop.
-    for needle in ("basename", "cut -d- -f2", "dist/*.whl",
-                   "export LC_ALL=C", "shopt -s nullglob", "${#wheels[@]}"):
+    # for — each of which a rewrite back to `ls` would drop. The tarball
+    # spellings below are the same decision made a second time.
+    for needle in ("basename", "cut -d- -f2", "dist/*.whl", "dist/*.tar.gz",
+                   "export LC_ALL=C", "shopt -s nullglob", "${#wheels[@]}",
+                   "${#sdists[@]}", ".tar.gz | cut -d- -f2"):
         assert needle in tag, f"{needle!r} is gone from the tag step body"
-    assert "ls dist/*.whl" not in tag, (
-        "the tag step is reading `ls dist/*.whl` again. `ls` returns EVERY "
-        "match and collates by locale, so `basename` on its output picks one "
-        "wheel per LC_ALL and says nothing about the rest — the shape driven "
-        "in `test_the_tag_gate_refuses_a_dist_it_cannot_reason_about`."
+    for needle in ("dist/*.tar.gz", "shopt -s nullglob", "tar tzf"):
+        assert needle in manifest, f"{needle!r} is gone from the manifest step"
+    assert "for sdist in dist/*.tar.gz" in manifest, (
+        "the manifest step is back to reading ONE tarball. It is not a "
+        "refusal — `release.yml` says so beside it — so with more than one "
+        "tarball it must record all of them rather than pick, and with none it "
+        "must record nothing rather than fail the release."
+    )
+    # `ls dist/` IS PINNED AS ABSENT, in the whole file rather than in one
+    # body, for the reason the wheel needle above was dropped: the construct is
+    # the defect. It stood at three sites and was retired in two passes —
+    # `ls dist/*.whl` in the tag step, by the commit that made "the wheel" a
+    # well-defined noun, and `ls dist/*.tar.gz` in the sdist step and in the
+    # manifest step, here — and `ls` returns EVERY match, so a caller that
+    # reads its output as one filename is picking (`basename` on the last
+    # line) or crashing (`tar` on a filename with a newline in it). This pin
+    # is over the whole file so that the manifest step, which no drive reads,
+    # is covered by it too. CODE lines only:
+    # `release.yml` and this module both describe the retired construct in
+    # prose, and a whole-text scan would fail on the record of the defect.
+    code = "\n".join(_code_lines(_release_text()))
+    assert "ls dist/" not in code, (
+        "`ls dist/` is back in `release.yml`. Every match, collated by the "
+        "runner's locale, read by a caller that wants one filename — the shape "
+        "driven in `test_the_tag_gate_refuses_a_dist_it_cannot_reason_about` "
+        "and `test_the_sdist_gate_refuses_a_dist_it_cannot_read`."
     )
     # the bodies are scripts, not one-liners: a body that shrank to nothing
     # would still start with `set -euo pipefail` and pass the extractor's check
     assert len(sdist.splitlines()) > 20, sdist
     assert len(tag.splitlines()) > 5, tag
+    assert len(manifest.splitlines()) > 5, manifest

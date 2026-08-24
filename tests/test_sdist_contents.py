@@ -693,6 +693,19 @@ def _package_files_in_tree(root: pathlib.Path, oracle: pathlib.Path) -> set[str]
 
     Different sets, and the build packs the second.
 
+    **THE SECOND LINE OF THAT TABLE WAS NOT A PROPERTY OF `safe_walk`**, and
+    saying it was is what hid a defect for as long as it stood. `link` and
+    `real` are the same inode; the seen-set means whichever the walk reaches
+    FIRST is the one whose files are recorded, and :func:`_walked_files` was
+    missing the `sorted` that hatchling's own `recurse_explicit_files` applies
+    to `dirnames`. So `{'link/a.py'}` was `safe_walk` PLUS the order
+    `os.scandir` happened to return two names in — it reproduces for `link`/
+    `real` and inverts for `linkdir`/`realdir`, where the build ships
+    `linkdir/a.py` and this enumeration said `realdir/a.py`. Three of eight
+    planted aliasing shapes agreed before the `sorted` landed and eight of
+    eight after; the measurement is in :func:`_walked_files` and it is pinned
+    by :func:`test_the_walk_breaks_an_alias_the_way_the_build_breaks_it`.
+
     `oracle` is a scratch directory for :func:`_check_ignore`'s throwaway
     repository; it needs `git`, which is why the callers are gated on it.
     """
@@ -1459,6 +1472,37 @@ def _walked_files(root: pathlib.Path) -> set[str]:
     utils.safe_walk` verbatim — a symlinked directory IS descended into by the
     build, so a walk that skipped it would under-report exactly where the build
     over-collects.
+
+    **`sorted` IS PART OF THE ALGORITHM AND NOT A TIDINESS.** hatchling's
+    `recurse_explicit_files` writes
+    ``dirs[:] = sorted(d for d in dirs if d not in EXCLUDED_DIRECTORIES)``;
+    this applied the same filter and kept `os.scandir` order. That is invisible
+    for a tree with no aliasing — the two orders enumerate the same set — and
+    decisive the moment two directory paths name the same inode, because the
+    seen-set means the path visited FIRST wins and the other is pruned to
+    nothing. `os.scandir` order is the filesystem's, so which alias won was a
+    property of how ext4 happened to hash the two NAMES, while the build always
+    picks the alphabetically first. MEASURED on this tree, eight aliasing
+    shapes planted under `src/stelling`, each a directory plus a symlink to it,
+    wheel built with `uv build` and compared to
+    :func:`_package_files_in_tree`::
+
+        shape                  scandir order        wheel ships    walk said
+        link -> real           link, real           link/a.py      link/a.py
+        alias -> target        alias, target        alias/a.py     alias/a.py
+        source -> mirror       mirror, source       mirror/a.py    mirror/a.py
+        linkdir -> realdir     realdir, linkdir     linkdir/a.py   realdir/a.py
+        aaa_link -> zzz_real   zzz_real, aaa_link   aaa_link/a.py  zzz_real/a.py
+        zzz_link -> aaa_real   zzz_link, aaa_real   aaa_real/a.py  zzz_link/a.py
+        pkga -> pkgb           pkgb, pkga           pkga/a.py      pkgb/a.py
+        b -> q                 q, b                 b/a.py         q/a.py
+
+    Three of eight agreed, and the three are exactly the three whose scandir
+    order already happened to be sorted order. With `sorted` here: eight of
+    eight, and the column that used to be "walk said" is the column the build
+    ships. FALSE RED ONLY — nothing can ship wrong from this, because the wheel
+    is the wheel either way; what it breaks is the comparison that is supposed
+    to notice when the wheel is wrong.
     """
     found: set[str] = set()
     seen: set[tuple[int, int]] = set()
@@ -1469,7 +1513,12 @@ def _walked_files(root: pathlib.Path) -> set[str]:
             dirnames[:] = []
             continue
         seen.add(identifier)
-        dirnames[:] = [d for d in dirnames if d not in _HATCH_EXCLUDED_DIRECTORIES]
+        # `sorted`, as hatchling's own `recurse_explicit_files` does it: with a
+        # seen-set, traversal order is what decides which of two aliasing paths
+        # wins. See the docstring for the eight shapes this was measured on.
+        dirnames[:] = sorted(
+            d for d in dirnames if d not in _HATCH_EXCLUDED_DIRECTORIES
+        )
         relative = os.path.relpath(dirpath, root)
         prefix = "" if relative == "." else relative.replace(os.sep, "/") + "/"
         for name in filenames:
@@ -2498,6 +2547,106 @@ def test_the_scan_refuses_a_blinded_walk(tmp_path: pathlib.Path) -> None:
     # that gets switched off.
     pruned = _repo("pruned", "docs/.hatch/note.md", delete=False)
     assert _untracked_that_would_ship(pruned, {"docs"}, tmp_path / "oracle-pruned") == []
+
+
+#: Aliasing plants for :func:`test_the_walk_breaks_an_alias_the_way_the_build_breaks_it`
+#: as ``(real directory, symlink to it)``. Every pair is planted SYMLINK FIRST,
+#: and two kinds of pair are listed on purpose, because the hazard has to be
+#: EXPRESSIBLE on whatever filesystem `tmp_path` lands on. On a filesystem that
+#: returns entries in CREATION order, the pairs whose symlink sorts AFTER its
+#: target (``zzz_link``/``aaa_real``, ``source``/``mirror``) are the ones whose
+#: scandir order is not sorted order. On one that HASHES names — what ext4 does
+#: here — the order is neither, and the remaining pairs are what happened to
+#: come back unsorted. If every pair came back sorted the plant would prove
+#: nothing, and the test says so rather than passing quietly.
+_ALIAS_PLANTS = (
+    ("aaa_real", "zzz_link"),
+    ("mirror", "source"),
+    ("real", "link"),
+    ("realdir", "linkdir"),
+    ("q", "b"),
+    ("pkgb", "pkga"),
+    ("target", "alias"),
+)
+
+
+def test_the_walk_breaks_an_alias_the_way_the_build_breaks_it(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`sorted` in :func:`_walked_files`, pinned — it was missing, and the
+    enumeration and the build disagreed about a real tree.
+
+    hatchling's `recurse_explicit_files` does
+    ``dirs[:] = sorted(d for d in dirs if d not in EXCLUDED_DIRECTORIES)``.
+    :func:`_walked_files` applied that filter and kept `os.scandir` order,
+    which is nothing at all until two directory paths name one inode — and then
+    the ``(st_dev, st_ino)`` seen-set makes the FIRST path visited the winner
+    and prunes the second to nothing. So the winner was whatever order the
+    filesystem returned two names in, while the build's winner is always the
+    alphabetically first.
+
+    MEASURED before the `sorted` landed, eight aliasing shapes planted under
+    `src/stelling` and a real `uv build` compared against
+    :func:`_package_files_in_tree`: **three of eight agreed**, and the three
+    were exactly the three whose scandir order already happened to be sorted
+    order. `link -> real` was one of them, which is why
+    :func:`_package_files_in_tree`'s docstring recorded ``{'link/a.py'}`` as a
+    property of `safe_walk` — it is a property of `safe_walk` plus a
+    directory-entry order. `linkdir -> realdir` was not: the wheel shipped
+    `stelling/linkdir/a.py` and this enumeration said `stelling/realdir/a.py`,
+    so the equality in
+    :func:`test_the_wheel_ships_every_module_of_the_package` went red on a
+    wheel that was right. After the `sorted`: **eight of eight**.
+
+    FALSE RED ONLY — no artefact can ship wrong from this, because the build
+    was never consulting this function. What it breaks is the check that exists
+    to notice when the build is wrong, and a check that reports a healthy wheel
+    as broken is a check that gets switched off.
+
+    NO BUILD AND NO `uv` HERE, deliberately: the property is a property of the
+    walk, and it is asserted directly rather than through a wheel, so it holds
+    in the environment where the wheel checks skip.
+    """
+    root = tmp_path / "aliased"
+    root.mkdir()
+    for real, link in _ALIAS_PLANTS:
+        # symlink FIRST, dangling, so creation order is (link, real) — see
+        # `_ALIAS_PLANTS` for why that matters
+        os.symlink(real, root / link)
+        (root / real).mkdir()
+        (root / real / "a.py").write_text("X = 1\n", encoding="utf-8")
+
+    entries = [e.name for e in os.scandir(root)]
+    order_sensitive = [
+        (real, link)
+        for real, link in _ALIAS_PLANTS
+        if entries[min(entries.index(real), entries.index(link))]
+        != min(real, link)
+    ]
+    assert order_sensitive, (
+        "every planted alias came back from `os.scandir` in sorted order "
+        f"already ({entries}), so this plant cannot tell a sorted walk from an "
+        "unsorted one and the assertion below would hold either way. That is a "
+        "property of the filesystem `tmp_path` is on, not of the walk — plant "
+        "a shape this one returns unsorted before trusting this test."
+    )
+
+    walked = _walked_files(root)
+    for real, link in _ALIAS_PLANTS:
+        winner = min(real, link)
+        loser = max(real, link)
+        assert f"{winner}/a.py" in walked, (
+            f"the walk did not reach `{winner}/a.py`. `{link}` and `{real}` "
+            "are one inode, and hatchling sorts `dirnames` before descending, "
+            f"so `{winner}` is the path the build records and the path this "
+            f"enumeration has to record. Got: {sorted(walked)}"
+        )
+        assert f"{loser}/a.py" not in walked, (
+            f"the walk recorded BOTH `{winner}/a.py` and `{loser}/a.py`. The "
+            "`(st_dev, st_ino)` seen-set is what stops the second visit, and "
+            "the build records one of them, so recording two is a different "
+            f"disagreement with the build. Got: {sorted(walked)}"
+        )
 
 
 def test_a_record_of_a_force_included_path_is_read_as_false() -> None:
