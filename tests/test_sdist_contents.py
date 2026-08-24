@@ -87,6 +87,27 @@ paragraph whose subject is how much of this module a machine without `uv` does
 not run. Re-measured at bbaa251, before the two additions below: ``14 passed,
 6 skipped``. Nothing reads this number, which is how it drifted.
 
+**AND `git` IS A SECOND GATE NOW, ON THREE OF THOSE EIGHT.** The wheel-member
+checks compute what hatchling will ship out of `src/stelling`, which means
+asking :func:`_check_ignore` — a throwaway repository and the `git` binary —
+what the exclusion spec keeps out. They used to filter three names by hand
+instead, and that is the defect written up at :func:`_package_files_in_tree`.
+Measured on this tree, one `pytest` of this module each, all figures with the
+other tool present:
+
+    both `uv` and `git`         24 passed             (was 23)
+    no `uv`                     16 passed,  8 skipped  (was 15 / 8)
+    no `git`                    14 passed, 10 skipped  (was 17 / 6)
+
+The `no uv` column moves by ONE and not by three: the new pin below is where
+the exclusion model is actually held, and it needs `git` and no build at all,
+so a machine without `uv` still runs it.
+
+The three that moved skip on ``needs `uv` to build and `git` to read
+hatchling's exclusions``, which is disclosed in `tests/test_skip_inventory.py`
+— so a machine missing either tool says so through the skip inventory rather
+than through a check that quietly answers off a different model.
+
 Driven across the smuggling shapes this module carries: one of them, a
 committed dangling symlink, goes from ``1 failed`` to a green run with the
 build half skipped; the rest stay red, because what catches them is
@@ -606,21 +627,96 @@ def _wheel_package_members(wheel: pathlib.Path) -> set[str]:
     return {n for n in names if not n.split("/")[0].endswith(".dist-info")}
 
 
-def _package_files_in_tree(root: pathlib.Path) -> set[str]:
+#: Where the wheel target's `packages = ["src/stelling"]` reads from, spelled
+#: once. The wheel's own member names drop the `src/` — hatchling's `sources`
+#: rewrite — which is why the two spellings are both written down here.
+_PACKAGE_ROOT = "src/stelling/"
+
+
+def _package_files_in_tree(root: pathlib.Path, oracle: pathlib.Path) -> set[str]:
     """What `[tool.hatch.build.targets.wheel] packages` has to put in a wheel.
 
     Read off the tree rather than off a list written here, and in the wheel's
     own spelling (`stelling/x.py`, not `src/stelling/x.py`) so the comparison
     is a set equality with no translation step to get wrong.
+
+    **Through hatchling's own walk and hatchling's own exclusions, and it used
+    to be through neither.** This was an `rglob` under `src/stelling` filtering
+    three names by hand — `__pycache__`, `.pyc`, `.pyo` — in a module whose
+    whole subject is that a transcript of hatchling rots. It reported a
+    DIFFERENT SET TO DIFFERENT DEVELOPERS, which is the one thing an equality
+    over a built artefact must not do. One command::
+
+        printf '' > src/stelling/_probe.so   # `.gitignore` line 7 is `*.so`
+
+    Hatchling READS that `.gitignore`, so the file is not in the wheel. The
+    hand filter counted it as a module of the package, so the wheel was
+    accused of dropping one. Driven on this tree at 1242da4::
+
+        test_the_wheel_ships_every_module_of_the_package               FAILED
+          in the tree and NOT in the wheel: ['stelling/_probe.so']
+          in the wheel and NOT in the tree: []
+        test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken
+                                                                      FAILED
+          the intervention did not drop exactly one module:
+          ['stelling/_probe.so', 'stelling/solvers.py']
+
+    — and the sentence the first one printed, *"a package that cannot import
+    its own modules once installed"*, was FALSE about a wheel that was right.
+    A `.so` beside a package is what every in-place C build, `cythonize`,
+    `pip install -e` of a compiled dependency and `maturin develop` leaves.
+
+    **WHY :func:`_check_ignore` AND :func:`_hatchling_excluded` WERE NOT
+    ALREADY USED HERE**, which is worth writing down because they were in
+    scope: they landed on 2026-08-08 (02dd89b, eb14935) and this function
+    landed on 2026-08-09 (9166e2e), one day later and one section up, and
+    nothing connected them. They live under *"what hatchling ACTUALLY reads"*,
+    a section built for the UNTRACKED-FILE guard; this function was written for
+    a different question — *"what does `packages` have to put in a wheel"* —
+    and answered it off the disk. The three names it filtered are the
+    give-away: `__pycache__` is a member of
+    :data:`_HATCH_EXCLUDED_DIRECTORIES`, and `.pyc`/`.pyo` are two of the four
+    suffixes `*.py[cdo]` in :data:`_HATCH_DEFAULT_GLOBAL_EXCLUDE` covers. It
+    was a partial hand copy of precisely the constants it should have called,
+    and it missed `.pyd`, every :data:`_HATCH_EXCLUDED_FILES` basename, and the
+    entire `.gitignore`. The walkers sweep at ec69818 that found six of these
+    did not reach this one: it read `REPO` through `rglob` rather than through
+    any of the enumerations that sweep was auditing.
+
+    **The walk matters as well as the exclusions, measured rather than
+    assumed.** :func:`_walked_files` is `hatchling.builders.utils.safe_walk`
+    verbatim and an `rglob` is not it. CPython 3.12.3, a package holding
+    `real/a.py` and a symlink `link -> real`::
+
+        rglob("*"), is_file()   {'real/a.py'}
+        safe_walk               {'link/a.py'}
+
+    Different sets, and the build packs the second.
+
+    `oracle` is a scratch directory for :func:`_check_ignore`'s throwaway
+    repository; it needs `git`, which is why the callers are gated on it.
     """
-    pkg = root / "src" / "stelling"
-    return {
-        f"stelling/{path.relative_to(pkg).as_posix()}"
-        for path in pkg.rglob("*")
-        if path.is_file()
-        and "__pycache__" not in path.parts
-        and path.suffix not in (".pyc", ".pyo")
-    }
+    reached = {p for p in _walked_files(root) if p.startswith(_PACKAGE_ROOT)}
+    assert reached, (
+        f"hatchling's walk reached no file under {_PACKAGE_ROOT} in {root}, so "
+        "the set equality this feeds would compare two empty sets and pass on "
+        "any wheel at all"
+    )
+    shipped = reached - _hatchling_excluded(root, reached, oracle)
+    return {f"stelling/{path[len(_PACKAGE_ROOT):]}" for path in shipped}
+
+
+#: The three wheel checks need `uv` to BUILD and `git` to ask
+#: :func:`_check_ignore` what hatchling excludes. Both, or the comparison is
+#: between an artefact and a guess — and a guess about exclusions is the defect
+#: :func:`_package_files_in_tree` was repaired for. Gated rather than degraded:
+#: a fallback filter would be a second model of hatchling that nothing holds,
+#: reporting a different verdict on a machine without `git`, which is the shape
+#: this module exists to refuse.
+_needs_a_build_and_an_oracle = pytest.mark.skipif(
+    shutil.which("uv") is None or shutil.which("git") is None,
+    reason="needs `uv` to build and `git` to read hatchling's exclusions",
+)
 
 
 def _build_into(root: pathlib.Path, out: pathlib.Path) -> pathlib.Path:
@@ -634,7 +730,7 @@ def _build_into(root: pathlib.Path, out: pathlib.Path) -> pathlib.Path:
     return wheels[0]
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+@_needs_a_build_and_an_oracle
 def test_the_wheel_ships_every_module_of_the_package(tmp_path: pathlib.Path) -> None:
     """An EQUALITY, so it fires in both directions.
 
@@ -648,9 +744,9 @@ def test_the_wheel_ships_every_module_of_the_package(tmp_path: pathlib.Path) -> 
     ``[tool.hatch.build.targets.wheel]``. That is driven rather than suggested,
     by the test below.
     """
-    wheel = _build_into(REPO, tmp_path)
+    wheel = _build_into(REPO, tmp_path / "dist")
     shipped = _wheel_package_members(wheel)
-    expected = _package_files_in_tree(REPO)
+    expected = _package_files_in_tree(REPO, tmp_path / "oracle")
     assert expected, "no package files found in the tree — this check is vacuous"
     assert shipped == expected, (
         "the built wheel's member list is not the package.\n"
@@ -667,7 +763,7 @@ def test_the_wheel_ships_every_module_of_the_package(tmp_path: pathlib.Path) -> 
     assert len([n for n in shipped if n.endswith(".py")]) > 10
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+@_needs_a_build_and_an_oracle
 def test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -691,7 +787,7 @@ def test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken(
     out = tmp_path / "dist"
     wheel = _build_into(staged, out)
     shipped = _wheel_package_members(wheel)
-    expected = _package_files_in_tree(staged)
+    expected = _package_files_in_tree(staged, tmp_path / "oracle")
     missing = expected - shipped
     assert missing == {"stelling/solvers.py"}, (
         f"the intervention did not drop exactly one module: {sorted(missing)}"
@@ -729,7 +825,7 @@ def test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken(
     )
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+@_needs_a_build_and_an_oracle
 def test_the_built_wheel_installs_and_every_module_resolves(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -761,7 +857,7 @@ def test_the_built_wheel_installs_and_every_module_resolves(
 
     modules = sorted(
         name[len("stelling/") : -len(".py")].replace("/", ".")
-        for name in _package_files_in_tree(REPO)
+        for name in _package_files_in_tree(REPO, tmp_path / "oracle")
         if name.endswith(".py") and not name.endswith("/__init__.py")
     )
     assert len(modules) > 10, modules
@@ -790,6 +886,78 @@ def test_the_built_wheel_installs_and_every_module_resolves(
         capture_output=True, text=True, timeout=300, env=env,
     )
     assert cli.returncode == 0, f"`python -m stelling` off the wheel failed:\n{cli.stdout}\n{cli.stderr}"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_the_package_enumeration_reads_what_hatchling_excludes(
+    tmp_path: pathlib.Path,
+) -> None:
+    """THE PIN ON :func:`_package_files_in_tree`, AND IT NEEDS NO BUILD.
+
+    The three checks above are set EQUALITIES between a built wheel and this
+    enumeration, and on a clean tree they are green whichever model the
+    enumeration uses — every file under `src/stelling` is a `.py` nobody
+    excludes. So the repair is INVISIBLE to them until a developer's own
+    directory carries something hatchling drops, which is precisely the
+    condition under which the old filter reported a different verdict to
+    different people. Driven at 1242da4 with one `printf` into the checkout::
+
+        src/stelling/_probe.so          (`.gitignore` line 7 is `*.so`)
+
+        test_the_wheel_ships_every_module_of_the_package             FAILED
+          in the tree and NOT in the wheel: ['stelling/_probe.so']
+        test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken
+                                                                    FAILED
+
+    — a wheel that was correct, accused of shipping "a package that cannot
+    import its own modules once installed".
+
+    BOTH DIRECTIONS, because only one of them is the defect and the other is
+    what a repair could break:
+
+    * what hatchling EXCLUDES must not be counted — a `.so` and a `.pyd`
+      (`*.py[codz]` in this `.gitignore`, `*.py[cdo]` in
+      :data:`_HATCH_DEFAULT_GLOBAL_EXCLUDE`), and a `__pycache__` member, which
+      the old filter did get right and which must stay right;
+    * what hatchling SHIPS must still be counted, including an UNTRACKED file.
+      Reading the index instead of the walk would have been the easy repair and
+      the wrong one: hatchling packs untracked files, so an enumeration of
+      tracked files would make the wheel equality blind to exactly the stray
+      `test_no_untracked_file_anywhere_would_ship` exists to catch.
+    """
+    staged = _tree_to_build(tmp_path)
+    assert not _vcs_exclusions_are_discarded(staged, tmp_path / "oracle-bail"), (
+        f"the staged copy at {staged} sits at a path this project's own "
+        "`.gitignore` matches, so hatchling would throw its whole exclusion "
+        "set away (see `_vcs_exclusions_are_discarded`) and nothing below is "
+        "measuring exclusions. Point TMPDIR somewhere else."
+    )
+    before = _package_files_in_tree(staged, tmp_path / "oracle-before")
+    assert before, "the enumeration is empty before anything was planted"
+
+    pkg = staged / "src" / "stelling"
+    (pkg / "_probe.so").write_bytes(b"\x7fELF not a module of this package\n")
+    (pkg / "_probe.pyd").write_bytes(b"nor this\n")
+    (pkg / "__pycache__").mkdir(exist_ok=True)
+    (pkg / "__pycache__" / "zz_probe.cpython-312.pyc").write_text("x\n", encoding="utf-8")
+    excluded = _package_files_in_tree(staged, tmp_path / "oracle-excluded")
+    assert excluded == before, (
+        "files hatchling excludes are being counted as modules of the package, "
+        "so the wheel equality above will accuse a correct wheel of having "
+        "dropped them:\n"
+        f"  counted and not shipped: {sorted(excluded - before)}\n"
+        f"  shipped and not counted: {sorted(before - excluded)}"
+    )
+
+    (pkg / "_probe_untracked.py").write_text("# untracked, not ignored\n", encoding="utf-8")
+    grown = _package_files_in_tree(staged, tmp_path / "oracle-grown")
+    assert grown == before | {"stelling/_probe_untracked.py"}, (
+        "an untracked, non-ignored `.py` under the package is no longer "
+        "counted. Hatchling PACKS it, so an enumeration that reads the index "
+        "rather than the walk would leave the wheel equality unable to see a "
+        "stray that really does ship:\n"
+        f"  {sorted(grown.symmetric_difference(before))}"
+    )
 
 
 # --- what a bare `pip install stelling` PULLS IN ----------------------------

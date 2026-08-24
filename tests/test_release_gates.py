@@ -458,6 +458,12 @@ def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
     already been wrong once — it said TWO, which was the count of REASONS
     listed under it, while the sdist checks landed later and did not move it.
 
+    IT MOVED A SECOND TIME, and this test is what made that a decision rather
+    than an oversight: the tag step's "dist/ does not hold exactly one wheel"
+    refusal is a SEVENTH `exit 1` site, so the header reads NINE. The literals
+    here — `seven` and `7` — are the claim; the arithmetic below is what holds
+    them to the file.
+
     Derived from the file, not from a constant here: the `exit 1` sites are
     counted, and the two refusals that are a step's own exit code are added
     from :data:`_IMPLICIT_REFUSALS`, which is written down because deciding
@@ -481,8 +487,8 @@ def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
         "the arithmetic changed — this count was already wrong once."
     )
     # ...and the header's own breakdown must agree with the same arithmetic
-    assert "six `exit 1` sites" in text and len(exit_sites) == 6, (
-        f"the header's breakdown says six `exit 1` sites and there are "
+    assert "seven `exit 1` sites" in text and len(exit_sites) == 7, (
+        f"the header's breakdown says seven `exit 1` sites and there are "
         f"{len(exit_sites)}"
     )
 
@@ -840,11 +846,14 @@ def test_the_tag_gate_refuses_a_tag_the_artifact_does_not_carry(tmp_path):
     rc=1 unmutated and rc=0 mutated, printing `tag=v9.9.9 artifact
     version=9.9.9` on a `dist/` that holds only 0.1.0.
 
-    THE TWO-WHEEL WEAKNESS IS NOT RE-DRIVEN HERE and is not this test's
-    subject: `ls` sorts, so a stray that sorts BEFORE the real wheel is read
-    past and uploaded anyway. That is recorded in `release.yml` beside the
-    step, with the runs that established it, and is unreachable from that
-    workflow because `dist/` is filled by one `uv build` into a fresh clone.
+    THE TWO-WHEEL WEAKNESS USED TO BE DECLARED OUT OF SCOPE HERE, in a
+    paragraph that said it "is not re-driven here" because `ls` sorts and a
+    stray sorting BEFORE the real wheel is read past. Both halves have moved:
+    the step no longer picks, and the sorting explanation was false — see
+    :func:`test_the_tag_gate_refuses_a_dist_it_cannot_reason_about`, which
+    drives that refusal, and `release.yml`'s own comment, which corrects the
+    record. This test keeps its original subject, which is the tag comparison
+    on a `dist/` the step CAN reason about: exactly one wheel.
     """
     body = _step_body(_TAG_STEP)
     dist = tmp_path / "tree" / "dist"
@@ -871,6 +880,143 @@ def test_the_tag_gate_refuses_a_tag_the_artifact_does_not_carry(tmp_path):
         assert "tag and artifact disagree" in r.stdout
 
 
+def _locales_to_drive() -> list[str]:
+    """``C`` plus whatever real language locales this box actually has.
+
+    DISCOVERED AND NOT TYPED, for the reason the step below exists: a test
+    that DEMANDED ``en_GB.UTF-8`` would itself be a check whose input is the
+    developer's environment, red on a machine that ships only ``C`` and green
+    on one that does not. ``C`` is always present, so the drive is never
+    vacuous; every further locale found is one more reader whose verdict must
+    agree.
+
+    Which locales are worth asking is measured rather than guessed:
+    ``C`` and ``C.UTF-8`` collate ``stelling-0.2.0-…`` and
+    ``stelling-0.2.0.dev0-…`` by byte, and ``en_GB.UTF-8`` / ``en_US.UTF-8``
+    do not, which is the whole of the divergence this step used to carry.
+    """
+    found = ["C"]
+    if shutil.which("locale") is None:
+        return found
+    proc = subprocess.run(
+        ["locale", "-a"], capture_output=True, text=True, timeout=60
+    )
+    if proc.returncode != 0:
+        return found
+    have = {line.strip().lower().replace("-", "") for line in proc.stdout.splitlines()}
+    for want in ("C.UTF-8", "en_GB.UTF-8", "en_US.UTF-8"):
+        if want.lower().replace("-", "") in have:
+            found.append(want)
+    return found
+
+
+@_needs_a_shell
+def test_the_tag_gate_refuses_a_dist_it_cannot_reason_about(tmp_path):
+    """THE SEVENTH `exit 1` SITE, AND IT REPLACED A SILENT PICK.
+
+    `ls dist/*.whl` returns EVERY match and `basename` on a multi-line string
+    returns whatever follows the LAST `/`. So with two wheels in `dist/` the
+    step examined ONE and said nothing at all about the other, and WHICH one it
+    examined was decided by the runner's `LC_ALL`. Driven on the OLD body, a
+    `dist/` of two empty files, `TAG=v0.2.0`::
+
+        0.2.0 + 0.2.0.dev0   LC_ALL=C            version=0.2.0.dev0  rc=1
+        0.2.0 + 0.2.0.dev0   LC_ALL=en_GB.UTF-8  version=0.2.0       rc=0
+        0.2.0 + 0.2.0.dev0   LC_ALL=en_US.UTF-8  version=0.2.0       rc=0
+
+    — one tree, one tag, two verdicts, and the green one uploads the untagged
+    `0.2.0.dev0` because `upload-artifact` takes the whole directory.
+
+    `LC_ALL=C` ALONE IS NOT THE REPAIR, and this test exists because it is
+    not. Driven with only the export added to the old body, the row above goes
+    rc=1 under all three locales — and `0.0.9 + 0.1.0` tagged `v0.1.0` is still
+    rc=0 in every one of them, so a wheel nobody tagged still ships. What makes
+    the answer right is the COUNT: the step establishes there is exactly one
+    wheel, and refuses a `dist/` it cannot reason about.
+
+    THE LOCALE LOOP IS A REGRESSION GUARD RATHER THAN A LIVE DIVERGENCE, and
+    saying so is the point: the shipped body pins its own `LC_ALL=C` and reads
+    `wheels[0]` only after the count is 1, so glob collation cannot reach the
+    verdict. The loop is what fails if either of those is undone.
+
+    THE ZERO-WHEEL CASE IS DRIVEN HERE TOO. `release.yml` used to record it as
+    a shortcoming — `ls` died on its own rc=2 with no annotation, "red, but not
+    by this gate". It is this gate's refusal now, with a message.
+    """
+    body = _step_body(_TAG_STEP)
+
+    def _dist(name: str, *wheels: str) -> pathlib.Path:
+        tree = tmp_path / name
+        (tree / "dist").mkdir(parents=True)
+        for version in wheels:
+            (tree / "dist" / f"stelling-{version}-py3-none-any.whl").write_bytes(b"")
+        return tree
+
+    one = _dist("one", "0.2.0")
+    stale = _dist("stale", "0.2.0", "0.2.0.dev0")
+    stray = _dist("stray", "0.0.9", "0.1.0")
+    empty = _dist("empty")
+
+    locales = _locales_to_drive()
+    assert "C" in locales, locales
+
+    for locale in locales:
+        # A GATE THAT REFUSES EVERYTHING IS NOT A GATE. The shape this release
+        # path actually produces — one `uv build`, one wheel — must still pass.
+        ok = _drive(body, one, TAG="v0.2.0", LC_ALL=locale)
+        assert ok.returncode == 0, (
+            f"the tag gate refuses the one-wheel `dist/` a single `uv build` "
+            f"leaves, under LC_ALL={locale}, so it would refuse every "
+            f"release.\n{ok.stdout}\n{ok.stderr}"
+        )
+        assert "artifact version=0.2.0" in ok.stdout
+
+        # THE STALE PRE-RELEASE BESIDE ITS OWN RELEASE — the shape whose
+        # verdict used to be the runner's locale.
+        bad = _drive(body, stale, TAG="v0.2.0", LC_ALL=locale)
+        assert bad.returncode != 0, (
+            "THE TAG GATE PASSED A `dist/` HOLDING TWO WHEELS under "
+            f"LC_ALL={locale}. `upload-artifact` takes the whole directory and "
+            "the publish step uploads every file in it, so the wheel this "
+            "comparison never examined goes to PyPI permanently. It "
+            f"reported:\n{bad.stdout}"
+        )
+        assert "does not hold exactly one wheel" in bad.stdout
+        # AND IT NAMES BOTH. "Examined one and said nothing about the other"
+        # is the defect; a refusal that names only one is the same silence.
+        for wheel in ("stelling-0.2.0-py3-none-any.whl",
+                      "stelling-0.2.0.dev0-py3-none-any.whl"):
+            assert wheel in bad.stdout, (
+                f"the refusal did not name {wheel}, so the publish log does "
+                f"not say what is in `dist/`:\n{bad.stdout}"
+            )
+
+        # THE STRAY THAT SORTS FIRST IN EVERY LOCALE — rc=0 on the old body
+        # under C and under UTF-8 alike, which is why `LC_ALL=C` was not the
+        # repair. The tag AGREES with a wheel here; the directory is still
+        # unpublishable.
+        low = _drive(body, stray, TAG="v0.1.0", LC_ALL=locale)
+        assert low.returncode != 0, (
+            "THE TAG GATE PASSED a `dist/` holding an untagged 0.0.9 beside "
+            f"the tagged 0.1.0 under LC_ALL={locale}. The tag matches a wheel, "
+            "which is not the question: both files are uploaded. It "
+            f"reported:\n{low.stdout}"
+        )
+        assert "does not hold exactly one wheel" in low.stdout
+
+        # NO WHEEL AT ALL is this gate's refusal now, not `ls`'s exit code.
+        gone = _drive(body, empty, TAG="v0.2.0", LC_ALL=locale)
+        assert gone.returncode != 0, (
+            f"the tag gate passed an EMPTY `dist/` under LC_ALL={locale}: "
+            f"{gone.stdout}\n{gone.stderr}"
+        )
+        assert "does not hold exactly one wheel" in gone.stdout, (
+            "an empty `dist/` no longer reaches this step's own refusal — it "
+            "is dying on a command's exit code with no annotation, which is "
+            f"the state this repaired:\n{gone.stdout}\n{gone.stderr}"
+        )
+
+
 @_needs_a_shell
 def test_the_drives_are_reading_the_real_step_bodies():
     """Anti-vacuity for the two drives, in the shape this file already uses.
@@ -886,8 +1032,21 @@ def test_the_drives_are_reading_the_real_step_bodies():
     tag = _step_body(_TAG_STEP)
     for needle in ("tar tzf", "git ls-files", "comm -23", "explained.txt"):
         assert needle in sdist, f"{needle!r} is gone from the sdist step body"
-    for needle in ("basename", "cut -d- -f2", "ls dist/*.whl"):
+    # `ls dist/*.whl` USED TO BE ON THIS LIST and is deliberately not: reading
+    # the LAST line of `ls` is the defect that step was repaired for, so a pin
+    # demanding it back would pin the defect. What replaces it is the glob
+    # itself (the step must still be looking in `dist/`), the array count that
+    # makes "the wheel" a well-defined noun, and the `LC_ALL` the file argues
+    # for — each of which a rewrite back to `ls` would drop.
+    for needle in ("basename", "cut -d- -f2", "dist/*.whl",
+                   "export LC_ALL=C", "shopt -s nullglob", "${#wheels[@]}"):
         assert needle in tag, f"{needle!r} is gone from the tag step body"
+    assert "ls dist/*.whl" not in tag, (
+        "the tag step is reading `ls dist/*.whl` again. `ls` returns EVERY "
+        "match and collates by locale, so `basename` on its output picks one "
+        "wheel per LC_ALL and says nothing about the rest — the shape driven "
+        "in `test_the_tag_gate_refuses_a_dist_it_cannot_reason_about`."
+    )
     # the bodies are scripts, not one-liners: a body that shrank to nothing
     # would still start with `set -euo pipefail` and pass the extractor's check
     assert len(sdist.splitlines()) > 20, sdist
