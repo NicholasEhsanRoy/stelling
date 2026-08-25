@@ -32,6 +32,21 @@ suite green and the skip-inventory verdict `made`. The six:
    inverted, so it reports the INTERSECTION, is empty exactly when the tree is
    healthy, and can never fire.
 
+AND THE COUNT IS SPELLED THREE TIMES IN THAT FILE, NOT ONCE. The header states
+it; two other sentences are DERIVED from it — "SEVEN OF THE <N> WERE DRIVEN",
+where the SEVEN counts drives and the N is the header's count, and "rather than
+adding a <Nth>", which is the header's count PLUS ONE. Both followed the header
+in lockstep through EIGHT, NINE, TWELVE and THIRTEEN, and both went stale in
+the one commit that took it to FOURTEEN: `release.yml` then stated its own
+refusal count as two different numbers, and gave the name "THE FOURTEENTH" both
+to the `tar` refusal that WAS added and to a refusal that deliberately was NOT.
+Nothing here saw either — set to `SEVEN OF THE NINETY` and `adding a
+NINETIETH`, this module was 21 passed.
+:func:`test_the_counts_DERIVED_from_the_header_move_with_it` holds all three to
+each other now: red on the commit before this one, naming BOTH sentences, and
+green on the two before that, which are the last commits at which the file was
+consistent.
+
 WHAT THIS FILE IS. Two things, and the second was called IMPOSSIBLE here for
 four commits.
 
@@ -165,6 +180,33 @@ _NUMBER_WORDS = {
     "TWENTY": 20,
 }
 
+# The ordinal spellings, for the one sentence in `release.yml` that names the
+# refusal it did NOT add. Same discipline as the cardinals above: an unlisted
+# word fails LOUDLY rather than reading as zero, which is what an ordinal
+# rewritten to a value nobody checked would otherwise do.
+_ORDINAL_WORDS = {
+    "FIRST": 1, "SECOND": 2, "THIRD": 3, "FOURTH": 4, "FIFTH": 5,
+    "SIXTH": 6, "SEVENTH": 7, "EIGHTH": 8, "NINTH": 9, "TENTH": 10,
+    "ELEVENTH": 11, "TWELFTH": 12, "THIRTEENTH": 13, "FOURTEENTH": 14,
+    "FIFTEENTH": 15, "SIXTEENTH": 16, "SEVENTEENTH": 17, "EIGHTEENTH": 18,
+    "NINETEENTH": 19, "TWENTIETH": 20,
+}
+
+# The three sentences in `release.yml` that spell the refusal count. The first
+# IS the count; the other two are DERIVED from it and had both gone stale by
+# the time this was written. Named here so the line-ending test drives the same
+# patterns the pins do, and so no pattern is written twice.
+_HEADER_COUNT_RE = r"^# ([A-Z]+) REFUSAL POINTS STAND BETWEEN A TAG AND PyPI"
+_DRIVEN_OF_RE = r"^# SEVEN OF THE ([A-Z]+) WERE DRIVEN IN BOTH DIRECTIONS"
+# No `.*` in this one, deliberately: `.` matches a carriage return, so a
+# wildcard here would see the CR-only rendering that
+# `test_the_release_gates_READ_ONE_FILE_however_its_lines_end` requires every
+# scan in this module to be blind to.
+_DECLINED_ORDINAL_RE = (
+    r"^# therefore refuse through refusal point 1 rather than adding a "
+    r"([A-Z]+)"
+)
+
 # The two refusals that are not `exit 1` sites: a step that refuses by its own
 # command's exit code. `release.yml` names them — the pytest step and
 # `python -m stelling`. NOT derived, and said so: deciding mechanically which
@@ -218,8 +260,9 @@ _ANCHORED_SCANS = (
      r"^\s*STELLING_SKIP_INVENTORY_VERDICT:\s*(.+?)\s*$"),
     ("the `rm -f` of the verdict path", r'^\s*rm -f "([^"]+)"\s*$'),
     ("the `verdict=` assignment", r'^\s*verdict="([^"]+)"\s*$'),
-    ("the refusal-count header",
-     r"^# ([A-Z]+) REFUSAL POINTS STAND BETWEEN A TAG AND PyPI"),
+    ("the refusal-count header", _HEADER_COUNT_RE),
+    ("the count the drives are seven OF", _DRIVEN_OF_RE),
+    ("the ordinal of the refusal NOT added", _DECLINED_ORDINAL_RE),
 )
 
 
@@ -522,9 +565,7 @@ def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
     text = _release_text()
     lines = _code_lines(text)
     exit_sites = [line for line in lines if line.strip() == "exit 1"]
-    header = re.search(
-        r"^# ([A-Z]+) REFUSAL POINTS STAND BETWEEN A TAG AND PyPI", text, re.M
-    )
+    header = re.search(_HEADER_COUNT_RE, text, re.M)
     assert header, (
         "the header no longer states a refusal count in the form this reads"
     )
@@ -540,6 +581,114 @@ def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
     assert "twelve `exit 1` sites" in text and len(exit_sites) == 12, (
         f"the header's breakdown says twelve `exit 1` sites and there are "
         f"{len(exit_sites)}"
+    )
+
+
+def _one_word(text: str, pattern: str, what: str) -> str:
+    """The single capture of an `^`-anchored scan, or a loud failure."""
+    hits = re.findall(pattern, text, re.M)
+    assert len(hits) == 1, (
+        f"expected exactly one sentence in `release.yml` stating {what}, "
+        f"found {len(hits)}: {hits}. The sentence has been reworded or "
+        f"duplicated, and a pin that finds nothing is green for the wrong "
+        f"reason — see {pattern!r}"
+    )
+    return hits[0]
+
+
+def test_the_counts_DERIVED_from_the_header_move_with_it():
+    """TWO SENTENCES SPELL THE REFUSAL COUNT AGAIN AND NOTHING HELD THEM TO IT.
+
+    The pin above holds the header's count to the file's own `exit 1` sites.
+    Two other sentences RESTATE that count and are derived from it:
+
+      * "SEVEN OF THE <N> WERE DRIVEN IN BOTH DIRECTIONS" — the SEVEN is a
+        count of drives and does not move when a refusal lands; the N is the
+        header's count and does;
+      * "rather than adding a <Nth>" — the ordinal a refusal added there WOULD
+        take, which is the header's count PLUS ONE.
+
+    BOTH TRACKED THE HEADER IN LOCKSTEP THROUGH FOUR ROUNDS AND THEN STOPPED
+    TOGETHER. Read off each commit's own header: EIGHT/EIGHT, NINE/NINE,
+    TWELVE/TWELVE + THIRTEENTH, THIRTEEN/THIRTEEN + FOURTEENTH — and then
+    FOURTEEN with THIRTEEN and FOURTEENTH left standing, so `release.yml`
+    stated its refusal count as two different numbers in one file, and gave the
+    name "THE FOURTEENTH" both to the `tar` refusal that WAS added and to the
+    refusal that deliberately was NOT. A reader could take the first for the
+    second.
+
+    AND THE STALE SENTENCE STATED ITS OWN INVARIANT IN THE SAME BREATH: *"this
+    sentence said 'a tenth' when the count was nine, and the count is what
+    moves"* — and then did not move. That is why this exists as an instrument
+    rather than as a note: the rule was written down, was correct, and was not
+    enough.
+
+    NOTHING SAW EITHER. Measured on the parent commit with both set to absurd
+    values — `SEVEN OF THE NINETY` and `adding a NINETIETH` — this module was
+    21 passed. Both words are unlisted in the tables above, so with this
+    pin they now fail LOUDLY rather than reading as zero.
+
+    DRIVEN, on the file this commit ships, against the off-by-ones a person
+    actually makes and against the stale values themselves — each on its own,
+    each naming this test: `FOURTEEN` -> `THIRTEEN` (the parent's own value)
+    red, -> `FIFTEEN` red, -> `NINETY` red as an unrecognised word;
+    `FIFTEENTH` -> `FOURTEENTH` (the parent's own value) red, -> `SIXTEENTH`
+    red, -> `NINETIETH` red as an unrecognised word. And from the other side:
+    moving the HEADER alone reddens this together with the count pin, which is
+    the coupling this test exists to assert. GREEN, unchanged, on `eb26d482`
+    and `400415fe` — the last two commits at which the file was consistent —
+    so it is not a check that only passes on today's numbers.
+
+    WHAT IT CANNOT DO is the same thing the count pin cannot do: these are
+    words in comments, and nothing in this repository derives an ORDINAL for a
+    refusal. What is held is that the three sentences agree with each other and
+    that the first of them agrees with the file's `exit 1` sites.
+    """
+    text = _release_text()
+    total = _NUMBER_WORDS[_one_word(text, _HEADER_COUNT_RE, "the refusal count")]
+    driven = _one_word(text, _DRIVEN_OF_RE, "the total the seven drives are OF")
+    declined = _one_word(text, _DECLINED_ORDINAL_RE,
+                         "the ordinal of the refusal deliberately NOT added")
+    # BOTH SENTENCES ARE REPORTED, NOT THE FIRST ONE TO FAIL. They went stale
+    # together in one commit and are repaired together; a red that names one
+    # of them invites a fix that leaves the file inconsistent in the other
+    # direction.
+    wrong = []
+    if driven not in _NUMBER_WORDS:
+        wrong.append(
+            f"'SEVEN OF THE {driven}' is not a number word this module knows, "
+            f"so nothing can compare it to the header's {total}. Add it to "
+            f"`_NUMBER_WORDS` or spell the count as a word."
+        )
+    elif _NUMBER_WORDS[driven] != total:
+        wrong.append(
+            f"'SEVEN OF THE {driven}' ({_NUMBER_WORDS[driven]}) restates the "
+            f"refusal count and the header says {total}. The SEVEN is a count "
+            f"of DRIVES and does not move when a refusal lands; the total it "
+            f"is seven OF is the header's count and does. It followed the "
+            f"header through EIGHT, NINE, TWELVE and THIRTEEN and then stopped."
+        )
+    if declined not in _ORDINAL_WORDS:
+        wrong.append(
+            f"'adding a {declined}' is not an ordinal this module knows, so "
+            f"nothing can compare it to {total + 1}. Add it to "
+            f"`_ORDINAL_WORDS` or spell the ordinal as a word."
+        )
+    elif _ORDINAL_WORDS[declined] != total + 1:
+        wrong.append(
+            f"'adding a {declined}' ({_ORDINAL_WORDS[declined]}) names the "
+            f"refusal that was deliberately NOT added, and with {total} "
+            f"refusal points the next one would be number {total + 1}. That "
+            f"sentence says of ITSELF that it read 'a tenth' when the count "
+            f"was nine and that the count is what moves. An ordinal one short "
+            f"also COLLIDES: it hands a refusal that was never added the name "
+            f"this file already gives to one that was, so a reader can "
+            f"conclude the wrong refusal was the one declined."
+        )
+    assert not wrong, (
+        f"`release.yml`'s header states {total} refusal points and the "
+        f"sentences derived from that count no longer agree with it:\n  "
+        + "\n  ".join(wrong)
     )
 
 
@@ -969,7 +1118,7 @@ def _dist_of(base: pathlib.Path, name: str, *, wheels=("0.1.0",),
 
 @_needs_a_shell
 def test_the_sdist_gate_refuses_a_dist_it_cannot_read(tmp_path):
-    """THE ELEVENTH REFUSAL POINT, AND IT REPLACED A DEATH WITH NO ANNOTATION.
+    """THE TWELFTH REFUSAL POINT, AND IT REPLACED A DEATH WITH NO ANNOTATION.
 
     ORDINALS IN THIS MODULE AND IN `release.yml`'s HEADER ARE ARRIVAL ORDER —
     the order the refusals were ADDED, which is what "the header said EIGHT
@@ -978,6 +1127,16 @@ def test_the_sdist_gate_refuses_a_dist_it_cannot_read(tmp_path):
     total and this one stood eighth among them. Nothing derives either number,
     so each refusal is NAMED as well as numbered; see the count pin's docstring
     for why a position claim cannot be pinned at all.
+
+    AND IT THEN SAID "THE ELEVENTH REFUSAL POINT", WHICH WAS OFF BY ONE IN THE
+    ORDER IT HAD JUST NAMED. This refusal — the sdist step establishing the
+    tarball count for itself — arrived in the commit that took `release.yml`'s
+    header from NINE to TWELVE, in a group of three, and it is the last of the
+    three. Arrival order numbers a refusal by the count AFTER it arrives, so it
+    is the TWELFTH and not the eleventh; `release.yml` carried the same
+    off-by-one on the same four refusals and is corrected in the same commit as
+    this line. The rule, stated there: the refusal called the Kth is the one
+    that took the count TO K.
 
     `sdist="$(ls dist/*.tar.gz)"` is quoted, so two matches are ONE string with
     a newline in it and `tar tzf` is handed a filename that does not exist;
@@ -1067,6 +1226,17 @@ def _corrupt_tarballs() -> dict[str, bytes]:
     accident. It is measured here rather than inherited: rc=2 in the sdist
     step before the refusal landed, rc=0 and "could not list this file" in the
     manifest step.
+
+    FIVE IS THE COUNT OF SHAPES THAT MAKE `tar tzf` EXIT NON-ZERO, AND THAT IS
+    NOT THE SAME AS THE COUNT OF UNREADABLE TARBALLS. A `dist/` entry that is a
+    FIFO named like a tarball makes `tar tzf` BLOCK — a FIFO with no writer
+    never returns from `open` — so it produces no exit code at all and the
+    twelfth refusal never runs. Measured on the bodies this commit ships: the
+    tag step rc=0 (it reads filenames), the sdist step and the manifest step
+    both hung and were killed at 20 s. It fails CLOSED, since nothing is
+    published, and it is unreachable from `checkout` + `uv build`; it is
+    recorded beside that refusal in `release.yml` and is not driven here,
+    because a drive of it is a test that hangs.
     """
     valid = _valid_tarball_bytes()
     return {
@@ -1613,11 +1783,18 @@ def _locales_to_drive() -> list[str]:
 
 @_needs_a_shell
 def test_the_tag_gate_refuses_a_dist_it_cannot_reason_about(tmp_path):
-    """THE SEVENTH `exit 1` SITE TO ARRIVE — the EIGHTH refusal point in
+    """THE SEVENTH `exit 1` SITE TO ARRIVE — the NINTH refusal point in
     `release.yml`'s own numbering — AND IT REPLACED A SILENT PICK.
 
     Arrival order, not file order: it stands third among the twelve `exit 1`
     sites the file now holds. See the count pin's docstring.
+
+    IT SAID "the EIGHTH refusal point" UNTIL THIS COMMIT, and the two halves of
+    that heading disagreed with each other. Seven `exit 1` SITES stood once
+    this landed, because six stood before it — and the refusal count went from
+    EIGHT to NINE for exactly the same reason, so this is the NINTH refusal and
+    the SEVENTH site. Numbering a refusal off the count BEFORE it arrives is
+    what left `release.yml` with no TWELFTH at all; see the header there.
 
     `ls dist/*.whl` returns EVERY match and `basename` on a multi-line string
     returns whatever follows the LAST `/`. So with two wheels in `dist/` the
