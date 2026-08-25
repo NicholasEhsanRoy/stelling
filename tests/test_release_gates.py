@@ -196,7 +196,30 @@ _ORDINAL_WORDS = {
 # IS the count; the other two are DERIVED from it and had both gone stale by
 # the time this was written. Named here so the line-ending test drives the same
 # patterns the pins do, and so no pattern is written twice.
-_HEADER_COUNT_RE = r"^# ([A-Z]+) REFUSAL POINTS STAND BETWEEN A TAG AND PyPI"
+#
+# FOUR PATTERNS OVER THREE SENTENCES, because the first sentence makes TWO
+# claims on one line — "FOURTEEN REFUSAL POINTS … — twelve `exit 1` sites" —
+# and a pattern `_one_word` reads may carry exactly one group. The opening of
+# that sentence is therefore written ONCE, in `_HEADER_OPENING`, and both of
+# its patterns are composed from it: a reworded header must not be a place
+# where one of the two is updated and the other quietly stops matching.
+_HEADER_OPENING = "# {} REFUSAL POINTS STAND BETWEEN A TAG AND PyPI"
+_HEADER_COUNT_RE = "^" + _HEADER_OPENING.format("([A-Z]+)")
+# THE SAME SENTENCE'S BREAKDOWN of that total into `exit 1` sites, and it is
+# an anchored scan because for one commit it was not one. The count pin's
+# second half was `"twelve `exit 1` sites" in text` — a bare substring over
+# the whole file, where every other scan in this module is `^`-anchored and
+# exactly-once — so ANY occurrence of that phrase anywhere in `release.yml`
+# satisfied it. MEASURED on the committed blob before this was written: the
+# phrase planted once in a comment paragraph below, the header's own breakdown
+# mutated `twelve` -> `eleven`, and the pin PASSED; the same mutation without
+# the plant is red. Anchored to the sentence it is a claim ABOUT, prose
+# elsewhere in that file can neither satisfy it nor falsify it — which is what
+# retired the "do not respell the phrase" rule `release.yml` used to carry in
+# place of an instrument.
+_HEADER_BREAKDOWN_RE = (
+    "^" + _HEADER_OPENING.format("[A-Z]+") + r" — ([a-z]+) `exit 1` sites"
+)
 _DRIVEN_OF_RE = r"^# SEVEN OF THE ([A-Z]+) WERE DRIVEN IN BOTH DIRECTIONS"
 # NARROW ON PURPOSE, AND THE REASON THAT STOOD HERE WAS HALF TRUE. It read:
 # "No `.*` in this one, deliberately: `.` matches a carriage return, so a
@@ -222,9 +245,20 @@ _DRIVEN_OF_RE = r"^# SEVEN OF THE ([A-Z]+) WERE DRIVEN IN BOTH DIRECTIONS"
 # `_one_word` demands exactly one, so a loose pattern fails on the file as it
 # stands. That is the shape to expect from these three sentences in
 # particular: their subject is the sentences themselves, so the file is full of
-# retracted and hypothetical spellings of each. All three patterns in this
+# retracted and hypothetical spellings of each. All FOUR patterns in this
 # group are anchored to their own literal for that reason, and the CR argument
 # is the second one.
+#
+# THE BREAKDOWN PATTERN IS THE SAME STORY, MEASURED ON THE FILE THIS COMMIT
+# SHIPS. Without the anchor, "([a-z]+) `exit 1` sites" finds SIX hits —
+# `twelve`, `the`, `of`, `twelve`, `own`, `five` — of which exactly one is the
+# clause that IS the claim; the rest are paragraphs ABOUT the claim, the
+# hazard note's own quotation of it, and a step comment counting that one
+# step's refusals. The phrase is not rare in that file and never was, which is
+# why a substring test over it was not a test of the header. And the
+# mid-pattern wildcard is red on the CR control here too: "^#.*— ([a-z]+)
+# `exit 1` sites" reads ONE hit in the CR-only rendering where zero is
+# required, while the anchored form above reads none.
 _DECLINED_ORDINAL_RE = (
     r"^# therefore refuse through refusal point 1 rather than adding a "
     r"([A-Z]+)"
@@ -284,6 +318,7 @@ _ANCHORED_SCANS = (
     ("the `rm -f` of the verdict path", r'^\s*rm -f "([^"]+)"\s*$'),
     ("the `verdict=` assignment", r'^\s*verdict="([^"]+)"\s*$'),
     ("the refusal-count header", _HEADER_COUNT_RE),
+    ("the header's breakdown into `exit 1` sites", _HEADER_BREAKDOWN_RE),
     ("the count the drives are seven OF", _DRIVEN_OF_RE),
     ("the ordinal of the refusal NOT added", _DECLINED_ORDINAL_RE),
 )
@@ -592,17 +627,48 @@ def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
     IT MOVED A FIFTH TIME, by one, when the sdist step stopped dying on `tar`'s
     own exit code: a tarball nothing in this workflow can read is that step's
     own refusal now, with an annotation, rather than an rc=2 out of `tar`.
-    Twelve `exit 1` sites, FOURTEEN with the two implicit ones. The literals
-    here — `twelve` and `12` — are the claim; the arithmetic below is what
-    holds them to the file, and both halves are driven red. THE OFF-BY-ONE A
-    PERSON ACTUALLY MAKES is not a wild number, it is one step either side, so
-    that is what this was driven against: `FOURTEEN` -> `THIRTEEN` red,
-    `FOURTEEN` -> `FIFTEEN` red, and the breakdown `twelve` -> `eleven` red,
-    each on its own, each naming this test. A well-formed `exit 1` added to the
-    manifest step reddens it too, from the other direction. The `FOURTEEN` ->
-    `THIRTEEN` row is not hypothetical here: THIRTEEN is what this file said
-    before the twelfth site landed, so the pin was driven red by the fix itself
-    before the header was moved to match it.
+    Twelve `exit 1` sites, FOURTEEN with the two implicit ones. NEITHER NUMBER
+    IS TYPED HERE ANY MORE: both words are read off the header and compared to
+    the file's own `exit 1` sites, so what is held is that the header agrees
+    with the file rather than that the file still says what it said the day
+    this was written. The typed `12` that stood in the second half was
+    implied by the first half anyway — with the header at FOURTEEN,
+    `_NUMBER_WORDS[word] == len(exit_sites) + 2` IS `len(exit_sites) == 12` —
+    so all it added was a red on a commit that legitimately moves the count,
+    and it was the one place in this module where a count derived from a
+    collection was written down a second time by hand. THE OFF-BY-ONE A PERSON
+    ACTUALLY MAKES is not a wild number, it is one step either side, so that is
+    what this was driven against: `FOURTEEN` -> `THIRTEEN` red, `FOURTEEN` ->
+    `FIFTEEN` red, and the breakdown `twelve` -> `eleven` red, each on its own,
+    each naming this test. A well-formed `exit 1` added to the manifest step
+    reddens it too, from the other direction. The `FOURTEEN` -> `THIRTEEN` row
+    is not hypothetical here: THIRTEEN is what this file said before the
+    twelfth site landed, so the pin was driven red by the fix itself before the
+    header was moved to match it.
+
+    THE BREAKDOWN HALF WAS A BARE SUBSTRING TEST FOR ONE COMMIT — the defect
+    this module exists to catch, committed inside the module. While the other
+    scans here are `^`-anchored and exactly-once, this one asked whether
+    "twelve `exit 1` sites" appeared ANYWHERE in `release.yml`, so a second
+    copy of the phrase satisfied it no matter what the header said. It was
+    found by being triggered: a comment drafted for that file repeated the
+    phrase, and the mutation that should have reddened this test did not.
+    REPRODUCED on the committed blob before the fix — phrase planted once in a
+    comment paragraph below the header, the header's own breakdown mutated
+    `twelve` -> `eleven`, this test PASSED, and the same mutation without the
+    plant is red.
+
+    DRIVEN FOUR WAYS on the anchored form, each on its own, each naming this
+    test: breakdown mutated with ONE occurrence of the phrase in the file RED
+    (as before), breakdown mutated with TWO occurrences RED (green before, and
+    this is the fix), the breakdown clause REWORDED OUT of the header RED on
+    ZERO hits through `_one_word` rather than silently green, and the header
+    SENTENCE — what this scan matches — duplicated RED naming the duplication.
+    A fifth input is green BY DESIGN and is the property the anchor buys:
+    the PHRASE alone repeated in prose elsewhere in `release.yml`, with the
+    header correct, is not a failure. `release.yml` carries such a repeat
+    today, in the paragraph recording this hazard, so the two-occurrence drive
+    above is the state of the shipped file and not a planted one.
 
     WHAT THIS PIN STRUCTURALLY CANNOT DO, said here because `release.yml` was
     wrong about it in prose while this test was green: it checks the NUMBER of
@@ -631,10 +697,30 @@ def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
         "steps that refuse by their own exit code. Move the header, or say why "
         "the arithmetic changed — this count was already wrong once."
     )
-    # ...and the header's own breakdown must agree with the same arithmetic
-    assert "twelve `exit 1` sites" in text and len(exit_sites) == 12, (
-        f"the header's breakdown says twelve `exit 1` sites and there are "
-        f"{len(exit_sites)}"
+    # ...and the header's own breakdown must agree with the same arithmetic.
+    # THROUGH `_one_word`, ANCHORED AND EXACTLY-ONCE, for the reason written
+    # beside `_HEADER_BREAKDOWN_RE`: as a bare substring this half was
+    # satisfied by any occurrence of the phrase anywhere in `release.yml`, and
+    # the header's own breakdown could then be edited out from under it.
+    breakdown = _one_word(
+        text, _HEADER_BREAKDOWN_RE,
+        "the header's breakdown of that count into `exit 1` sites",
+    )
+    # `_NUMBER_WORDS` is keyed on the SHOUTED spelling the header's total uses;
+    # the breakdown is ordinary prose in the same sentence, so it is folded
+    # here rather than listed twice in the table.
+    assert breakdown.upper() in _NUMBER_WORDS, (
+        f"the header's breakdown says {breakdown!r} `exit 1` sites, which is "
+        f"not a number word this module knows, so nothing can compare it to "
+        f"the {len(exit_sites)} sites in the file. Add it to `_NUMBER_WORDS` "
+        f"or spell the count as a word."
+    )
+    assert _NUMBER_WORDS[breakdown.upper()] == len(exit_sites), (
+        f"the header's breakdown says {breakdown} "
+        f"({_NUMBER_WORDS[breakdown.upper()]}) `exit 1` sites and the file "
+        f"has {len(exit_sites)}. The breakdown and the total in front of it "
+        f"are one sentence and move together: the total is this number plus "
+        f"the {_IMPLICIT_REFUSALS} steps that refuse by their own exit code."
     )
 
 

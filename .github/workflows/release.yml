@@ -250,16 +250,28 @@
 # files, in the same commit that moves a site — or the reader after you is
 # misled the way this one was.
 #
-# AND DO NOT RESPELL THE PHRASE THE COUNT PIN SCANS FOR, which is a hazard
-# these comments carry rather than a rule about them. That pin's breakdown
-# half is a bare substring test over the whole file, not an anchored scan like
-# the other three, so a SECOND copy of its literal anywhere in this header
-# keeps it green while the header's own breakdown is edited out from under it.
-# MEASURED in this commit: a paragraph above repeated the phrase, and mutating
-# the breakdown at the top of this file then left the pin passing; the
-# paragraph was reworded and the mutation reddens it again. Making that half
-# an exactly-once scan is the instrument that would retire the hazard, and it
-# is not built here.
+# THE BREAKDOWN AT THE TOP OF THIS HEADER IS READ BY AN ANCHORED SCAN, AND
+# FOR ONE COMMIT IT WAS NOT. The count pin's second half reads the clause
+# "twelve `exit 1` sites" of the first sentence above through an `^`-anchored,
+# exactly-once scan tied to that sentence's own opening, so nothing else
+# written in this file can satisfy it, and REWORDING that clause out of the
+# sentence is a RED on zero hits rather than a silent pass. It no longer types
+# the number either: the word is read off this header and compared to this
+# file's own `exit 1` sites, the same way the total above it is.
+#
+# THE RECORD, BECAUSE THE HOLE WAS LIVE FOR A COMMIT AND IS WHY THIS PARAGRAPH
+# EXISTS: that half was a bare substring test over the whole file, where the
+# module's other scans were already anchored. A second copy of its literal
+# ANYWHERE here kept it green while the breakdown at the top of this file was
+# edited out from under it. MEASURED then — a paragraph above repeated the
+# phrase by accident, the mutation went unnoticed, the paragraph was reworded,
+# and the mutation reddened again — and this note said DO NOT RESPELL THE
+# PHRASE, because a rule addressed to the next writer was the only mitigation
+# there was. RE-MEASURED on the fix, with the phrase planted a second time and
+# the breakdown mutated: RED. The rule is retired; the instrument replaced it,
+# and the quotation of the phrase in the paragraph immediately above is
+# DELIBERATE: it is what makes this file's shipped state the two-occurrence
+# case, standing exactly where the retired rule forbade it.
 #
 # The "examined nothing" loop guards three files; the `explained.txt` arm is
 # dead. `printf '%s\n' "${GENERATED}"` emits a newline even for an empty
