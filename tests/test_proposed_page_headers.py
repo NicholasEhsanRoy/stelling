@@ -57,14 +57,20 @@ is worse than none:
   makes it. The search WAS over the whole page, so a ``tests/…py``
   mentioned four hundred lines below the header satisfied it; that half is
   fixed, and the remaining half is stated rather than implied.
-* **the commit leg needs the commits, and a shallow checkout does not have
-  them.** Where ``git`` cannot reach a sha a status names,
+* **the commit leg needs the commits, and a checkout without the history
+  does not have them.** Where ``git`` cannot reach a sha a status names,
   ``test_every_commit_a_status_paragraph_names_is_an_ancestor`` SKIPS, with
   a ``UserWarning`` naming git's own words and every page and sha that went
   unverified. It used to hard-``assert`` there instead, which made this file
   refuse the publish inside ``.github/workflows/release.yml``'s tagged-tree
-  job -- a depth-1 checkout, so every sha older than the tag is out of
-  reach. Skipping is the right answer for an environment; what it costs is
+  job, which then checked out at the default depth of 1 so that every sha
+  older than the tag was out of reach. **That job takes ``fetch-depth: 0``
+  now**, so this workflow no longer builds the tree that produced the
+  condition -- and the skip below firing inside it is a signal that the
+  checkout changed, not a fact about git. It stays for the environments
+  ``fetch-depth: 0`` cannot reach: a shallow clone cut somewhere else, an
+  unpacked sdist with no ``.git``, a ``git init``'d copy with no commit in
+  it. Skipping is the right answer for an environment; what it costs is
   real and is stated at the skip: in that run, nothing checks that a status
   names a commit that exists, that it is a commit rather than a tag, or
   that it is an ancestor of this tree. **In a FULL checkout an unreachable
@@ -396,9 +402,12 @@ def _the_environment_explains_it() -> str | None:
     The triage is `tests/test_soundness_routing.py`'s, one object over, and
     it asks in this order:
 
-    * `git rev-parse --is-shallow-repository` -- TRUE is the release job's
-      own shape and is answered first, so this leg never depends on an
-      import;
+    * `git rev-parse --is-shallow-repository` -- answered FIRST, so this leg
+      never depends on an import. TRUE was the release job's own shape until
+      both of `.github/workflows/release.yml`'s two `actions/checkout@v4`
+      steps took `fetch-depth: 0`; it is now the shape of every OTHER
+      shallow consumer -- `git clone --depth 1`, a default `actions/checkout`
+      in some other workflow -- and the release job answers FALSE;
     * `git cat-file -e <root commit>^{commit}` -- a non-shallow repository
       holding any commit of this history holds the root too, so its absence
       says this is a vendored copy somebody ran `git init` in, a fork with
@@ -487,14 +496,23 @@ def _what_goes_unchecked(pairs: list[tuple[str, str]], said: str) -> str:
         f"another branch's tree or a commit that was rewritten away. A page "
         f"could carry any of those three defects and this run would report "
         f"nothing -- and `docs/README.md` tells a reader to trust these "
-        f"headers. {said} THE COMMONEST CAUSE IS A SHALLOW CHECKOUT: "
-        f"`actions/checkout@v4` with no `fetch-depth` fetches the triggering "
-        f"ref at depth 1, so a tag build holds exactly one commit and every "
-        f"sha older than the tag is out of reach -- which is the shape "
-        f"`.github/workflows/release.yml`'s job `the suite, on the tagged "
-        f"tree` runs in, and that job is refusal point #1 between a tag and "
-        f"PyPI. `git fetch --unshallow`, or `fetch-depth: 0` on that "
-        f"checkout, restores the check."
+        f"headers. {said} WHAT PRODUCES THIS IS A TREE THAT DOES NOT CARRY "
+        f"THE HISTORY, and there are three of them: a SHALLOW CLONE, where "
+        f"`actions/checkout@v4` at its default `fetch-depth: 1` (or a plain "
+        f"`git clone --depth 1`) holds the tip commit alone and every older "
+        f"sha is out of reach; an UNPACKED SDIST, which has no `.git` at "
+        f"all; and a `git init` NOBODY HAS COMMITTED IN, which has no "
+        f"history for a sha to be in. `git fetch --unshallow` restores the "
+        f"first where there is a remote to ask. "
+        f"THIS IS NO LONGER THE SHAPE `.github/workflows/release.yml` "
+        f"BUILDS. Both of that file's two `actions/checkout@v4` steps -- "
+        f"job `the suite, on the tagged tree`, which is refusal point #1 "
+        f"between a tag and PyPI, and job `build` -- take "
+        f"`persist-credentials: false` AND `fetch-depth: 0`, which fetches "
+        f"every branch and every tag rather than the triggering ref alone. "
+        f"So this warning arriving from inside that workflow does not mean "
+        f"git is narrow: it means THE CHECKOUT CHANGED, and the check this "
+        f"paragraph describes has been lost again."
     )
 
 
@@ -512,17 +530,45 @@ def test_every_commit_a_status_paragraph_names_is_an_ancestor():
     PASS**: git is present and `HEAD` resolves to the one commit that was
     fetched. Control then reached a hard `assert` on `git cat-file -t <sha>`,
     which fails for every sha outside a depth-1 history. Driven here, in a
-    sandbox built the way the release job builds its tree (`git init`; one
-    `git fetch --depth=1` of a single ref into a tag ref; `git checkout` of
-    that tag): `1 failed`, on
+    sandbox built the way the release job THEN built its tree (`git init`;
+    one `git fetch --depth=1` of a single ref into a tag ref; `git checkout`
+    of that tag): `1 failed`, on
     ``proposed-declaration-dtype-check.md's status names `89413c2`, which
     this tree's git cannot resolve: fatal: Not a valid object name 89413c2``.
-    That is `.github/workflows/release.yml`'s job `the suite, on the tagged
-    tree`, which checks out with `persist-credentials: false` alone -- no
-    `fetch-depth`, no `fetch-tags` -- and is refusal point #1 between a tag
-    and PyPI. A tree nobody can fix after the tag is cut refused the publish
-    over an environment, in the name of an integrity claim it could not have
-    decided either way.
+    That WAS `.github/workflows/release.yml`'s job `the suite, on the tagged
+    tree`, refusal point #1 between a tag and PyPI: it checked out with
+    `persist-credentials: false` alone, so the default depth of 1 applied. A
+    tree nobody can fix after the tag is cut refused the publish over an
+    environment, in the name of an integrity claim it could not have decided
+    either way.
+
+    **AND THAT JOB IS NOT THAT SHAPE ANY MORE, WHICH IS THE THING A READER
+    OF THE SKIP BELOW NEEDS TO KNOW.** Re-derived from the workflow with
+    PyYAML rather than from any sentence about it: `release.yml` has TWO
+    `actions/checkout@v4` steps -- `jobs.test.steps[0]` and
+    `jobs.build.steps[0]` -- and `publish` checks nothing out. (`grep -c
+    "uses: actions/"` reads EIGHT in that file: four real steps, of which
+    two are those checkouts and two are `upload-artifact` and
+    `download-artifact`, plus four comment lines quoting the string. A count
+    taken off that grep is a count of matches and not of checkouts.) Both
+    steps carry exactly two inputs, `persist-credentials: false` and
+    `fetch-depth: 0`, and no `fetch-tags` -- which `fetch-depth: 0` makes
+    inert anyway, because the all-history refspec it fetches already
+    contains `+refs/tags/*:refs/tags/*`. DRIVEN in the sandbox above with
+    that config instead: not shallow, 1079 commits, `v0.1.0` resolves, and
+    this check DECIDES rather than skipping -- `deadbee` planted in
+    `proposed-tier-clause.md`'s **Status:** paragraph comes back `1 failed`,
+    named as a page defect.
+
+    **THE SKIP STAYS, BECAUSE `fetch-depth: 0` MAKES THE CONDITION
+    UNREACHABLE FROM THIS WORKFLOW AND NOT IMPOSSIBLE.** Three environments
+    still produce it, and each has its own reason string below: a shallow
+    clone cut anywhere else (`git clone --depth 1`, another workflow's
+    default checkout); an unpacked sdist, which has no `.git`; and a `git
+    init`'d copy with no commit in it. So a skip firing here INSIDE THAT
+    WORKFLOW is now a signal that something changed -- the checkout lost its
+    `fetch-depth: 0` -- rather than a fact about the environment CI happens
+    to give.
 
     So the unreachable case is a DISCLOSED SKIP now, with a `UserWarning`
     beside it carrying git's exit code, git's own words, and the pages and

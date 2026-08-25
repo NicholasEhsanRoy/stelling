@@ -287,15 +287,27 @@ def _git_cannot_resolve_the_release_tag() -> bool:
     condition legitimate. That argument was about this file, and this file
     is where it is answered.
 
-    **THE CONDITION IS ORDINARY AND ONE OF ITS CAUSES IS THE RELEASE JOB.**
-    `.github/workflows/release.yml`'s job `the suite, on the tagged tree` --
-    refusal point #1 between a tag and PyPI -- checks out with
-    `actions/checkout@v4` and `persist-credentials: false` alone: no
-    `fetch-depth`, no `fetch-tags`, which is DEPTH 1 ON THE TRIGGERING TAG
-    REF. On every release after `v0.1.0` that tree has git, has `.git`, and
-    does not have `v0.1.0`, so the hard red fired inside the one workflow
+    **THE CONDITION IS ORDINARY, AND ONE OF ITS CAUSES USED TO BE THE
+    RELEASE JOB.** `.github/workflows/release.yml`'s job `the suite, on the
+    tagged tree` -- refusal point #1 between a tag and PyPI -- checked out
+    with `actions/checkout@v4` and `persist-credentials: false` alone: no
+    `fetch-depth`, no `fetch-tags`, which meant DEPTH 1 ON THE TRIGGERING
+    TAG REF. On every release after `v0.1.0` that tree had git, had `.git`, and
+    did not have `v0.1.0`, so the hard red fired inside the one workflow
     whose mistakes are immutable, and refused the publish with a message
     that read as an integrity failure of the record.
+
+    **THAT CAUSE IS GONE AND THE OTHERS ARE NOT.** Read out of the workflow
+    rather than out of a description of it: both of its two
+    `actions/checkout@v4` steps -- there are two, in `test` and in `build`,
+    and `publish` checks nothing out -- now take `persist-credentials:
+    false` AND `fetch-depth: 0`, which fetches every branch and every tag,
+    so `v0.1.0` resolves in that job and the check over there DECIDES. What
+    still produces the condition is every environment `fetch-depth: 0`
+    cannot reach: a shallow clone cut somewhere else, an unpacked sdist or
+    export with no `.git`, a `git init`'d copy of a tree with no refs in it.
+    The rule stays for those, and a skip carrying this reason from inside
+    that workflow now means the checkout changed.
 
     THE PREDICATE ASKS GIT THE SAME QUESTION THE TEST ASKS, IN THE SAME
     ORDER: git on PATH, then `.git`, then the tag. The first two conditions
@@ -368,12 +380,22 @@ def _git_cannot_reach_a_status_commit() -> bool:
     --verify HEAD` -- **and a shallow clone passes both of them**: git is
     present and HEAD resolves to the single fetched commit. So the assertion
     fired in `.github/workflows/release.yml`'s job `the suite, on the tagged
-    tree`, which checks out with `actions/checkout@v4` and
+    tree`, which THEN checked out with `actions/checkout@v4` and
     `persist-credentials: false` alone -- no `fetch-depth`, no `fetch-tags`,
     i.e. depth 1 on the triggering tag ref -- and is refusal point #1 between
-    a tag and PyPI. Re-derived here in a sandbox built that way (`git init`;
+    a tag and PyPI. Re-derived in a sandbox built that way (`git init`;
     one `git fetch --depth=1` of a single ref into a tag ref; `git checkout`
     of that tag): `1 failed`, `fatal: Not a valid object name 89413c2`.
+
+    **AND THAT JOB DOES NOT BUILD THAT TREE ANY MORE.** Both of the
+    workflow's two `actions/checkout@v4` steps take `persist-credentials:
+    false` and `fetch-depth: 0`, so the tagged-tree job gets every branch
+    and every tag and the check over there decides -- a `deadbee` planted in
+    a **Status:** paragraph is a FAILURE in that sandbox, not a skip. The
+    rule below stays for the environments that still cannot reach the
+    object -- a shallow clone cut elsewhere, an unpacked sdist, a `git
+    init`'d copy -- and a skip carrying its reason from inside that workflow
+    is now evidence that the checkout changed.
 
     THE PREDICATE ASKS GIT THE SAME QUESTIONS THE TEST ASKS, IN THE SAME
     ORDER: the population first (the test asserts it is non-empty before it
@@ -819,13 +841,21 @@ RULES = (
             "resolve `v0.1.0` -- the released tag every `Versions:` field in "
             "`SOUNDNESS.md`'s `## Log` is a claim about. The five causes the "
             "rule above lists all produce it, and so does the one that "
-            "matters most: `.github/workflows/release.yml`'s job `the suite, "
-            "on the tagged tree`, which is refusal point #1 between a tag and "
-            "PyPI, checks out with `actions/checkout@v4` and "
-            "`persist-credentials: false` alone -- no `fetch-depth`, no "
-            "`fetch-tags` -- which is depth 1 on the triggering tag ref, so "
-            "on every release after `v0.1.0` that tree has git, has `.git`, "
-            "and does not have the tag. UNTIL 2026-08-25 THIS CONDITION WAS A "
+            "mattered most until it was fixed: "
+            "`.github/workflows/release.yml`'s job `the suite, on the tagged "
+            "tree`, which is refusal point #1 between a tag and PyPI, USED TO "
+            "check out with `actions/checkout@v4` and `persist-credentials: "
+            "false` alone -- no `fetch-depth`, no `fetch-tags` -- which "
+            "meant depth 1 on the triggering tag ref, so on every release "
+            "after `v0.1.0` that tree had git, had `.git`, and did not have "
+            "the "
+            "tag. BOTH of that file's two `actions/checkout@v4` steps take "
+            "`fetch-depth: 0` NOW, alongside `persist-credentials: false` and "
+            "nothing else, and that fetches every branch and every tag -- so "
+            "the tag resolves in that job and this reason firing there means "
+            "the checkout changed rather than that the environment is narrow. "
+            "The rule is kept for the causes `fetch-depth: 0` cannot reach, "
+            "which are the five above. UNTIL 2026-08-25 THIS CONDITION WAS A "
             "HARD RED, on the argument that no rule here declared it "
             "legitimate; `tests/test_soundness_routing.py` already SKIPS "
             "eight tests on the same condition one object over, so two "
@@ -859,13 +889,22 @@ RULES = (
             "CLONE PASSES BOTH -- git is there and HEAD is the one commit "
             "that was fetched -- so control reached a hard assert on `git "
             "cat-file -t <sha>` and it failed for every sha older than the "
-            "tag. That is exactly the tree "
+            "tag. That was exactly the tree "
             "`.github/workflows/release.yml`'s job `the suite, on the tagged "
-            "tree` builds: `actions/checkout@v4` with `persist-credentials: "
-            "false` alone, no `fetch-depth` and no `fetch-tags`, i.e. depth "
-            "1 on the triggering tag ref, and that job is refusal point #1 "
-            "between a tag and PyPI. The SAME file also skipped as `needs "
-            "git` with `.git` removed and git right there on PATH, which "
+            "tree` USED TO build: `actions/checkout@v4` with "
+            "`persist-credentials: false` alone, no `fetch-depth` and no "
+            "`fetch-tags`, i.e. depth 1 on the triggering tag ref, and that "
+            "job is refusal point #1 between a tag and PyPI. IT BUILDS A "
+            "DIFFERENT TREE NOW: both `actions/checkout@v4` steps in that "
+            "file take `fetch-depth: 0` beside `persist-credentials: false`, "
+            "which fetches every branch and every tag, so the ancestry check "
+            "there DECIDES -- and a skip carrying this reason from inside "
+            "that workflow is a signal that the checkout changed. The rule "
+            "is kept because the condition is still reachable elsewhere: a "
+            "shallow clone cut somewhere else, an unpacked sdist, a `git "
+            "init`'d copy with no commit in it. The SAME file also skipped "
+            "as `needs git` with `.git` removed and git right there on "
+            "PATH, which "
             "this file called CONTRADICTED and which is why the "
             "unpacked-sdist lane read `1 failed`; that reason now names the "
             "condition that actually holds. The condition IS computable "

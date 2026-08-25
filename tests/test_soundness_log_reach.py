@@ -1196,6 +1196,83 @@ def _git(*args: str) -> subprocess.CompletedProcess:
     )
 
 
+def _the_environment_explains_an_unresolvable_citation() -> str | None:
+    """Why THIS TREE could legitimately not hold a cited commit, or ``None``.
+
+    **THE GUARD THAT STAYED HARD-RED AFTER THE TAG GUARD WAS FIXED, AND IT
+    IS THE SAME DEFECT ONE LEG OVER.** The tag guard above disclosed the
+    case where `v0.1.0` itself is out of reach. It does not cover the case
+    where the tag RESOLVES and the CITED COMMITS do not, which is exactly a
+    shallow fetch that also fetched the tag refs: `git clone --depth 1
+    --branch v0.1.0`, or `actions/checkout` with `fetch-tags: true` and no
+    `fetch-depth`. In that tree `postdates_the_tag` answers `None` for every
+    cited sha, every commit-cited paragraph reads as citing nothing, and the
+    coverage assertion below fired saying *"N claim(s) ... cite nothing this
+    check can decide"* -- WHICH IS FALSE THERE. Those paragraphs cite a
+    commit; this checkout cannot resolve it. Measured on 2026-08-25 in a
+    sandbox built that way over this tree: `1 failed, 12 passed`, naming
+    seven `## Log` bullets, one of which quotes `4d793cf` in its own
+    headline. `.github/workflows/release.yml` cannot produce that shape --
+    both its `actions/checkout@v4` steps take `fetch-depth: 0`, which
+    fetches the whole history and every tag -- but a `--depth` anywhere else
+    still can, and a live assertion message that is false in an ordinary
+    `git clone --depth 1` is the thing this file exists to stop shipping.
+
+    **AND IT MAY NOT SIMPLY BECOME A WARNING**, for the reason
+    `tests/test_proposed_page_headers.py` gives at the same fork: in a FULL
+    checkout of this project, a cited sha that does not resolve is a
+    paragraph citing a commit that never existed -- a typo, a sha from a
+    fork, a commit rewritten away -- and that is a defect this rule should
+    keep reporting. So the environment is asked first, and only where
+    something about THIS TREE explains the miss is the citation reported as
+    undecidable rather than absent. The triage is
+    `tests/test_soundness_routing.py`'s, in the same order and for the same
+    reasons, with `_ANCHOR` READ from the module that owns it rather than a
+    second copy of a sha:
+
+    * `git rev-parse --is-shallow-repository` -- answered first, so this leg
+      never depends on an import;
+    * `git cat-file -e <root commit>^{commit}` -- a non-shallow repository
+      holding any commit of this history holds the root too, so its absence
+      says this is a vendored copy somebody ran `git init` in, a fork with
+      rewritten history, or a `GIT_DIR` pointing somewhere else.
+
+    An import failure or a git that stopped answering returns an
+    explanation, which is the SAFE direction: it turns a hard red into a
+    disclosed warning rather than inventing a red in a tree nobody can fix.
+    """
+    shallow = _git("rev-parse", "--is-shallow-repository")
+    if shallow.returncode != 0:  # pragma: no cover - env-dependent
+        return (
+            f"git cannot say whether this checkout is shallow: "
+            f"{shallow.stderr.strip()[:120]}"
+        )
+    if shallow.stdout.strip() == "true":  # pragma: no cover - env-dependent
+        return (
+            "this checkout is SHALLOW -- `git rev-parse "
+            "--is-shallow-repository` says true -- so its history is "
+            "truncated and a commit older than the horizon is simply not "
+            "here, however correctly the paragraph cites it"
+        )
+    try:
+        from test_soundness_routing import _ANCHOR
+    except Exception:  # noqa: BLE001 - a triage helper may not raise
+        return (  # pragma: no cover - env-dependent
+            "this tree cannot say whether it is this project's checkout at "
+            "all, because tests/test_soundness_routing.py, which owns the "
+            "root commit, did not import"
+        )
+    probe = _git("cat-file", "-e", f"{_ANCHOR}^{{commit}}")
+    if probe.returncode != 0:  # pragma: no cover - env-dependent
+        return (
+            f"the git repository rooted here is not this project's: it does "
+            f"not have {_ANCHOR[:12]}, this project's root commit, which a "
+            f"non-shallow repository holding any commit of this history "
+            f"holds too"
+        )
+    return None
+
+
 def _tag_tree_population() -> list[tuple[str, int, str]]:
     """`(where, line, text)` for everything that owes this rule evidence.
 
@@ -1443,27 +1520,43 @@ def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
 
     All three were driven on the tree this commit produces, each giving
     `1 skipped` on this node with the reason named above and, for the
-    third, a warning. **AND NONE OF THE THREE IS A GREEN SUITE, which the
-    last pass's "driven with git off PATH" line implied and did not
-    measure.** With git off `PATH` — a symlink farm of every `bin` dir
-    minus `git*`, so `uv` and the rest are still there — the zero-dep
-    suite is `4 failed, 2305 passed, 197 skipped` here and `4 failed, 2304
-    passed, 197 skipped` at `e94f4ea`: the same four, in
-    `tests/test_reuse_pins.py`, `tests/test_sdist_reference_hygiene.py`
-    (twice) and the skip inventory that reads their skips. With `.git`
-    removed it is `1 failed` on both trees. In an sdist unpacked and
-    `git init`-ed, `tests/test_doc_examples.py` ERRORS AT COLLECTION on
-    both, refusing to run because `.git` is present and `git ls-files`
-    returned nothing. None of those is this file and none is fixed here;
-    they are listed because "it skips" is not "the lane is green", and the
+    third, a warning. **AND ONE OF THE THREE IS STILL NOT A GREEN SUITE,
+    which the pass before last's "driven with git off PATH" line implied
+    and did not measure.** RE-DRIVEN on this tree on 2026-08-25, zero-dep
+    lane, whole suite, `STELLING_SKIP_INVENTORY_VERDICT` set:
+
+    * git off `PATH` — a symlink farm of every `bin` dir minus `git*`, so
+      `uv` and the rest are still there — is `3 failed, 2306 passed, 209
+      skipped`, `verdict=made`. The three are
+      `tests/test_reuse_pins.py` once and
+      `tests/test_sdist_reference_hygiene.py` twice: they guard on `.git`
+      and not on `shutil.which("git")`, so git's absence reaches them as an
+      uncaught `FileNotFoundError`. Neither file is this one and neither is
+      fixed here. IT WAS FOUR, and the fourth was the skip inventory
+      reading their skips; that one is gone — measured identical, `3
+      failed, 2306 passed, 209 skipped`, on this tree WITHOUT the changes
+      in this commit, so it is not this commit that fixed it.
+    * `.git` removed, git still on `PATH` — an unpacked sdist — is
+      `2328 passed, 190 skipped`, exit 0, `verdict=made`. The `1 failed`
+      recorded here for that lane was
+      `tests/test_proposed_page_headers.py` skipping as `needs git` with
+      git right there; that reason now names the condition that holds.
+    * an unpacked copy with `.git` removed, `git init` run and everything
+      committed — so `git ls-files` answers and
+      `tests/test_doc_examples.py` collects — is `2332 passed, 186
+      skipped`, exit 0, `verdict=made`. (`git init` with NOTHING committed
+      is a different tree: `git ls-files` returns nothing there and that
+      file still errors at collection.)
+
+    They are listed because "it skips" is not "the lane is green", and the
     difference is the whole subject of the file it is written in.
 
     **THE THIRD WAS A HARD RED AND IT FIRED INSIDE REFUSAL POINT #1 FOR
     PyPI.** `.github/workflows/release.yml`'s job *"the suite, on the
-    tagged tree"* checks out with `actions/checkout@v4` and
+    tagged tree"* USED TO check out with `actions/checkout@v4` and
     `persist-credentials: false` alone — no `fetch-depth`, no
-    `fetch-tags` — which is depth 1 on the triggering tag ref. On any
-    release after `v0.1.0` that tree has `.git`, has git, and does not
+    `fetch-tags` — which meant depth 1 on the triggering tag ref. On any
+    release after `v0.1.0` that tree had `.git`, had git, and did not
     have `v0.1.0`: the old assertion fired, the suite went red, and the
     publish was refused with a message reading as an integrity failure of
     the record. The precedent ran against it three ways, all of them in
@@ -1475,29 +1568,62 @@ def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
     was written and only an entry was missing; and
     `tests/test_sdist_contents.py` says of its own environment-absence
     skip that making it a hard failure *"would be flaky in the environment
-    where it matters least"*. `fetch-depth: 0` in that workflow would also
-    fix it, does not generalise to any other shallow consumer, and is a
-    sibling's file: it is a recommendation and nothing here relies on it.
+    where it matters least"*. `fetch-depth: 0` in that workflow was named
+    here as a recommendation; it has since LANDED, and the paragraph below
+    says what that changes and what it does not.
 
-    **AND REFUSAL POINT #1 IS STILL BLOCKED, BY A SIBLING'S FILE, IN THE
-    SAME SHAPE.** The release-job state was built and driven on 2026-08-25
-    — a fresh `git init`, one `git fetch --depth=1` of a single ref into a
-    tag ref, `git checkout` of that tag, giving git present, `.git`
-    present, shallow, no `v0.1.0`. This check is a disclosed skip there.
-    The zero-dep suite in that sandbox comes back `1 failed, 2320 passed,
-    185 skipped`, against `2 failed, 2319 passed, 184 skipped` for the
-    same sandbox built from `e94f4ea` — this check is the one that stops
-    failing. What still fails is
-    `tests/test_proposed_page_headers.py::test_every_commit_a_status_paragraph_names_is_an_ancestor`,
-    which hard-asserts `git cat-file -t <sha>` over every commit a
-    `proposed-*.md` status paragraph names: the identical shape, one file
-    over. That file carries the MIRROR defect too — with `.git` removed it
-    skips as `needs git` while git IS on `PATH`, which
-    `tests/test_skip_inventory.py` correctly calls a CONTRADICTED skip, so
-    the sdist lane is `1 failed` on `e94f4ea` and `1 failed` here for that
-    reason and no other. Neither is fixed here: that file is not this
-    agent's this round. Both are recorded as the recommendation, with the
-    sandbox that reproduces them.
+    **AND THAT WORKFLOW NO LONGER PRODUCES THE CONDITION — DERIVED FROM
+    THE FILE, NOT FROM A SENTENCE ABOUT IT.** Parsed with PyYAML,
+    `release.yml` has TWO `actions/checkout@v4` steps —
+    `jobs.test.steps[0]` and `jobs.build.steps[0]`; `publish` checks
+    nothing out, and `grep -c "uses: actions/"` reading EIGHT there counts
+    two artefact steps and four comment mentions alongside them. Both
+    checkouts carry exactly `persist-credentials: false` and
+    `fetch-depth: 0`, and no `fetch-tags`, which `fetch-depth: 0` makes
+    inert because the all-history refspec already contains
+    `+refs/tags/*:refs/tags/*`. Built the way that config builds a tree —
+    `git init`, ONE fetch of `+refs/heads/*:refs/remotes/origin/*` and
+    `+refs/tags/*:refs/tags/*` with no depth limit, `git checkout --force`
+    of the tag — the sandbox comes back NOT SHALLOW, 1079 commits, and
+    `v0.1.0` RESOLVES. So this check decides there rather than skipping,
+    and refusal point #1 is no longer blocked by it or by
+    `tests/test_proposed_page_headers.py`, whose ancestry check decides
+    too: `deadbee` planted in a **Status:** paragraph is `1 failed` in
+    that sandbox, named as a page defect.
+
+    **AND THE FOURTH STATE, WHICH `fetch-depth: 0` DID NOT REACH.** The
+    three skips above all key on *the tag* being out of reach. A tree can
+    resolve the tag and still not hold the COMMITS the paragraphs cite --
+    `git clone --depth 1 --branch v0.1.0`, or `actions/checkout` with
+    `fetch-tags: true` and no `fetch-depth`, which the workflow's own header
+    measures and rejects. There the coverage assertion below fired with a
+    message that was FALSE of the paragraphs it named: seven `## Log`
+    bullets reported as citing *"nothing this check can decide"* while one
+    of them quotes `4d793cf` in its own headline. Driven in that sandbox on
+    this tree: `1 failed, 12 passed`. It is now separated at the source --
+    :func:`postdates_the_tag` already answered `True`/`False`/`None` and the
+    caller was reading all three as two -- so a paragraph whose only
+    citations are commits THIS TREE CANNOT RESOLVE is dropped from the
+    coverage assertion and disclosed in a `UserWarning` naming the
+    paragraph, the shas and what goes unchecked, and the rest of the rule
+    still runs. It is NOT a
+    skip: the path leg and every other paragraph are still decided, and a
+    check that can decide most of its population should not throw that away.
+    And it is not unconditional either:
+    :func:`_the_environment_explains_an_unresolvable_citation` is asked
+    first, so in a complete checkout of this project an unresolvable
+    citation is still a hard red -- a sha that never existed is a defect,
+    not an environment. See that function.
+
+    **THE SKIP STAYS, AND SO DOES THE REASON FOR IT.** `fetch-depth: 0`
+    makes the condition unreachable FROM THIS WORKFLOW; it does not make
+    it impossible. A shallow clone cut anywhere else, an unpacked sdist
+    with no `.git`, and a `git init`'d copy with no tags all still produce
+    it, and the three reasons above partition exactly those. What follows
+    from the change is a reading rule: THIS SKIP FIRING INSIDE THAT
+    WORKFLOW IS NOW A SIGNAL THAT SOMETHING CHANGED — the `fetch-depth: 0`
+    came off one of the two checkouts — and not a fact about the
+    environment CI happens to give.
 
     **AND THE PROMISE THAT SKIP REPLACED WAS EMPTY.** The old red said it
     carried *"git's own stderr"*, and the probe was
@@ -1554,11 +1680,18 @@ def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
             f"disagrees with the tag, and a member of "
             f"`_tag_tree_population()` citing nothing at all. `git rev-parse "
             f"--verify {_TAG}^{{commit}}` exited {tag.returncode} and said: "
-            f"{said}. The commonest cause is a SHALLOW CHECKOUT: "
-            f"`actions/checkout@v4` at its default `fetch-depth: 1` fetches "
-            f"the triggering ref alone, so on every release after `{_TAG}` "
-            f"this is the shape `.github/workflows/release.yml`'s "
-            f"tagged-tree job runs in."
+            f"{said}. THREE ENVIRONMENTS PRODUCE THIS: a SHALLOW CLONE, "
+            f"where `actions/checkout@v4` at its default `fetch-depth: 1` "
+            f"or a plain `git clone --depth 1` fetches the tip alone; an "
+            f"UNPACKED SDIST or an export, which has no `.git` to hold a "
+            f"tag; and a `git init`'d COPY of a tree, which has the files "
+            f"and none of the refs. `.github/workflows/release.yml` IS NOT "
+            f"ONE OF THEM ANY MORE: both of its `actions/checkout@v4` "
+            f"steps take `persist-credentials: false` and `fetch-depth: 0`, "
+            f"which fetches every branch and every tag, so `{_TAG}` "
+            f"resolves in that job. This warning arriving from inside that "
+            f"workflow is a signal that the checkout changed, not that git "
+            f"is narrow."
         )
         pytest.skip(_TAG_OUT_OF_REACH_SKIP)
 
@@ -1594,7 +1727,7 @@ def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
                 ancestor[sha] = walk.returncode != 0
         return ancestor[sha]
 
-    uncovered, wrong_polarity = [], []
+    uncovered, wrong_polarity, cite_unresolvable = [], [], []
     for where, _line, text in population:
         flat = " ".join(text.split())
         absent = [
@@ -1621,9 +1754,58 @@ def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
                     "claims PRESENT, and it is NOT in the tag's tree",
                 ))
         cited = dict.fromkeys(m.group("sha") for m in _SHA_RE.finditer(text))
-        shas = [sha for sha in cited if postdates_the_tag(sha)]
+        # THREE ANSWERS, NOT TWO. `postdates_the_tag` returns True (a commit
+        # this repository has, and it is not an ancestor of the tag), False
+        # (a commit this repository has, and it IS an ancestor -- which
+        # covers nothing, and is the commit leg's non-vacuity) and None (no
+        # commit HERE, whatever it is elsewhere). Reading all three as
+        # falsy collapsed the last two, so a paragraph that cites a commit
+        # this tree cannot resolve was reported as citing nothing at all.
+        verdicts = {sha: postdates_the_tag(sha) for sha in cited}
+        shas = [sha for sha, after in verdicts.items() if after]
         if not paths and not shas:
-            uncovered.append((where, text.splitlines()[0][:64]))
+            headline = text.splitlines()[0][:64]
+            uncovered.append((where, headline))
+            missing = [sha for sha, after in verdicts.items() if after is None]
+            if missing:
+                cite_unresolvable.append((where, headline, missing))
+
+    # THE ENVIRONMENT IS ASKED ONCE, AFTER THE LOOP, AND ONLY WHERE IT COULD
+    # MATTER. A paragraph whose only citations are commits THIS TREE CANNOT
+    # RESOLVE is an uncovered claim in a complete checkout -- a sha that
+    # never existed -- and an unverifiable one in a tree that explains the
+    # miss. The assertion below keeps the first; the warning discloses the
+    # second and the rest of the rule still runs on everything else.
+    why = (
+        _the_environment_explains_an_unresolvable_citation()
+        if cite_unresolvable else None
+    )
+    if why is not None:  # pragma: no cover - env-dependent
+        listed = "; ".join(
+            f"{where} ({headline}) cites "
+            + ", ".join(f"`{sha}`" for sha in missing)
+            for where, headline, missing in cite_unresolvable
+        )
+        warnings.warn(
+            f"{len(cite_unresolvable)} claim(s) that the released `{_TAG}` "
+            f"does not carry a defect cite ONLY commits this checkout "
+            f"cannot resolve, so the commit leg of the tag-tree citation "
+            f"rule is UNVERIFIED for them: {listed}. What goes unchecked is "
+            f"whether each cited sha is a commit at all and whether it "
+            f"POSTDATES `{_TAG}` -- a paragraph could cite a commit that is "
+            f"an ancestor of the tag, which covers nothing, and this run "
+            f"would not say so. This is reported rather than failed because "
+            f"{why}; in a complete checkout of this project an unresolvable "
+            f"citation FAILS below as an uncovered claim, which is where a "
+            f"sha that never existed is caught. "
+            f"`.github/workflows/release.yml` does not build this shape: "
+            f"both its `actions/checkout@v4` steps take `fetch-depth: 0`, "
+            f"so this warning arriving from that workflow means the "
+            f"checkout changed.",
+            stacklevel=2,
+        )
+        excused = {where for where, _headline, _missing in cite_unresolvable}
+        uncovered = [u for u in uncovered if u[0] not in excused]
 
     assert not wrong_polarity, (
         f"{len(wrong_polarity)} tag-tree citation(s) disagree with the "
@@ -1655,5 +1837,12 @@ def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
         f"this way and nothing about whether the released `{_TAG}` carries "
         f"the defect, which only running an extracted `{_TAG}` decides. "
         f"Measured over the three document states in which a false "
-        f"`Versions:` field shipped, this rule is green on all NINE of them."
+        f"`Versions:` field shipped, this rule is green on all NINE of them. "
+        f"IF A LISTED PARAGRAPH DOES CITE A BACKTICKED SHA, then this tree "
+        f"cannot resolve it AND nothing about this tree explains that -- "
+        f"`git rev-parse --is-shallow-repository` said false and this "
+        f"repository holds this project's root commit -- so the citation "
+        f"names a commit that is not in this history: a typo, a sha from a "
+        f"fork, or one rewritten away. In a shallow clone the same "
+        f"paragraph is a WARNING instead, not this."
     )
