@@ -398,14 +398,26 @@ only release"* while that was so.)
   the predicate memos this instrument classifies through, which is what
   keeps its verdict a reading of the perimeter rather than of another file's
   teardown. So its first test took the perimeter out and **every test
-  collected after it ran unprotected with nothing red**, while the
-  `reset_counters()` in the same fixture wiped the tally the tests before it
-  had already earned. Both halves read as one number: the documented dial-on
-  command over the whole suite reported `NOT ARMED [detached] ... 0 integer
-  literal(s) ... were checked` — **zero**, over the 4,393 tests that passed
-  in that run (`e6968fe`). It now records what it found, lowers the hold for
-  its own window only, and hands it back by identity through `arm()`,
-  raising if it cannot.
+  collected after it ran unprotected**, while the `reset_counters()` in the
+  same fixture wiped the tally the tests before it had already earned. Both
+  halves read as one number: the documented dial-on command over the whole
+  suite reported `NOT ARMED [detached] ... 0 integer literal(s) ... were
+  checked` — **zero**, over a whole-suite run at `e6968fe`. It now records
+  what it found, lowers the hold for its own window only, and hands it back
+  by identity through `arm()`, raising if it cannot.
+
+  **AND THAT RUN WAS NOT GREEN, WHICH THIS ENTRY USED TO IMPLY IT WAS.** It
+  said the later tests ran unprotected *with nothing red*, and a reader can
+  take that for "the run came back clean". It did not: re-driven at
+  `e6968fe` with the dial on, this file on its own ends `56 passed, 1
+  error`, and the error is `ERROR at teardown of
+  tests/test_narrowing_perimeter.py::test_the_vendored_predicates_own_selftest_passes_in_this_cell`
+  — that version of the fixture ended `assert perimeter.armed_faces() ==
+  before == ()`, and it failed on this file's FIRST test, with `assert () ==
+  ('tracer', 'array')`, because the session's hold was still standing on the
+  way in. The incident reported its own shape, on the first test it touched,
+  in the run that produced the zero. What was missing was not a red mark; it
+  was a reader.
 
   **WHERE THAT FILE SITS IN THE COLLECTION IS LOAD-BEARING, AND IT IS
   CHECKED RATHER THAN WRITTEN DOWN HERE.** A rank is a property of a
@@ -415,7 +427,10 @@ only release"* while that was so.)
   new test. This entry names no ordinal and no count. The file derives its
   own position instead, from `pytest --collect-only -q -p no:randomly`, and
   asserts the two relations the incident above actually rests on; a second
-  check reads this page and refuses the numeral if it ever comes back.
+  check reads this page and refuses that coordinate in five spellings, not
+  just the one it was last written in; and a third holds this entry to still
+  disclosing what the paragraphs above disclose, because taking the numeral
+  off took with it the only thing that had been keeping them on the page.
 
 - **`prop_guard._target_dtype` no longer memoises a fault.** It cached the
   `None` produced inside its own `except` branch, so one transient failure
