@@ -3,11 +3,25 @@
 
 """`CHANGELOG.md`'s newest heading and `stelling.__version__`, tied.
 
-Nothing tied them. They agree today — `0.2.0.dev0` in
+Nothing tied them. They agreed when this file was written — `0.2.0.dev0` in
 `src/stelling/__init__.py`, `## 0.2.0 — unreleased` at the top of the
-changelog — so nothing ships wrong, and that is the whole reason to write this
-now rather than after it does. It is the same unguarded coupling the tag gate
-in `.github/workflows/release.yml` exists to close, one file over: **a value
+changelog — so nothing shipped wrong, and that was the whole reason to write
+it then rather than after it did.
+
+**BOTH OF THOSE READINGS HAVE SINCE MOVED, AND THEY WERE WRITTEN IN THE
+PRESENT TENSE.** The release bump made `__version__` `0.2.0` and put a date
+on the heading — the OTHER of the two states this file checks — so two
+sentences that were true on the branch that added them were false on the
+merge that carried them, and no branch could have seen it: this file exists
+on one side of that merge only, so the merge was textually clean. Nothing in
+the tree could catch it either, because `tests/test_prose_hygiene.py` scopes
+itself to shipped prose and `tests/` is outside it — while `tests/` is 181 of
+the sdist's 379 members. They are dated records now rather than live claims,
+which is the only form of illustration that cannot rot: it is the CHECK below
+that carries the argument, and the check exercises both states.
+
+It is the same unguarded coupling the tag gate in
+`.github/workflows/release.yml` exists to close, one file over: **a value
 maintained by hand against a value read from source**, with no check between
 them. `pyproject.toml` already reads the version from
 `src/stelling/__init__.py` (`[tool.hatch.version]`), so the wheel, the sdist
@@ -15,9 +29,10 @@ and the tag cannot disagree with the module. The changelog can, and a release
 whose changelog heading names the previous version is a release note that
 describes the wrong release.
 
-**THE VERSIONS ARE NOT SPELLED THE SAME AND THE COUPLING IS STILL EXACT.**
-`__version__` is `0.2.0.dev0` and the heading says `0.2.0`, because a heading
-names the RELEASE and `__version__` names the BUILD. PEP 440 makes that
+**THE VERSIONS NEED NOT BE SPELLED THE SAME AND THE COUPLING IS STILL
+EXACT.** At that commit `__version__` was `0.2.0.dev0` and the heading said
+`0.2.0`, because a heading names the RELEASE and `__version__` names the
+BUILD. PEP 440 makes that
 relation total rather than a matter of taste: `0.2.0.dev0` is a development
 build *of* `0.2.0`, its release segment is `(0, 2, 0)`, and `is_prerelease`
 answers whether the build has shipped. So the assertion is on the release
