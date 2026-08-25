@@ -196,15 +196,60 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     :mod:`stelling.falsify` is never imported, and every existing path is
     byte-identical) or ``"sample"`` to try, after a VERIFIED, to FALSIFY
     it by executing the real program at concrete points inside the
-    declared set. **SHIPPED SINCE 0.2.0, DEFAULT-OFF AND UNAUDITED**; it
-    is here to be measured, not to be relied on, and it may be changed or
-    withdrawn in any release without a deprecation cycle. (This read
-    *"UNRELEASED AND UNAUDITED"* while 0.2.0 was a development line; the
-    keyword is in the 0.2.0 release, so only the first half changed.) It
+    declared set. **SHIPPED, AND ``experimental``** — the level in
+    ``DOCUMENTATION_ARCHITECTURE.md`` §8.5's table, where it means *"may
+    change without notice"* with guarantee *"none"*, so this keyword,
+    :func:`stelling.falsify.probe`'s signature and every name in that
+    module's ``__all__`` may change or be withdrawn in any release with
+    **no deprecation cycle and no notice**. It is not that table's
+    ``provisional``, which is the neighbouring level and DOES promise one
+    minor's notice; this paragraph and that module's heading both said
+    the wrong one of the two, next to their own disclosure that
+    ``probe()``'s first parameter changed name and type inside one
+    release cycle — which is a change with no notice, i.e. the definition
+    of the word they were not using. The level is read from
+    :data:`stelling.falsify.STABILITY`, which is the one place it is
+    written down.
+
+    **AUDITED IS A DIFFERENT QUESTION FROM THE LEVEL, AND IT IS
+    ANSWERED.** The fire condition's exact reading is checked against an
+    independent ``Fraction`` oracle sharing no code with that module, on
+    every run, by ``tests/test_probe_oracle.py`` (297 gate readings, 270
+    obligation readings, all 270 point-comparisons agreeing, and the
+    counts asserted there rather than quoted here — as is what that file
+    does NOT reach, which is 22 of the 32 single-edit defects it was
+    measured against). That is evidence about what the probe DOES; the
+    level above is a statement about what its SURFACE may do next, and
+    neither buys the other. This sentence used to cite *"363 gate
+    readings and 363 agreements"*, a figure that appeared nowhere in this
+    repository except the two sentences citing it; a number a reader
+    cannot re-derive is the same defect as a check that does not exist,
+    which is a rule this project applies to everything else it ships.
+    :mod:`stelling.falsify`'s docstring opens with the SIX DISCLOSURES,
+    which are a different axis from the level and are not implied by it:
+    a level is a promise about future changes to the surface, and those
+    six are what the instrument does not do today. **Two of its six items
+    are a decline standing in for a guard**: an ``ieee`` firing cannot
+    tell a caller's own ``libm_budget`` declaration from an unsound
+    analysis, so the firing
+    message names the declaration instead of guessing; and the rational
+    replay does not descend a loop or branch body, which this release
+    GUARDS — the descent refuses a body that does not run once per
+    equation, by a name, an iteration count and a signature — and does not
+    close. **A THIRD ITEM IS NOT ONE OF THEM AND THIS SENTENCE USED TO
+    SAY IT WAS**: the analysis's constrained region is never read — the
+    one this file used to call *"the one hole"* — and there is no decline
+    standing in for anything there, because the probe does not read the
+    analysis's region correctly OR incorrectly; it does not read it at
+    all. It is the MIRROR of that class rather than an instance of it, it
+    is disclosed and open, and it is the one item of the six that cannot
+    be closed inside that module's import rule. Counting it among the
+    guarded ones was an overclaim in the reassuring direction. The same
+    docstring carries the measured reach on ordinary ``jnp`` code. It
     exists because this library is asymmetric about its two answers: a
-    REFUTED's witness is replayed
-    through the real program, and a VERIFIED — a universal claim with no
-    witness — has had nothing downstream at all.
+    REFUTED's witness is replayed through the real program, and a
+    VERIFIED — a universal claim with no witness — has had nothing
+    downstream at all.
 
     Two properties of it are not negotiable and are enforced rather than
     described. First, **it can only refute**: finding nothing adds no
@@ -218,6 +263,24 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     the two dispositions that were rejected, the list of what the probe
     is allowed to import and why that set is the independent one, and —
     measured, not assumed — the class of defect it cannot reach.
+
+    **SO THIS FUNCTION CAN RAISE, AND ONE OF THE TWO IS OUTSIDE
+    ``Exception``.** With ``falsify="sample"`` a caller must expect
+    :class:`stelling.falsify.VerifiedFalsified` (an ``AssertionError``:
+    the probe broke a VERIFIED, which is stelling's defect) and
+    :class:`stelling.falsify.ProbeInvariantViolated` (a
+    ``BaseException``: a fact the probe's own readings rest on did not
+    hold, so it has nothing to say about the verdict either way). The
+    second is deliberately outside ``Exception`` AND outside
+    ``AssertionError`` so that neither the ordinary batch idiom nor the
+    catch-a-soundness-event idiom can silently swallow an instrument's
+    alarm — which means **``except Exception:`` will not contain it**, and
+    a batch runner that must survive one has to name it. With
+    ``falsify=None`` neither can be raised at all. A probe that CANNOT
+    run does not raise: an unsampleable declaration, a dtype the sampler
+    cannot construct, or a 64-bit declaration under ``jax_enable_x64=0``
+    all produce a verdict carrying a named decline in its notes. See
+    ``docs/preconditions.md``.
 
     The same keyword is accepted by
     :func:`stelling.contracts.check_contract` and
@@ -309,7 +372,7 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     import dataclasses
 
     import stelling as _stelling
-    from stelling._jax_compat import jax_version, trace, x64_enabled
+    from stelling._jax_compat import jax_version, trace_with_jaxpr, x64_enabled
     from stelling.propagate import propagate
     from stelling.vacuity import (
         _MODES, NestedDeclaration, declaration_bounds, unwidened, widen,
@@ -412,7 +475,7 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
             # Fresh closure defeats jax.make_jaxpr's identity cache; the
             # eviction above defeats every trace cache BELOW it, which the
             # fresh closure never reached.
-            cj = trace(lambda: harness())
+            cj, jaxpr = trace_with_jaxpr(lambda: harness())
         finally:
             narrowings = _pop_gate()
         # THREE ways the watch can be PARTIAL, and none of them is a
@@ -469,7 +532,7 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
                 f"under the instrument"
             )
     else:
-        cj = trace(harness)
+        cj, jaxpr = trace_with_jaxpr(harness)
         narrowings = 0
 
     if narrowings > 0 or unobserved is not None:
@@ -613,13 +676,43 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     # where `VERIFIED_BARRED_PRIMITIVES` lives and where an emission defect
     # that MISSED a violation would be. The claim under attack is the one
     # the verdict makes, so it is the one the probe is handed.
+    #
+    # AND THE PROGRAM UNDER ATTACK IS THE ONE THE VERDICT IS ABOUT, WHICH
+    # USED TO BE LEFT TO A JAX MEMO. The probe was handed `harness` and
+    # traced it AGAIN for itself; whether that second `jax.make_jaxpr`
+    # re-ran the body was decided by jax's trace cache, and the armed
+    # branch above defeats that cache deliberately (a fresh closure, after
+    # `jax.clear_caches()`). Measured: harness-body invocations per
+    # `check()` were 1 unarmed and 2 under `pytest -p stelling.overflow`
+    # with `falsify="sample"` -- so an impure harness gave the probe a
+    # genuinely different program, and NOTHING compared the two. Driven
+    # through the public API, both directions: a CORRECT VERIFIED made to
+    # raise "stelling is UNSOUND at this query", and a VERIFIED carrying a
+    # "NO VIOLATION WAS FOUND" work report about a program the verdict is
+    # not about -- the same call, the same stelling, VERIFIED under
+    # `pytest` and "UNSOUND" under `pytest -p stelling.overflow`, which
+    # `check()`'s own docstring recommends. `jaxpr` here is jax's own
+    # object from the ONE trace this pipeline took, so the probe has no
+    # second program to disagree with. The transcription `cj` is NOT
+    # passed: the probe may not read `stelling.ir`, and that rule is
+    # untouched by handing it the jax object it was tracing for itself.
+    #
+    # THE STAMPED ASSUMPTIONS GO WITH THE STATUSES, and for the same
+    # reason. A firing says "stelling is UNSOUND at this query", but an
+    # `ieee` VERIFIED resting on a caller-declared `libm_budget` is not
+    # stelling's own claim -- the stamp says so in the words "DECLARED,
+    # NOT VERIFIED" -- and under-declaring it made the probe raise a
+    # soundness alarm against stelling for the caller's declaration.
+    # Passed as plain strings, exactly as `statuses` is, so the probe
+    # still imports nothing that produced them.
     if falsify is not None:
         from stelling.falsify import probe as _probe
 
         _report = _probe(
-            harness,
+            jaxpr,
             statuses=[o.status for o in v.obligations],
             semantics=semantics,
+            assumptions=v.stamp.assumptions,
         )
         v = dataclasses.replace(v, notes=v.notes + (_report.stamp_line(),))
 

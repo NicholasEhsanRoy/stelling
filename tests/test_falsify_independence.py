@@ -352,7 +352,10 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
             return assert_(jnp.power(x, 2.0) + n <= 40.0)
 
         # BASELINE: what merely tracing the harness pulls in.
-        jax.make_jaxpr(h)()
+        # KEPT, because the probe is HANDED this object rather than
+        # tracing for itself -- so the trace's own imports are outside
+        # the recorded window by construction, not by a jax memo.
+        CLOSED = jax.make_jaxpr(h)()
         before = sorted(m for m in BANNED if m in sys.modules)
         print("BASELINE", before)
 
@@ -397,7 +400,7 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
         IMPORTED = len(REACHES)
 
         try:
-            r = probe(h, statuses=["discharged"])
+            r = probe(CLOSED, statuses=["discharged"])
             print("EXECUTED", r.points_executed, "DECLINED", r.declined)
         except VerifiedFalsified as e:
             print("FIRED", e.report.points_executed)

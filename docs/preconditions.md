@@ -124,6 +124,92 @@ The second example REFUTES with witness `0`: the configuration range
 admits the singular value and nothing in the code forbids it. That is a
 statement about your config space, not about your default.
 
+### The `falsify` pass is `experimental`, and it can only refute
+
+`check(harness, ..., falsify="sample")` switches on the falsification
+probe: after an obligation comes back VERIFIED, stelling executes your
+real program at concrete points inside your declared set and tries to
+find one that violates it. The default is `falsify=None`, and on that
+path `stelling.falsify` is never imported and the verdict is
+byte-identical to what it was before the keyword existed.
+
+**Stability: `experimental`.** That is the level from
+`DOCUMENTATION_ARCHITECTURE.md` §8.5, where `experimental` means *"may
+change without notice"* with guarantee *"none"*. It is deliberately **not**
+the neighbouring level `provisional`, which means *"may change in minor
+with a deprecation cycle"* and promises *one minor's notice* — a promise
+this keyword does not make. The keyword, `stelling.falsify.probe()`'s
+signature and every name in that module's `__all__` may change or be
+withdrawn in any release, including a patch, **with no deprecation cycle
+and no notice**: `probe()`'s own first parameter changed name and type
+inside 0.2.0's cycle while it was already exported. What the probe *does
+when it fires* is settled; what you call is not. The level is written
+down once, as `stelling.falsify.STABILITY`, and
+`tests/test_probe_stability_level.py` holds the word on this page to
+that string rather than to a memory of it.
+
+**A firing is a counterexample; a silence is nothing.** The probe can
+only refute. A firing is a concrete point at which your real program
+violates an obligation stelling had just certified — that is a defect in
+*stelling*, and it is worth everything. Finding nothing is a fact about
+the sampler and not evidence about the verdict: a probed VERIFIED is not
+a better VERIFIED, and nothing stelling returns, stamps or renders lets
+one read as though it were. Switch it on to hunt for tool defects, never
+to raise your confidence in a green run.
+
+**And with it on, `check()` may raise instead of returning** — one of the
+two classes is outside `Exception` entirely, which is the next section. The
+six things the probe does not do are listed in `stelling.falsify`'s own
+docstring; they are a separate matter from the level above, which is a
+statement about future changes to the surface and implies none of them.
+
+### `check()` can also raise — and one of the two is outside `Exception`
+
+Those three statuses are what `check()` **returns**. With
+`falsify="sample"` it can also **raise**, and this page never used to say
+so. Two classes, and they are deliberately disjoint: no `except` clause
+catches both without naming both.
+
+- **`stelling.falsify.VerifiedFalsified`** — an `AssertionError`. The
+  falsification probe executed your real program at a concrete point
+  inside your declared set and the obligation stelling had just marked
+  VERIFIED came out **false**. That is a defect in *stelling*, not a
+  finding about your program, which is why it is not a status: none of
+  VERIFIED/REFUTED/UNKNOWN can say "the tool was wrong". The exception
+  carries the probe's report. `except Exception` and
+  `except AssertionError` both catch it — the second on purpose, which is
+  the idiom to write if you are running a batch and want soundness events
+  to stop you.
+- **`stelling.falsify.ProbeInvariantViolated`** — a **`BaseException`,
+  not an `Exception`**. A fact the probe's own readings rest on did not
+  hold, so the probe has nothing to say about your verdict either way.
+  This is not a soundness event about the verdict and must not be read as
+  one, so it is outside `Exception` *and* outside `AssertionError`:
+  neither the ordinary batch idiom nor the catch-a-soundness-event idiom
+  can swallow it. **`except Exception:` will not contain it.** A batch
+  runner that must survive one has to name it —
+  `except (Exception, ProbeInvariantViolated):` — and the class is in
+  `stelling.falsify.__all__` so that you can. It is the same contract
+  `EagerTruncationError` and `NarrowingError` offer.
+
+With `falsify=None`, which is the default, neither can be raised at all:
+`stelling.falsify` is never imported.
+
+**A probe that cannot run declines; it does not raise.** An unbounded or
+otherwise unsampleable declaration, a dtype the sampler cannot construct,
+an integer box holding no integer, or a 64-bit declaration under
+`jax_enable_x64=0` (where jax narrows the point on the way in, so the
+executed run and the exact test would be about different programs) all
+produce a VERIFIED that carries the decline in its notes — *"falsification
+probe: DECLINED, nothing was executed (…). This is not evidence about the
+verdict."* Your verdict is not lost because the probe could not sample it.
+
+**If you already write `except BaseException:` around stelling calls**,
+note what that now absorbs. [overflow-tripwire.md](overflow-tripwire.md)
+recommends that idiom for catching the tripwire's alarm; with
+`falsify="sample"` on, the same handler will silently absorb a
+`ProbeInvariantViolated` too. Name the classes you mean.
+
 ## What this checks — and what it doesn't (yet)
 
 **In scope:** *input-side* preconditions — pointwise or scalar
