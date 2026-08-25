@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Changelog
 
-## 0.2.0 — 2026-08-24
+## 0.2.0 — 2026-08-25
 
 ### New transfers and precision improvements
 
@@ -1562,6 +1562,35 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
   unamended for nine days and was found by re-reading this section against
   the release at the 0.2.0 bump; see the SOUNDNESS.md entry of
   2026-08-15 (B7).
+
+- **The suite shipped INSIDE the sdist exits 1 on four bookkeeping tests, and
+  none of them is about the library.** Unpack `stelling-0.2.0.tar.gz` and run
+  `pytest` in it and you get four failures against roughly 2350 passes. All
+  four are the same shape — **a check whose model is a git checkout, run in a
+  distribution** — and each has an independent cause: three `scratchpad/`
+  paths cited in `docs/` are absent from `NOT_IN_THIS_TREE` (the prose beside
+  each already tells the reader the file is tracked and not shipped, so no
+  shipped sentence is false); `PKG-INFO` is declared generated-in-distribution
+  while being a real file in an unpacked sdist; and two solver-battery skip
+  reasons written *for* the sdist are not registered with the skip-inventory
+  pin, which aborts that completeness claim in any sdist session. **Nothing
+  here touches a verdict, the public API, or `pip install stelling`** — the
+  wheel is unaffected and `python -m stelling` is green from a clean venv on
+  3.10 and 3.12. It is not new: a rebuilt `v0.1.0` sdist fails two of the four
+  today. It stands because **no workflow unpacks the built sdist and runs its
+  suite**, which is the fix that makes the class non-recurring rather than
+  patching three symptoms; that job, and the three repairs, are 0.2.1.
+
+- **One test is order-dependent under a shuffled whole-suite run.**
+  `tests/test_tripwire_arm.py::test_jax_s_own_prng_mask_is_suppressed_and_named_not_blamed_on_the_caller`
+  fails at seed `20260825` and passes in file order on the same tree and the
+  same venv; it is green in isolation and green as a module at that seed, so
+  the dependence is cross-module and the shape points at a warning already
+  having been emitted by an earlier test. `.github/workflows/ci.yml` declares
+  the randomised-order lane **not a required check** precisely so this kind of
+  finding reports rather than blocks, and the seed is the reproducer. The fix
+  is to make the test independent of whether that warning has been emitted —
+  not to pin an order.
 
 ---
 
