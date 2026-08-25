@@ -836,7 +836,7 @@ repairing them, and the repairs are in place above and in
   swept — a paragraph naming what a sweep reached must move when the page
   grows a section the sweep never saw, or the reach statement quietly
   widens to cover text nobody drove.
-* **The `## Log` below was not read line by line.** It is **16,082 lines** as
+* **The `## Log` below was not read line by line.** It is **16,168 lines** as
   this is written — the `## Log` heading to the end of the file, and that is
   the population — and it was swept EXHAUSTIVELY BY INSTRUMENT — every
   `path::name` citation, every backticked module-qualified identifier, every
@@ -858,8 +858,8 @@ repairing them, and the repairs are in place above and in
   arithmetic were all stale by 2026-08-25 and are re-derived here rather
   than left**: measured on this tree by the same two rules — physical lines
   from the `## Log` heading to the last line of the file, and
-  `_detail_sections` over the 72 routed bodies — the Log is **16,082**
-  lines, the routed sections **3,470**, and the difference **12,612**,
+  `_detail_sections` over the 72 routed bodies — the Log is **16,168**
+  lines, the routed sections **3,470**, and the difference **12,698**,
   which is not 11,000-odd any more either. The two rules are stated because
   they are what reproduce the historical figures: they give 14,926 at
   `3fe29d3`, 14,924 at `391e50e` and 14,823 at `5ad906f`, so nothing above
@@ -13286,13 +13286,16 @@ one object over, with a declared reason and a warning naming git's words;
 that a hard failure there *"would be flaky in the environment where it
 matters least"*. `fetch-depth: 0` in that workflow would also fix it,
 does not generalise to any other shallow consumer, and is recorded here
-as a recommendation that nothing relies on. **And the promise that red
-carried was empty**: it advertised *"git's own stderr"* while probing
-with `rev-parse --verify --quiet`, which suppresses stderr, so the
-message read ``git said: ''`` in every environment it could ever have
-fired in. The `--quiet` is gone from that probe, git's exit code and
-words travel in the WARNING beside the skip, and an empty stderr is now
-reported as an empty stderr rather than quoted as if it were a message.
+as a recommendation that nothing relies on. **(That clause, and this
+paragraph's description of the checkout above it, both went false on
+2026-08-25; the AMENDED paragraph below is the canonical one for them.)**
+**And the promise that red carried was empty**: it advertised *"git's own
+stderr"* while probing with `rev-parse --verify --quiet`, which
+suppresses stderr, so the message read ``git said: ''`` in every
+environment it could ever have fired in. The `--quiet` is gone from that
+probe, git's exit code and words travel in the WARNING beside the skip,
+and an empty stderr is now reported as an empty stderr rather than quoted
+as if it were a message.
 
 **AND THE RELEASE JOB IS STILL BLOCKED, BY A SIBLING'S FILE, FOR THE SAME
 REASON — MEASURED AND NOT ASSUMED.** All three states were driven on
@@ -13314,7 +13317,90 @@ is in that file: with `.git` removed it skips as `needs git` while git IS
 on `PATH`, which `tests/test_skip_inventory.py` correctly reports as a
 CONTRADICTED skip and which reds the whole sdist lane. Neither is fixed
 here, because that file is another agent's this round; both are recorded
-as the recommendation, with the sandbox that reproduces them.
+as the recommendation, with the sandbox that reproduces them. **(That
+headline went false on 2026-08-25 for the same reason, and the test it
+names is one of the ten nodes that moved; the SECOND defect recorded here
+— the CONTRADICTED `needs git` skip with `.git` removed — is untouched by
+that change and still stands. The AMENDED paragraph below is the
+canonical one for the headline.)**
+
+**AMENDED 2026-08-25 (0.2.0 R25): THE CHECKOUT THESE TWO PARAGRAPHS
+DESCRIBE IS NOT THAT CHECKOUT ANY MORE, AND THREE OF THEIR CLAUSES ARE
+FALSE ON THIS TREE.** All three were TRUE WHEN WRITTEN and are left
+standing rather than rewritten, because a `## Log` entry quietly updated
+to today's figure falsifies the record instead of repairing it. What made
+them false is a MERGE and not a mistake: this entry and the DISCLOSED
+SKIP it describes were written on one branch — `3617e35`, then `63c4b6d`
+— while `35fca4c` gave the release workflow's two checkouts
+`fetch-depth: 0` on the other, and neither branch alone carried a false
+sentence. They met at `8a18140`.
+
+**THE CHECKOUT, RE-DERIVED WITH A YAML PARSE AND NOT A GREP.**
+`.github/workflows/release.yml` holds exactly TWO `actions/checkout@v4`
+steps — `jobs.test.steps[0]`, which is the job named *"the suite, on the
+tagged tree"*, and `jobs.build.steps[0]`; `jobs.publish` checks nothing
+out — and each carries the same two inputs and no third, which are
+`persist-credentials: false` and `fetch-depth: 0`. Neither carries
+`fetch-tags`, and that is not a gap: under `fetch-depth: 0` that key
+would be INERT, because the all-history refspec already contains
+`+refs/tags/*:refs/tags/*` and there is nothing left for it to add. The
+parse is why this is stated at all — three separate passes have now
+produced three different GREP counts of this one file, and
+`grep -c "uses: actions/"` reads EIGHT there: four real steps and four
+comment lines quoting the string.
+
+**AND THE SANDBOX AGREES, BUILT TO THE MERGED CHECKOUT'S OWN SHAPE.**
+Driven on 2026-08-25 against the tree this commit produces: a fresh
+`git init`, one fetch with no depth limit of
+`+refs/heads/*:refs/remotes/origin/*` and `+refs/tags/*:refs/tags/*`,
+`git checkout --force` of the release tag.
+`git rev-parse --is-shallow-repository` answers **false**,
+`git rev-list --count HEAD` is **1,081**, and `v0.1.0` RESOLVES. That is
+the exact negative of the *"shallow, `v0.1.0` absent"* sandbox the
+paragraph above measures, and it is the same workflow, after `35fca4c`.
+
+**SO `fetch-depth: 0` IS NOT "A RECOMMENDATION THAT NOTHING RELIES ON"
+ANY MORE: IT IS IN THE FILE, AND TEN NODES RELY ON IT.** The whole
+zero-dep suite in both sandboxes off one tree — **2,332 passed, 186
+skipped** in the depth-1 shape, **2,342 passed, 176 skipped** in the
+merged one. Ten nodes move, every one of them skipped → passed, and
+nothing moves the other way. Eight are
+`tests/test_soundness_routing.py`'s
+`test_the_source_hashes_reproduce_from_git`,
+`test_the_source_span_is_derived_and_not_trusted`,
+`test_the_splitter_partitions_the_source` and
+`test_the_declared_loss_check_bites`, each over both routed sections.
+The ninth is this entry's own subject,
+`test_a_claim_about_the_tags_TREE_is_decided_against_the_tag`. The tenth
+is `test_every_commit_a_status_paragraph_names_is_an_ancestor`, which is
+the check the paragraph above calls the release job's remaining blocker,
+and that is why the headline is false as well as the clause: it blocks
+nothing now. In the merged shape it DECIDES — with `deadbee` planted in
+a `proposed-*.md` **Status:** paragraph there it is `1 failed`, naming
+the page and quoting git's own words, the page restored byte-identically
+afterwards (sha256).
+
+**WHAT THIS DOES NOT WITHDRAW.** The three DISCLOSED skips above are
+right and they stay. A shallow clone cut somewhere else, an unpacked
+sdist with no `.git`, and a `git init`'d copy with no refs all still
+produce the condition, and each still skips with the reason that is true
+there. What `fetch-depth: 0` changed is that THIS workflow can no longer
+produce it — unreachable from here, not impossible anywhere — so a skip
+firing inside that job is now a signal that its checkout changed.
+
+**AND THE TWO DERIVED FIGURES THIS AMENDMENT KEYS ON WERE RE-TAKEN ON
+ITS OWN FINAL TEXT.** The `v0.1.0:<path>` token ratio stated twice above
+is **unmoved at 6 of 21**: this amendment writes no `v0.1.0:<path>`
+token, so neither leg of it moves and both statements stand as written.
+The *"this commit's own prose"* in the second of them names `3617e35`,
+the commit that wrote that sentence and carried the ratio from 6 of 18
+to 6 of 21 — not this one. The figure this amendment DOES move is the
+`## Log` population triple, whose first and third members grow by the
+lines added here; it is re-derived above in
+`### What has been driven in this document` by the two rules that bullet
+names, and
+`tests/test_soundness_log_reach.py::test_the_logs_stated_population_is_the_one_the_two_rules_measure`
+holds it there.
 
 **THE POLARITY LEG IS A FOUR-PHRASE VOCABULARY AND NOT A NEGATION
 DETECTOR, AND IT MISSES IN BOTH DIRECTIONS.** Driven on 2026-08-25 on this

@@ -1499,8 +1499,14 @@ def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
       `v0.1.0:<path>` tokens by :data:`_TAG_PATH_RE` over a
       whitespace-normalised copy of each; 6 fall inside the polarity leg
       and 15 do not. It was 6 of 18 at `e94f4ea`: THREE of the fifteen
-      were added by this commit's own prose, which is exactly how a ratio
+      were added by `3617e35`'s own prose, which is exactly how a ratio
       like this moves and why it is dated rather than left standing.
+      `3617e35` is named here rather than *"this commit"*, which is what
+      this bullet said: an indexical in a figure that outlives its own
+      commit re-points at whichever commit reads it next. Re-derived on
+      2026-08-25 over the amendment `SOUNDNESS.md`'s 2026-08-18 entry now
+      carries, which adds prose to that entry and no token to either
+      file: **unmoved, 6 of 21**.
     * **the floor is `>= 3`, not eleven.** The population is measured, and
       the assertion under it only refuses a COLLAPSE. Driven: re-dating
       eight of the nine bullets to the tag day leaves 3 members and the
@@ -1584,9 +1590,13 @@ def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
     `+refs/tags/*:refs/tags/*`. Built the way that config builds a tree —
     `git init`, ONE fetch of `+refs/heads/*:refs/remotes/origin/*` and
     `+refs/tags/*:refs/tags/*` with no depth limit, `git checkout --force`
-    of the tag — the sandbox comes back NOT SHALLOW, 1079 commits, and
-    `v0.1.0` RESOLVES. So this check decides there rather than skipping,
-    and refusal point #1 is no longer blocked by it or by
+    of the tag — the sandbox comes back NOT SHALLOW and `v0.1.0`
+    RESOLVES. (1079 commits at `e6b35dc`, 1081 at the commit that wrote
+    this sentence. The count is a property of the CHECKOUT the sandbox is
+    built from, not of the workflow, so it moves on every commit and no
+    live value for it is pinned here; the two answers that are about the
+    workflow are the two above.) So this check decides there rather than
+    skipping, and refusal point #1 is no longer blocked by it or by
     `tests/test_proposed_page_headers.py`, whose ancestry check decides
     too: `deadbee` planted in a **Status:** paragraph is `1 failed` in
     that sandbox, named as a page defect.

@@ -170,9 +170,14 @@ an evidence rule: that the tag has no such module is decidable here; that
 no M2 finding reaches a release is the section's own claim, and measured
 against the three document states in which a false `Versions:` field
 actually shipped, that rule is green on all nine of them. Where the tag is
-out of reach — a shallow clone, and that includes the release workflow's
-own tagged-tree job — it is a DISCLOSED SKIP with a warning naming git's
-words, not a red.
+out of reach — a shallow clone cut elsewhere, an unpacked sdist, or a
+`git init`'d copy with no refs — it is a DISCLOSED SKIP with a warning
+naming git's words, not a red. (That dash-clause read *"and that includes
+the release workflow's own tagged-tree job"* until 2026-08-25, when
+`35fca4c` gave both of that workflow's `actions/checkout@v4` steps
+`fetch-depth: 0`. It no longer does: there the tag resolves and this check
+decides. Derived and driven at `SOUNDNESS.md`'s 2026-08-18 entry, in the
+amendment dated 2026-08-25.)
 
 - **M2-0.2.0-01** — An out-of-range integer constant narrowed at array
   construction RAISES at the line that wrote it, under the opt-in
