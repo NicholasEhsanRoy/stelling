@@ -476,6 +476,34 @@ def _git_cannot_reach_a_status_commit() -> bool:
         return False
 
 
+def _git_cannot_read_the_release_tag() -> bool:
+    """Whether git can read `SOUNDNESS.md` AS THE `v0.1.0` TAG HAS IT.
+
+    `tests/test_prerelease_scope_from_the_tag.py` derives the set of `## Log`
+    entries scoped *0.1.0 pre-release builds only* FROM the tagged document,
+    which is the only place that claim can be checked against rather than
+    proxied. Four environments legitimately cannot answer — no git on PATH, a
+    tree that is not a checkout (an unpacked sdist), a clone fetched without
+    tags, and a shallow clone that does not reach the tagged commit — and in
+    every one of them the honest move is to skip rather than fall back to the
+    date proxy that file exists to replace.
+
+    A PREDICATE BORROWED, not a reason: this asks that module the same
+    question the test asks, so the two cannot come apart, while the reason
+    below is typed here in the diff a reviewer reads. Answers False if the
+    import fails at all, which is the safe direction — the skip is then
+    reported as contradicted rather than quietly excused.
+    """
+    try:
+        from test_prerelease_scope_from_the_tag import tagged_soundness
+    except Exception:  # noqa: BLE001 - a predicate may not raise
+        return False
+    try:
+        return tagged_soundness() is None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _jax_x64_is_on() -> bool:
     """Whether this session runs with 64-bit dtypes enabled.
 
@@ -769,6 +797,28 @@ RULES = (
             {"needs a POSIX shell and coreutils to drive a gate body"}
         ),
         legitimate=_the_shell_toolchain_is_incomplete,
+    ),
+    Rule(
+        when=(
+            "git cannot read `SOUNDNESS.md` at the `v0.1.0` TAG — no git on "
+            "PATH, a tree that is not a checkout, a clone fetched without "
+            "tags, or a shallow clone that does not reach the tagged commit. "
+            "Four causes and one condition, and the condition is computable "
+            "here, so BOTH directions are asserted. `git` being on PATH is "
+            "only one of the four, so the predicate asks git the same "
+            "question the test asks instead of testing for a binary. The "
+            "test it discloses derives the `## Log` entries scoped *0.1.0 "
+            "pre-release builds only* FROM the tagged document; where the tag "
+            "is unreadable it skips rather than degrading to the "
+            "date-versus-field proxy it replaces, which would leave the "
+            "weaker instrument running under the stronger one's name in "
+            "exactly the environments nobody watches"
+        ),
+        reasons=frozenset({
+            "git cannot read `v0.1.0:SOUNDNESS.md`, so the pre-release scope "
+            "cannot be derived from the tag",
+        }),
+        legitimate=_git_cannot_read_the_release_tag,
     ),
     Rule(
         when=(
@@ -1523,6 +1573,10 @@ _MUST_MATCH = (
     "needs `uv` to build an sdist",
     "needs `uv` to build and `git` to read hatchling's exclusions",
     "needs git",
+    (
+        "git cannot read `v0.1.0:SOUNDNESS.md`, so the pre-release scope "
+        "cannot be derived from the tag"
+    ),
     "not a git checkout (an unpacked sdist, say)",
     "needs a POSIX shell and coreutils to drive a gate body",
     "git cannot resolve `v0.1.0`, so no claim here about the tag's tree can be decided",

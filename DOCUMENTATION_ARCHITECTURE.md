@@ -349,16 +349,25 @@ reading of it.
 | The harness traces the code that actually ships | **User** | Query hash vs. current trace; stale-verdict detection (§10.6) |
 | Tool classification (T2/TI/TD/TCL/criterion/TQL) | **User** | §12 mappings; their assessor |
 | The qualification argument, if a verdict is load-bearing | **User** | The qualification package (§11) as input; the argument is theirs |
-| The ℝ ⇒ float gap, until it closes | **User** (named in every verdict) | `arithmetic` field; `docs/semantics/arithmetic.md` |
-| The traced ⇒ compiled gap, until it closes | **User** (named in every verdict) | `trust_boundary` field; `docs/qualification/trust_boundary.md` |
+| The ℝ ⇒ float gap, until it closes | **User** (named in every verdict) | The stamp's `semantics` line — which arithmetic the obligations were judged in, and the default one says the float behaviour is not modelled; §4.2; `docs/semantics/arithmetic.md` |
+| The traced ⇒ compiled gap, until it closes | **User** | §2.3 link 7; `SOUNDNESS.md`'s link-7 entry; §4.3. The stamp key called `trust_boundary` in §2.4 and §10.2 is designed there and is not in the tree, so unlike the row above this gap is named in the documents and by no field of any verdict |
 | The solver is correct on this query | **Shared, unresolved** | **Nothing today** — certificates eventually (§11.3). *This cell read "cross-solver agreement today". Agreement is not evidence (§6.1, §11.2): two backends that agree have failed to disagree, which is a fact about the pair. The portfolio is real, it runs, and it belongs in the row above as a refutation channel — not here, where the column is headed Evidence* |
 | Deciding a verdict is good enough for a given SIL/ASIL/DAL | **User and their assessor** | Everything above |
 
 The last four rows are the honest ones and must never be softened. Two of them
-(ℝ ⇒ float, traced ⇒ compiled) are gaps stelling does not close today and says
-so in the artifact itself — **the way to make an unclosed gap safe is not to
-close it but to name it somewhere it cannot be forgotten**, which is why they
-are verdict fields and not documentation prose.
+(ℝ ⇒ float, traced ⇒ compiled) are gaps stelling does not close today — **the
+way to make an unclosed gap safe is not to close it but to name it somewhere it
+cannot be forgotten**, and a verdict field is the place a reader cannot get past.
+
+**The two rows are not in the same state, and the sentence this one replaced
+said they were.** For ℝ ⇒ float the artifact does carry it: every stamp's
+`semantics` line says in as many words which arithmetic the obligations were
+judged in, and the default one says the traced program's float behaviour is not
+modelled. For traced ⇒ compiled there is no such line — the key §2.4 designs
+for it is not in the tree — so today that gap travels in this document and in
+`SOUNDNESS.md` and not in the verdict a reader is handed. **That asymmetry is a
+defect, and the rule above is what it is measured against**; it is not a second
+way of being safe.
 
 ### 1.5 What open source and no certified process cost — and what they buy
 
@@ -663,10 +672,13 @@ useful single artifact in this document. Six readings of it:
   miscompilation is not a rounding difference either (§4.3). The coupling covers
   reassociation and stops there. Read the table as eight things that must hold,
   not as eight probabilities to multiply.
-- **Links 6, 7, and 8 are named, not closed.** 6 and 7 are verdict fields
-  (`arithmetic`, `trust_boundary`, `precision`), not footnotes, so a verdict
-  cannot travel without them. Commitment 5 already says this — *"we verify what
-  traced, XLA runs what compiled, and we say so plainly"*. The architecture's job
+- **Links 6, 7, and 8 belong in the stamp and not in a footnote**, so that a
+  verdict cannot travel without them. Link 6 is there: the `semantics` line
+  names which arithmetic the obligations were judged in, with `arithmetic_mode`
+  and `precision_config` beside it. **Link 7 is not** — the key §2.4 calls
+  `trust_boundary` is not in the tree, and §1.4's row is where that one gap is
+  recorded as travelling in the documents alone. Commitment 5 already asks for this —
+  *"we verify what traced, XLA runs what compiled, and we say so plainly"*. The architecture's job
   is to make "plainly" mechanical. Link 8 is named here and in the package (§11.1)
   and nowhere else, because there is nothing to stamp: it is a property of the
   machine, not of the run.
@@ -1031,7 +1043,10 @@ assumptions *are* the claim. Dropping them does not reduce information — it
 inverts the meaning, because a bare "VERIFIED" asserts strictly more than the
 stamped one does.
 
-Fields, per `SOUNDNESS.md` plus what §2.3 requires:
+Fields, per `SOUNDNESS.md` plus what §2.3 requires. **This is the required
+set, not an inventory of the tree.** The inventory is `stelling.verdict.Stamp`,
+it does not carry all of these under these names, and every row below that is
+design rather than tree says so in the row.
 
 | Field | Why |
 |---|---|
@@ -1042,9 +1057,9 @@ Fields, per `SOUNDNESS.md` plus what §2.3 requires:
 | `query_hash` | `ir.ClosedJaxpr.content_hash()` — the spine (§2.6) |
 | `tiers` | The assumption tier of every transfer function in the chain (commitment 5) |
 | `soundness` | Derived: `proof` if the chain is all exact/sound, `heuristic` if any transfer is heuristic (§5.1) |
-| `arithmetic` | `real-with-margin` \| `float-exact` — link 6, named |
-| `trust_boundary` | `jaxpr` \| `hlo` — link 7, named |
-| `precision` | **The precision configuration the verdict assumes**, and the devices it was asserted for. Link 7, named. `arithmetic: real-with-margin` says a margin absorbs the rounding; it does not say *which* rounding, and on JAX that is not a property of the program (§2.3). Belongs beside `solver_options` for identical reasons and by the identical argument: **one jaxpr, three devices, three numerics** |
+| `arithmetic` | `real-with-margin` \| `float-exact` — link 6, named. **Two things wear this name and neither is that dial.** What records which arithmetic a verdict is judged in is `semantics`, whose two positions are ℝ and IEEE-754; what records how interval endpoints are computed is `arithmetic_mode`. Neither position carries a margin, nothing computes one, and `real-with-margin` names a dial position this document has and the tree does not |
+| `trust_boundary` | `jaxpr` \| `hlo` — the intended naming of link 7, and **design: no key of that name is in the tree.** §4.3 is the page that would have to exist with it |
+| `precision` | **The precision configuration the verdict assumes**, and the devices it was asserted for. Link 7, named. The `arithmetic` row's `real-with-margin` position would say a margin absorbs the rounding; it would not say *which* rounding, and on JAX that is not a property of the program (§2.3). Belongs beside `solver_options` for identical reasons and by the identical argument: **one jaxpr, three devices, three numerics** |
 | `vacuity` | `witnessed` (a point in R was exhibited) \| `unchecked` — link 1, partially |
 | `obligations` | Assumptions discharged elsewhere, if any — notably the induction base case (§10.8) |
 | `coverage_ref` | The coverage artifact for this query. **A verdict without its scope is a verdict without its meaning** (§6.3) |
@@ -1098,16 +1113,17 @@ From the lattice, a mechanically detectable *contradiction* falls out:
 
 **But it does not follow that stelling is at fault, and the tool must not say
 so.** The two claims are about different objects: the checked witness is a
-*float* fact about the *compiled* program, while `verified` is (under
-`arithmetic: real-with-margin`, `trust_boundary: jaxpr`) a claim about the
-*traced* jaxpr over *ℝ*. Both can be true at once. The candidates are:
+*float* fact about the *compiled* program, while `verified` is a claim about
+the *traced* jaxpr over *ℝ* — which is what the stamp says it is, in the
+verdict, under the default `semantics="real"`. Both can be true at once. The
+candidates are:
 
 | Candidate | Which link | Whose |
 |---|---|---|
 | Encoder or query-construction bug | 3 | **stelling's** |
 | Unsound transfer despite its tier | 4 | **stelling's** |
 | Solver wrong on this query | 5 | Shared (§11.2) |
-| **The margin did not absorb the rounding** | 6 | **The user's — and this is a finding about their program, not a bug in stelling** |
+| **The ℝ ⇒ float gap bit: the predicate holds in ℝ and fails in floats** | 6 | **The user's — and this is a finding about their program, not a bug in stelling.** Nothing absorbs that difference today; §2.4's `arithmetic` row is where the mechanism that would is described, and `semantics="ieee"` is the position that judges the float execution instead of bridging to it |
 | **XLA does not implement the jaxpr here** | 7 | The user's, and a much bigger deal than a stelling bug |
 
 The last two are not failure modes of the disagreement mechanism — **they are the
@@ -1206,18 +1222,23 @@ equivalence, and anything else whose semantics depend on a thunk's contents, it
 is **not an identity at all**: two queries that differ precisely in the thing
 under test hash alike.
 
-Three consequences, all cheap now and expensive later:
+Three consequences, all cheap now and expensive later — and **all three are
+obligations on the artifact this section designs, not readings of the tree.**
+`stelling.ir` has the `OpaqueParam` value and the transcription raises it where
+a param cannot be represented; nothing counts those into a verdict, so no
+stored verdict can be asked the question below, and each consequence is written
+as the obligation it is:
 
-- **The verdict artifact carries `opaque_params`** — the count and the
-  `(primitive, param)` slots the query contains — so that a hash match plus an
-  empty list is a *total* identity, and a hash match with a non-empty list is a
-  match anyone can see needs more.
-- **§16.3's Replay mode requires `opaque_params: []`**, or the stronger identity
-  a Stage-2 gradient hash provides once it exists. Citing a stored verdict on a
-  bare hash match is the forbidden keying, in the one place where it would look
-  most reasonable.
-- **The ledger's `affects` predicate may range over `opaque_params`** (§7.2), so
-  a Stage-2 soundness event can scope itself to exactly the queries the hash
+- **The verdict artifact should carry an `opaque_params` list** — the count and
+  the `(primitive, param)` slots the query contains — so that a hash match plus
+  an empty list is a *total* identity, and a hash match with a non-empty list is
+  a match anyone can see needs more.
+- **§16.3's Replay mode should require that list to be empty**, or the stronger
+  identity a Stage-2 gradient hash provides once it exists. Citing a stored
+  verdict on a bare hash match is the forbidden keying, in the one place where
+  it would look most reasonable.
+- **The ledger's `affects` predicate should be able to range over it** (§7.2),
+  so a Stage-2 soundness event can scope itself to exactly the queries the hash
   cannot distinguish.
 
 **`SOUNDNESS.md`'s cache rule is a different rule and does not cover this one.**
@@ -1228,7 +1249,10 @@ identity. Nothing in the repository does. This subsection is where that gap is
 recorded rather than assumed away.
 
 The artifact is JSON, schema-versioned, and written under `evidence/` by CI and
-by users who want a record:
+by users who want a record. **The schema below is this section's design, and
+four of its keys are only that** — `arithmetic`, `trust_boundary`,
+`opaque_params` and `crosscheck` are written here in the shapes §2.4 argues
+for, and what a verdict carries today is `stelling.verdict.Stamp`:
 
 ```json
 {
@@ -1328,10 +1352,15 @@ the shipped `ProbeReport` refuses to grow a field matching, and a schema that
 grew them would have moved the defect from the module to the record.
 
 **One caveat on this whole block.** It is a schema sketch and parts of it are
-still plan rather than tree: `arithmetic: real-with-margin` names a dial position
-the source tree does not have, and the `Verdict` type in §10.2 carries no probe
-field at all. §2.3.1 says which of these fields exist today; **the artifact is the
-record and may be wider than the type, but it may not be wider than the truth.**
+still plan rather than tree: the `arithmetic` row's `real-with-margin` position
+names a dial the source tree does not have — §2.5's row says which two names
+wear it instead, and that neither carries a margin — and the `Verdict` type in
+§10.2 carries no probe field at all. **The pair form is deliberately not used
+here**: written as `key`-colon-`value` this sentence would imitate a line out
+of a record, which is the reading the caveat exists to prevent, and
+`tests/test_documented_names_exist.py` refuses it on exactly that ground.
+§2.3.1 says which of these fields exist today; **the artifact is the record
+and may be wider than the type, but it may not be wider than the truth.**
 
 ---
 
@@ -1653,10 +1682,14 @@ Three rules:
    only if every transfer in the chain is `exact` or `sound`. One `heuristic`
    demotes the whole verdict. Rendering a heuristic-chain verdict as a bare
    `VERIFIED` is a use error the tool must not permit (§2.1 rule 3).
-3. **The tier is data, not prose.** It lives in `TransferMeta` (§10.1), is
-   surfaced in the coverage report and the verdict, and the doc's tier field is
-   generated from the code — never the reverse. A tier that exists only in a
-   Markdown table is a tier that will drift.
+3. **The tier is data, not prose.** Today it is a string literal beside its
+   transfer in `stelling.propagate`'s registry, and the stamp carries it as
+   `transfer_tiers` — one `(primitive, tier)` pair per transfer the chain used.
+   §10.1 designs `Tier` and `TransferMeta` as its structured home, §9.1 lists
+   that home among the deferred items, and neither name is anywhere under
+   `src/`. **The direction is what does not depend on which of those is true**:
+   the doc's tier header is generated from the code, never the reverse. A tier
+   that exists only in a Markdown table is a tier that will drift.
 
 ### 5.2 Primitive semantics are evidence, not lore
 
@@ -1984,9 +2017,13 @@ What it does not provide, and cannot:
 
 - **Not a claim about the compiled program**, until link 7 closes. A verdict is
   about the traced jaxpr.
-- **Not a claim about float execution**, until link 6 closes. A verdict under
-  `arithmetic: real-with-margin` is a claim about ℝ, with margin, and the
-  margin-absorption argument connecting it to IEEE-754 does not exist yet.
+- **Not a claim about float execution**, until link 6 closes. Under the default
+  `semantics="real"` a verdict is a claim about ℝ, and **nothing absorbs the
+  difference**: no margin is computed, none rides on a verdict, and the
+  margin-absorption argument that would connect the two does not exist — so
+  §2.4's `arithmetic` row describes a bridge and not a crossing.
+  `semantics="ieee"` does not close this link either; it makes a narrower claim
+  that does not need it, about the traced program's float execution.
 - **Not a claim that the harness is the right property.** Link 1 is the user's.
   stelling checks R ≠ ∅ and nothing else about intent.
 - **Not a solver qualification.** stelling identifies the solver exactly; it does
