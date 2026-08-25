@@ -381,6 +381,21 @@ exercised from outside. Until the schema identifier stops saying
 a consumer comparing `schema` against the string it was written for fails
 closed.
 
+**And `provisional` here is a marking on this document format, not the
+API-stability level of the same name.** `DOCUMENTATION_ARCHITECTURE.md`
+§8.5 gives `provisional` as *"may change in minor with a deprecation
+cycle"*, guarantee *"one minor's notice"* — more than the paragraph above
+offers you, and more than this schema promises. What you get here is that
+table's `experimental` in strength: any release, no deprecation cycle, no
+notice. §8.5's *Applied to:* line does not name this artifact, so nothing
+has assigned it a level at all; the word in the identifier is a state —
+version 1, not frozen yet — and it goes away when the condition is met,
+which is not a thing a stability level does. The distinction is worth a
+paragraph because this release does teach those levels by name elsewhere:
+[Checking preconditions](preconditions.md) and
+[The harness API](harness-api.md) both assign `falsify` the level
+`experimental` and quote §8.5 for what it means.
+
 *This section named 0.1.1 as both the release fields could move in and the
 release the schema would freeze in. 0.1.1 has been and gone, a second
 release has arrived, the running version is `0.2.0`, and the schema is still

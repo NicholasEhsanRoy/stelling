@@ -3,9 +3,28 @@
 
 """With the flag off, NOTHING changed — and that is measured, not asserted.
 
-The falsification probe ships in 0.2.0, default-off and unaudited — it was
-unreleased when this file was written, and the 0.2.0 version bump is what
-changed that half. The constraint on it is therefore not "it should be
+The falsification probe ships in 0.2.0, it is default-off, and its API
+stability level is ``experimental``. This paragraph read *"unreleased and
+unaudited"*, and BOTH halves have since gone. The keyword is in the 0.2.0
+release. And ``UNAUDITED`` was retired on evidence that is in this tree:
+``tests/test_probe_oracle.py`` checks the probe's fire condition, on every
+run, against an independent ``Fraction`` oracle that shares no code with
+``stelling.falsify`` — which is the thing the word was being withheld for.
+
+``experimental`` is a LEVEL and not an adjective.
+``DOCUMENTATION_ARCHITECTURE.md`` §8.5 defines it as *"may change without
+notice"*, guarantee *"none"*, as against the neighbouring ``provisional``,
+which promises *"one minor's notice"* — a promise this keyword has already
+broken once and does not make. The level is written down once, as
+``stelling.falsify.STABILITY``, and ``tests/test_probe_stability_level.py``
+holds the four sites that ASSIGN it to that string. This sentence is a
+MENTION and not a fifth assignment, so if the two ever disagree the
+constant is the one that is right.
+
+**AND NONE OF THAT IS WHAT THIS FILE MEASURES.** A level is a promise about
+future changes to the SURFACE; the six disclosures in ``stelling.falsify``'s
+docstring are a statement about what the instrument does not do today; and
+the constraint measured here is a third thing again. It is not "it should be
 safe" but "a caller who does not set ``falsify`` must get exactly the
 verdict they got before it existed", and a claim of that shape is only
 worth what its measurement is worth.

@@ -233,6 +233,63 @@ NOT_EXECUTED_EXIT = 3
 # CONDITION, not on a version: once a consumer that did not write it has
 # parsed real emissions and the fields have been exercised from outside.
 #
+# **AND `provisional` HERE IS A MARKING ON A DOCUMENT FORMAT, NOT
+# `DOCUMENTATION_ARCHITECTURE.md` §8.5's STABILITY LEVEL OF THE SAME NAME.**
+# The two words collide and they do not mean the same thing. §8.5's
+# `provisional` is *"may change in minor with a deprecation cycle"*,
+# guarantee *"one minor's notice"*. The sentence directly above gives
+# strictly less than that — any release, no deprecation cycle — which is
+# that table's `experimental`, *"may change without notice"*, guarantee
+# *"none"*. A reader who knows the table would come away with a promise of
+# notice that nothing here makes, and in 0.2.0 that reader is not
+# hypothetical: `docs/harness-api.md` and `docs/preconditions.md` now teach
+# §8.5's levels by name, for the `falsify` keyword — and those are the two
+# pages documenting `check`, which is where the verdict this module
+# reproduces comes from.
+#
+# THE COLLISION IS NAMED, AND THE IDENTIFIER IS NOT RENAMED. Three reasons,
+# and the third is what decides it:
+#
+#   * **§8.5 does not reach this artifact.** Its *Applied to:* line names
+#     the harness API, the verdict artifact schema, `stelling.ir` and the
+#     evidence schemas. The verdict artifact and the evidence schemas are
+#     the JSON under `evidence/`, which §3.2 of that same document records
+#     as never having existed in this repository; this sidecar is neither
+#     of them. Nor does that line reach `stelling.reproduce`: the Python
+#     inventory in it is the harness API, and `SCHEMA` is not in that.
+#     So no level was ever ASSIGNED here and then got wrong. What is here
+#     is a word that reads like one.
+#   * **The word is doing a different job, and it is a job a level cannot
+#     do.** A §8.5 level is a standing promise about future changes to a
+#     surface. `1-provisional` is a STATE of one document format: `1` is
+#     the schema version and the suffix is its not-frozen-yet flag, which
+#     stops being said the day the condition below is met. A promise a
+#     surface can simply stop making is not the kind of thing that table
+#     describes.
+#   * **The identifier is WIRE.** `stelling.reproducer/1-provisional` is
+#     stamped into every sidecar this module emits, into the `SIDECAR`
+#     block of every reproducer it writes, and into that file's own header
+#     line. Renaming the suffix is a change to what consumers see, and it
+#     buys a consumer nothing: the whole design of the marking is that the
+#     ordinary check `doc["schema"] == "stelling.reproducer/1"` FAILS
+#     CLOSED, and it already does. It costs: any pin already written
+#     against the emitted string breaks, `tests/test_reproduce.py` pins
+#     the literal AND pins that the word `provisional` is in it, and
+#     `docs/reproducing-a-witness.md` prints the literal twice and the
+#     `stelling.reproducer/1` comparison a consumer would write once. A
+#     wire change for a word's connotation is not a trade this file should
+#     make.
+#
+# So the guarantee stands, the identifier stands, and the sentence that
+# could mislead gets this disclaimer. Two things are deliberately NOT done.
+# There is no version-numbered freeze promise — that defect was here once
+# and was removed, and the paragraph below is why. And the emitted
+# `stability` string and the reproducer's own banner are left byte for
+# byte alone: they already state the guarantee in full words, and their
+# reader is one who has the JSON and has never seen §8.5. The collision
+# bites a reader of THIS repository, so the repair is here and on the page
+# that reader also reads.
+#
 # THE CONDITION IS THE COMMITMENT, AND NAMING A RELEASE INSTEAD BROKE IT.
 # This said "may be added, removed or renamed in 0.1.1 ... planned to FREEZE
 # in 0.1.1". 0.1.1 came and went, and a second release arrived without it;

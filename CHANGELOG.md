@@ -673,10 +673,24 @@ module is post-tag.
 ### Verification pipeline
 
 - **`check(..., falsify="sample")` — the falsification probe, DEFAULT-OFF
-  and UNAUDITED.** It SHIPS in 0.2.0 — this entry read *"and UNRELEASED"*
-  while 0.2.0 was a development line, and the version bump is what made
-  that false. Nothing about the keyword changed: it is off by default, no
-  audit has been run against it, and it is not a surface to build on. A new
+  and `experimental`.** It SHIPS in 0.2.0, and this heading has now lost
+  both of the words it was written with. It read *"and UNRELEASED"* while
+  0.2.0 was a development line, and the version bump made that false. It
+  then read *"and UNAUDITED"*, and that word is retired too, on evidence
+  in the tree: `tests/test_probe_oracle.py` checks the probe's fire
+  condition on every run against an independent `Fraction` oracle sharing
+  no code with `stelling.falsify`, which is what the word was being
+  withheld for. What stands in their place is a LEVEL from
+  `DOCUMENTATION_ARCHITECTURE.md` §8.5 — `experimental`, *"may change
+  without notice"*, guarantee *"none"* — and deliberately not the
+  neighbouring `provisional`, which promises *"one minor's notice"*: this
+  keyword broke exactly that promise when `probe()`'s first parameter
+  changed name and type inside this release cycle while already exported.
+  A changelog entry is a record of a release, so this states 0.2.0's
+  level; the live one is `stelling.falsify.STABILITY`, and
+  `tests/test_probe_stability_level.py` holds the four sites that assign
+  it. Neither correction changed anything the keyword DOES: it is off by
+  default, it can only refute, and it is not a surface to build on. A new
   keyword on `stelling.preconditions.check`,
   `stelling.contracts.check_contract` and
   `stelling.inductive.check_inductive_step`. With the default `None`
