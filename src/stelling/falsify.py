@@ -22,15 +22,50 @@ kind can run: **after a discharge, execute the real program at concrete
 points and try to find one that violates the obligation.**
 
 --------------------------------------------------------------------------
-STABILITY: SHIPPED, DEFAULT-OFF, AND PROVISIONAL — AND THE WORD IT
-REPLACES WAS ``UNAUDITED``
+STABILITY: SHIPPED, DEFAULT-OFF, AND ``experimental`` — THE POLICY'S OWN
+WORD, AND THE TWO IT REPLACES WERE ``PROVISIONAL`` AND ``UNAUDITED``
 --------------------------------------------------------------------------
 
 ``falsify="sample"`` ships in 0.2.0. It is **default-off** — with
 ``falsify=None`` this module is never imported and every path is
-byte-identical — and it is **provisional**: what it does when it fires is
-settled, its SIGNATURE is not. ``probe()``'s first parameter changed name
-and type inside this release cycle, and it is in ``__all__``.
+byte-identical — and its API stability level is :data:`STABILITY`, which
+is ``"experimental"``: what it does when it fires is settled, its
+SIGNATURE is not. ``probe()``'s first parameter changed name and type
+inside this release cycle, and it is in ``__all__``.
+
+**THE HEADING SAID ``PROVISIONAL``, AND IN THIS PROJECT ``provisional``
+MEANS SOMETHING ELSE.** ``DOCUMENTATION_ARCHITECTURE.md`` §8.5 carries a
+four-level table, and its two middle levels are not synonyms:
+``provisional`` is *"may change in minor with a deprecation cycle"*,
+guarantee *"one minor's notice"*, while ``experimental`` is *"may change
+without notice"*, guarantee *"none"*. The sentence directly above — a
+parameter that changed NAME AND TYPE inside one release cycle while
+sitting in ``__all__`` — describes a change made with no deprecation
+cycle and no notice, which is the table's ``experimental`` and not its
+``provisional``. The old word was not a softer synonym; it was a
+PROMISE of one minor's notice, a promise this keyword has already broken
+once and cannot make again while its signature is still moving. Read as
+the table defines it, the level says: **``falsify="sample"``,
+``probe()``'s signature and every name in ``__all__`` may change, or be
+withdrawn, in any release — including a patch — with no deprecation
+cycle and no notice.** Nothing here promises a deprecation cycle and
+nothing here should be read as promising one.
+
+**§8.5's *Applied to* line does not name this keyword**, and that is
+stated rather than quietly relied on: it names the harness API, the
+verdict artifact schema, ``stelling.ir`` and the evidence schemas. That
+line is an inventory of surfaces; the four DEFINITIONS above it are what
+is being used here, and they are what a reader who knows the table will
+apply to the word. The level is written down once, at :data:`STABILITY`,
+and restated in three places: ``preconditions.check``'s own ``falsify``
+paragraph, which is what ``help(check)`` prints, and the two pages a
+caller reads without opening ``src/`` at all —
+``docs/harness-api.md``'s argument table and ``docs/preconditions.md``,
+where it had NO level at all until this release. Every one of the four
+is held to that one string by
+``tests/test_probe_stability_level.py``. A level that drifts out of
+the docs is the same defect as a figure that drifts out of a sentence,
+which is the defect this module's own history is mostly made of.
 
 **``UNAUDITED`` IS RETIRED, AND ON EVIDENCE THAT IS IN THIS TREE.** The
 fire condition's exact reading is checked, on every run, against an
@@ -74,9 +109,17 @@ be, and now is, is its ORACLE. The base-versus-fix comparisons that DO
 re-derive in a single tree are the corpus re-runs recorded below, which
 name the corpus, the files and the counts.
 
-**WHAT "PROVISIONAL" NAMES IS A LIST, NOT A MOOD.** Every item is
-disclosed in full at its own site; they are gathered here so that a reader
-deciding whether to switch this on does not have to find them:
+**THE SIX DISCLOSURES, WHICH ARE A DIFFERENT AXIS FROM THE LEVEL AND
+MUST NOT BE READ OFF IT.** This list used to be introduced as *what
+"provisional" names* — a policy word doing duty for a list that policy
+does not describe. A stability level is a promise about FUTURE CHANGES
+to a surface; every item below is a statement about what this instrument
+does NOT DO TODAY, and no level in that table implies any of them. A
+reader told only that the keyword is ``experimental`` has been told
+nothing whatever about item 1. So the level is stated above, once, and
+the list stands here under its own name. Every item is disclosed in full
+at its own site; they are gathered here so that a reader deciding
+whether to switch this on does not have to find them:
 
 1. **THE ANALYSIS'S REGION IS NEVER READ.** The assume gate reads the
    program's assume TEXT; what the analysis discharged over is a
@@ -1104,11 +1147,43 @@ __all__ = [
     "ProbeInvariantViolated",
     "ProbeReport",
     "SEED_LABEL",
+    "STABILITY",
     "STRATEGIES",
     "VerifiedFalsified",
     "probe",
     "unverified_declarations",
 ]
+
+# ── the API stability level, written down ONCE ──────────────────────────────
+#
+# `DOCUMENTATION_ARCHITECTURE.md` §8.5's four-level table, whose two middle
+# levels are NOT synonyms: `provisional` is "may change in minor with a
+# deprecation cycle", guarantee "one minor's notice"; `experimental` is "may
+# change without notice", guarantee "none".  This module's heading said
+# PROVISIONAL while its own next sentence disclosed a first parameter that
+# changed name and type inside one release cycle from inside `__all__` --
+# which is a change with no notice, so the word was promising a deprecation
+# cycle nothing here can keep.  The level is `experimental`, and the honest
+# reading of it is that the `falsify` keyword, `probe()`'s signature and
+# every name in `__all__` above may change or be withdrawn in any release,
+# with no deprecation cycle and no notice.
+#
+# **It is a string and not a sentence because four other places state it**:
+# this module's docstring heading, `preconditions.check`'s `falsify`
+# paragraph, `docs/harness-api.md`'s argument table and
+# `docs/preconditions.md`'s listing.  They are held to THIS value -- read
+# out of this file, not retyped -- by
+# `tests/test_probe_stability_level.py::test_every_page_that_names_the_level_names_the_one_in_the_source`,
+# which is the same discipline `SKIP` gets from `WITHHELD` in
+# `tests/_repo_files.py` and `FALSIFY_MODES` gets from the pin below: two
+# copies of one fact is a drift waiting to happen, and prose is where this
+# repository's figures have always drifted.
+#
+# The level is about the SURFACE.  What the probe does not do is a different
+# axis entirely and is the six-item list in the module docstring; no level in
+# that table implies any of those six, and item 1 -- the analysis's region is
+# never read -- is not reachable from any level-word at all.
+STABILITY = "experimental"
 
 # The dial's accepted values.  `preconditions.check` spells the same pair
 # out as a literal rather than importing this, because importing this

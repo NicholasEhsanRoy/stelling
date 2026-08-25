@@ -124,6 +124,45 @@ The second example REFUTES with witness `0`: the configuration range
 admits the singular value and nothing in the code forbids it. That is a
 statement about your config space, not about your default.
 
+### The `falsify` pass is `experimental`, and it can only refute
+
+`check(harness, ..., falsify="sample")` switches on the falsification
+probe: after an obligation comes back VERIFIED, stelling executes your
+real program at concrete points inside your declared set and tries to
+find one that violates it. The default is `falsify=None`, and on that
+path `stelling.falsify` is never imported and the verdict is
+byte-identical to what it was before the keyword existed.
+
+**Stability: `experimental`.** That is the level from
+`DOCUMENTATION_ARCHITECTURE.md` §8.5, where `experimental` means *"may
+change without notice"* with guarantee *"none"*. It is deliberately **not**
+the neighbouring level `provisional`, which means *"may change in minor
+with a deprecation cycle"* and promises *one minor's notice* — a promise
+this keyword does not make. The keyword, `stelling.falsify.probe()`'s
+signature and every name in that module's `__all__` may change or be
+withdrawn in any release, including a patch, **with no deprecation cycle
+and no notice**: `probe()`'s own first parameter changed name and type
+inside 0.2.0's cycle while it was already exported. What the probe *does
+when it fires* is settled; what you call is not. The level is written
+down once, as `stelling.falsify.STABILITY`, and
+`tests/test_probe_stability_level.py` holds the word on this page to
+that string rather than to a memory of it.
+
+**A firing is a counterexample; a silence is nothing.** The probe can
+only refute. A firing is a concrete point at which your real program
+violates an obligation stelling had just certified — that is a defect in
+*stelling*, and it is worth everything. Finding nothing is a fact about
+the sampler and not evidence about the verdict: a probed VERIFIED is not
+a better VERIFIED, and nothing stelling returns, stamps or renders lets
+one read as though it were. Switch it on to hunt for tool defects, never
+to raise your confidence in a green run.
+
+**And with it on, `check()` may raise instead of returning** — one of the
+two classes is outside `Exception` entirely, which is the next section. The
+six things the probe does not do are listed in `stelling.falsify`'s own
+docstring; they are a separate matter from the level above, which is a
+statement about future changes to the surface and implies none of them.
+
 ### `check()` can also raise — and one of the two is outside `Exception`
 
 Those three statuses are what `check()` **returns**. With

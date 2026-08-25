@@ -196,24 +196,42 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     :mod:`stelling.falsify` is never imported, and every existing path is
     byte-identical) or ``"sample"`` to try, after a VERIFIED, to FALSIFY
     it by executing the real program at concrete points inside the
-    declared set. **SHIPPED AND PROVISIONAL**: audited — the fire
-    condition's exact reading is checked against an independent
-    ``Fraction`` oracle sharing no code with that module, on every run, by
-    ``tests/test_probe_oracle.py`` (297 gate readings, 270 obligation
-    readings, all 270 point-comparisons agreeing, and the counts asserted
-    there rather than quoted here — as is what that file does NOT reach,
-    which is 22 of the 32 single-edit defects it was measured against) —
-    and its SIGNATURE is not frozen;
-    ``probe()``'s own first parameter changed name and type inside this
-    release cycle. This sentence used to cite *"363 gate readings and 363
-    agreements"*, a figure that appeared nowhere in this repository except
-    the two sentences citing it; a number a reader cannot re-derive is the
-    same defect as a check that does not exist, which is a rule this
-    project applies to everything else it ships.
-    :mod:`stelling.falsify`'s docstring opens with the list of what
-    "provisional" names. **Two of its six items are a decline standing in
-    for a guard**: an ``ieee`` firing cannot tell a caller's own
-    ``libm_budget`` declaration from an unsound analysis, so the firing
+    declared set. **SHIPPED, AND ``experimental``** — the level in
+    ``DOCUMENTATION_ARCHITECTURE.md`` §8.5's table, where it means *"may
+    change without notice"* with guarantee *"none"*, so this keyword,
+    :func:`stelling.falsify.probe`'s signature and every name in that
+    module's ``__all__`` may change or be withdrawn in any release with
+    **no deprecation cycle and no notice**. It is not that table's
+    ``provisional``, which is the neighbouring level and DOES promise one
+    minor's notice; this paragraph and that module's heading both said
+    the wrong one of the two, next to their own disclosure that
+    ``probe()``'s first parameter changed name and type inside one
+    release cycle — which is a change with no notice, i.e. the definition
+    of the word they were not using. The level is read from
+    :data:`stelling.falsify.STABILITY`, which is the one place it is
+    written down.
+
+    **AUDITED IS A DIFFERENT QUESTION FROM THE LEVEL, AND IT IS
+    ANSWERED.** The fire condition's exact reading is checked against an
+    independent ``Fraction`` oracle sharing no code with that module, on
+    every run, by ``tests/test_probe_oracle.py`` (297 gate readings, 270
+    obligation readings, all 270 point-comparisons agreeing, and the
+    counts asserted there rather than quoted here — as is what that file
+    does NOT reach, which is 22 of the 32 single-edit defects it was
+    measured against). That is evidence about what the probe DOES; the
+    level above is a statement about what its SURFACE may do next, and
+    neither buys the other. This sentence used to cite *"363 gate
+    readings and 363 agreements"*, a figure that appeared nowhere in this
+    repository except the two sentences citing it; a number a reader
+    cannot re-derive is the same defect as a check that does not exist,
+    which is a rule this project applies to everything else it ships.
+    :mod:`stelling.falsify`'s docstring opens with the SIX DISCLOSURES,
+    which are a different axis from the level and are not implied by it:
+    a level is a promise about future changes to the surface, and those
+    six are what the instrument does not do today. **Two of its six items
+    are a decline standing in for a guard**: an ``ieee`` firing cannot
+    tell a caller's own ``libm_budget`` declaration from an unsound
+    analysis, so the firing
     message names the declaration instead of guessing; and the rational
     replay does not descend a loop or branch body, which this release
     GUARDS — the descent refuses a body that does not run once per

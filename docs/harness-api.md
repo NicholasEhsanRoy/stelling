@@ -898,7 +898,34 @@ check.falsify = None
 | `solver` | `None` (the full portfolio), `"z3"` or `"cvc5"` to restrict it; anything else raises `ValueError` at the call. See [Choosing a solver backend](choosing-a-solver-backend.md) |
 | `strict` | `False` (default) returns `DECLINED` for a query that cannot be transcribed; `True` re-raises instead |
 | `libm_budget` | a declared accuracy profile for `exp`/`pow` under `semantics="ieee"`, which decline without one. Passing it under `"real"` raises — see [Checking preconditions](preconditions.md) |
-| `falsify` | the falsification pass; see [Reading a verdict](reading-a-verdict.md) |
+| `falsify` | `None` (default, the probe never runs) or `"sample"`: the falsification pass. **Stability: `experimental`** — may change or be withdrawn without notice. With it set, `check` **may raise instead of returning**, and one of the two classes is a `BaseException`. It can only refute. See the paragraph below, [Checking preconditions](preconditions.md) and [Reading a verdict](reading-a-verdict.md) |
+
+**`falsify` is `experimental`, and that is a level and not an adjective.**
+`DOCUMENTATION_ARCHITECTURE.md` §8.5 defines four: `experimental` is *"may
+change without notice"*, guarantee *"none"* — as against the neighbouring
+`provisional`, which is *"may change in minor with a deprecation cycle"*,
+guarantee *"one minor's notice"*. `falsify` is assigned the first of those
+two and deliberately not the second. The keyword,
+`stelling.falsify.probe()`'s signature and every name in that module's
+`__all__` may change or go away in any release, including a patch, **with
+no deprecation cycle and no notice**; `probe()`'s own first parameter
+changed name and type inside 0.2.0's cycle while it was already exported.
+There is no deprecation promise here, and the level is not prose: it is
+`stelling.falsify.STABILITY`, and `tests/test_probe_stability_level.py`
+holds this page's word to that string.
+
+**Two things to know before you switch it on.** First, `check(...,
+falsify="sample")` **may raise instead of returning a verdict** —
+`stelling.falsify.VerifiedFalsified`, an `AssertionError`, when the probe
+executed your program and broke a VERIFIED; and
+`stelling.falsify.ProbeInvariantViolated`, which is a **`BaseException`**
+and therefore **not caught by `except Exception:`**. A batch caller that
+relies on `check` always returning must handle both, by name. Second,
+**a firing is a counterexample and a silence is nothing**: the probe can
+only refute, so finding no violation is a fact about the sampler and not
+evidence about the verdict, and a probed VERIFIED is not a better
+VERIFIED. [Checking preconditions](preconditions.md) has both in full,
+with the decline behaviour that is neither.
 
 **`strict` decides whether an unreadable query is a status or an
 exception.** By default a query stelling cannot transcribe comes back as
