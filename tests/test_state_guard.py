@@ -893,15 +893,64 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
 # had become `None` under it — and a report a maintainer cannot reproduce is
 # how a guard gets weakened.
 #
-# Latent when it was found, and counted rather than assumed:
+# Latent when it was found, and now HELD rather than counted.
 # `tests/test_tripwire_plugin.py` reaches `pytester.runpytest` — IN-PROCESS —
-# through the `_run` helper at its line 83, from FOURTEEN call sites, and not
-# one of them passes `-p _state_guard` (its args are
-# `tripwire_plugin_args()` and `deterministic_order_args()`). The nested
-# sessions in THIS file do pass it and are `subprocess.run`. What made it worth fixing rather than
-# recording is that the reaching edit is the idiom this very file already uses,
-# one argument away. The trajectory hangs off the session's `Config` now, so a
-# nested session gets a fresh one and the separation is BY CONSTRUCTION.
+# through its `_run` helper, and no call site there hands a nested session
+# `-p _state_guard`. The nested sessions in THIS file do pass it and are
+# `subprocess.run`. What made it worth fixing rather than recording is that
+# the reaching edit is the idiom this very file already uses, one argument
+# away. The trajectory hangs off the session's `Config` now, so a nested
+# session gets a fresh one and the separation is BY CONSTRUCTION.
+#
+# **THIS PARAGRAPH USED TO CARRY THE HELPER'S LINE NUMBER AND ITS CALL-SITE
+# COUNT, AND BOTH WERE FALSE.** It said line 83 from FOURTEEN sites; measured
+# at the commit that removed them, the helper was at line 98 with 24 sites,
+# and a later repair moved it again. Neither figure was ever held by
+# anything, which is why neither survived contact with a tree that moved —
+# and a count a reader cannot re-derive is the same defect as a check that
+# does not exist. The claim that carried the ARGUMENT was never the count; it
+# was the absence, so the absence is what
+# `test_no_nested_session_in_the_tripwire_file_loads_this_module` asserts and
+# the numbers are gone rather than corrected.
+
+
+def test_no_nested_session_in_the_tripwire_file_loads_this_module():
+    """No call in `tests/test_tripwire_plugin.py` passes `-p _state_guard`.
+
+    THE HALF OF THE PARAGRAPH ABOVE THAT IS A CLAIM RATHER THAN A STORY. That
+    file's `_run` helper reaches `pytester.runpytest` IN-PROCESS, so a nested
+    session there that loaded this module would share the outer session's
+    bookkeeping — the exact shape the trajectory fix exists to make
+    impossible. The fix makes it impossible BY CONSTRUCTION and this makes the
+    argument re-derivable, which the line number and call count it replaced
+    never were.
+
+    Read off the SYNTAX, not off the text: a string inside a `Call` node's
+    arguments is an argument to a nested session, and the same characters in a
+    comment or a docstring are prose about one. Grepping cannot tell those
+    apart, and a guard that fires on its own explanation is a guard that gets
+    deleted.
+    """
+    import ast  # noqa: PLC0415 - local to the one test that parses
+
+    path = pathlib.Path(__file__).resolve().parent / "test_tripwire_plugin.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    passed = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for arg in [*node.args, *(kw.value for kw in node.keywords)]
+        if isinstance(arg, ast.Constant) and arg.value == "_state_guard"
+    ]
+    assert not passed, (
+        "tests/test_tripwire_plugin.py hands `_state_guard` to a nested "
+        f"session at line(s) {passed}. Its sessions reach `pytester.runpytest` "
+        "IN-PROCESS, so loading this module there puts a nested session and "
+        "the outer one on the same bookkeeping — which is the defect the "
+        "trajectory-on-Config fix closed. If a nested session there genuinely "
+        "needs the guard, it needs a SUBPROCESS, the way this file's own "
+        "nested sessions get it."
+    )
 
 #: ``test_one``'s body for the two controls below: an in-process pytest session
 #: over a trivial, well-behaved tree, loading the SAME ``_state_guard`` module

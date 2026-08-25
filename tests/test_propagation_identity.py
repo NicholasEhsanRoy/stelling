@@ -1408,12 +1408,27 @@ def _member_names(sources):
     names. That pulls in `stelling.overflow`, which imports
     `stelling._tripwire.plugin` at module scope — and pytest cannot
     assertion-rewrite a plugin module that is already imported, so it issues
-    a `PytestAssertRewriteWarning`, which
-    `tests/test_tripwire_plugin.py`'s two `-W error::UserWarning` rows turn
-    into an `INTERNAL_ERROR`. Measured: 2 failed / 3828 passed with the
-    import sweep, 0 failed without it. **An instrument that changes the
-    process it measures is not an instrument**, and the two classes this
-    needs are the two it can read off objects it already holds.
+    a `PytestAssertRewriteWarning`. **Measured at the commit that removed the
+    sweep: 2 failed / 3828 passed with it, 0 failed without.** The two that
+    failed were `tests/test_tripwire_plugin.py`'s `-W error::UserWarning`
+    rows, which were then the only ones passing that flag to a nested
+    session. **An instrument that changes the process it measures is not an
+    instrument**, and the two classes this needs are the two it can read off
+    objects it already holds.
+
+    **THAT SENTENCE WAS IN THE PRESENT TENSE UNTIL THE CHAIN WAS CLOSED AT ITS
+    OTHER END, AND THE TENSE WAS THE WHOLE DEFECT.** It read that those two
+    rows *turn* the warning into an `INTERNAL_ERROR` — a live claim about a
+    file this one does not own, standing on a measurement taken once. Those
+    rows no longer reach the warning at all: they hand the plugin to the
+    nested session as an OBJECT, so the import that would need rewriting never
+    happens. Deleting the sweep fixed one importer and left behind an
+    invariant nobody could hold — *no test in this tree may import that module
+    in the outer process* — which a second importer went on to break, in a
+    third file, and which is why that repair is now at the nested session
+    rather than here. What is recorded above is a measurement and stays true;
+    what was wrong was writing it as a standing property of somebody else's
+    file.
     """
     import ast
     import dataclasses as dc
