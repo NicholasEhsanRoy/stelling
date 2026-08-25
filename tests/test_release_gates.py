@@ -600,6 +600,83 @@ def test_the_attributes_that_decide_whether_a_refusal_refuses():
     )
 
 
+def test_every_checkout_in_this_file_takes_the_WHOLE_history():
+    """The attribute that decides whether refusal point 1 CHECKS anything.
+
+    `actions/checkout@v4` fetches the triggering ref at DEPTH 1 by default, so
+    a tag build holds exactly one commit and every sha older than the tag is
+    unreachable. Part of what the tagged-tree job runs reads git HISTORY:
+    `tests/test_soundness_routing.py`'s four git-gated tests, and the
+    status-paragraph ancestry check in `tests/test_proposed_page_headers.py`.
+    At depth 1 they do not FAIL — they skip, or they refuse over the
+    environment — so a green tagged-tree job is compatible with nothing having
+    been decided about the tree being published.
+
+    DRIVEN, in a sandbox built the way that job builds its tree (`git init`;
+    one `git fetch` per the checkout config under test; `git checkout` of the
+    tag), with `deadbee` planted in a `docs/proposed-*.md` status paragraph
+    and the page restored byte-identically after each run:
+
+        depth 1 (the default)            `deadbee` 1 skipped
+        `fetch-depth: 0`                 `deadbee` 1 FAILED, named
+        `fetch-tags`, depth 1            `deadbee` 1 skipped, and the suite
+                                         red in a new place
+
+    THE SCAN READS `actions/checkout@`, NOT `actions/`, AND THAT DISTINCTION
+    IS THE DEFECT THAT KEPT THIS OPEN. `grep -c "uses: actions/"` reads 10 in
+    `ci.yml` and 4 in `release.yml`; in `ci.yml` all ten of those ARE
+    checkouts, so the grep is accidentally right there, while here two of the
+    four are `upload-artifact` and `download-artifact`, which take no
+    `fetch-depth` input at all. A comparison of the two workflows run on that
+    grep reports "4 checkouts here, none of them with `fetch-depth`" — and a
+    repair satisfying it on two of the four could have left a real checkout
+    shallow, because two of the four it counted are not checkouts.
+    Nothing is typed here: the steps are derived from the file, so a checkout
+    ADDED later without the key is a red rather than a silent depth-1 job.
+
+    NOT `fetch-tags: true`, and it is not a near-miss. Measured in the same
+    sandbox: fetching the tag refs at depth 1 makes `v0.1.0` RESOLVE while the
+    history stays one commit deep, so
+    `tests/test_soundness_log_reach.py`'s tag guard stops skipping and the
+    rule under it hard-fails — every cited commit unreachable, seven
+    commit-cited paragraphs read as uncovered. It converts a lost check into a
+    red release job. See `release.yml`'s header for the table.
+    """
+    lines = _code_lines(_release_text())
+    assert lines, "`_code_lines` returned nothing; this pin would be vacuous"
+    steps = [
+        i for i, line in enumerate(lines)
+        if line.strip().startswith("- uses: actions/checkout@")
+    ]
+    assert steps, (
+        "no `actions/checkout` step in `release.yml`. Either the workflow "
+        "stopped checking anything out, or this scan has stopped finding the "
+        "steps it is meant to hold — both are reasons to look."
+    )
+    shallow = []
+    for i in steps:
+        indent = len(lines[i]) - len(lines[i].lstrip())
+        body = []
+        for line in lines[i + 1:]:
+            if not line.strip():
+                continue
+            if len(line) - len(line.lstrip()) <= indent:
+                break
+            body.append(line.strip())
+        if "fetch-depth: 0" not in body:
+            shallow.append((lines[i].strip(), body))
+    assert not shallow, (
+        f"{len(shallow)} of the {len(steps)} `actions/checkout` steps in "
+        f"`release.yml` no longer carry `fetch-depth: 0`: {shallow}. The "
+        "default is depth 1, and at depth 1 the history-reading checks in the "
+        "tagged-tree job SKIP rather than fail — a green refusal point 1 that "
+        "decided nothing about which commits the shipped `docs/proposed-*.md` "
+        "headers name. `ci.yml` carries this on all ten of its checkouts, "
+        "under a comment giving the same reason. `fetch-tags` is not the "
+        "substitute: see this test's docstring and `release.yml`'s header."
+    )
+
+
 def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
     """MUTANT 5, and the reason it is worth a test rather than a proof-read: a
     number in a comment is exactly the thing nothing checks, and this one had

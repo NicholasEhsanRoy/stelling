@@ -422,6 +422,166 @@
 # that step — because it reads FILENAMES and never opens either file. A corrupt tarball reached a step that dies
 # without speaking THROUGH A GREEN GATE. See beside that step for the table and
 # for what `pipefail` does and does not catch.
+#
+# ── BOTH CHECKOUTS TAKE THE WHOLE HISTORY NOW, AND THAT IS A BEHAVIOUR ──────
+# ── CHANGE ─────────────────────────────────────────────────────────────────
+#
+# THE FIRST COMMIT IN THIS CHAIN TO MOVE THIS FILE'S CODE, said first because
+# every one before it was comment-only and said so. With every comment line
+# stripped by `tests/test_release_gates.py`'s own `_code_lines`, this file was
+# 186 lines and byte-identical at `0ba04ba`, `f470d96`, `5de3ac2`, `bcdec4a`
+# and `6fa2e7f` — one sha256,
+# ee62b9ec8353c8746351ae0bf15957f14b353ccddfa95502ebed2279cf890709, five
+# ways, and `eb26d48` before them is the last commit that moved it. It is
+# 188 lines now, sha256
+# 40a96feaf4394974a0ebdc2b9fc8357d27ab59b38e2701196dea215b02f5a055, and the
+# two added lines are the whole of the difference: `fetch-depth: 0` in each of
+# this file's two `actions/checkout@v4` steps. Parsed with PyYAML and compared
+# leaf by leaf against `6fa2e7f`, this workflow gains exactly two leaves —
+# `jobs.test.steps[0].with.fetch-depth` and
+# `jobs.build.steps[0].with.fetch-depth` — with nothing else added, removed or
+# changed, and the three step bodies `tests/test_release_gates.py` extracts
+# and EXECUTES are byte-identical across the change: the sdist step 162 lines
+# a247ed53…, the tag step 87 lines 418583d9…, the manifest step 25 lines
+# a55591b1…, the same digests as at `6fa2e7f`.
+#
+# THERE ARE TWO CHECKOUTS IN THIS FILE, NOT FOUR, AND THE MISCOUNT IS PART OF
+# WHY THIS STOOD. The comparison that opened it read "`ci.yml` has ten
+# `actions/checkout` steps and all ten carry `fetch-depth: 0`; `release.yml`
+# has four and none of them do", and FOUR is what `grep -c "uses: actions/"`
+# says here. In `ci.yml` all ten `uses: actions/` lines ARE checkouts, so that
+# grep is accidentally right in the file it was calibrated on; in this file
+# two of the four are `upload-artifact` and `download-artifact`, which take no
+# `fetch-depth` input at all. RE-DERIVED by reading both files rather than
+# grepping them: `ci.yml` carries `- uses: actions/checkout@v4` at lines 134,
+# 191, 277, 376, 523, 597, 907, 1301, 1340 and 1606 — ten steps, ten
+# `fetch-depth: 0`, eight of them under one identical comment, one under a
+# reason of its own (the property suite materialises old revisions with `git
+# archive`) and one bare. This file carries two, in `test` and in `build`; the
+# `publish` job checks nothing out at all. So the repair is two lines and not
+# four — and a claim of four would have gone on being "true" with one of the
+# two real checkouts left shallow.
+#
+# WHY, IN `ci.yml`'s OWN WORDS, WHICH WERE ALREADY IN THIS REPOSITORY:
+#
+#   "FULL HISTORY, because the routing verification reads `CHANGELOG.md` AT
+#    THE COMMIT THE MANIFEST NAMES and a depth-1 clone cannot reach it. With
+#    the default depth those checks SKIP, so the one guarantee batch B8c
+#    exists to provide -- that every routed block arrived, checked against the
+#    source it left -- was not exercised by any job. Measured on a `--depth 1`
+#    clone of this repository: `19 passed, 8 skipped`, and the eight are the
+#    whole git-gated set."
+#
+# The job below runs those same tests. The reasoning was written down and not
+# carried across to the workflow whose mistakes cannot be unpublished, and
+# that is the whole of the finding.
+#
+# WHAT IT BUYS, DRIVEN IN THE JOB'S OWN TREE SHAPE AND ITS OWN LANE. The
+# sandbox is built the way `actions/checkout@v4` builds one — `git init`; `git
+# remote add`; ONE `git fetch` with the refspec and the depth the config under
+# test implies; `git checkout --force` of the tag — over a mirror of this
+# repository with `v0.2.0` cut on a tree carrying this file AND the disclosed
+# skips a sibling is landing for the same defect. The tree is identical in all
+# three rows, so the only variable is the checkout. The lane is the one this
+# job installs (`.[solvers,jax]`), `STELLING_SKIP_INVENTORY_VERDICT` set,
+# which is the second refusal point in the same step. `deadbee` was planted in
+# `docs/proposed-tier-clause.md`'s **Status:** paragraph and the page restored
+# byte-identically (sha256) after every run.
+#
+#   config                    the sandbox        `deadbee` planted
+#   ────────────────────────  ─────────────────  ─────────────────────────────
+#   depth 1 (as it stood)     shallow, 1         1 SKIPPED — with a warning
+#                             commit, `v0.1.0`   naming it, and nothing red
+#                             unresolvable
+#   `fetch-depth: 0` (this)   not shallow,       1 FAILED, named: "what is
+#                             1079 commits       wrong is the PAGE naming a
+#                                                commit that is not here"
+#   `fetch-tags`, depth 1     shallow, 1         1 SKIPPED — unchanged, and
+#                             commit, `v0.1.0`   the suite red elsewhere
+#                             RESOLVES
+#
+#   config                    the whole suite, that sandbox, that lane
+#   ────────────────────────  ──────────────────────────────────────────────
+#   depth 1 (as it stood)     4669 passed, 20 skipped, exit 0, verdict=made
+#   `fetch-depth: 0` (this)   4679 passed, 10 skipped, exit 0, verdict=made
+#   `fetch-tags`, depth 1     1 failed, 4669 passed, 19 skipped, exit 1,
+#                             verdict=made
+#
+# THE TEN REMAINING SKIPS IN THE MIDDLE ROW ARE ALL ABSENT LIBRARIES —
+# `hypothesis` seven times, `blackjax` twice, `pytest-xdist` once — and not one
+# of them is a check a checkout setting could restore. The first row's twenty
+# are those same ten PLUS the ten this line buys back.
+#
+# THE MIDDLE ROW IS THE POINT AND THE FIRST ROW IS WHAT IT REPLACES. A green
+# tagged-tree job that SKIPPED its own history checks is exactly as green as
+# one that ran them, and the skips are what a sibling's repair bought: they
+# stop the job refusing the publish over an environment, and they do not make
+# it verify anything. TEN TEST NODES MOVE FROM SKIPPED TO PASSED across the
+# three files that read history — `tests/test_soundness_routing.py` 8 (its
+# four git-gated tests over two sections),
+# `tests/test_proposed_page_headers.py` 1 (the status-paragraph ancestry
+# check) and `tests/test_soundness_log_reach.py` 1 (the tag-tree citation
+# rule): `51 passed, 10 skipped` over those three files at depth 1 against
+# `61 passed` with this line.
+#
+# AND ON THIS BRANCH'S TREE ALONE, WITHOUT THAT SIBLING — said here because
+# this line does not depend on that branch landing, and because it is the
+# sharper result. Same sandbox, the tag cut on this branch's own tree: at
+# depth 1 those three files are `1 failed, 71 passed, 8 skipped`, and the red
+# is the ancestry check dying on `89413c2` — a REAL and CORRECT sha that this
+# environment cannot reach. With this line they are `80 passed`, 0 skipped,
+# and the whole suite in that sandbox is `4675 passed, 10 skipped`, exit 0,
+# `verdict=made`.
+# The `deadbee` plant is `1 failed` in BOTH, and the two reds are not the same
+# red: at depth 1 it names `89413c2` and says nothing at all about the plant;
+# at full depth it names `deadbee`. So this line closes refusal point 1 for
+# this branch on its own, and closes it by making the check DECIDE rather than
+# by disclosing that it cannot.
+#
+# NOT `fetch-tags: true`, AND THIS IS A MEASUREMENT AND NOT A WARNING TAKEN ON
+# TRUST. Fetching the tag refs at depth 1 makes `refs/tags/v0.1.0` RESOLVE
+# while the history stays one commit deep, which is the worst of both: the
+# guard in `tests/test_soundness_log_reach.py` that skips when the tag is out
+# of reach stops firing, and the rule under it hard-fails at line 1644 —
+# "7 claim(s) that the released `v0.1.0` does not carry a defect cite nothing
+# this check can decide", because every cited commit is unreachable and every
+# commit-cited paragraph therefore reads as uncovered. Driven in the sandbox
+# above: `1 failed, 51 passed, 9 skipped` over the three files, against
+# `61 passed` with `fetch-depth: 0`. It does not restore the `deadbee` check
+# either — that row is still `1 SKIPPED`. It converts a lost check into a red
+# release job, in a new place, on a tree nobody can fix after the tag is cut.
+# THE FIX IS DEPTH, NOT TAGS.
+#
+# WHAT IT COSTS, AND THIS REPOSITORY'S HISTORY IS NOT SMALL. `fetch-depth: 0`
+# fetches EVERY BRANCH AND EVERY TAG, not just the tagged commit's ancestry.
+# Measured on this box over `file://`, three cold runs each, same origin and
+# same tag: depth 1 is 565 objects, 4.61 MiB packed, 0.56/0.57/0.56 s; the
+# same fetch with no depth limit is 7510 objects, 7.51 MiB, 2.05/2.11/2.09 s.
+# Against this repository AS IT ACTUALLY STANDS — 269 branch heads, 2 tags and
+# 1393 commits reachable from them, of which 1070 are on this branch — the
+# unrestricted fetch is 9980 objects and 10.12 MiB in 2.25/2.22/2.24 s,
+# because all 269 heads come too. So it is roughly twice
+# the bytes, eighteen times the objects and four times the wall clock, and all
+# three grow with the branch list rather than with the release. On a hosted
+# runner the wall time is network-bound and these seconds are not the ones you
+# will see; the object and byte counts are the figures that transfer. TWO JOBS
+# PAY IT AND ONLY ONE NEEDS IT — see beside the `build` job's checkout, where
+# that is said rather than implied. It is bought deliberately: a few seconds
+# per release against the only checks this repository has on which commits the
+# shipped `docs/proposed-*.md` headers name, in the one workflow whose
+# mistakes cannot be unpublished.
+#
+# AND IT IS PINNED NOW, because a line whose absence is silent is a line that
+# comes back off.
+# `tests/test_release_gates.py::test_every_checkout_in_this_file_takes_the_WHOLE_history`
+# derives the checkout steps FROM THIS FILE — matching `actions/checkout@` and
+# not `actions/`, for the reason the count paragraph above gives — and fails
+# if any of them lacks `fetch-depth: 0`. Driven RED five ways, each alone:
+# either line deleted; both deleted, which is this file at `6fa2e7f`;
+# `fetch-depth: 0` rewritten to `fetch-depth: 1`; and a NEW `actions/checkout`
+# step added to `publish` without the key. It types no count, so a checkout
+# added later is covered without a re-derivation — which the header count and
+# the four kinds of ordinal above still are not.
 
 name: release
 on:
@@ -439,6 +599,30 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # FULL HISTORY, AND IT IS THE DIFFERENCE BETWEEN A CHECK AND A SKIP.
+          # This job is refusal point 1, and some of what it runs reads git
+          # HISTORY rather than the git INDEX. At the default depth of 1 those
+          # checks do not fail — they SKIP, or they refuse over the
+          # environment — and neither outcome decides anything about the tree
+          # being published. Driven in a sandbox built the way this job builds
+          # its tree (`git init`; one `git fetch` of the tag ref; `git
+          # checkout` of the tag): at depth 1 `tests/test_soundness_routing.py`
+          # is `8 skipped`, and the status-paragraph ancestry check in
+          # `tests/test_proposed_page_headers.py` cannot resolve a single sha
+          # it is given — including `deadbee`, planted there as a control.
+          # With this line the same sandbox decides all of them, and the
+          # planted sha is the one it names. The table, the `fetch-tags`
+          # measurement and the cost are in this file's header.
+          #
+          # `ci.yml` HAD ALREADY MADE THIS DECISION, at every one of its ten
+          # checkout steps, under a comment giving exactly this reason: "FULL
+          # HISTORY, because the routing verification reads `CHANGELOG.md` AT
+          # THE COMMIT THE MANIFEST NAMES and a depth-1 clone cannot reach it.
+          # With the default depth those checks SKIP, so the one guarantee
+          # batch B8c exists to provide -- that every routed block arrived,
+          # checked against the source it left -- was not exercised by any
+          # job." This job runs those same tests.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
       - run: uv pip install -e ".[solvers,jax]" pytest
@@ -513,6 +697,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # FULL HISTORY HERE TOO, AND NOT BECAUSE THIS JOB NEEDS IT TODAY.
+          # That is said plainly rather than implied, because a line justified
+          # by a reason that is not its own is a line the next reader deletes.
+          # Every git call in this job is `git ls-files` — the INDEX, which a
+          # depth-1 checkout has in full — and the version hatchling stamps
+          # into both artefacts is read from `[tool.hatch.version]`'s path,
+          # never from a tag or a `git describe`. Nothing here is measurably
+          # different with it or without it, TODAY.
+          #
+          # What it buys is that history is a property of THIS FILE rather
+          # than of one step in it. The asymmetry this line closes went
+          # unnoticed for as long as it did because nobody comparing the two
+          # workflows was comparing steps: `grep -c "uses: actions/"` reads 10
+          # in `ci.yml` and 4 here, and in `ci.yml` all ten of those ARE
+          # checkouts while here two of the four are `upload-artifact` and
+          # `download-artifact`, which have no `fetch-depth` input at all. Two
+          # checkouts that agree cannot be half-fixed by a grep that cannot
+          # tell them apart. Same clone, same cost as the job above.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       # Driven for real at a61c01f (no tag, nothing uploaded): 279-member
       # `stelling-0.1.0.tar.gz` and 28-member `stelling-0.1.0-py3-none-any.whl`.
