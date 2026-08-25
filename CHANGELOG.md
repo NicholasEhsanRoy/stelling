@@ -432,11 +432,37 @@ only release"* while that was so.)
   --collect-only -q -p no:randomly`, and asserts the two relations the
   incident above actually rests on; a second check reads this page and
   refuses that coordinate in seven spellings rather than the one it was last
-  written in, and refuses the *unanchored* form of each, because a figure
-  with the commit it was read at against it is a measurement and not a
-  coordinate of somebody's tree; and a third holds this entry to carrying
-  the phrases the disclosure turns on, because taking the numeral off took
-  with it the only thing that had been keeping them on the page.
+  written in; and a third holds this entry to carrying the phrases the
+  disclosure turns on, because taking the numeral off took with it the only
+  thing that had been keeping them on the page.
+
+  **AND NAMING A COMMIT BUYS A READING OF A RUN PAST THAT SECOND CHECK, NOT
+  A COORDINATE OF A COLLECTION.** The seven spellings are two kinds. Three
+  of them are shapes a reading of a NAMED RUN takes — a count of tests, an
+  `N of M` ratio, a run's own outcome line — and against those a sha is the
+  right remedy and was a missing one: this entry's own **zero** lost its
+  denominator to the check before the escape existed, which is strictly less
+  disclosure on the one paragraph whose reason for existing is *the one
+  number a reader can go and reproduce*. The other four are coordinates of a
+  COLLECTION — an ordinal, a rank in digits, a rank in words, a count of
+  files — and **no commit buys those past at all**, because what a command
+  collects is a property of the ENVIRONMENT rather than of the tree. At one
+  and the same sha this tree's own collect names one number of files in the
+  default lane and the same number in a lane on the jax 0.10 series, one
+  fewer in each of the two CI lanes that carry no `sympy`, and about half as
+  many in the zero-dep lane, where it does not reach this file at all. A
+  rank with a sha written against it is therefore *false* wherever the
+  denominator moved and *meaningless* where there is no rank to have,
+  **at the sha it names** — so it is refused anchored or not, and the only
+  remedy offered for it is the derived figure. Applied to all seven alike,
+  the escape did not merely fail to catch that spelling; it opened it, and a
+  sentence putting this file's rank and the file count on this page behind a
+  sha was green from end to end.
+  Two mechanical repairs go with the split: an all-decimal backticked
+  integer is no longer read as an address — `16777219` and `2147483647` are
+  on this very page as subject matter, and each of them was buying figures
+  past — and the sentence the escape is scoped to now breaks at a bullet, so
+  an anchor in one agent's entry can no longer exempt a figure in another's.
 
   **AND THAT THIRD CHECK HOLDS PHRASES, NOT MEANING — WHICH BELONGS ON THE
   PAGE IT GUARDS RATHER THAN ONLY IN ITS OWN DOCSTRING.** It is a
