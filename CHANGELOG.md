@@ -1044,7 +1044,8 @@ it** (`fix/B15-trace-gate-observation`) —
 (`fix/B13-instrument-reach`) — [SF-0.2.0-10](SOUNDNESS.md#sf-020-10)
 
 - **SF-0.2.0-11** — A verdict replayed on a different jax now says so.
-  Versions: 0.2.0 development builds only. [Detail](SOUNDNESS.md#sf-020-11)
+  Versions: `v0.1.0` and 0.2.0 development builds.
+  [Detail](SOUNDNESS.md#sf-020-11)
 
 - **SF-0.2.0-12** — The const-fold tripwire's "this release has never been
   read" carve-out no longer waves through real jax releases. Versions: 0.2.0

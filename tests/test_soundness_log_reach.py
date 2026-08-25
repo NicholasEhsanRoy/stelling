@@ -3,11 +3,12 @@
 
 """How many entries of `SOUNDNESS.md`'s `## Log` reach a RELEASE — counted.
 
-**THE DIGIT HAS HELD EIGHT VALUES.** *"(no releases yet)"*, then S11
+**THE DIGIT HAS HELD NINE VALUES.** *"(no releases yet)"*, then S11
 alone, then three, then four and five at the same moment on two branches,
-then six, then seven, then nine, and now eleven. The first six were
-corrections made by a person re-reading the log; the seventh and the
-eighth were not — `Versions:` fields moved and the derived count followed
+then six, then seven, then nine, then eleven, and now twelve. The first
+six were
+corrections made by a person re-reading the log; the last three were not
+— `Versions:` fields moved and the derived count followed
 them, which is the paragraph after
 next. Not one of the five noticed that the 2026-08-15 B6 entry for audit
 finding **S12&prime;** had carried the headline `PRESENT IN THE RELEASED
@@ -47,37 +48,58 @@ to nine.
 
 **AND THE SECOND HALF OF THAT IS THE HALF NO CHECK CAN REACH.** Those six
 are visible to a comparison between a bullet's DATE and its field: a
-post-tag date cannot have an event that was over pre-tag. Two more moved
-on 2026-08-25 — S12&Prime; and M17 — and they are the mirror: post-tag
+post-tag date cannot have an event that was over pre-tag. THREE more moved
+on 2026-08-25 — S12&Prime;, M17 and the 2026-08-18 query-identity entry —
+and they are the mirror: post-tag
 dates carrying *0.2.0 development builds only* for defects the released
 `v0.1.0` already had. Nothing about those bullets is internally
 inconsistent, so the date comparison is structurally silent over them;
 they were found by driving each entry against an extracted `v0.1.0`. That
-correction moved the entries count from nine to eleven, and it is why the
+correction moved the entries count from nine to twelve — in TWO passes,
+nine to eleven and then eleven to twelve, the second found by a blinded
+audit of the first, one bullet further down the same page. It is why the
 paragraph above says a closed set holds the vocabulary and not the truth
-rather than saying the fields have now been checked.
+rather than saying the fields have now been checked, and it is why this
+file now holds the CHANGELOG disclosures instead: what a document check
+can reach is whether a reader is TOLD, never whether the telling is true.
 
-**THE THREE UNITS, WHICH ARE 11, 12 AND 9.** They are different questions
+**THE THREE UNITS, WHICH ARE 12, 12 AND 10.** They are different questions
 and this file keeps them apart, because the count was wrong twice by
-answering one of them with another's answer:
+answering one of them with another's answer — and the first two units
+being EQUAL today makes that easier to do, not harder:
 
 * **entries** — top-level `## Log` bullets whose `Versions:` field names
-  `v0.1.0`. Eleven.
-* **findings** — audit 0.2.0 findings reaching `v0.1.0`. Twelve: one more
-  than the entries, because S14 has a routed detail section
-  (`SF-0.2.0-59`) and its own reach declaration but no `## Log` bullet.
+  `v0.1.0`. Twelve.
+* **findings** — audit 0.2.0 findings reaching `v0.1.0`. Twelve: the same
+  NUMBER as the entries and a different SET. S14 has a routed detail
+  section (`SF-0.2.0-59`) and its own reach declaration but no `## Log`
+  bullet; the 2026-08-18 query-identity entry has a bullet and is a B13
+  instrument fix rather than an audit finding. The two differences cancel
+  in the digit and nowhere else.
 * **one-liners** — `CHANGELOG.md` entries carrying the `v0.1.0` version
-  field IN `### Soundness fixes`. Nine: three fewer than the findings,
-  because S15 and S16 share `SF-0.2.0-14`, and because M12 and M17 have
-  no soundness-fix one-liner at all — their bullets are in *Float32 /
-  float16 / bfloat16 IEEE mode* and *Verification pipeline*, and both
-  now carry the version field there, where this count does not look and
-  a changelog-only reader does.
+  field IN `### Soundness fixes`. Ten: two fewer than the findings, over
+  four terms and not three. S15 and S16 share `SF-0.2.0-14` (−1); M12 and
+  M17 have no soundness-fix one-liner at all (−2) — their bullets are in
+  *Float32 / float16 / bfloat16 IEEE mode* and *Verification pipeline*,
+  and both carry the version field there, where this count does not look
+  and a changelog-only reader does; and `SF-0.2.0-11` carries the field
+  without being an audit finding at all (+1).
 
 Each numeral in the paragraph is compared against the thing it counts,
 and the findings numeral against the list written beside it in that same
 paragraph — so a finding added to the list without the digit, or a digit
 moved without the list, is a failure either way round.
+
+**AND THE TWO DISCLOSURES THE ONE-LINER COUNT DELIBERATELY DOES NOT LOOK
+AT ARE HELD BY THEIR OWN CHECK NOW.** M12's and M17's `v0.1.0`
+disclosures were added by hand on 2026-08-25 at a site no derivation
+reached: not their phrase (a fourth spelling would have passed), not their
+presence (deleting both would have passed), not agreement with the
+`## Log` bullets they mirror. A page whose whole argument is that a
+hand-maintained figure beside a derived one rots does not get to add two
+hand-maintained disclosures and call the gap closed, so
+`test_the_v010_disclosures_outside_the_routed_sections_are_a_partition`
+makes them a two-way partition against the paragraph that names them.
 """
 
 from __future__ import annotations
@@ -126,6 +148,19 @@ _LINERS_RE = re.compile(
     re.S,
 )
 
+#: A finding that reaches `v0.1.0` and has NO `### Soundness fixes`
+#: one-liner, together with the `CHANGELOG.md` section its bullet lives in
+#: — as the one-liner paragraph itself writes the pair. Read out of the
+#: page rather than listed here: a list here would be a fourth
+#: hand-maintained copy of the fact this file exists to stop copying.
+#: Run over a WHITESPACE-NORMALISED paragraph — the page wraps at 72
+#: columns and both of today's two sentences wrap mid-clause, so a pattern
+#: that reads the file's own line breaks matches one of them and not the
+#: other, which is worse than matching neither.
+_DISCLOSED_ELSEWHERE = re.compile(
+    r"(?P<who>[A-Za-z0-9&;]+)'s bullet is in \*(?P<sec>[^*]+)\*"
+)
+
 
 def _numeral(word: str) -> int | None:
     return int(word) if word.isdigit() else _NUMBER_WORD.get(word.lower())
@@ -141,14 +176,26 @@ def _numeral(word: str) -> int | None:
 #: **THE NUMBER IS PINNED BY THE DOCUMENT AND NOT BY THIS COMMENT**, in
 #: `test_an_ENTRY_CANNOT_BE_HIDDEN_IN_THE_LOGS_PREAMBLE` — every other leg
 #: down there derives its plant FROM this constant, so until 2026-08-22 the
-#: constant checked itself and `60 -> 6000` was green. Today's preamble is 42
-#: non-blank lines and the median `## Log` entry is 146 — so the 18 lines of
-#: headroom admit an explanation and refuse a typical entry, which is the
-#: argument, measured, at both ends. **The test below re-derives all three
-#: and asserts the relations between them**, so the digits typed here are
-#: illustration and not the check — which is what they have to be: the
-#: preamble was 21 lines and the median 135 when this comment was last
-#: written by hand, and both moved under it twice in three days.
+#: constant checked itself and `60 -> 6000` was green. The argument for the
+#: value is that the HEADROOM above today's preamble admits an explanation
+#: and refuses a typical entry, and that argument is measured at both ends
+#: down there: **the test below re-derives today's preamble length, the
+#: median `## Log` entry and the headroom between them, and asserts the
+#: relations.**
+#:
+#: **NO FIGURE IS TYPED HERE ANY MORE, BECAUSE THE TYPED ONES WENT STALE
+#: TWICE IN THREE DAYS AND THIS COMMENT SAID SO WHILE BEING ONE OF THEM.**
+#: It carried the preamble length and the headroom as digits, two lines
+#: under its own warning that both "moved under it twice in three days".
+#: Measured on `SOUNDNESS.md` at each commit that touched this file, the
+#: preamble has been 21 non-blank lines (`68b219d`, `1f55eef`), 34
+#: (`1242da4`), 42 (`c198a8d`) and 48 (`161ead8`) — and the comment read 21
+#: at `1242da4` and 42 at `161ead8`, wrong at both, the second time written
+#: by the pass that added six preamble lines and left the numeral alone. In
+#: the file whose subject is derived-versus-typed figures, an illustration
+#: standing beside a derivation is the defect and not a convenience, so it
+#: is gone: the assertions below print all three values in their failure
+#: messages, which is where a reader who needs a live one should get it.
 _PREAMBLE_MAX_LINES = 60
 
 #: A list item at column 0. `- ` is an entry; `* ` and `+ ` are the other two
@@ -526,6 +573,249 @@ def test_the_one_liner_count_is_the_number_of_one_liners_that_carry_the_field():
     )
 
 
+def _one_liner_paragraph(soundness: str) -> str:
+    """The blank-line-delimited paragraph that states the one-liner count.
+
+    Scoped to the paragraph and not to the file because
+    :data:`_DISCLOSED_ELSEWHERE` is a sentence SHAPE, and the shape is
+    cheap enough that a second entry could grow one elsewhere and be read
+    as an accounting of the changelog disclosures. The accounting is one
+    paragraph; so is the search.
+    """
+    m = _LINERS_RE.search(soundness)
+    assert m, (
+        "SOUNDNESS.md no longer states how many `CHANGELOG.md` one-liners "
+        "carry the `v0.1.0` version field, so the paragraph that accounts "
+        "for the disclosures OUTSIDE `### Soundness fixes` cannot be found "
+        "either."
+    )
+    start = soundness.rfind("\n\n", 0, m.start())
+    end = soundness.find("\n\n", m.end())
+    return soundness[0 if start < 0 else start:len(soundness) if end < 0 else end]
+
+
+def _changelog_sections(changelog: str) -> list[tuple[str, str]]:
+    """`(### heading, body)` for every `### ` section of `CHANGELOG.md`.
+
+    A `## ` release heading CLOSES the open section rather than being
+    swallowed by it: `### Known limitations (0.2.0)` is the last `### ` of
+    the 0.2.0 release and the next one belongs to 0.1.0, so a naive split
+    on `### ` alone would file every line of the 0.1.0 preamble under a
+    0.2.0 heading. Nothing in this tree turns on that today; a section
+    reader that is wrong about which release a line is in would be.
+    """
+    out, heading, body = [], None, []
+    for line in changelog.split("\n"):
+        if line.startswith("### "):
+            if heading is not None:
+                out.append((heading, "\n".join(body)))
+            heading, body = line.rstrip(), []
+        elif line.startswith("## "):
+            if heading is not None:
+                out.append((heading, "\n".join(body)))
+            heading, body = None, []
+        elif heading is not None:
+            body.append(line)
+    if heading is not None:
+        out.append((heading, "\n".join(body)))
+    return out
+
+
+def test_the_v010_disclosures_outside_the_routed_sections_are_a_partition():
+    """THE `v0.1.0` DISCLOSURES A CHANGELOG-ONLY READER DEPENDS ON, HELD.
+
+    Two audit findings that reach the released `v0.1.0` — M12 and M17 —
+    have no `### Soundness fixes` one-liner, so the routing check's rule
+    that every one-liner carries a version field from the closed set does
+    not reach them. Their bullets live in ordinary feature sections, and
+    until 2026-08-25 those sections carried no `Versions:` field at all: a
+    reader of `CHANGELOG.md` alone got NO disclosure for either, about an
+    artefact that is on PyPI today.
+
+    **THE DISCLOSURES ADDED THAT DAY WERE HELD BY NOTHING**, which is the
+    whole reason this test exists. Not their phrase — a fourth spelling of
+    the version field would have passed. Not their presence — deleting
+    both would have passed, because `### Soundness fixes` carries ten of
+    its own and any "somewhere in `CHANGELOG.md`" check reads those.
+    Not agreement with the `## Log` bullets they mirror. A page whose
+    entire argument is that a hand-maintained figure beside a derived one
+    rots does not get to close a gap with two hand-maintained sentences at
+    a site no derivation reaches.
+
+    So this is a PARTITION, in both directions, over the sections OUTSIDE
+    the routed ones:
+
+    * what `CHANGELOG.md` carries — every `### ` section, other than the
+      routed ones, whose body contains :data:`LINER_V010`, which is
+      derived from `_release_record.VERSION_FIELDS` and not typed here;
+    * what `SOUNDNESS.md` accounts for — every section named by the
+      one-liner paragraph's own "X's bullet is in *section*" sentences,
+      read off a whitespace-normalised copy of that paragraph.
+
+    Equality, so a disclosure that disappears is caught on one side and a
+    disclosure nothing accounts for is caught on the other. The routed
+    sections are excluded because their one-liners are already held by
+    `tests/test_soundness_routing.py`; a `v0.1.0` disclosure appearing in
+    one of them is not this test's business and is not a hole.
+
+    **DRIVEN RED FOUR WAYS**, on the real `CHANGELOG.md`, restored
+    byte-identically (sha256 verified) after each and `11 passed` on the
+    restored file. Every one is `1 failed, 10 passed`:
+
+    * the `Versions:` sentence DELETED from `### Verification pipeline` —
+      names that section as accounted for and absent;
+    * the same field REWORDED to a fourth spelling
+      (`Versions: v0.1.0 and later.`) — the same red, which is what makes
+      the phrase's derivation from `VERSION_FIELDS` load-bearing rather
+      than decorative;
+    * BOTH disclosures deleted — names both sections, where a
+      "somewhere in `CHANGELOG.md`" check would have stayed green;
+    * an unaccounted disclosure ADDED to `### SMT emission extensions` —
+      names that section as present and unaccounted, which is the
+      direction a one-sided check has no way to see.
+
+    **WHAT THIS DOES NOT DO**, said here rather than left to be assumed:
+    it does not check that a disclosure is TRUE. `## Log`'s own closing
+    paragraphs carry that limit in full — a field of the form *0.2.0
+    development builds only* on a defect the tag actually carries is
+    consistent with every date and every document in this tree, and only
+    running an extracted `v0.1.0` refutes it. This test holds the
+    TELLING, which is the half a document check can reach.
+    """
+    soundness = SOUNDNESS.read_text(encoding="utf-8")
+    changelog = CHANGELOG.read_text(encoding="utf-8")
+
+    para = " ".join(_one_liner_paragraph(soundness).split())
+    named = {
+        m.group("sec").strip(): m.group("who")
+        for m in _DISCLOSED_ELSEWHERE.finditer(para)
+    }
+    assert named, (
+        "the `## Log` paragraph stating the one-liner count names no "
+        "`CHANGELOG.md` section as carrying a `v0.1.0` disclosure for a "
+        "finding with no `### Soundness fixes` one-liner. Two findings are "
+        "in that position (M12 and M17) and their disclosures are the only "
+        "thing a changelog-only reader has. If that has genuinely stopped "
+        "being true — both findings gained a soundness one-liner — retire "
+        "this check deliberately and say so; do not let an empty "
+        "accounting read as a clean one."
+    )
+
+    routed = {section.heading for section in SECTIONS}
+    found = {
+        heading
+        for heading, body in _changelog_sections(changelog)
+        if heading not in routed and LINER_V010 in " ".join(body.split())
+    }
+    want = {f"### {name}" for name in named}
+    assert found == want, (
+        f"the `v0.1.0` disclosures outside the routed changelog sections "
+        f"do not match the accounting in `SOUNDNESS.md`.\n"
+        f"  accounted for and ABSENT from CHANGELOG.md: "
+        f"{sorted(want - found)}\n"
+        f"  present in CHANGELOG.md and UNACCOUNTED for: "
+        f"{sorted(found - want)}\n"
+        f"The phrase is {LINER_V010!r}, derived from "
+        f"`_release_record.VERSION_FIELDS`; the accounting is the "
+        f"one-liner paragraph's own \"X's bullet is in *section*\" "
+        f"sentences ({named}). A disclosure a changelog-only reader "
+        f"depends on is not held by having been typed once."
+    )
+
+
+#: The `### What has been driven in this document` bullet states the `## Log`'s
+#: SIZE, as the population a sweep did not read line by line, and it states
+#: the two rules it measured that size by. Both spellings are read: the
+#: bullet's own headline figure and the parenthetical's three-term
+#: arithmetic, which must agree with each other as well as with the file.
+_LOG_LINES_RE = re.compile(r"It is \*\*([\d,]+) lines\*\* as")
+_LOG_POPULATION_RE = re.compile(
+    r"the Log is \*\*([\d,]+)\*\*\s*\n?\s*lines, the routed sections "
+    r"\*\*([\d,]+)\*\*, and the difference \*\*([\d,]+)\*\*"
+)
+
+
+def test_the_logs_stated_population_is_the_one_the_two_rules_measure():
+    """The Log's stated SIZE, derived — it has now rotted on two
+    consecutive days.
+
+    The sentence exists to bound a sweep-reach claim: *"the `## Log` below
+    was not read line by line"*, over a population the sentence names. It
+    read *"11,000-odd lines"*, which was no revision's figure, and then
+    stood at 14,926 while the `## Log` measured 15,439 (`6ecb5cd`). The
+    2026-08-25 pass re-derived it to 15,628 by the two rules the
+    parenthetical states — physical lines from the `## Log` heading to the
+    last line of the file, and `_detail_sections` over the 72 routed
+    bodies — and that was correct at `161ead8` and false again the next
+    day, because **the figure is only ever right in the commit that
+    repairs it** and nothing said when it stopped being. That is the
+    third hand-maintained figure this pass met that a later edit had
+    falsified. The other two — the preamble length in
+    the comment on `_PREAMBLE_MAX_LINES` above and the one-liner split in
+    `tests/test_soundness_routing.py` — were repaired by DELETING the
+    digit, because nothing at those two sites needed a live value. This
+    one is different and gets a PIN instead: the sentence needs a
+    population to bound its reach claim, so the digit stays and is held to
+    the rules the page itself names for it.
+
+    Both spellings are checked, and against each other: the headline
+    figure and the parenthetical's `log − routed = difference`. A figure
+    that appears twice and agrees with itself but not with the file is the
+    shape `tests/test_soundness_routing.py`'s manifest columns are about.
+
+    Driven RED by adding one to the headline figure: `1 failed, 10
+    passed`, naming both the stated and the measured value on both rules,
+    with `SOUNDNESS.md` restored byte-identically after.
+
+    `_detail_sections` is IMPORTED from `tests/test_soundness_routing.py`
+    rather than re-implemented, for the reason `log_bullets`'s own
+    docstring gives about a copy of a rule going green over the rule's
+    absence — and because the parenthetical names that function by name,
+    so the check has to be over the thing the page cites.
+    """
+    from test_soundness_routing import _detail_sections
+
+    soundness = SOUNDNESS.read_text(encoding="utf-8")
+    lines = soundness.splitlines()
+    lo = next(i for i, line in enumerate(lines, 1) if line.rstrip() == "## Log")
+    log_lines = len(lines) - lo + 1
+    routed = sum(
+        len(body.splitlines()) for body in _detail_sections(soundness).values()
+    )
+
+    head = _LOG_LINES_RE.search(soundness)
+    assert head, (
+        "SOUNDNESS.md no longer states the `## Log`'s size in the form `It "
+        "is **N lines** as`. The size is the POPULATION a sweep-reach claim "
+        "is about, and a reach claim over an unstated population is not one."
+    )
+    body = _LOG_POPULATION_RE.search(soundness)
+    assert body, (
+        "SOUNDNESS.md no longer states the `Log / routed / difference` "
+        "arithmetic that names the two rules the size is measured by. The "
+        "rules are what make the historical figures reproducible."
+    )
+
+    def _n(text: str) -> int:
+        return int(text.replace(",", ""))
+
+    stated_head = _n(head.group(1))
+    stated_log, stated_routed, stated_diff = (_n(g) for g in body.groups())
+    assert (stated_head, stated_log, stated_routed, stated_diff) == (
+        log_lines, log_lines, routed, log_lines - routed
+    ), (
+        f"the `## Log` population figures in SOUNDNESS.md do not match the "
+        f"two rules the page states for them. Stated: headline "
+        f"{stated_head:,}, Log {stated_log:,}, routed {stated_routed:,}, "
+        f"difference {stated_diff:,}. Measured: Log {log_lines:,} (physical "
+        f"lines from the `## Log` heading to the last line of the file), "
+        f"routed {routed:,} (`_detail_sections` over the routed bodies), "
+        f"difference {log_lines - routed:,}. Write the measured values, or "
+        f"the sweep-reach claim is about a population this file no longer "
+        f"has."
+    )
+
+
 def test_the_release_record_does_not_state_the_old_count_unquoted():
     """*"is reached by six entries"* may be quoted; it may not be asserted.
 
@@ -556,14 +846,28 @@ def test_each_permitted_field_is_actually_used(field):
 
     A closed set with a member nothing ever uses is an option that has
     never been exercised, and this campaign has closed that shape often
-    enough to check for it. All three are in use: 33 bullets pre-release
-    only, 10 in 0.2.0 development only, 11 reaching `v0.1.0`. (Named
+    enough to check for it. All three are in use. **The partition is NOT
+    typed here**, for the reason the comment on `_PREAMBLE_MAX_LINES`
+    gives: measured over the same bullets at each commit that touched this
+    file, it has been 39/8/7 (`68b219d`, `1f55eef`, `1242da4`), 33/12/9
+    (`c198a8d`, `6ecb5cd`) and 33/10/11 (`161ead8`) — three moves in two
+    days before this branch made a fourth, and every one of them a
+    correction of a FALSE FIELD rather than a new entry. The live values are in the message below and in `SOUNDNESS.md`'s
+    own reached-release paragraph, which is derived from these bullets and
+    checked above. (Named
     rather than called "the release": `0.2.0` is a release too now, and no
     bullet reaches it.)
     """
-    used = [line for line, text in log_bullets() if field in text]
+    bullets = log_bullets()
+    used = [line for line, text in bullets if field in text]
     assert used, (
         f"no `## Log` bullet carries {field!r}. A phrase in the closed set "
         f"that nothing uses is an untested branch of the rule, not a "
-        f"choice the rule offers."
+        f"choice the rule offers. The partition over "
+        f"{len(bullets)} bullets is "
+        + "/".join(
+            str(sum(1 for _, text in bullets if f in text))
+            for f in REACH_FIELDS
+        )
+        + "."
     )

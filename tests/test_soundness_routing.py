@@ -1137,19 +1137,40 @@ def test_each_permitted_version_field_is_actually_used(files, field):
     A closed set is worth having because it refuses a hedge; a member of
     it that no entry ever carries is a branch of the rule nothing has
     exercised, and this campaign has withdrawn several. Both are in use
-    across the two routed sections: 57 one-liners carry the 0.2.0-only
-    phrase (51 soundness, 6 Mode 2) and 7 carry the `v0.1.0` one.
+    across the two routed sections.
+
+    **THE SPLIT IS NO LONGER TYPED HERE, AND THAT IS THE POINT OF THE
+    CHANGE.** This docstring read *"57 one-liners carry the 0.2.0-only
+    phrase (51 soundness, 6 Mode 2) and 7 carry the `v0.1.0` one"* and was
+    wrong by two on each of the three figures: the 2026-08-24 and
+    2026-08-25 passes moved `Versions:` fields between the two phrases,
+    which moves both counts and touches nothing this test asserts, so the
+    file stayed green over a stale illustration from the 2026-08-24 pass
+    until this one. A digit
+    beside a derivation, in the file whose entire subject is that routing
+    is *"lossless and mechanically verifiable"* because a machine holds it,
+    is the one thing here nothing held. It is derived now: the live split
+    is in the message below, and the `v0.1.0` figure a reader usually wants
+    is stated and CHECKED in `SOUNDNESS.md`, by
+    `tests/test_soundness_log_reach.py::test_the_one_liner_count_is_the_number_of_one_liners_that_carry_the_field`
+    — over `### Soundness fixes` alone, which is a NARROWER population than
+    this one and is not the same number in general.
     """
     changelog, _ = files
     used = 0
+    per_section = {}
     for section in SECTIONS:
         body = _changelog_section(changelog, section.heading)
+        n = 0
         for lines in _one_liner_blocks(body, section.id_prefix).values():
-            used += field in " ".join(x.strip() for x in lines)
+            n += field in " ".join(x.strip() for x in lines)
+        per_section[section.key] = n
+        used += n
     assert used, (
         f"no one-liner in any routed section carries {field!r}. A phrase "
         f"the closed set permits and nothing uses is an option the rule "
-        f"has never been tested on."
+        f"has never been tested on. The live split over the routed "
+        f"sections is {per_section}."
     )
 
 
