@@ -836,7 +836,7 @@ repairing them, and the repairs are in place above and in
   swept — a paragraph naming what a sweep reached must move when the page
   grows a section the sweep never saw, or the reach statement quietly
   widens to cover text nobody drove.
-* **The `## Log` below was not read line by line.** It is **15,833 lines** as
+* **The `## Log` below was not read line by line.** It is **15,923 lines** as
   this is written — the `## Log` heading to the end of the file, and that is
   the population — and it was swept EXHAUSTIVELY BY INSTRUMENT — every
   `path::name` citation, every backticked module-qualified identifier, every
@@ -858,8 +858,8 @@ repairing them, and the repairs are in place above and in
   arithmetic were all stale by 2026-08-25 and are re-derived here rather
   than left**: measured on this tree by the same two rules — physical lines
   from the `## Log` heading to the last line of the file, and
-  `_detail_sections` over the 72 routed bodies — the Log is **15,833**
-  lines, the routed sections **3,470**, and the difference **12,363**,
+  `_detail_sections` over the 72 routed bodies — the Log is **15,923**
+  lines, the routed sections **3,470**, and the difference **12,453**,
   which is not 11,000-odd any more either. The two rules are stated because
   they are what reproduce the historical figures: they give 14,926 at
   `3fe29d3`, 14,924 at `391e50e` and 14,823 at `5ad906f`, so nothing above
@@ -6178,9 +6178,22 @@ and a count over entries that happened to say something is not a count.
   and their kin are faithful and unaffected; `x ** (1.0/3.0)`,
   `x ** (2.0/3.0)`, `x ** 0.1`, `x ** (1.0/10.0)`, `x ** (1.0/80.0)`,
   `x ** 0.7`, `x ** (1.0/7.0)` were all substitutions. **The row does not
-  exist in `v0.1.0`** — verified at the tag: `pow` is absent from
-  `obligation._ARITH`, so a `pow` slice there declines as an unsupported
-  primitive and no released verdict can be affected. Interval-only
+  exist in `v0.1.0`, AND THAT IS NOW A CITATION AND NOT AN ASSERTION.**
+  `"pow"` appears **zero** times in `v0.1.0:src/stelling/obligation.py`,
+  whose `_ARITH` carries `integer_pow` and no `pow` — so a `pow` slice
+  there declines as an unsupported primitive. The row was built after the
+  tag by `1382e71` (the integer branch) and `4e58c1e` (the rational one),
+  neither an ancestor of `v0.1.0`. Driven on an extracted `v0.1.0` under
+  jax 0.11.0, python 3.12.3, x64, z3 + cvc5 wheels: the two-line harness
+  above returns **UNKNOWN**, `assert #0` quoting *"escalation declined —
+  primitive 'pow' is outside the supported emission set: no SMT emission
+  rule has been built and audited for it … An interval transfer row for
+  'pow' IS registered (tier 'sound-libm'), so the gap is the
+  solver-emission row alone"*. No released verdict can be affected, and
+  the sentence saying so is decidable rather than remembered:
+  `tests/test_soundness_log_reach.py::test_a_claim_about_the_tags_TREE_is_decided_against_the_tag`
+  checks the citation's shape and polarity — not the drive, which is
+  above. Interval-only
   verdicts are also unaffected: the interval leg alone answered UNKNOWN
   on every construction above, and the false VERIFIED was minted by the
   solver escalation.
@@ -9801,6 +9814,22 @@ in place and marked.*
   short of. On builds whose bar was
   whole-query there was no re-derivation to be short of axioms.
 
+  **AND THAT IS DRIVEN AT THE TAG NOW, NOT INFERRED FROM THE FIX'S DATE.**
+  Forwarding arrived in `6226002` (*"forward relational assumes to solver
+  as axioms"*, 2026-08-13), which is not an ancestor of `v0.1.0`, and the
+  mechanism this defect needs is absent from the tag's tree three ways
+  over: `relational_assumes` appears **zero** times anywhere under
+  `v0.1.0:src/stelling/`; `slice_obligation` there is
+  `(closed, index, env, *, top_primitives=None)`, so there is no argument
+  `_bar_scope`'s re-derivation could omit; and the word `assumes` does not
+  occur in `v0.1.0:src/stelling/obligation.py` at all, so an
+  `ObligationSlice` at the tag has no `assumes` for `smt.emit` to read and
+  a recorded script has no `(assert …)` axiom lines for a re-emission to
+  be short of. `v0.1.0:src/stelling/solvers.py` says the same thing in its
+  own words — *"a relational assume that stays inert"*. Measured at the
+  tag with `stelling.__version__ == "0.1.0"` under jax 0.11.0, python
+  3.12.3.
+
   **What to re-run to re-establish trust.** Any 0.2.0-development UNKNOWN
   whose notes contain *"reproduces both this query's slice of it and the
   script that slice emits"* AND whose query contains a `stelling_assume` over
@@ -11609,18 +11638,28 @@ in place and marked.*
   and false of the artefact the reader is running, and the reader is the
   one this advice is addressed to. **THE ENUMERATION THAT FOLLOWED IT NAMED
   THREE PLACES AND MISSED FIVE, AND IS RE-DERIVED HERE BY GREP RATHER THAN
-  BY MEMORY** — the five it missed are the 2026-08-16 bar entry,
-  `tests/test_nested_assert_escalation.py`'s own module docstring, and
-  three tracked JSON artefacts. It said
+  BY MEMORY** — the five it missed are the 2026-08-15 (B7) M10
+  VERIFIED-bar entry, `tests/test_nested_assert_escalation.py`'s own
+  module docstring, and three tracked JSON artefacts. **THE COUNT WAS
+  RIGHT AND THE SUBJECT WAS MISNAMED, TWICE, INSIDE THE ONE SENTENCE THAT
+  ADVERTISES ITSELF AS MACHINE-DERIVED**: it read *"the 2026-08-16 bar
+  entry"* here and *"the 2026-08-16 UNSOUND-3 bar entry ABOVE"* below
+  until 2026-08-25. The two
+  occurrences are in bullet 44, dated 2026-08-15 (B7), audit finding M10 —
+  the entry about the VERIFIED bar, which is above this one. The
+  2026-08-16 UNSOUND-3 entry is bullet 51, contains ZERO occurrences of
+  the sentence, and is BELOW this one, so the misnaming disagreed with its
+  own direction word as well as with the file. Re-derived by grep a second
+  time, and this time the label was derived too. It said
   the sentence survives *"only in this entry, in
   `CHANGELOG.md`, and as a `not in` assertion in
   `tests/test_nested_assert_escalation.py`"*, and the load-bearing half
   above is untouched by the correction. In this tree it survives in this
   entry (in the drive at the top and in the quoted template just above);
-  in the 2026-08-16 UNSOUND-3 bar entry ABOVE, which quotes it twice while
-  recording that B6's fix deleted the check that produced it; in
-  `CHANGELOG.md`; in `tests/test_nested_assert_escalation.py` BOTH as that
-  `not in` assertion and in the module docstring's measured
+  in the 2026-08-15 (B7) M10 VERIFIED-bar entry ABOVE, which quotes it
+  twice while recording that B6's fix deleted the check that produced it;
+  in `CHANGELOG.md`; in `tests/test_nested_assert_escalation.py` BOTH as
+  that `not in` assertion and in the module docstring's measured
   `main` output; and in three of the tracked result JSONs under
   `scratchpad/mechc/`, where it is carried under a
   DIFFERENT prefix — *"affine refinement declined: the obligation slice is
@@ -13060,9 +13099,11 @@ found
 by driving the entry against an extracted `v0.1.0`, and all three entries
 now
 carry that drive. **So the residual risk is not "a field nobody checked";
-it is "a field only the tag can refute", and this page has no instrument
-for it** — the guard added below holds the changelog DISCLOSURE and not
-the field, and that boundary is the point of the three paragraphs after
+it is "a field only the tag can refute", and this page has ONE instrument
+for a SUB-CASE of it and none for the rest** — the 2026-08-25 guard holds
+the changelog DISCLOSURE and not the field, and the rule added below it
+holds a JUSTIFICATION that is a claim about the tag's tree and still not
+the field. Both boundaries are the point of the paragraphs after
 next. Nine bullets have now been re-scoped on that account, six out
 of *0.1.0 pre-release builds only* and three out of *0.2.0 development
 builds only*, and the two phrases failed for opposite reasons.
@@ -13105,21 +13146,70 @@ thing that disagrees is the released artefact, which no document
 comparison opens. Settling one costs an extraction of `v0.1.0`, an
 interpreter, and in this entry's case TWO interpreters carrying two jaxes
 — which is not a test-suite gate, it is the work the entry is supposed to
-have done. **One sub-case IS document-decidable and is worth naming
-because it is the one that failed here**: a justification of the form
-*"`v0.1.0` predates the whole file"* is a claim about the TAG'S TREE, and
-`git cat-file -e v0.1.0:<path>` refutes it in a millisecond. A check over
-that shape is not added, for the reason this campaign has withdrawn
-several permitted-but-unused rules: with the false claim removed there is
-no live subject left for it, and a rule with no subject is a branch
-nothing has ever exercised. **What the page would need instead**, said so
-the next pass meets a proposal rather than a shrug: a per-bullet
-DISCLOSURE requirement — every post-tag bullet carrying *0.2.0 development
-builds only* states what was driven at the tag to establish that `v0.1.0`
-does not carry the defect — which is mechanically checkable as a marker
-and buys nothing unless nine bullets are actually driven first. That is
-the cost, and it is the honest one: the check cannot do the driving, and a
-marker on an undriven bullet would be worse than no marker.
+have done. **One sub-case IS document-decidable, and it is the one that
+failed here**: a justification of the form *"`v0.1.0` predates the whole
+file"* is a claim about the TAG'S TREE, and `git cat-file -e
+v0.1.0:<path>` refutes it in a millisecond.
+
+**THAT CHECK EXISTS NOW, AND THE ARGUMENT FOR NOT ADDING IT WAS WRONG IN
+BOTH HALVES.** It read *"with the false claim removed there is no live
+subject left for it, and a rule with no subject is a branch nothing has
+ever exercised"*, on the precedent of this campaign withdrawing
+permitted-but-unused rules. That precedent is about a DEAD OPTION A CLOSED
+SET OFFERS — a `Versions:` phrase no entry can ever carry, whose branch
+cannot be reached by any document — which is a different thing from a
+guard that currently finds nothing. **Every regression test in this tree
+is the second thing**, and withdrawing them all is not a policy anybody
+holds. And the premise was false one step out: the class is not *"the one
+sentence that was wrong"*, it is *"a justification that is a claim about
+the tag's tree"*, and that class has NINE live subjects in this log — the
+nine post-tag bullets carrying *0.2.0 development builds only* — plus TWO
+outside it, in `CHANGELOG.md`'s Mode 2 and Mode 3 `*Versions.*`
+paragraphs, which make exactly this move for a whole SECTION (*"Mode N is
+0.2.0 development work throughout, so `v0.1.0` predates all of it"*). All
+eleven were checked by hand and all eleven are true. They existed.
+
+**THE RULE.**
+`tests/test_soundness_log_reach.py::test_a_claim_about_the_tags_TREE_is_decided_against_the_tag`
+requires every one of those eleven to cite something git can decide:
+either a `v0.1.0:<path>`, whose existence at the tag is decided with `git
+cat-file -e` AGAINST THE CLAIM'S POLARITY — the citation claims the path
+is in the tag's tree unless it is immediately followed by *"does not
+exist"*, *"did not exist"*, *"is absent"* or *"does not appear"* — or a
+commit, decided with `git merge-base --is-ancestor <sha> v0.1.0` to be NOT
+an ancestor of the tag. Seven of the nine bullets already cited a sha; the
+two that did not are the 2026-08-14 rational-`pow` entry (whose *"The row
+does not exist in `v0.1.0`"* named no path at all) and the 2026-08-15 B7
+M10 VERIFIED-bar entry, and both were driven at an extracted `v0.1.0` on
+2026-08-25 before the citation was written into them. Both `CHANGELOG.md`
+paragraphs now cite the module the section is about —
+`v0.1.0:src/stelling/_tripwire/eager.py` and
+`v0.1.0:src/stelling/_tripwire/perimeter.py`, neither of which is in the
+tag's tree.
+
+**WHAT IT ESTABLISHES AND WHAT IT DOES NOT, WHICH IS THE HALF A READER
+WILL OTHERWISE ASSUME.** It is NECESSARY AND NOT SUFFICIENT, and its own
+docstring says so first rather than last. **It never claims to have done
+the driving**: it decides a citation's SHAPE and POLARITY, not the defect,
+and a bullet can satisfy every leg of it and still carry a false field.
+What it removes from the board is one specific way of being wrong — the
+way that actually happened three passes running. It needs git and the tag;
+where git is absent it SKIPS, on the two reason strings
+`tests/test_skip_inventory.py` already declares and on byte-for-byte the
+predicates that file declares them legitimate for, so the skip is
+disclosed by construction. A checkout whose git cannot resolve the tag is
+a hard red carrying git's own stderr rather than a skip, because a control
+reporting green while it did not run is this page's own subject.
+
+**AND THE PER-BULLET DISCLOSURE REQUIREMENT IS STILL NOT ADDED**, for the
+reason it was rejected under: *"every post-tag bullet carrying 0.2.0
+development builds only states what was driven at the tag"* is mechanically
+checkable as a MARKER and buys nothing unless nine bullets are actually
+driven first. The check cannot do the driving, and a marker on an undriven
+bullet would be worse than no marker. The rule above is the part of that
+proposal a machine can decide: not *"something was driven"*, which only a
+person can attest, but *"this specific claim about the tag's tree agrees
+with the tag's tree"*, which git settles.
 
 **THE ALTERNATIVES THE LAST PASS REJECTED, RECORDED HERE RATHER THAN IN
 ITS COMMIT MESSAGE.** M12's and M17's `v0.1.0` disclosures could have been

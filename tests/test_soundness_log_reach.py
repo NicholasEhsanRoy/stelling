@@ -100,16 +100,35 @@ hand-maintained figure beside a derived one rots does not get to add two
 hand-maintained disclosures and call the gap closed, so
 `test_the_v010_disclosures_outside_the_routed_sections_are_a_partition`
 makes them a two-way partition against the paragraph that names them.
+
+**AND ONE SUB-CASE OF "IS THE FIELD TRUE" IS DECIDABLE, WHICH IS WHERE
+THIS FILE STOPS BEING ONLY ABOUT THE TELLING.** A field cannot be
+checked; a JUSTIFICATION offered for one sometimes can, when the
+justification is a claim about the TAG'S TREE — *"`v0.1.0` predates the
+whole file"* is settled by `git cat-file -e` in a millisecond, and it is
+the justification that cost passes 3, 4 and 5.
+`test_a_claim_about_the_tags_TREE_is_decided_against_the_tag` decides it,
+over the nine post-tag bullets carrying *0.2.0 development builds only*
+and the two `CHANGELOG.md` paragraphs that make the same move for a whole
+section. **It checks a citation's shape and polarity and never the
+defect** — necessary, not sufficient — and it says so before it says
+anything else.
 """
 
 from __future__ import annotations
 
 import pathlib
 import re
+import shutil
+import subprocess
 
 import pytest
 
-from _release_record import VERSION_FIELDS, release_prose  # noqa: E402
+from _release_record import (  # noqa: E402
+    VERSION_FIELDS,
+    release_prose,
+    release_records,
+)
 from _soundness_routing_manifest import SECTIONS  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -134,9 +153,51 @@ _NUMBER_WORD = {
     "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
 }
 
-_ENTRIES_RE = re.compile(
+#: THE CANONICAL SPELLING — `is reached by **N** ENTRIES`. The log has to go
+#: on stating the figure in a form a reader can find, and this is the form.
+_ENTRIES_CANONICAL_RE = re.compile(
     r"is\s+reached\s+by\s+\*\*(?P<n>[A-Za-z]+|\d+)\*\*\s+ENTRIES", re.S
 )
+
+#: EVERY SPELLING, WHICH IS THE ONE THAT MATTERS, AND THE CANONICAL PATTERN
+#: ABOVE WAS THE WHOLE CHECK UNTIL 2026-08-25. The record stated this figure
+#: TWICE — `is reached by **twelve** ENTRIES of this log` in the
+#: reached-release paragraph, and *"Twelve ENTRIES of this log reach
+#: `v0.1.0`"* three paragraphs down in the three-units paragraph — and only
+#: the first spelling was read. Driven at `b0df85e`: the second set to
+#: `Fourteen` left this file at **`11 passed`** and six doc-relevant files
+#: at **`140 passed`**, while the OTHER TWO numerals of that paragraph (the
+#: findings count and the one-liner count) each give `1 failed, 10 passed`
+#: when falsified the same way. A figure that appears twice and agrees with
+#: itself but not with the file is the exact shape
+#: `test_the_logs_stated_population_is_the_one_the_two_rules_measure`'s
+#: docstring legislates against, and it was left standing here.
+#:
+#: So the unit phrase is what is anchored on — `N ENTRIES of this log` —
+#: rather than one sentence's framing of it, and every occurrence is read.
+#: The numeral may be bare or bolded; `_numeral` returns `None` for a word
+#: that is not a number, which fails the comparison, so an unrecognised
+#: spelling reds rather than passing.
+_ENTRIES_RE = re.compile(
+    r"\*?\*?(?P<n>[A-Za-z]+|\d+)\*?\*?\s+ENTRIES\s+of\s+this\s+log", re.S
+)
+
+#: A QUOTED historical value, which this page must be able to write: the
+#: digit has held nine values and the paragraph that lists them quotes some
+#: of them. `*"…"*` is how this record quotes a retired sentence, and it is
+#: the same convention
+#: `test_the_release_record_does_not_state_the_old_count_unquoted` already
+#: relies on with its `(?<![\"*])` lookbehind. Blanked rather than deleted —
+#: every character except a newline becomes a space — so offsets and line
+#: numbers into the blanked copy are still the file's own.
+_QUOTED_RE = re.compile(r'\*"[^"]*"\*', re.S)
+
+
+def _live(text: str) -> str:
+    """`text` with every `*"…"*` quotation blanked, offsets preserved."""
+    return _QUOTED_RE.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+
+
 _FINDINGS_RE = re.compile(
     r"\*\*(?P<n>[A-Za-z]+|\d+)\*\*\s+audit\s+findings\s+reach\s+it:"
     r"\s*(?P<list>[^.]+?)\s*—",
@@ -465,29 +526,75 @@ def test_every_log_bullet_answers_the_reach_question_exactly_once():
 
 
 def test_the_reached_release_count_is_the_number_of_entries_that_declare_it():
-    """The ENTRIES numeral, against the entries.
+    """The ENTRIES numeral — EVERY spelling of it, in EVERY file of the
+    record.
 
     This digit read **six** against seven declaring bullets, having
     already read *"(no releases yet)"*, S11 alone, three, and four-and-
     five on two branches at once.
+
+    **AND THE RECORD STATES IT TWICE AND THIS CHECK READ IT ONCE**, which
+    is what 2026-08-25 fixed. `_ENTRIES_RE` matched
+    `is reached by **N** ENTRIES` and nothing else; the three-units
+    paragraph three paragraphs below the reached-release one restates the
+    same unit as *"Twelve ENTRIES of this log reach `v0.1.0`"*, and
+    `re.search` never reached it. **Driven before the fix, on a clean
+    checkout of `b0df85e`**: that second numeral set to `Fourteen` left
+    this file at **`11 passed`** and `test_soundness_routing`,
+    `test_soundness_log_reach`, `test_sdist_reference_hygiene`,
+    `test_release_doc_claims`, `test_prose_hygiene` and
+    `test_doc_examples` together at **`140 passed`** — while falsifying
+    either of the other two numerals in that same paragraph gives
+    `1 failed, 10 passed`. One numeral of three, unheld, in the paragraph
+    whose entire subject is that these three counts get mistaken for one
+    another.
+
+    So the anchor is the UNIT PHRASE — `N ENTRIES of this log` — and not
+    one sentence's framing of it, every occurrence is compared, and the
+    comparison is per FILE through `release_records()` for the reason
+    `tests/_release_record.py` gives: over a concatenation `re.search`
+    returns the first match, so a correct copy in one file masks a stale
+    copy in the other. A `*"…"*` quotation is blanked first, because the
+    paragraph on this digit's history has to be able to quote the values
+    it has held.
+
+    The canonical spelling is required to survive as well: a record that
+    stops saying `is reached by **N** ENTRIES` has not stopped having the
+    number, it has stopped letting a reader find it.
     """
     entries = [
         line for line, text in log_bullets() if REACHES_V010 in text
     ]
-    soundness = SOUNDNESS.read_text(encoding="utf-8")
-    m = _ENTRIES_RE.search(soundness)
-    assert m, (
-        "SOUNDNESS.md no longer states how many ENTRIES of the log reach a "
-        "release, in the form `is reached by **N** ENTRIES`. "
+
+    canonical, wrong = [], []
+    for name, text in release_records():
+        live = _live(text)
+        canonical += [
+            (name, m.group("n")) for m in _ENTRIES_CANONICAL_RE.finditer(live)
+        ]
+        for m in _ENTRIES_RE.finditer(live):
+            if _numeral(m.group("n")) != len(entries):
+                wrong.append((
+                    name,
+                    live.count("\n", 0, m.start()) + 1,
+                    m.group("n"),
+                    " ".join(live[m.start():m.end() + 40].split()),
+                ))
+
+    assert canonical, (
+        "the release record no longer states how many ENTRIES of the log "
+        "reach a release, in the form `is reached by **N** ENTRIES`. "
         f"{len(entries)} do. A log that stops stating it has not stopped "
         "having the number; it has stopped letting a reader check it."
     )
-    stated = _numeral(m.group("n"))
-    assert stated == len(entries), (
-        f"SOUNDNESS.md says {m.group('n')!r} entries of the log reach "
-        f"`v0.1.0` and {len(entries)} bullets carry {REACHES_V010!r} "
-        f"(lines {entries}). The omitted one was S12&prime; for five "
-        f"corrections running."
+    assert not wrong, (
+        f"the release record states the ENTRIES figure {len(wrong)} time(s) "
+        f"as something other than the {len(entries)} bullets that carry "
+        f"{REACHES_V010!r} (lines {entries}): {wrong}. Every spelling of "
+        f"`N ENTRIES of this log` is read, in every file of the record — "
+        f"the second spelling of this figure went unread until 2026-08-25 "
+        f"and `Fourteen` was green in it. The omitted ENTRY was S12&prime; "
+        f"for five corrections running."
     )
 
 
@@ -870,4 +977,336 @@ def test_each_permitted_field_is_actually_used(field):
             for f in REACH_FIELDS
         )
         + "."
+    )
+
+
+# --- THE CITATION RULE ------------------------------------------------------
+#
+# A `Versions: 0.2.0 development builds only.` field on a post-tag bullet is a
+# claim about a released artefact, and three passes have now moved one of these
+# fields because the claim was FALSE. Nothing in this tree can decide the
+# claim; one SUB-CLASS of the justifications offered for it is decidable in
+# milliseconds, and that sub-class is the one that failed.
+
+#: The released tag every `Versions:` field in this file is about. Named once.
+_TAG = "v0.1.0"
+
+#: A citation of a PATH IN THE TAG'S TREE — `v0.1.0:src/stelling/foo.py`.
+#: Matched WITHOUT its backticks, so the form `git show v0.1.0:<path>` inside
+#: one code span is read too; the log uses both. A trailing `.` or `,` is not
+#: part of a path here because the character class is anchored by `+` and the
+#: page always closes the span, but `_is_path_char` keeps `/` and `.` so a
+#: dotted filename survives.
+_TAG_PATH_RE = re.compile(r"v0\.1\.0:(?P<path>[A-Za-z0-9_][A-Za-z0-9_./-]*)")
+
+#: THE ABSENCE SPELLING, AND THERE IS EXACTLY ONE SHAPE OF IT. A citation of
+#: a tag path is a claim that the path IS in the tag's tree unless it is
+#: immediately followed by one of these four phrases, which claim it is not.
+#: Default-present is the safe default: citing a path that is not in the
+#: tag's tree, without saying it is not, is a citation that names nothing —
+#: which is the failure this rule exists for and not a spelling to forgive.
+#: Run over a WHITESPACE-NORMALISED copy, because the page wraps at 72
+#: columns and any of these phrases can wrap.
+_TAG_PATH_ABSENT_RE = re.compile(
+    r"`v0\.1\.0:(?P<path>[A-Za-z0-9_][A-Za-z0-9_./-]*)` "
+    r"(?:does not exist|did not exist|is absent|does not appear)"
+)
+
+#: A COMMIT citation. Seven or more hex digits in a code span. A token that
+#: does not resolve to a commit in this repository is simply not a commit
+#: citation — it is not an error here, because an ordinary English word can
+#: be spelled out of `[0-9a-f]` and this rule has no business red-flagging
+#: one. What it costs: a MISTYPED sha does not count as a citation, so the
+#: bullet fails the coverage leg below rather than passing on a sha that is
+#: not there.
+_SHA_RE = re.compile(r"`(?P<sha>[0-9a-f]{7,40})`")
+
+#: The date on a `## Log` bullet's headline.
+_BULLET_DATE_RE = re.compile(r"^- \*\*(?P<date>\d{4}-\d{2}-\d{2})")
+
+#: THE SAME INFERENCE, OUTSIDE THE `## Log` AND OUTSIDE ITS FIELDS.
+#: `CHANGELOG.md`'s Mode 2 and Mode 3 sections each carry a `*Versions.*`
+#: paragraph making this exact move — *"Mode N is 0.2.0 development work
+#: throughout, so `v0.1.0` predates all of it"* — for a whole SECTION rather
+#: than for one entry. They are in this rule's population because the class
+#: it is about is *a justification that is a claim about the tag's tree*, and
+#: these two are that, in the most literal form of it: `predates all of it`
+#: is the sentence `git cat-file -e` decides. A pass that closed the class
+#: inside the `## Log` and left these two would have closed it by where the
+#: sentences live rather than by what they claim.
+_PREDATES_RE = re.compile(r"`v0\.1\.0` predates")
+
+
+def _git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(REPO), *args], capture_output=True, text=True
+    )
+
+
+def _tag_tree_population() -> list[tuple[str, int, str]]:
+    """`(where, line, text)` for everything that owes this rule evidence.
+
+    Two shapes, one class:
+
+    * every `## Log` bullet DATED AFTER the tag and carrying
+      :data:`DEV_ONLY` — the field that says the release does not carry the
+      defect. The tag's own date is read out of git rather than typed, and
+      the tag DAY is not "after the tag": an entry written on 2026-08-12
+      can be either side of a commit made that afternoon, and demanding
+      evidence of it would be demanding it of a bullet whose field may be
+      about the pre-tag half of its own day;
+    * every `CHANGELOG.md` paragraph carrying :data:`_PREDATES_RE`.
+    """
+    tagged = _git("log", "-1", "--format=%cs", f"{_TAG}^{{commit}}")
+    assert tagged.returncode == 0, (
+        f"`git log -1 --format=%cs {_TAG}` failed, so the date that decides "
+        f"which bullets are post-tag cannot be read: {tagged.stderr.strip()}"
+    )
+    tag_day = tagged.stdout.strip()
+
+    out: list[tuple[str, int, str]] = []
+    for line, text in log_bullets():
+        if DEV_ONLY not in text:
+            continue
+        m = _BULLET_DATE_RE.match(text)
+        assert m, (
+            f"`## Log` bullet at line {line} carries {DEV_ONLY!r} and opens "
+            f"with no date, so whether it is post-tag cannot be decided: "
+            f"{text.splitlines()[0][:70]!r}"
+        )
+        if m.group("date") > tag_day:
+            out.append((f"SOUNDNESS.md:{line}", line, text))
+
+    changelog = CHANGELOG.read_text(encoding="utf-8")
+    para, start = [], 0
+    for n, raw in enumerate(changelog.split("\n"), 1):
+        if raw.strip():
+            if not para:
+                start = n
+            para.append(raw)
+        elif para:
+            body = "\n".join(para)
+            if _PREDATES_RE.search(body):
+                out.append((f"CHANGELOG.md:{start}", start, body))
+            para = []
+    if para and _PREDATES_RE.search("\n".join(para)):
+        out.append((f"CHANGELOG.md:{start}", start, "\n".join(para)))
+    return out
+
+
+def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
+    """EVERY post-tag *0.2.0 development builds only* claim cites something
+    `git` can decide, and every tag-tree path it cites is decided.
+
+    **WHAT THIS DOES NOT ESTABLISH, FIRST, BECAUSE IT IS THE HALF A READER
+    WILL OTHERWISE ASSUME.** This check does not run `v0.1.0`. It does not
+    decide whether the released artefact carries the defect, and it CANNOT:
+    settling one of these costs an extraction of the tag, an interpreter,
+    and in one case two interpreters carrying two jaxes. **It reads a
+    CITATION'S SHAPE AND POLARITY, not the defect.** A bullet can satisfy
+    every leg here and still carry a false field — necessary, not
+    sufficient. What it removes from the board is one specific way of being
+    wrong, and that way is the one that actually happened: a justification
+    of the form *"`v0.1.0` predates the whole file"* is a claim about the
+    TAG'S TREE, `git cat-file -e` refutes it in a millisecond, and three
+    consecutive passes shipped one that a millisecond would have caught.
+
+    **WHY IT IS HERE AT ALL, GIVEN THAT THE LAST PASS DECLINED IT.** That
+    pass argued *"with the false claim removed there is no live subject,
+    and this campaign withdraws permitted-but-unused rules"*. Both halves
+    are wrong. The campaign's norm is about a DEAD OPTION A CLOSED SET
+    OFFERS — a `Versions:` phrase no entry can ever use — which is a
+    different thing from a guard that currently finds nothing; every
+    regression test in this tree is the latter, and withdrawing them all
+    is not a policy anyone holds. And the premise is false one step out:
+    the class is not *"the one sentence that was wrong"*, it is *"a
+    justification that is a claim about the tag's tree"*, and that class
+    has NINE live subjects in the `## Log` plus TWO in `CHANGELOG.md`.
+    They were checked by hand and found true. They existed.
+
+    **THE RULE.** Every member of :func:`_tag_tree_population` must cite at
+    least one thing this check can decide:
+
+    * a **`v0.1.0:<path>`**, decided with `git cat-file -e` against the
+      claim's POLARITY. The citation claims the path IS in the tag's tree
+      unless it is immediately followed by one of the four phrases in
+      :data:`_TAG_PATH_ABSENT_RE`, which claim it is not; **or**
+    * a **commit**, decided with `git merge-base --is-ancestor <sha>
+      v0.1.0` to be NOT an ancestor of the tag.
+
+    Both legs run over the WHOLE population and not only over the members
+    that need them: the polarity leg checks every tag-path citation any
+    member makes, including the ones whose coverage came from a sha, so a
+    bullet cannot buy the coverage leg with a sha and then make a false
+    tag-tree claim beside it.
+
+    **WHAT THE COMMIT LEG CANNOT TELL, SAID BECAUSE IT BOUNDS THE LEG.**
+    It cannot tell WHICH cited sha is *"the commit that introduced the
+    defect"* — prose says that, and prose is what this file has given up
+    reading. So it asks for at least one cited commit that postdates the
+    tag, which is what a genuine 0.2.0-development defect must have and
+    what a bullet whose whole documentary basis predates the tag cannot
+    produce. A bullet that cites a pre-tag commit for context alongside is
+    not failed for it, because citing one is not a claim about anything.
+
+    **POPULATION, MEASURED HERE AND NOT TYPED**: nine `## Log` bullets on
+    2026-08-25 (all of 2026-08-14 and 2026-08-15; the earliest is two days
+    after the tag) and two `CHANGELOG.md` paragraphs, the Mode 2 and Mode 3
+    `*Versions.*` sentences. Seven of the nine already cited a sha. The two
+    that did not are the two whose evidence was driven at the tag for this
+    round:
+
+    * the 2026-08-14 rational-`pow` entry, whose *"The row does not exist
+      in `v0.1.0`"* was a tag-tree claim naming no path at all. Driven at
+      an extracted `v0.1.0` under jax 0.11.0, x64, z3 + cvc5 wheels:
+      `x ** 0.1 <= 1e30` over `x` declared `((), "float64", (1.0, 1e300))`
+      returns UNKNOWN quoting *"escalation declined — primitive 'pow' is
+      outside the supported emission set"*, and `"pow"` appears zero times
+      in `v0.1.0:src/stelling/obligation.py`. It now cites that path and
+      the commit that built the row;
+    * the 2026-08-15 B7 M10 VERIFIED-bar entry, whose one `v0.1.0` mention
+      carried no path and no sha. Driven at the tag: `relational_assumes`
+      appears **zero** times anywhere under `v0.1.0:src/stelling/`,
+      `slice_obligation` there takes `(closed, index, env, *,
+      top_primitives=None)` and has no parameter `_bar_scope` could omit,
+      and the word `assumes` does not occur in
+      `v0.1.0:src/stelling/obligation.py` at all — so the recorded script
+      has no axiom lines for a re-emission to be short of.
+
+    **WHEN GIT IS NOT THERE**, this skips, with the two reason strings
+    `tests/test_skip_inventory.py` already declares and on byte-for-byte
+    the predicates it declares them legitimate for, so the skip is
+    disclosed by construction rather than by a second copy of a condition.
+    Driven with `git` off `PATH`: `1 skipped`, reason `needs git`, and
+    `tests/test_skip_inventory.py` run beside it in that same session
+    reports everything it saw as disclosed.
+    A checkout whose git cannot resolve the tag is a HARD RED carrying
+    git's own stderr and not a skip: that is the shape
+    `tests/test_sdist_contents.py`'s own gate was corrected for — a
+    control reporting green while it did not run — and no rule over there
+    declares it legitimate.
+
+    **DRIVEN RED FIVE WAYS**, on the real files, restored byte-identically
+    (sha256) after each and the whole file back at `12 passed`:
+
+    * BOTH shas removed from the 2026-08-15 B6 regression bullet, leaving
+      it with no citation of either kind — names that bullet, uncovered;
+    * `v0.1.0:src/stelling/_tripwire/eager.py` in `CHANGELOG.md`'s Mode 2
+      paragraph reworded off the ABSENCE spelling, so a path that is NOT
+      in the tag's tree reads as a claim that it is — names the file, the
+      line, the path, and which way it disagrees;
+    * a path that IS in the tag's tree
+      (`v0.1.0:src/stelling/obligation.py`) written with `does not exist`
+      after it — the exact shape that cost passes 3, 4 and 5;
+    * the `predates` sentence's whole evidence clause deleted from Mode 3
+      — names that paragraph, uncovered, which is the direction a rule
+      scoped to the `## Log` would never have looked in;
+    * both shas in that same B6 bullet replaced by `e67688e`, which is the
+      tag's own commit and therefore an ancestor of it — names the bullet
+      uncovered, which is the leg's non-vacuity: the commit leg accepts a
+      commit for POSTDATING the tag and not for being seven hex digits.
+    """
+    if shutil.which("git") is None:
+        # Byte-for-byte the predicate `tests/test_skip_inventory.py` declares
+        # legitimate for this reason string.
+        pytest.skip("needs git")
+    if not (REPO / ".git").exists():
+        # A worktree's `.git` is a FILE, hence `exists()` and not `is_dir()`.
+        pytest.skip("not a git checkout (an unpacked sdist, say)")
+
+    tag = _git("rev-parse", "--verify", "--quiet", f"{_TAG}^{{commit}}")
+    assert tag.returncode == 0, (
+        f"this is a git checkout and git cannot resolve `{_TAG}`, so every "
+        f"claim below about the tag's tree is unverified here. Not a skip: a "
+        f"control that reports green while it did not run is the defect this "
+        f"page is about. git said: {tag.stderr.strip()!r}"
+    )
+
+    population = _tag_tree_population()
+    assert len(population) >= 3, (
+        f"this rule found {len(population)} subject(s) and there were ELEVEN "
+        f"on 2026-08-25 — nine `## Log` bullets carrying {DEV_ONLY!r} "
+        f"with a post-tag date, and `CHANGELOG.md`'s two `predates` "
+        f"paragraphs. A population that has collapsed is a green that "
+        f"measured nothing. If the class has genuinely emptied, retire this "
+        f"check deliberately."
+    )
+
+    exists: dict[str, bool] = {}
+
+    def in_the_tag(path: str) -> bool:
+        if path not in exists:
+            probe = _git("cat-file", "-e", f"{_TAG}:{path}")
+            exists[path] = probe.returncode == 0
+        return exists[path]
+
+    ancestor: dict[str, bool | None] = {}
+
+    def postdates_the_tag(sha: str) -> bool | None:
+        """`True` / `False` / `None` when `sha` is no commit in this repo."""
+        if sha not in ancestor:
+            if _git(
+                "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"
+            ).returncode != 0:
+                ancestor[sha] = None
+            else:
+                walk = _git("merge-base", "--is-ancestor", sha, _TAG)
+                ancestor[sha] = walk.returncode != 0
+        return ancestor[sha]
+
+    uncovered, wrong_polarity = [], []
+    for where, _line, text in population:
+        flat = " ".join(text.split())
+        absent = [
+            (m.start(), m.group("path"))
+            for m in _TAG_PATH_ABSENT_RE.finditer(flat)
+        ]
+        # The k-th tag-path citation of the flattened copy is the k-th of the
+        # raw one: whitespace normalisation cannot reorder or drop a match,
+        # because no citation spans whitespace. So polarity is read off the
+        # flattened copy and the citation is reported from it too.
+        claimed_absent = {start for start, _ in absent}
+        paths = []
+        for m in _TAG_PATH_RE.finditer(flat):
+            # `m.start()` is the `v`; the absence pattern starts one backtick
+            # earlier.
+            paths.append((m.group("path"), (m.start() - 1) in claimed_absent))
+        for path, says_absent in paths:
+            if in_the_tag(path) == says_absent:
+                wrong_polarity.append((
+                    where,
+                    path,
+                    "claims ABSENT, and it IS in the tag's tree"
+                    if says_absent else
+                    "claims PRESENT, and it is NOT in the tag's tree",
+                ))
+        cited = dict.fromkeys(m.group("sha") for m in _SHA_RE.finditer(text))
+        shas = [sha for sha in cited if postdates_the_tag(sha)]
+        if not paths and not shas:
+            uncovered.append((where, text.splitlines()[0][:64]))
+
+    assert not wrong_polarity, (
+        f"{len(wrong_polarity)} tag-tree citation(s) disagree with the "
+        f"tag:\n  "
+        + "\n  ".join(
+            f"{w}: `{_TAG}:{p}` {why}" for w, p, why in wrong_polarity
+        )
+        + f"\nA `{_TAG}:<path>` citation claims the path IS in the tag's tree "
+        f"unless it is immediately followed by `does not exist`, `did not "
+        f"exist`, `is absent` or `does not appear`. `git cat-file -e` decides "
+        f"it. This is exactly what refutes the justification that cost passes "
+        f"3, 4 and 5."
+    )
+    assert not uncovered, (
+        f"{len(uncovered)} claim(s) that the released `{_TAG}` does not carry "
+        f"a defect cite nothing this check can decide:\n  "
+        + "\n  ".join(f"{w}: {h}" for w, h in uncovered)
+        + f"\nEach must cite a `{_TAG}:<path>` (decided with `git cat-file "
+        f"-e` against the claim's polarity) or a commit that is NOT an "
+        f"ancestor of `{_TAG}` (decided with `git merge-base "
+        f"--is-ancestor`). NECESSARY, NOT SUFFICIENT: neither decides "
+        f"whether the tag carries the defect — only running an extracted "
+        f"`{_TAG}` does that, and it is the work the entry is supposed to "
+        f"have done. What this refuses is a justification about the tag's "
+        f"TREE that nothing in the tree was ever asked about."
     )

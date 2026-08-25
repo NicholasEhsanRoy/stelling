@@ -160,7 +160,14 @@ cannot be brought into compliance by deleting it.
 *Versions.* Nothing in this section reaches a release. Mode 2 is 0.2.0
 development work throughout, so `v0.1.0` predates all of it and every M2
 finding below was fixed before `stelling.__version__` became `0.2.0`.
-(This read *"`v0.1.0` is the only release"* while that was so.)
+(This read *"`v0.1.0` is the only release"* while that was so.) The
+`predates` half is a claim about the TAG'S TREE and is cited rather than
+asserted: `v0.1.0:src/stelling/_tripwire/eager.py` does not exist — Mode 2's
+whole module is post-tag — and
+`tests/test_soundness_log_reach.py::test_a_claim_about_the_tags_TREE_is_decided_against_the_tag`
+decides that with `git cat-file -e`. It checks the citation, not the
+finding: that the tag has no such module is decidable here; that no M2
+finding reaches a release is the section's own claim.
 
 - **M2-0.2.0-01** — An out-of-range integer constant narrowed at array
   construction RAISES at the line that wrote it, under the opt-in
@@ -199,7 +206,10 @@ LEFT this file and is pinned by the sha256 of what it left as
 *Versions.* Nothing here reaches a release. Mode 3 is 0.2.0 development work
 throughout, so `v0.1.0` predates all of it and every finding here was fixed
 before `stelling.__version__` became `0.2.0`. (This read *"`v0.1.0` is the
-only release"* while that was so.)
+only release"* while that was so.) Cited rather than asserted, on the same
+rule and by the same check as Mode 2's:
+`v0.1.0:src/stelling/_tripwire/perimeter.py` does not exist — Mode 3's whole
+module is post-tag.
 
 - **The defect it closes.** `x <= 2**31 - 1` on a `float32` array is a
   program about `2147483648.0` — the literal has no `float32` and jax
