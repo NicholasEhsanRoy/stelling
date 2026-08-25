@@ -111,7 +111,14 @@
 # is stated here rather than left as an untested branch. THIS PARAGRAPH USED TO
 # OPEN "THE TWELFTH CANNOT FIRE", AND THAT ORDINAL WAS ANCHORED TO NOTHING: it
 # was carried from "THE NINTH" and bumped by three when the count moved, with
-# no re-derivation.
+# no re-derivation. THAT QUOTATION IS RETRACTED TEXT AND IT NUMBERS NOTHING,
+# which has to be said out loud now, because the renumbering below CREATED a
+# live twelfth: under arrival order the twelfth refusal is the sdist step
+# establishing the tarball count for ITSELF — named a few paragraphs above —
+# and that is a different refusal, in a different step, from the one this
+# retracted sentence was ever about. What cannot fire here is one ARM of the
+# "examined nothing" loop, and that loop is a live refusal this header does not
+# number at all.
 #
 # AND THE SENTENCE THAT SAID SO PUT AN ORDINAL STRAIGHT BACK, which is the
 # whole of why there is none here now. It read: *"the site it named is the
@@ -126,6 +133,14 @@
 # refusal. RE-DERIVED AGAIN on the file THIS commit ships, which inserts a
 # twelfth site above it in the same step: the TENTH site and the TWELFTH
 # refusal. Two commits, three values, and the check itself never changed.
+# BOTH OF THOSE REFUSAL FIGURES ARE FILE ORDER, with the two implicit refusals
+# counted WHERE THEY STAND — the order the retracted quotation used and the one
+# this paragraph re-derives in — and NOT the arrival order this header numbers
+# with everywhere else. Re-derived once more on the file this commit ships, and
+# unmoved: the "examined nothing" site is the tenth of the file's twelve sites
+# and the twelfth of its fourteen refusals read in file order. So "the TWELFTH
+# refusal" here and "the twelfth" four paragraphs above are two different
+# refusals in two different orders, and each of them now says which.
 #
 # SO THE ORDINAL IS NOT A PROPERTY OF THE THING IT NUMBERS. It is a property of
 # how many refusals happen to be spelled above it, and any commit that adds one
@@ -146,6 +161,20 @@
 # one paragraph, and every one of them names the refusal as well as numbering
 # it so that no reader has to resolve one order from the other.
 #
+# AND A THIRD ORDER IS LIVE IN THIS FILE, USED CORRECTLY AND UNDECLARED UNTIL
+# NOW: ARRIVAL AMONG ONE STEP'S OWN `exit 1` SITES. The sdist step's comment
+# says "the fifth site to arrive in THIS STEP (`tar` failing)". That step went
+# from four sites to five at `0ba04ba` and `tar` failing is the one that
+# arrived, so FIFTH is right — but it is not file order (`tar` failing stands
+# SECOND of that step's five as they are written) and it is not this header's
+# arrival order either (among refusals it is the FOURTEENTH). Three orders are
+# therefore live: arrival among all refusals, which is what this header numbers
+# with; position in the file, which the paragraph above is about; and arrival
+# among a single step's own sites, which only that step's comment uses. A
+# number is readable only if it says which order it is in, so each of them
+# names its order as well as its refusal, and the step-local one names its
+# step.
+#
 # AND FOUR OF THOSE ORDINALS WERE OFF BY ONE UNTIL THIS COMMIT: they named the
 # count BEFORE the refusal arrived, not after. Reconstructed from this header's
 # own count at each commit that moved it — the wheel count landed when the
@@ -153,9 +182,13 @@
 # when it went 9 -> 12 and were called the ninth, tenth and eleventh; the
 # `dist/` inventory landed 12 -> 13 as THE THIRTEENTH; `tar` failing landed
 # 13 -> 14 as THE FOURTEENTH. The last two number the count AFTER arrival and
-# the first four the count BEFORE it, and the tell is that nothing in this file
-# was ever THE TWELFTH: the narrative ran 8, 9, 10, 11, 13, 14 and reached this
-# file's own total of fourteen only by SKIPPING one.
+# the first four the count BEFORE it, and the tell is that UNTIL THIS
+# CORRECTION nothing in this file had ever been called THE TWELFTH: the
+# narrative ran 8, 9, 10, 11, 13, 14 and reached this file's own total of
+# fourteen only by SKIPPING one. That is a claim about the NUMBERING as it
+# stood and not about the refusals — the renumbering below fills the gap, and
+# from here on the twelfth refusal is the sdist step establishing the tarball
+# count for ITSELF.
 #
 # THEY ARE RENUMBERED, AND THE SENTENCE THAT VOUCHES FOR THEM IS KEPT. Dropping
 # the paragraph above was the other repair available and it fixes nothing: the
@@ -167,6 +200,21 @@
 # one that took the count TO K. "the seventh `exit 1` site" above is NOT in
 # this correction and is right as it stands — it numbers a SITE among sites,
 # where six stood before it, not a refusal among refusals.
+#
+# AND WHEN ONE COMMIT ADDS SEVERAL REFUSALS AT ONCE, THE ORDER AMONG THEM IS
+# FILE POSITION. "The Kth is the one that took the count TO K" fixes where a
+# GROUP lands and says nothing about the order WITHIN it, and a group is not
+# hypothetical: `400415f` took the count 9 -> 12 with three refusals in one
+# commit. The convention that commit actually used is written down here rather
+# than inferred a second time — the members of a group are numbered by where
+# they STAND in this file, earliest lowest, and the group ends on the new
+# total. RE-DERIVED on that commit: the tag step's sdist-count refusal, the
+# tag-versus-sdist comparison and the sdist step's own tarball count stand in
+# exactly that order in it, and this header calls them the tenth, the eleventh
+# and the twelfth. It is also what makes the ordinal in "THREE MORE" below a
+# statement rather than a guess: the count PLUS ONE is the ordinal of a refusal
+# added ALONE, and a commit that adds two gives the second the count plus two,
+# the higher number going to whichever stands lower in this file.
 #
 # NOTHING DERIVES AN ORDINAL AND NOTHING CAN. The count pin holds the TOTAL,
 # and the arithmetic it checks is the NUMBER of `exit 1` sites, never a
@@ -757,8 +805,13 @@ jobs:
       # the input it is given. FOUR of them can fire in the workflow as it
       # stands, and only four, because the tag step establishes the tarball
       # count before this step runs — and it establishes NOTHING ELSE about the
-      # tarball, because it never opens it, which is why the fifth site (`tar`
-      # failing) is live in the workflow and not only standalone.
+      # tarball, because it never opens it, which is why the fifth site to
+      # arrive in THIS STEP (`tar` failing) is live in the workflow and not
+      # only standalone. FIFTH is arrival among this step's OWN sites — it went
+      # four to five at `0ba04ba` — which is a third order, neither file order
+      # (`tar` failing stands second of the five as they are written) nor the
+      # header's arrival order among refusals (there it is the FOURTEENTH). The
+      # header declares that order beside the other two.
       #
       # THE PARENTHETICAL HERE USED TO READ "three of which can fire" WITH
       # NEITHER FRAME NAMED, one paragraph after this file insists on the
@@ -825,13 +878,23 @@ jobs:
           # used to be written into the checkout ROOT and removed by an `rm -f`
           # on the SUCCESS path only, so every refusal that got as far as
           # writing them left `members.txt`, `tracked.txt`, `generated.txt` and
-          # `explained.txt` behind — measured at four files on each of the
-          # three refusal paths that reach them, and zero on the fourth, which
-          # returns above before any is written. State left in the workspace by
-          # a step whose own comment argues that nothing is carried between
-          # steps. A scratch directory plus a `trap` says the same thing in a
-          # way that survives `exit 1`; the messages below still name the plain
-          # basename, because that is what a reader needs.
+          # `explained.txt` behind. RE-DERIVED on the body this commit ships,
+          # with `work` pointed back at the checkout root and the `trap`
+          # removed — the historical shape, everything else byte for byte —
+          # each of this step's FIVE sites driven on its own input: four files
+          # on each of the THREE paths that reach the writes (examined nothing,
+          # not a real artefact, an uncommitted member) and ZERO on each of the
+          # TWO that return above them (two tarballs, a corrupt tarball). It
+          # read "three … and zero on the FOURTH" until now: correct at
+          # `eb26d48`, when this step had four sites, and stale from `0ba04ba`,
+          # the commit that made `tar` failing the second site in file order
+          # and the second that returns above the writes. The fourth site in
+          # file order is one that DOES reach them. State left in the
+          # workspace by a step whose own comment argues that nothing is
+          # carried between steps. A scratch directory plus a `trap` says the
+          # same thing in a way that survives `exit 1`; the messages below
+          # still name the plain basename, because that is what a reader
+          # needs.
           work="$(mktemp -d)"
           trap 'rm -rf "${work}"' EXIT
           # THE TARBALL IS READ ONCE, AND `tar` FAILING IS THIS STEP'S OWN
@@ -1036,6 +1099,38 @@ jobs:
       # the glob makes the record cover everything `dist/` would publish and
       # still asserts nothing. `nullglob` is what makes the empty case print
       # nothing instead of trying to read a file called `dist/*.tar.gz`.
+      #
+      # AND ONE SHAPE THIS STEP CANNOT RECORD AND CANNOT SURVIVE, noted here
+      # because every paragraph above argues that it cannot fail the release
+      # and none of them met this. A `dist/` entry that is a FIFO named like a
+      # tarball makes `tar tzf` BLOCK — a FIFO with no writer never returns
+      # from `open` — so this loop never comes back and the JOB BURNS TO ITS
+      # TIMEOUT. That is not a `tar` exit code, so the `||` below cannot turn
+      # it into a record; it is not an empty listing either; and a timeout is
+      # the one refusal that cannot say it refused. MEASURED on the bodies this
+      # commit ships, a real `dist/` — the wheel, the sdist and the one-byte
+      # `*` `.gitignore` `uv build` writes — plus a FIFO called
+      # `stelling-0.0.9.tar.gz`, `TAG=v0.2.0`:
+      #
+      #   the tag step        rc=1   dist/ does not hold exactly one sdist
+      #   the sdist step      rc=1   cannot tell which tarball to read
+      #   the manifest step   HANGS  killed at 20 s, no exit code
+      #
+      # BOTH REFUSAL POINTS CATCH THAT SHAPE AND THIS STEP STILL HANGS ON IT,
+      # which is the whole reason it is written down: they refuse on the COUNT
+      # and this step loops over EVERY match, so being third in the job is not
+      # a property of this body. "An earlier step would have caught it" is the
+      # argument this file exists to retract, and a `run:` block is a script
+      # that has to be correct on the input it is given — which is why the
+      # sdist step makes the tarball count for ITSELF one step earlier. It is
+      # UNREACHABLE from this workflow for the same reason the sdist step's
+      # FIFO note gives — `actions/checkout@v4` plus `uv build` puts regular
+      # files in a gitignored `dist/` — and it is RECORDED and not repaired for
+      # the same reason too: a `timeout` around `tar` would put a NEW way to
+      # fail into the one step whose stated property is that it cannot fail the
+      # release, and that property is what the `2>&1` repair above was for. See
+      # beside the sdist step for the single-FIFO measurement, where this step
+      # hangs and the tag step returns 0.
       - name: the sdist manifest, for the record
         run: |
           set -euo pipefail

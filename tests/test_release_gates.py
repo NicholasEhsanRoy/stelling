@@ -198,10 +198,33 @@ _ORDINAL_WORDS = {
 # patterns the pins do, and so no pattern is written twice.
 _HEADER_COUNT_RE = r"^# ([A-Z]+) REFUSAL POINTS STAND BETWEEN A TAG AND PyPI"
 _DRIVEN_OF_RE = r"^# SEVEN OF THE ([A-Z]+) WERE DRIVEN IN BOTH DIRECTIONS"
-# No `.*` in this one, deliberately: `.` matches a carriage return, so a
+# NARROW ON PURPOSE, AND THE REASON THAT STOOD HERE WAS HALF TRUE. It read:
+# "No `.*` in this one, deliberately: `.` matches a carriage return, so a
 # wildcard here would see the CR-only rendering that
 # `test_the_release_gates_READ_ONE_FILE_however_its_lines_end` requires every
-# scan in this module to be blind to.
+# scan in this module to be blind to." MEASURED on this tree's `release.yml`,
+# CR-only rendering, `re.M`: this pattern with a TRAILING `.*` appended is
+# still ZERO hits — the negative control is NOT broken — and so are the other
+# two. In a CR-only rendering there is no `\n` at all, so `^` matches only at
+# offset 0, and each pattern's own anchored literal is what refuses it there; a
+# wildcard placed AFTER that literal never gets the chance to matter. What
+# breaks the control is a `.*` BETWEEN `^#` AND THE DISTINGUISHING LITERAL:
+# `^#.*adding a ([A-Z]+)` reads ONE hit where zero is required, because `.`
+# matches `\r` and the whole file is then a single line beginning at offset 0.
+# So the true claim is about the MID-PATTERN position and not about the
+# position a wildcard would naturally occupy.
+#
+# AND THE STRONGER REASON FOR NARROWNESS IS UNIQUENESS, which is red on the
+# NORMALISED file before the CR question is reached at all: `release.yml`
+# QUOTES ITS OWN COUNTER-EXAMPLE. `^#.*SEVEN OF THE ([A-Z]+)` finds TWO hits
+# today — `FOURTEEN` in the sentence that IS the claim, and `NINETY` in the
+# sentence recording that `SEVEN OF THE NINETY` once went unnoticed — and
+# `_one_word` demands exactly one, so a loose pattern fails on the file as it
+# stands. That is the shape to expect from these three sentences in
+# particular: their subject is the sentences themselves, so the file is full of
+# retracted and hypothetical spellings of each. All three patterns in this
+# group are anchored to their own literal for that reason, and the CR argument
+# is the second one.
 _DECLINED_ORDINAL_RE = (
     r"^# therefore refuse through refusal point 1 rather than adding a "
     r"([A-Z]+)"
@@ -278,9 +301,20 @@ def test_the_release_gates_READ_ONE_FILE_however_its_lines_end():
     marker opened by a CR.
 
     Both directions are driven: the CRLF and CR-only renderings of this
-    repository's own `release.yml` read back to the same four hits, and the
-    CR-only rendering with its breaks LEFT ALONE is invisible to all four
-    -- which is what the normalisation is worth.
+    repository's own `release.yml` read back to the same {n} hits -- one per
+    entry of :data:`_ANCHORED_SCANS` -- and the CR-only rendering with its
+    breaks LEFT ALONE is invisible to all {n}, which is what the normalisation
+    is worth.
+
+    THAT NUMBER IS INTERPOLATED FROM `len(_ANCHORED_SCANS)` -- done just below
+    this function -- AND IS NOT TYPED HERE, because it had already stopped
+    tracking what it is derived from. It read "four" while the tuple held SIX:
+    it was written when the tuple held four and was left behind by the commit
+    that grew it to six, which is precisely the defect
+    :func:`test_the_counts_DERIVED_from_the_header_move_with_it` exists to
+    catch in `release.yml` -- committed in the docstring of a test in the
+    module that catches it. A count derived from a collection is written down
+    once, in the collection.
     """
     text = _release_text()
     assert "\r" not in text, (
@@ -289,6 +323,16 @@ def test_the_release_gates_READ_ONE_FILE_however_its_lines_end():
     )
     wanted = {name: re.findall(pattern, text, re.M)
               for name, pattern in _ANCHORED_SCANS}
+    # THE DICT IS KEYED ON THE NAME, so two entries sharing one would collapse
+    # into a single key and a scan would go undriven while every assertion
+    # below stayed green. Held to the tuple's own length, which is also where
+    # this test's docstring gets its count.
+    assert len(wanted) == len(_ANCHORED_SCANS), (
+        f"two entries of `_ANCHORED_SCANS` share a name, so "
+        f"{len(_ANCHORED_SCANS) - len(wanted)} of the "
+        f"{len(_ANCHORED_SCANS)} scans this test claims to drive are not "
+        f"being driven at all: {[name for name, _ in _ANCHORED_SCANS]}"
+    )
     assert all(len(hits) == 1 for hits in wanted.values()), (
         f"one of this module's anchored scans no longer finds exactly one "
         f"thing in `release.yml`, so the test below would watch nothing: "
@@ -317,6 +361,16 @@ def test_the_release_gates_READ_ONE_FILE_however_its_lines_end():
         f"`^`-anchored scan in this module and some of them saw it: "
         f"{blind}. If `re.M` has changed, say so where `_one_line_break` "
         f"explains why it exists"
+    )
+
+
+# THE ONE COUNT IN THAT DOCSTRING, DERIVED. `str.replace` rather than
+# `str.format` so a future brace in the prose is not a formatting error, and
+# guarded because `python -OO` strips docstrings to `None`.
+if test_the_release_gates_READ_ONE_FILE_however_its_lines_end.__doc__:
+    test_the_release_gates_READ_ONE_FILE_however_its_lines_end.__doc__ = (
+        test_the_release_gates_READ_ONE_FILE_however_its_lines_end.__doc__
+        .replace("{n}", str(len(_ANCHORED_SCANS)))
     )
 
 
@@ -638,6 +692,25 @@ def test_the_counts_DERIVED_from_the_header_move_with_it():
     the coupling this test exists to assert. GREEN, unchanged, on `eb26d482`
     and `400415fe` — the last two commits at which the file was consistent —
     so it is not a check that only passes on today's numbers.
+
+    PLUS ONE IS WELL DEFINED ONLY UNDER AN INTRA-COMMIT ORDERING CONVENTION,
+    AND THE CASE THAT NEEDS ONE HAS ALREADY HAPPENED. "The ordinal a refusal
+    added there WOULD take" is the count plus one when ONE refusal is added.
+    `400415f` added THREE in a single commit and took the count 9 -> 12, so
+    "the next one" was 10, 11 or 12 depending on which of the three is meant,
+    and nothing said which. The convention that commit actually used is FILE
+    POSITION — the members of a group are numbered by where they STAND in
+    `release.yml`, earliest lowest, and the group ends on the new total.
+    Re-derived on it: the tag step's sdist-count refusal, the tag-versus-sdist
+    comparison and the sdist step's own tarball count stand in that order in
+    that file, and the header calls them the tenth, the eleventh and the
+    twelfth. It was nowhere written down; it is written down now, in
+    `release.yml`'s header beside the renumbering rule it completes. THIS PIN
+    IS UNAFFECTED EITHER WAY — it compares the ordinal to the header's total
+    plus one, and a group's last member is the one that lands on the total —
+    but what the sentence MEANS while a group is being added was
+    under-specified, and an ordinal that does not say which order it is in is
+    the defect this whole pin was written for.
 
     WHAT IT CANNOT DO is the same thing the count pin cannot do: these are
     words in comments, and nothing in this repository derives an ORDINAL for a
@@ -1069,10 +1142,15 @@ def test_the_sdist_gate_refuses_a_member_that_is_not_committed(tmp_path):
 
 #: The four files the sdist step builds its comparison out of. They were
 #: written into the CHECKOUT ROOT and removed by an `rm -f` on the success path
-#: only, so every refusal that reached them left all four behind — measured at
-#: four files on each of the three refusal paths that get that far, in a step
-#: whose own comment argues that nothing is carried between steps. They live in
-#: a `mktemp -d` scratch directory now, removed by a `trap` on every way out.
+#: only, so every refusal that reached them left all four behind — re-derived
+#: on the body this commit ships, in the historical shape (`work` pointed at
+#: the checkout root, no `trap`): four files on each of the THREE paths that
+#: get that far, and zero on each of the TWO that return above the writes (the
+#: tarball count and `tar` failing), in a step whose own comment argues that
+#: nothing is carried between steps. `release.yml` said "three … and zero on
+#: the fourth" beside those writes from `eb26d48`, when the step had four
+#: sites, until this commit. They live in a `mktemp -d` scratch directory now,
+#: removed by a `trap` on every way out.
 _WORKINGS = ("members.txt", "tracked.txt", "generated.txt", "explained.txt")
 
 
@@ -1228,15 +1306,47 @@ def _corrupt_tarballs() -> dict[str, bytes]:
     manifest step.
 
     FIVE IS THE COUNT OF SHAPES THAT MAKE `tar tzf` EXIT NON-ZERO, AND THAT IS
-    NOT THE SAME AS THE COUNT OF UNREADABLE TARBALLS. A `dist/` entry that is a
-    FIFO named like a tarball makes `tar tzf` BLOCK — a FIFO with no writer
-    never returns from `open` — so it produces no exit code at all and the
-    twelfth refusal never runs. Measured on the bodies this commit ships: the
-    tag step rc=0 (it reads filenames), the sdist step and the manifest step
-    both hung and were killed at 20 s. It fails CLOSED, since nothing is
-    published, and it is unreachable from `checkout` + `uv build`; it is
-    recorded beside that refusal in `release.yml` and is not driven here,
-    because a drive of it is a test that hangs.
+    NOT THE SAME AS THE COUNT OF UNREADABLE TARBALLS. This module holds TWO
+    witnesses to that, and one paragraph used to name only the second.
+
+    THE FIRST IS `_A_SHORT_GZIP_OF_A_NON_TAR`, DIRECTLY BELOW, and it is why
+    two numbers in `release.yml` differ by one and are BOTH right. `tar tzf`
+    exits **0** on it and lists nothing, so it is unreadable and never reaches
+    the `tar` annotation at all — the empty-`members.txt` arm is what refuses
+    it. So the sdist step's own comment says "all five corrupt shapes rc=1 with
+    this annotation" (five shapes make `tar` exit non-zero — the five here) and
+    the header's THE FOURTEENTH paragraph says the tag step "returns rc=0 on
+    every corrupt shape measured — six of them" (six shapes are unreadable —
+    these five plus the short gzip). Five and six count different sets, the
+    sixth is the constant below, and the sentence that names one witness has to
+    name the other or the two numbers read as a discrepancy.
+
+    THE SECOND IS A FIFO named like a tarball, which makes `tar tzf` BLOCK — a
+    FIFO with no writer never returns from `open` — so it produces no exit code
+    at all and THE TWELFTH `exit 1` SITE, THE FOURTEENTH REFUSAL POINT, never
+    runs.
+
+    NOT "the twelfth refusal", which this paragraph said and which is a
+    different and LIVE refusal. Under the arrival order this module and
+    `release.yml` both number in, the TWELFTH refusal is the sdist step's own
+    tarball count — the one
+    :func:`test_the_sdist_gate_refuses_a_dist_it_cannot_read` heads with THE
+    TWELFTH REFUSAL POINT, a hundred lines above — and a FIFO is ONE glob
+    match, so on this shape it RUNS AND PASSES. TRACED under `bash -x` on the
+    body this commit ships, a `dist/` whose only `*.tar.gz` is a FIFO: `[ 1 -ne
+    1 ]` evaluates false, `sdist=` is assigned, the scratch directory is made
+    and the `trap` set, and control stops inside `tar tzf` with no annotation
+    printed. The refusal that never runs is the one BELOW that call. Naming it
+    "the twelfth" handed a live refusal's name to a dead path in the same
+    module that names the live one, which is the collision this file refused to
+    leave standing for FOURTEENTH.
+
+    Measured on the same bodies: the tag step rc=0 (it reads filenames), the
+    sdist step and the manifest step both hung and were killed at 20 s. It
+    fails CLOSED, since nothing is published, and it is unreachable from
+    `checkout` + `uv build`; it is recorded beside both of those steps in
+    `release.yml` and is not driven here, because a drive of it is a test that
+    hangs.
     """
     valid = _valid_tarball_bytes()
     return {
@@ -1794,7 +1904,9 @@ def test_the_tag_gate_refuses_a_dist_it_cannot_reason_about(tmp_path):
     this landed, because six stood before it — and the refusal count went from
     EIGHT to NINE for exactly the same reason, so this is the NINTH refusal and
     the SEVENTH site. Numbering a refusal off the count BEFORE it arrives is
-    what left `release.yml` with no TWELFTH at all; see the header there.
+    what left `release.yml` with no TWELFTH at all until the renumbering; see
+    the header there. There IS one now — the sdist step's own tarball count —
+    and it is named wherever it is numbered.
 
     `ls dist/*.whl` returns EVERY match and `basename` on a multi-line string
     returns whatever follows the LAST `/`. So with two wheels in `dist/` the
