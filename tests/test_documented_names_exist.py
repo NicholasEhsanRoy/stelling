@@ -3,12 +3,31 @@
 
 """A name a document presents as EXISTING, that `src/` does not have.
 
-`DOCUMENTATION_ARCHITECTURE.md` says *"`trust_boundary` field"*, *"It lives in
+`DOCUMENTATION_ARCHITECTURE.md` said *"`trust_boundary` field"*, *"It lives in
 `TransferMeta`"*, *"The verdict artifact carries `opaque_params`"* and
-*"`arithmetic: real-with-margin`"*. `grep -r` over `src/` returns nothing for
+*"`arithmetic: real-with-margin`"*. `grep -r` over `src/` returned nothing for
 any of the four. Two of them turned out to be labels rather than machinery and
-one is a mode that does not exist; a reader has no way to tell an implemented
+one is a mode that does not exist; a reader had no way to tell an implemented
 name from an intended one, and neither did any check in this repository.
+
+**THOSE NINE SENTENCES HAVE BEEN REWRITTEN AND THIS GATE IS WHAT HELD THEM TO
+IT** — see :func:`test_a_documented_name_presented_as_existing_is_in_src` for
+what each became. **The rewrite used none of the three exclusions**, and that
+was the instruction: an unchecked checkbox around a sentence nobody intends to
+tick is this defect one layer up, and a gate whose own failure text names the
+escapes is a gate whose escapes are the first thing an author reaches for.
+Each sentence instead says what is true — which artifact carries what, or that
+a name is designed and not built.
+
+**AND THAT MADE A HOUSE STYLE EXPLICIT, WHICH IS WORTH MORE THAN THE NINE
+EDITS.** Construction 3 below reads a backticked ``key: value`` pair as *"an
+artifact carries this pair"*, because that is what the pair form means in this
+repository's prose — so a field position that does NOT exist is written with
+its field and its value apart: *"the `arithmetic` row's `real-with-margin`
+position"*, never ``  `arithmetic: real-with-margin` ``. The pair form is
+reserved for pairs a reader could find in a verdict. Nothing here enforces
+that convention on its own — it is the reason construction 3 can be as blunt
+as it is without being wrong.
 
 **THE HARD PART IS THE FALSE-POSITIVE RATE, AND IT IS THE DESIGN.** A document
 may legitimately name a planned thing — this one is a *planning document* that
@@ -274,25 +293,45 @@ def missing_names(
 
 
 def test_a_documented_name_presented_as_existing_is_in_src():
-    """The gate. **RED on `main` at `115d771`, and every hit is real.**
+    """The gate. **RED on `main` at `115d771` — nine sites, four names.**
 
-    Four names, in a file this agent does not own:
+    Four names, and what each sentence says now. None of the four was
+    allowlisted: an allowlist entry for the defect a gate was written to catch
+    is the gate arriving pre-silenced, and `PERMITTED` is for names the
+    CONSTRUCTIONS cannot judge, never for instances waiting on a fix.
 
-    * `trust_boundary` — *"`trust_boundary` field"*, §1.4 and §2.4. A stamp
-      field the stamp does not have.
-    * `TransferMeta` — *"It lives in `TransferMeta`"*, §5.1. The tier turned
-      out to ride in the registry tuple; §10.1's dataclass was never built.
+    * `trust_boundary` — *"`trust_boundary` field"* in §1.4's responsibility
+      table and *"`trust_boundary: jaxpr`"* in §2.5. A stamp key the stamp
+      does not have. §1.4's row now names where the traced ⇒ compiled gap
+      *is* recorded and says that no verdict field records it, and §2.4's row
+      marks the key as design; the paragraph under §1.4's table used to say
+      both open gaps *"are verdict fields"*, and now says which one is and
+      which one is not, and that the asymmetry is a defect.
+    * `TransferMeta` — *"It lives in `TransferMeta`"*, §5.1 rule 3. The tier
+      rides in the registry and reaches the stamp as `transfer_tiers`;
+      §10.1's dataclass was never built and §9.1 already listed it as
+      deferred, so rule 3 now says where the tier IS and keeps its point,
+      which was never the container but the direction — code to doc, never
+      back.
     * `opaque_params` — *"The verdict artifact carries `opaque_params`"*,
       §2.6, and again in `design/transparent-primitives.md`. The type
-      `OpaqueParam` IS in `src/stelling/ir.py`; the artifact field is not,
-      which is exactly the case a coarser check would call satisfied.
-    * `real-with-margin` — *"`arithmetic: real-with-margin`"*, §2.4, §2.6 and
-      §6.4. A mode of a field that exists, and the mode does not.
+      `OpaqueParam` IS in `src/stelling/ir.py`; the artifact key is not,
+      which is exactly the case a coarser check would call satisfied. §2.6's
+      three consequences are now written as the obligations they are, over a
+      sentence that says nothing counts opaque params into a verdict, and the
+      schema sketch says which of its keys are design.
+    * `real-with-margin` — *"`arithmetic: real-with-margin`"*, §2.4, §2.5,
+      §2.6 and §6.4. A position of a dial, and neither the position nor the
+      dial is spelled that way in the tree: what records the arithmetic a
+      verdict is judged in is `semantics`, and what records how endpoints are
+      computed is `arithmetic_mode`. **No margin is computed anywhere**, so
+      the sentences that leaned on one — §2.5's candidate row and §6.4's
+      *"a claim about ℝ, with margin"* — say instead what does and does not
+      absorb the difference.
 
-    The red is the report. None of them is allowlisted: an allowlist entry
-    for the defect a gate was written to catch is the gate arriving
-    pre-silenced, and `PERMITTED` is for names the CONSTRUCTIONS cannot judge,
-    never for instances waiting on someone else's fix.
+    `SOUNDNESS.md` reached the same four names from the other end and is the
+    ledger for them; this is the architecture document's own prose, and the
+    two are meant to be read together rather than to repeat each other.
     """
     documents = corpus()
     assert documents, "the documentation corpus is empty"

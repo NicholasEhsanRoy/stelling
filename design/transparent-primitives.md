@@ -92,9 +92,12 @@ alike is exactly the identity relation verification wants. Gradient
 verdicts key on `grad(f)`'s trace, where jax's AD has already consumed the
 thunks and inlined the derivative math as ordinary equations (verified on
 0.10.2), so that hash distinguishes them on its own. The structural
-mitigation exists; what remains is bookkeeping — a *stored* verdict says
-which trace its hash is of, which `DOCUMENTATION_ARCHITECTURE.md` §2.6
-carries as the `opaque_params` field.
+mitigation exists; what remains is bookkeeping — a *stored* verdict should
+say which trace its hash is of, which `DOCUMENTATION_ARCHITECTURE.md` §2.6
+designs under the name `opaque_params`. **The bookkeeping is still what
+remains**: no stamp records how many opaque params a query held, so a reader
+holding two verdicts with equal hashes cannot tell from them whether the
+equality is total.
 
 `OpaqueParam` is ⊤ at the param level: the same known-unknown discipline
 the transfer registry applies to unknown primitives, one layer down. That
