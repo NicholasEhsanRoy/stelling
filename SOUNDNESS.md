@@ -836,7 +836,7 @@ repairing them, and the repairs are in place above and in
   swept — a paragraph naming what a sweep reached must move when the page
   grows a section the sweep never saw, or the reach statement quietly
   widens to cover text nobody drove.
-* **The `## Log` below was not read line by line.** It is **15,923 lines** as
+* **The `## Log` below was not read line by line.** It is **16,082 lines** as
   this is written — the `## Log` heading to the end of the file, and that is
   the population — and it was swept EXHAUSTIVELY BY INSTRUMENT — every
   `path::name` citation, every backticked module-qualified identifier, every
@@ -858,8 +858,8 @@ repairing them, and the repairs are in place above and in
   arithmetic were all stale by 2026-08-25 and are re-derived here rather
   than left**: measured on this tree by the same two rules — physical lines
   from the `## Log` heading to the last line of the file, and
-  `_detail_sections` over the 72 routed bodies — the Log is **15,923**
-  lines, the routed sections **3,470**, and the difference **12,453**,
+  `_detail_sections` over the 72 routed bodies — the Log is **16,082**
+  lines, the routed sections **3,470**, and the difference **12,612**,
   which is not 11,000-odd any more either. The two rules are stated because
   they are what reproduce the historical figures: they give 14,926 at
   `3fe29d3`, 14,924 at `391e50e` and 14,823 at `5ad906f`, so nothing above
@@ -13146,10 +13146,15 @@ thing that disagrees is the released artefact, which no document
 comparison opens. Settling one costs an extraction of `v0.1.0`, an
 interpreter, and in this entry's case TWO interpreters carrying two jaxes
 — which is not a test-suite gate, it is the work the entry is supposed to
-have done. **One sub-case IS document-decidable, and it is the one that
-failed here**: a justification of the form *"`v0.1.0` predates the whole
-file"* is a claim about the TAG'S TREE, and `git cat-file -e
-v0.1.0:<path>` refutes it in a millisecond.
+have done. **One sub-case is document-decidable ONLY WHERE THE SENTENCE
+NAMES A PATH, AND THE ONE THAT FAILED HERE NAMED NONE**: a justification
+of the form *"`v0.1.0` predates the whole file"* is a claim about the
+TAG'S TREE, and `git cat-file -e v0.1.0:<path>` settles it in a
+millisecond — GIVEN a `<path>`. The sentence that was false here was about
+`src/stelling/reproduce.py` and wrote no `v0.1.0:` token at all, so the
+check below reads this entry's OTHER, correct citation and passes.
+Measured on 2026-08-25 by running that check, as it stands today, over
+this document state at `b0df85e^`: **green**.
 
 **THAT CHECK EXISTS NOW, AND THE ARGUMENT FOR NOT ADDING IT WAS WRONG IN
 BOTH HALVES.** It read *"with the false claim removed there is no live
@@ -13187,19 +13192,173 @@ paragraphs now cite the module the section is about —
 `v0.1.0:src/stelling/_tripwire/perimeter.py`, neither of which is in the
 tag's tree.
 
-**WHAT IT ESTABLISHES AND WHAT IT DOES NOT, WHICH IS THE HALF A READER
-WILL OTHERWISE ASSUME.** It is NECESSARY AND NOT SUFFICIENT, and its own
-docstring says so first rather than last. **It never claims to have done
-the driving**: it decides a citation's SHAPE and POLARITY, not the defect,
-and a bullet can satisfy every leg of it and still carry a false field.
-What it removes from the board is one specific way of being wrong — the
-way that actually happened three passes running. It needs git and the tag;
-where git is absent it SKIPS, on the two reason strings
-`tests/test_skip_inventory.py` already declares and on byte-for-byte the
-predicates that file declares them legitimate for, so the skip is
-disclosed by construction. A checkout whose git cannot resolve the tag is
-a hard red carrying git's own stderr rather than a skip, because a control
-reporting green while it did not run is this page's own subject.
+**WHAT IT ESTABLISHES, MEASURED.** Eleven paragraphs are FORMATTED as
+citations: each contains ANY `v0.1.0:<path>` token or ANY backticked
+non-ancestor sha — anywhere in it, for any reason, INCLUDING a sha it
+cites as the commit that INTRODUCED the defect — and each path token it
+does contain agrees with `git cat-file -e` under a polarity read off four
+literal phrases. **A citation-FORMAT rule, not an evidence rule.** It
+never claims to have done the driving, and a bullet can satisfy every leg
+of it and still carry a false field.
+
+**AND IT IS GREEN ON ALL NINE FALSE `Versions:` FIELDS THIS PROJECT HAS
+EVER FOUND.** Re-derived on 2026-08-25 by running the rule as it stands
+over the three document states in which a false field actually shipped, a
+worktree at each commit with today's `tests/` copied in:
+
+* at `c198a8d^` the SIX false *0.1.0 pre-release builds only* fields are
+  outside its population BY CONSTRUCTION — the population keys on the
+  other field — so it is green on all six without reading one of them;
+* at `161ead8^` S12&Prime; and M17 are INSIDE the population and COVERED,
+  each mentioning `v0.1.0` **zero** times: S12&Prime; by `4d793cf`, which
+  its own body names two lines under the field as the commit that added a
+  false docstring SENTENCE while saying the crash itself is
+  *"pre-existing"*, and M17 by six shas that occur only in a TEST-COUNT
+  reconciliation table, none of them offered as evidence about the tag;
+* at `b0df85e^` the query-identity field is inside the population and
+  covered, by `v0.1.0:src/stelling/obligation.py` cited correctly beside
+  the *"`v0.1.0` predates the whole file"* sentence that was the false
+  one and that names no path.
+
+Where it DOES fire across those three states it fires on FOUR TRUE
+paragraphs — the 2026-08-14 rational-`pow` entry, the 2026-08-15 B7 M10
+VERIFIED-bar entry, and `CHANGELOG.md`'s Mode 2 and Mode 3 `*Versions.*`
+paragraphs. **A maintainer following it would have added citations to
+four correct paragraphs and shipped the false one.** And seven of today's
+eleven members cite no path at all and are covered by shas they already
+carried at `161ead8`, two commits before the rule existed: it asks those
+seven for nothing they did not have.
+
+**THE SENTENCE THAT STOOD HERE IS REMOVED, NOT SOFTENED.** It read *"What
+it removes from the board is one specific way of being wrong — the way
+that actually happened three passes running."* The SUFFICIENCY disclaimer
+stood in six places around it, honestly and first — the check's docstring
+opening, its `uncovered` assertion message, its module docstring, this
+paragraph and the one above it, and `CHANGELOG.md`'s Mode 2 sentence —
+and not one of them disclaimed that, which is a NECESSITY claim on the
+other axis, standing unqualified beside them, and it is the sentence a
+reader takes away. It is false nine times out of nine.
+
+**WHAT THE RULE IS STILL WORTH IS SMALLER AND IS STATED AS SUCH**: a
+`v0.1.0:<path>` token whose polarity disagrees with the tag is refused,
+and that is decidable in a millisecond and is now decided for 6 of the 21
+such tokens these two files carry. It is not the shape any of the nine
+false fields took. **Five gaps, measured on 2026-08-25 and stated rather
+than closed:** the OTHER false-claiming field is outside the population
+by construction, and the DATE-versus-FIELD comparison
+`tests/test_soundness_log_reach.py`'s own module docstring describes is
+implemented NOWHERE — driven with the plant and without it in one
+environment, the zero-dep lane is **2321 passed, 184 skipped** both ways;
+the twelve `REACHES_V010` bullets make fourteen path citations between
+five of them and none is polarity-checked — driven, a false absence claim
+planted in one is green, and widening the leg to reach them (one line)
+is `1 failed` on this page's own honest sentence, twice, which is the
+measured price of the cheapest available gain; `CHANGELOG.md`'s
+`### Verification pipeline` section makes this exact move in its own
+words (*"The count check is in the released tag:
+`v0.1.0:src/stelling/obligation.py`'s `slice_unknown_obligations` carries
+it verbatim"*) and is unreached, because the selector is the two words
+`v0.1.0 predates`; 6 of those 21 tokens fall inside the polarity leg and
+15 do not, where it was 6 of 18 at `e94f4ea` — three of the fifteen are
+this commit's own prose, which is how a ratio like this moves and why it
+is dated; and the population floor asserted is `>= 3`, not eleven —
+driven, re-dating eight bullets to the tag day leaves three members and
+it is green.
+
+**WHERE IT SKIPS, AND THE STATE THAT USED TO BLOCK THE RELEASE.** It
+needs git and it needs the tag, and all three failures are DISCLOSED
+skips, each on byte-for-byte the predicate `tests/test_skip_inventory.py`
+declares it legitimate for: `git` not on `PATH`, `.git` not here, and —
+since 2026-08-25 — git here, a checkout here, and the tag out of reach.
+**That third one was a hard red, and it fired inside refusal point #1 for
+PyPI.** `.github/workflows/release.yml`'s job *"the suite, on the tagged
+tree"* checks out with `actions/checkout@v4` and
+`persist-credentials: false` alone — no `fetch-depth`, no `fetch-tags` —
+which is depth 1 on the triggering tag ref, so on every release after
+`v0.1.0` that tree has git, has `.git`, and does not have `v0.1.0`. The
+red refused the publish with a message reading as an integrity failure of
+the record. The precedent ran against it three ways, all here:
+`tests/test_soundness_routing.py` SKIPS eight tests on the same condition
+one object over, with a declared reason and a warning naming git's words;
+`tests/test_skip_inventory.py` already carried a rule whose `when` names
+*"a shallow CI clone that does not reach it"*; and
+`tests/test_sdist_contents.py` says of its own environment-absence skip
+that a hard failure there *"would be flaky in the environment where it
+matters least"*. `fetch-depth: 0` in that workflow would also fix it,
+does not generalise to any other shallow consumer, and is recorded here
+as a recommendation that nothing relies on. **And the promise that red
+carried was empty**: it advertised *"git's own stderr"* while probing
+with `rev-parse --verify --quiet`, which suppresses stderr, so the
+message read ``git said: ''`` in every environment it could ever have
+fired in. The `--quiet` is gone from that probe, git's exit code and
+words travel in the WARNING beside the skip, and an empty stderr is now
+reported as an empty stderr rather than quoted as if it were a message.
+
+**AND THE RELEASE JOB IS STILL BLOCKED, BY A SIBLING'S FILE, FOR THE SAME
+REASON — MEASURED AND NOT ASSUMED.** All three states were driven on
+2026-08-25 against the tree this commit produces, the third of them built
+to be the release job's own shape: a fresh `git init`, one
+`git fetch --depth=1` of a single ref into a tag ref, `git checkout` of
+that tag — git present, `.git` present, the repository shallow, `v0.1.0`
+absent. The check above is a DISCLOSED SKIP there, carrying its new reason
+and a warning naming git's exit code and git's own words. That same tree
+still comes back **1 failed, 2320 passed, 185 skipped**, against
+**2 failed, 2319 passed, 184 skipped** for the same sandbox built from
+`e94f4ea`; the failure that remains is
+`tests/test_proposed_page_headers.py::test_every_commit_a_status_paragraph_names_is_an_ancestor`,
+which hard-asserts `git cat-file -t <sha>` over every commit a
+`proposed-*.md` status paragraph names: the identical shape, one file
+over. Pre-existing — the same sandbox built from `e94f4ea` is **2
+failed**, that test and this one. And a SECOND defect of the same family
+is in that file: with `.git` removed it skips as `needs git` while git IS
+on `PATH`, which `tests/test_skip_inventory.py` correctly reports as a
+CONTRADICTED skip and which reds the whole sdist lane. Neither is fixed
+here, because that file is another agent's this round; both are recorded
+as the recommendation, with the sandbox that reproduces them.
+
+**THE POLARITY LEG IS A FOUR-PHRASE VOCABULARY AND NOT A NEGATION
+DETECTOR, AND IT MISSES IN BOTH DIRECTIONS.** Driven on 2026-08-25 on this
+file, one spelling at a time, restored byte-identically (sha256) after
+each: a FALSE absence claim about `v0.1.0:src/stelling/obligation.py`,
+which IS in the tag's tree, planted in a population bullet, PASSES in ten
+spellings — *was not yet written*, *only arrived in 0.2.0*, *post-dates
+the tag*, *is nowhere in the tag's tree*, *is not in the tag's tree*, *is
+not there*, *never shipped in the tag*, *arrived later than the tag*, the
+negation written BEFORE the token, and the listed phrase with a comma in
+front of it — against a control (`does not exist` immediately after the
+token) that reds. It OVER-FIRES on the same axis: three of those spellings
+written about a path that genuinely is absent each red, reading *"claims
+PRESENT, and it is NOT in the tag's tree"*, and one of the three is this
+page's own true sentence — the one above that cites both tripwire modules
+and closes *"neither of which is in the tag's tree"* — which stands today
+only because its bullet carries the third `Versions:` field and the
+population does not look there. **The list is NOT extended, and that is the
+finding rather than a shortfall**: English negation is not a finite set
+of phrases, an eleventh spelling is one sentence away from any list, and
+each addition widens the over-fire by making more honest sentences read
+as a polarity nobody wrote. The LINE-BREAK case is handled correctly and is
+worth separating from the vocabulary — both scans run over a
+whitespace-normalised copy, so a listed phrase wrapped at 72 columns is
+still read, driven both ways.
+
+**AND THE QUOTATION CONVENTION WAS ANSWERED TWO WAYS BY ONE COMMIT.**
+`e94f4ea` BLANKS `*"…"*` quotations before comparing the ENTRIES figure,
+so the digit's own history can be quoted, and READS quotations in the
+citation rule, where a tag path in quotation dress is decided like any
+other and reds if its polarity disagrees. A quotation is a SPAN and not a
+speech act, so the blanked half was a hiding place: driven at `e94f4ea`,
+the unit phrase set to a wrong numeral inside a quotation and asserted as
+current, appended to both lines that carry it so the file's line count did
+not move, ran **141 passed** over the six doc-relevant files and **12
+passed** over the file whose subject it is. The blanking STAYS — the
+record must be able to quote its own history — and it is PAIRED:
+`test_no_quotation_carries_the_ENTRIES_figure_the_comparison_cannot_read`
+refuses the unit phrase inside a quotation, because inside one nothing
+reads it. The same plant on this tree is **1 failed, 141 passed**, named
+by that check. What the pairing costs is that a retired sentence carrying
+the full unit phrase can no longer be quoted verbatim here; nothing does
+today, measured — neither file carries one — and the canonical FRAMING
+may still be quoted, which is the shape the sibling check reads.
 
 **AND THE PER-BULLET DISCLOSURE REQUIREMENT IS STILL NOT ADDED**, for the
 reason it was rejected under: *"every post-tag bullet carrying 0.2.0

@@ -275,6 +275,58 @@ def _git_cannot_read_the_routing_source() -> bool:
     return unreadable and _why_the_history_is_out_of_reach() is not None
 
 
+def _git_cannot_resolve_the_release_tag() -> bool:
+    """Whether git is here, this IS a checkout, and the release tag is not.
+
+    THE SAME CONDITION AS THE RULE ABOVE, ONE OBJECT OVER, AND IT WAS A HARD
+    RED UNTIL 2026-08-25.
+    `tests/test_soundness_log_reach.py::test_a_claim_about_the_tags_TREE_is_decided_against_the_tag`
+    decides eleven paragraphs' `v0.1.0:<path>` and commit citations against
+    the tag, and where git cannot resolve the tag it decided nothing and
+    ASSERTED instead — on the argument that no rule here declared that
+    condition legitimate. That argument was about this file, and this file
+    is where it is answered.
+
+    **THE CONDITION IS ORDINARY AND ONE OF ITS CAUSES IS THE RELEASE JOB.**
+    `.github/workflows/release.yml`'s job `the suite, on the tagged tree` --
+    refusal point #1 between a tag and PyPI -- checks out with
+    `actions/checkout@v4` and `persist-credentials: false` alone: no
+    `fetch-depth`, no `fetch-tags`, which is DEPTH 1 ON THE TRIGGERING TAG
+    REF. On every release after `v0.1.0` that tree has git, has `.git`, and
+    does not have `v0.1.0`, so the hard red fired inside the one workflow
+    whose mistakes are immutable, and refused the publish with a message
+    that read as an integrity failure of the record.
+
+    THE PREDICATE ASKS GIT THE SAME QUESTION THE TEST ASKS, IN THE SAME
+    ORDER: git on PATH, then `.git`, then the tag. The first two conditions
+    have rules of their own with their own reasons, so this one can only be
+    reached where neither of those holds -- which is what makes the three
+    reason strings a partition of the three states rather than three
+    spellings of one. `_TAG` is READ from the module under test rather than
+    retyped, because a predicate about a different tag from the one the test
+    resolves would excuse a skip nobody made; the REASON is still typed in
+    this file, which is the thing a rule may not compute. Answers False if
+    the import or the probe cannot run at all, which is the safe direction:
+    the skip is then reported as contradicted rather than quietly excused.
+    """
+    if shutil.which("git") is None:
+        return False
+    if not (REPO / ".git").exists():
+        return False
+    try:
+        from test_soundness_log_reach import _TAG
+    except Exception:  # noqa: BLE001 - a predicate may not raise
+        return False
+    try:
+        probe = subprocess.run(
+            ["git", "-C", str(REPO), "rev-parse", "--verify", f"{_TAG}^{{commit}}"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode != 0
+
+
 def _jax_x64_is_on() -> bool:
     """Whether this session runs with 64-bit dtypes enabled.
 
@@ -593,6 +645,37 @@ RULES = (
             "manifest's source-side columns are unverified here",
         }),
         legitimate=_git_cannot_read_the_routing_source,
+    ),
+    Rule(
+        when=(
+            "git is on PATH, this tree IS a git checkout, and git cannot "
+            "resolve `v0.1.0` -- the released tag every `Versions:` field in "
+            "`SOUNDNESS.md`'s `## Log` is a claim about. The five causes the "
+            "rule above lists all produce it, and so does the one that "
+            "matters most: `.github/workflows/release.yml`'s job `the suite, "
+            "on the tagged tree`, which is refusal point #1 between a tag and "
+            "PyPI, checks out with `actions/checkout@v4` and "
+            "`persist-credentials: false` alone -- no `fetch-depth`, no "
+            "`fetch-tags` -- which is depth 1 on the triggering tag ref, so "
+            "on every release after `v0.1.0` that tree has git, has `.git`, "
+            "and does not have the tag. UNTIL 2026-08-25 THIS CONDITION WAS A "
+            "HARD RED, on the argument that no rule here declared it "
+            "legitimate; `tests/test_soundness_routing.py` already SKIPS "
+            "eight tests on the same condition one object over, so two "
+            "sibling document checks answered it in opposite ways, and the "
+            "red one stood inside the workflow whose mistakes cannot be "
+            "unpublished. The condition IS computable here and the predicate "
+            "asks git the question the test asks, in the same order -- git, "
+            "then `.git`, then the tag -- so this reason and the two above it "
+            "partition the three states instead of overlapping. What the "
+            "reason cannot carry the skip says in a WARNING: git's exit code, "
+            "git's own words, and which citations go unverified"
+        ),
+        reasons=frozenset({
+            "git cannot resolve `v0.1.0`, so no claim here about the tag's "
+            "tree can be decided",
+        }),
+        legitimate=_git_cannot_resolve_the_release_tag,
     ),
     Rule(
         when=(
@@ -1191,6 +1274,7 @@ _MUST_MATCH = (
     "needs `uv` to build an sdist",
     "needs git",
     "not a git checkout (an unpacked sdist, say)",
+    "git cannot resolve `v0.1.0`, so no claim here about the tag's tree can be decided",
     "broadcast+slice+squeeze: XLA did not contract this form on this build",
     "nested jit: XLA did not contract this form on this build",
 )

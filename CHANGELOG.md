@@ -165,9 +165,14 @@ finding below was fixed before `stelling.__version__` became `0.2.0`.
 asserted: `v0.1.0:src/stelling/_tripwire/eager.py` does not exist — Mode 2's
 whole module is post-tag — and
 `tests/test_soundness_log_reach.py::test_a_claim_about_the_tags_TREE_is_decided_against_the_tag`
-decides that with `git cat-file -e`. It checks the citation, not the
-finding: that the tag has no such module is decidable here; that no M2
-finding reaches a release is the section's own claim.
+decides that with `git cat-file -e`. It is a citation-FORMAT rule and not
+an evidence rule: that the tag has no such module is decidable here; that
+no M2 finding reaches a release is the section's own claim, and measured
+against the three document states in which a false `Versions:` field
+actually shipped, that rule is green on all nine of them. Where the tag is
+out of reach — a shallow clone, and that includes the release workflow's
+own tagged-tree job — it is a DISCLOSED SKIP with a warning naming git's
+words, not a red.
 
 - **M2-0.2.0-01** — An out-of-range integer constant narrowed at array
   construction RAISES at the line that wrote it, under the opt-in
