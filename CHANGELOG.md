@@ -402,9 +402,10 @@ only release"* while that was so.)
   same fixture wiped the tally the tests before it had already earned. Both
   halves read as one number: the documented dial-on command over the whole
   suite reported `NOT ARMED [detached] ... 0 integer literal(s) ... were
-  checked` — **zero**, over a whole-suite run at `e6968fe`. It now records
-  what it found, lowers the hold for its own window only, and hands it back
-  by identity through `arm()`, raising if it cannot.
+  checked` — **zero**, over the 4,393 tests that passed in that run
+  (`e6968fe`). It now records what it found, lowers the hold for its own
+  window only, and hands it back by identity through `arm()`, raising if it
+  cannot.
 
   **AND THAT RUN WAS NOT GREEN, WHICH THIS ENTRY USED TO IMPLY IT WAS.** It
   said the later tests ran unprotected *with nothing red*, and a reader can
@@ -424,13 +425,30 @@ only release"* while that was so.)
   checkout's file set: it moves whenever anyone adds a test file, in any
   lane, for any reason — so an ordinal on this page would be a number a
   stranger's tree falsifies, and a page edit would be the price of writing a
-  new test. This entry names no ordinal and no count. The file derives its
-  own position instead, from `pytest --collect-only -q -p no:randomly`, and
-  asserts the two relations the incident above actually rests on; a second
-  check reads this page and refuses that coordinate in five spellings, not
-  just the one it was last written in; and a third holds this entry to still
-  disclosing what the paragraphs above disclose, because taking the numeral
-  off took with it the only thing that had been keeping them on the page.
+  new test. This entry names no ordinal, and no figure that is not a reading
+  of a NAMED commit — the pass count above is what one run at `e6968fe`
+  reported, which no later checkout falsifies and any reader can go and take
+  again. The file derives its own position instead, from `pytest
+  --collect-only -q -p no:randomly`, and asserts the two relations the
+  incident above actually rests on; a second check reads this page and
+  refuses that coordinate in seven spellings rather than the one it was last
+  written in, and refuses the *unanchored* form of each, because a figure
+  with the commit it was read at against it is a measurement and not a
+  coordinate of somebody's tree; and a third holds this entry to carrying
+  the phrases the disclosure turns on, because taking the numeral off took
+  with it the only thing that had been keeping them on the page.
+
+  **AND THAT THIRD CHECK HOLDS PHRASES, NOT MEANING — WHICH BELONGS ON THE
+  PAGE IT GUARDS RATHER THAN ONLY IN ITS OWN DOCSTRING.** It is a
+  presence-of-tokens check: it has no notion of polarity, quotation or
+  retraction, and an entry that keeps every phrase it looks for while
+  denying every claim those phrases belong to passes it — driven, with the
+  whole suite green, as does leaving this entry untouched and appending one
+  sentence withdrawing it. No arrangement of patterns fixes that, and one
+  that looked as though it had would be worse, because its green would read
+  as a warrant. So what it holds is that these ten anchors cannot be
+  deleted, nor reworded far enough to lose them: the disclosure stays
+  LOCATED. Whether it still says this is something only reading it settles.
 
 - **`prop_guard._target_dtype` no longer memoises a fault.** It cached the
   `None` produced inside its own `except` branch, so one transient failure
