@@ -413,16 +413,88 @@ module is post-tag.
   therefore unmeasurable on the shipped tree.**
   `tests/test_narrowing_perimeter.py`'s autouse fixture restored
   unconditionally — the exact asymmetry `arm(owner=...)` exists to prevent,
-  aimed at the plugin's hold. That file sorts **72nd** of the files `pytest
-  --collect-only -q -p no:randomly` names in this tree — how many files that
-  is belongs to the environment and not to the tree, since a module whose
-  imports are unavailable is never collected, so the count is not written
-  down here and the command that produces it is named instead — so its
-  first test took the perimeter out and roughly **4,300 later
-  tests ran unprotected with nothing red**; the documented dial-on command reported `NOT ARMED
-  [detached] ... 0 integer literal(s) ... were checked`. It now records what
-  it found, lowers the hold for its own window only, and hands it back by
-  identity through `arm()`, raising if it cannot.
+  aimed at the plugin's hold. That file is collected EARLY — and before
+  `tests/test_tripwire_record.py`, the one file that binds a stand-in over
+  the predicate memos this instrument classifies through, which is what
+  keeps its verdict a reading of the perimeter rather than of another file's
+  teardown. So its first test took the perimeter out and **every test
+  collected after it ran unprotected**, while the `reset_counters()` in the
+  same fixture wiped the tally the tests before it had already earned. Both
+  halves read as one number: the documented dial-on command over the whole
+  suite reported `NOT ARMED [detached] ... 0 integer literal(s) ... were
+  checked` — **zero**, over the 4,393 tests that passed in that run
+  (`e6968fe`). It now records what it found, lowers the hold for its own
+  window only, and hands it back by identity through `arm()`, raising if it
+  cannot.
+
+  **AND THAT RUN WAS NOT GREEN, WHICH THIS ENTRY USED TO IMPLY IT WAS.** It
+  said the later tests ran unprotected *with nothing red*, and a reader can
+  take that for "the run came back clean". It did not: re-driven at
+  `e6968fe` with the dial on, this file on its own ends `56 passed, 1
+  error`, and the error is `ERROR at teardown of
+  tests/test_narrowing_perimeter.py::test_the_vendored_predicates_own_selftest_passes_in_this_cell`
+  — that version of the fixture ended `assert perimeter.armed_faces() ==
+  before == ()`, and it failed on this file's FIRST test, with `assert () ==
+  ('tracer', 'array')`, because the session's hold was still standing on the
+  way in. The incident reported its own shape, on the first test it touched,
+  in the run that produced the zero. What was missing was not a red mark; it
+  was a reader.
+
+  **WHERE THAT FILE SITS IN THE COLLECTION IS LOAD-BEARING, AND IT IS
+  CHECKED RATHER THAN WRITTEN DOWN HERE.** A rank is a property of a
+  checkout's file set: it moves whenever anyone adds a test file, in any
+  lane, for any reason — so an ordinal on this page would be a number a
+  stranger's tree falsifies, and a page edit would be the price of writing a
+  new test. This entry names no ordinal, and no figure that is not a reading
+  of a NAMED commit — the pass count above is what one run at `e6968fe`
+  reported, which no later checkout falsifies and any reader can go and take
+  again. The file derives its own position instead, from `pytest
+  --collect-only -q -p no:randomly`, and asserts the two relations the
+  incident above actually rests on; a second check reads this page and
+  refuses that coordinate in seven spellings rather than the one it was last
+  written in; and a third holds this entry to carrying the phrases the
+  disclosure turns on, because taking the numeral off took with it the only
+  thing that had been keeping them on the page.
+
+  **AND NAMING A COMMIT BUYS A READING OF A RUN PAST THAT SECOND CHECK, NOT
+  A COORDINATE OF A COLLECTION.** The seven spellings are two kinds. Three
+  of them are shapes a reading of a NAMED RUN takes — a count of tests, an
+  `N of M` ratio, a run's own outcome line — and against those a sha is the
+  right remedy and was a missing one: this entry's own **zero** lost its
+  denominator to the check before the escape existed, which is strictly less
+  disclosure on the one paragraph whose reason for existing is *the one
+  number a reader can go and reproduce*. The other four are coordinates of a
+  COLLECTION — an ordinal, a rank in digits, a rank in words, a count of
+  files — and **no commit buys those past at all**, because what a command
+  collects is a property of the ENVIRONMENT rather than of the tree. At one
+  and the same sha this tree's own collect names one number of files in the
+  default lane and the same number in a lane on the jax 0.10 series, one
+  fewer in each of the two CI lanes that carry no `sympy`, and about half as
+  many in the zero-dep lane, where it does not reach this file at all. A
+  rank with a sha written against it is therefore *false* wherever the
+  denominator moved and *meaningless* where there is no rank to have,
+  **at the sha it names** — so it is refused anchored or not, and the only
+  remedy offered for it is the derived figure. Applied to all seven alike,
+  the escape did not merely fail to catch that spelling; it opened it, and a
+  sentence putting this file's rank and the file count on this page behind a
+  sha was green from end to end.
+  Two mechanical repairs go with the split: an all-decimal backticked
+  integer is no longer read as an address — `16777219` and `2147483647` are
+  on this very page as subject matter, and each of them was buying figures
+  past — and the sentence the escape is scoped to now breaks at a bullet, so
+  an anchor in one agent's entry can no longer exempt a figure in another's.
+
+  **AND THAT THIRD CHECK HOLDS PHRASES, NOT MEANING — WHICH BELONGS ON THE
+  PAGE IT GUARDS RATHER THAN ONLY IN ITS OWN DOCSTRING.** It is a
+  presence-of-tokens check: it has no notion of polarity, quotation or
+  retraction, and an entry that keeps every phrase it looks for while
+  denying every claim those phrases belong to passes it — driven, with the
+  whole suite green, as does leaving this entry untouched and appending one
+  sentence withdrawing it. No arrangement of patterns fixes that, and one
+  that looked as though it had would be worse, because its green would read
+  as a warrant. So what it holds is that these ten anchors cannot be
+  deleted, nor reworded far enough to lose them: the disclosure stays
+  LOCATED. Whether it still says this is something only reading it settles.
 
 - **`prop_guard._target_dtype` no longer memoises a fault.** It cached the
   `None` produced inside its own `except` branch, so one transient failure

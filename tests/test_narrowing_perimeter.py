@@ -44,6 +44,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -287,9 +288,482 @@ THE_SIX_THE_PAGE_NAMED = (
 )
 
 
-#: Ordinal suffixes, for the collection-rank sentence below.
-_ORDINAL = {1: "st", 2: "nd", 3: "rd", 0: "th", 4: "th", 5: "th",
-            6: "th", 7: "th", 8: "th", 9: "th"}
+#: The collection command both artefacts name, kept as ARGV and joined into
+#: a sentence only at the point of comparison. Typed as a sentence it would
+#: stand in this file's own source -- and this file is one of the two
+#: artefacts, read whole -- so the assertion would satisfy itself.
+_COLLECT_ARGS = ("--collect-only", "-q")
+
+#: The one file in this tree that binds a ``SimpleNamespace`` over
+#: ``prop_guard``'s module memos. This file is collected BEFORE it, which is
+#: what keeps this file's verdict a reading of the perimeter rather than of
+#: that file's teardown -- an accident of the alphabet until
+#: :func:`test_this_file_is_collected_where_the_hazard_requires` said it out
+#: loud, along with what the arrangement costs.
+_MEMO_STAND_IN = "tests/test_tripwire_record.py"
+
+#: THE COMMIT THE INCIDENT WAS DRIVEN AT, and the address every reading in
+#: that entry is a reading of. It is a constant here because the entry on
+#: the shipped page is held to CARRYING it (:data:`_INCIDENT_DISCLOSURE`):
+#: the zero, the tally and the teardown error are all readings of ONE run,
+#: and with the sha off the page there is no run for a reader to go back to.
+_INCIDENT_COMMIT = "e6968fe"
+
+#: An ordinal written in DIGITS. In this file and in ``CHANGELOG.md`` that
+#: has only ever been one thing -- this file's rank in the collection, which
+#: is a property of the checkout's file set. Refused by
+#: :func:`test_neither_artefact_writes_this_checkouts_collection_coordinate`
+#: over the whole of both artefacts; an ordinal meant honestly goes in words.
+#: The suffix must follow the digits with nothing between, or ``2 states``
+#: reads as an ordinal.
+#:
+#: **A DATE IS NOT A RANK, AND THIS LEG REFUSED ONE.** *"the 3rd of March
+#: 2026"* is an honest sentence anybody could write in their own entry, and
+#: it matched -- driven. :data:`_DATE_ORDINAL` takes the date spellings back
+#: out, in both orders.
+#:
+#: **AND WHAT IS LEFT IS HELD PAGE-WIDE ON THE STRENGTH OF A CENSUS RATHER
+#: THAN OF A MEANING.** The argument this file uses to refuse a page-wide
+#: ban on a count of tests -- *"it would hand a sibling a red they did not
+#: cause"* -- applies word for word to this leg, and the difference between
+#: the two is measured, not principled: over ``CHANGELOG.md`` as it stands a
+#: typed ordinal that is not a date occurs ZERO times, and a count of tests
+#: occurs once, in another agent's entry. This leg costs nobody a red today;
+#: that one would cost one today. If an honest typed ordinal ever does want
+#: to be written on this page, this leg is the thing that is wrong, and the
+#: remedy is to narrow it here rather than to argue the sentence away.
+#:
+#: **AND NO COMMIT BUYS THIS SHAPE PAST THE GUARD**, which is the one thing
+#: about it that is not a census. It is one of the four shapes at
+#: :data:`_COORDINATE_OF_A_COLLECTION`, and the anchor escape does not reach
+#: any of them: naming the tree a RUN was taken on makes the run's outcome
+#: reproducible, and does nothing whatever for a rank or a denominator,
+#: because what gets collected is a property of the ENVIRONMENT and not of
+#: the tree. The remedy offered for this shape is to derive it or to spell a
+#: different ordinal in words -- never to name a commit.
+_TYPED_ORDINAL = re.compile(r"[0-9]+(?:st|nd|rd|th)\b")
+
+#: The spellings a DATE takes, which the leg above must not read as a rank.
+#: Subtracted from its matches by :func:`_coordinate_hits`, in both orders
+#: (*"the 3rd of March"* and *"March 3rd"*). The page writes its dates
+#: ISO-style today and so trips none of this; the leg is here for the entry
+#: somebody writes in prose, which is the one that would arrive as a red
+#: they could not fix.
+_MONTHS = (r"January|February|March|April|May|June|July|August|September"
+           r"|October|November|December")
+_DATE_ORDINAL = re.compile(
+    rf"\b(?:the\s+)?[0-9]{{1,2}}(?:st|nd|rd|th)\s+(?:of\s+)?(?:{_MONTHS})\b"
+    rf"|\b(?:{_MONTHS})\s+[0-9]{{1,2}}(?:st|nd|rd|th)\b",
+    re.IGNORECASE,
+)
+
+#: A file COUNT, refused over the whole of ``CHANGELOG.md``. How many files
+#: this tree collects belongs to the environment -- a module whose imports
+#: are unavailable is never collected -- so a release page cannot hold it
+#: true.
+#:
+#: THIS IS THE ASYMMETRY, IT IS A DELIBERATE LINE, AND THE CENSUS SAYS IT
+#: HOLDS. A count of TESTS is refused too, but only inside the material that
+#: describes this file's position (:data:`_REFUSED_SHAPES`), and there it is
+#: refused only where it names no commit, because the two shapes are not
+#: alike on a release page and are not alike under the escape either: a
+#: count of tests is a shape a reading of a named RUN takes, and a count of
+#: files is not. There is nothing a count of FILES IN A TREE can be except a
+#: property of a checkout as the environment filtered it, so refusing that
+#: shape page-wide costs no honest sentence -- measured over the page as it
+#: stands, it refuses none of them.
+#: A count of tests is routinely something else: *"changing it to `x + 300`
+#: left 325 tests green"* is a reading of a DRIVE, not a denominator, and
+#: this page carries exactly one sentence of that shape, in an entry this
+#: file has no business editing. Refusing it page-wide would refuse that one.
+#:
+#: TWO QUALIFICATIONS, because that census is the whole of the argument and
+#: neither of them is visible from the regexes:
+#:
+#: 1. **It is a reading of this page today, not a property of the shape.**
+#:    Nothing stops an honest count of files -- *"the wheel ships 12 files"*
+#:    -- from being written tomorrow in an entry this file does not own, and
+#:    on that day this leg is wrong and is the thing to narrow. The count is
+#:    zero now; it is not zero by construction.
+#: 2. **Inside the scope, the claim is NOT that such a figure can only be
+#:    this coordinate.** It used to say so and that was false: an honest
+#:    drive ratio -- *"the same drive fires 20 of 20"* -- reads exactly as
+#:    well there as anywhere else, and this guard refused it, driven. What
+#:    the scope holds now is narrower, it is stated at
+#:    :data:`_COMMIT_ANCHOR`, and it is SHAPE-AWARE: inside that material a
+#:    figure of a shape a reading of a named RUN takes must name the commit
+#:    it was read at, and a figure of a shape that is a coordinate of a
+#:    COLLECTION -- this one included -- is refused whether it names one or
+#:    not. A count of files is in the second group in both scopes, so an
+#:    anchor never buys it anywhere.
+_TYPED_FILE_COUNT = re.compile(r"[0-9][0-9,]*\s+files\b")
+
+#: A COMMIT ANCHOR -- a short hex sha in backticks -- and the thing that
+#: separates a figure this guard refuses from one it permits, ON THE THREE
+#: SHAPES IT IS ALLOWED TO SEPARATE.
+#:
+#: **THE GUARD COST REAL DISCLOSURE BEFORE THIS EXISTED.** The entry used to
+#: read *"`0 integer literal(s) ... were checked` -- zero, over the 4,393
+#: tests that passed in that run (`e6968fe`)"*. That is a measurement of a
+#: named historical run, not a coordinate of anybody's checkout: it does not
+#: move when someone adds a test file, and a reader can go to that commit
+#: and take it again. The guard refused it as *a count of tests* and the
+#: page complied by DELETING the number -- strictly less disclosure, on the
+#: one paragraph whose pinned reason is *"the one number a reader can go and
+#: reproduce"*.
+#:
+#: So a shape a reading of a named RUN takes (:data:`_RUN_READING`) is
+#: refused where the sentence carrying it names no commit, and permitted
+#: where it does. An anchored figure of that kind is a reading of a named
+#: tree that stays true however many tests are added to this one, and an
+#: unanchored one is a claim about *now* that its own commit can already
+#: falsify -- twice in this file's history its own commit already had, and
+#: a third figure, re-taken two docstrings down, lasted exactly one commit
+#: before the ordinary growth of this file falsified it.
+#:
+#: **AND THE ESCAPE IS SHAPE-AWARE, WHICH IT WAS NOT, AND THAT WAS THE WHOLE
+#: COORDINATE HANDED BACK.** Applied to every shape alike, this exemption
+#: made *"sorts <ordinal> of <count> at `<sha>`"* GREEN -- driven end to end
+#: over every test file in ``tests/`` that reads ``CHANGELOG.md``, with the
+#: sentence sitting in the entry whose own subject is that a rank must not
+#: be written down. It was worse than a miss: the case was pinned below as
+#: intended, and the failure message told a writer who tripped on a rank to
+#: name the commit they read it at. **Naming a commit makes a RUN OUTCOME
+#: reproducible. It does nothing at all for a rank or a denominator,**
+#: because what gets collected is a property of the ENVIRONMENT rather than
+#: of the tree, which is the argument the position check's own docstring
+#: makes at length. Measured at ``c479a044`` -- ONE tree, ONE sha -- this
+#: file's own collect command names one number of files in the default lane
+#: and the same number in a lane on the jax 0.10 series, ONE FEWER in each
+#: of the two CI lanes that carry no ``sympy``, and about half as many in
+#: the zero-dep lane, where it does not reach this file at all. In the four
+#: lanes that do reach it this file's rank is the same, and in the fifth
+#: there is no rank to have. So a rank with a sha against it is FALSE
+#: wherever the denominator moved and MEANINGLESS where the file is not
+#: collected, AT THAT VERY SHA. The four shapes at
+#: :data:`_COORDINATE_OF_A_COLLECTION` are therefore refused anchored or
+#: not, and there is no remedy for them except deriving the figure.
+#:
+#: **THE TOKEN MUST BE HEX AND NOT A NUMBER.** ``[0-9a-f]{7,40}`` in backticks
+#: matches any backticked decimal integer of seven digits or more, and on
+#: ``CHANGELOG.md`` at ``c479a044`` it matched fifteen distinct tokens of which
+#: TWO are not commits at all -- ``16777219`` and ``2147483647``, which are
+#: this project's own subject matter, the integer literals either side of the
+#: ``float32`` boundary. Driven: *"The guard refused `16777219`, and this file
+#: sorts <ordinal> of <count>."* was green on the strength of an anchor that
+#: was a literal. The lookahead requires at least one of ``a``-``f``, so an
+#: all-decimal token is not an address. That refuses a genuine sha whose short
+#: prefix happens to be all digits -- about one seven-character prefix in
+#: twenty-seven -- and it fails CLOSED, which is the right direction for an
+#: exemption: the writer's remedy is to paste more of the sha, and a longer
+#: prefix is far less likely to be all digits.
+#:
+#: **WHAT THE ESCAPE STILL DOES NOT DO**, said here rather than left to be
+#: found. It does not check that the sha exists, that it is reachable, or
+#: that the figure was ever read there. Its unit is a SENTENCE, so a figure
+#: put in the same sentence as somebody else's anchor is permitted on the
+#: strength of an anchor that is not its own -- bounded now at the bullet
+#: (:data:`_SENTENCE`), so it can no longer reach out of one agent's entry
+#: into another's, but still live inside one entry. Nor does it know a
+#: quotation from an assertion: a figure quoted in order to say that it was
+#: WRONG needs an anchor exactly as much as one asserted, and this file pays
+#: that cost in its own prose two docstrings down. It buys a reader an
+#: address to go to, and nothing else.
+_COMMIT_ANCHOR = re.compile(r"`(?![0-9]+`)[0-9a-f]{7,40}`")
+
+#: Sentence boundaries, which is the unit the anchor above is looked for in.
+#: A full stop, then whitespace, then something that opens a sentence -- so
+#: that ``literal(s) ... were checked`` and ``test_narrowing_perimeter.py``
+#: are not split down the middle. It is an approximation and it is used for
+#: an EXEMPTION rather than for a refusal, so where it is wrong it is wrong
+#: in the direction of asking for another anchor.
+#:
+#: **AND IT BREAKS BEFORE A LIST MARKER, WHICH IS NOT A REFINEMENT.** A
+#: bullet does not end the line above it with a full stop that this pattern
+#: can see -- ``**Title.** body`` puts the emphasis marks between the stop
+#: and the space -- so with only the first alternative a "sentence" ran
+#: straight through the end of one entry and into the next. Measured on
+#: ``CHANGELOG.md`` at ``c479a044``: not one of its one hundred and
+#: forty-four top-level bullets opened a sentence, one hundred and twenty of
+#: the three hundred and fifty-six sentences swallowed a bullet opener, and
+#: the longest was 1,573 characters. That is not a cosmetic unit: this
+#: page is written by several agents at once, and an anchor in one entry was
+#: exempting a shape hit in another's -- the same mechanism as the
+#: markdown-list plant, live on the shipped page. With the second
+#: alternative no bullet opener falls inside a sentence, the longest of the
+#: five hundred and sixteen is 720 characters, and an exemption cannot
+#: cross an entry boundary. It errs towards splitting, which is the
+#: direction that asks for another anchor.
+_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[\"'(*_`A-Z])"
+                       r"|\s+(?=[-*]\s)")
+
+
+def _coordinate_hits(text, shape, anchorable):
+    """The matches of ``shape`` in ``text`` that this guard actually refuses.
+
+    Two subtractions, and both are stated where the shapes are declared: a
+    match inside a DATE (:data:`_DATE_ORDINAL`) is never a rank, whatever
+    the shape; and a match in a sentence that names a commit
+    (:data:`_COMMIT_ANCHOR`) is a reading of that commit rather than a
+    coordinate of the reader's checkout -- **but only for a shape a reading
+    of a run can take**, which is what ``anchorable`` says.
+
+    ``anchorable`` HAS NO DEFAULT, and that is the point of it. The escape
+    used to be a property of the function and so applied to every shape that
+    was ever passed in, including the four that a commit cannot make
+    reproducible; a default would put the next shape back in that position
+    silently. Passing it is a decision, and each of the seven has that
+    decision recorded beside it at :data:`_REFUSED_SHAPES`.
+    """
+    hits = []
+    for sentence in _SENTENCE.split(text):
+        if anchorable and _COMMIT_ANCHOR.search(sentence):
+            continue
+        dates = [m.span() for m in _DATE_ORDINAL.finditer(sentence)]
+        for m in shape.finditer(sentence):
+            if any(lo <= m.start() and m.end() <= hi for lo, hi in dates):
+                continue
+            hits.append(m.group(0))
+    return sorted(set(hits))
+
+
+#: THE CONCEPT, NOT ONE SPELLING OF IT -- declared as shapes with names, so
+#: that what is refused can be READ rather than inferred from a regex.
+#: ``_TYPED_ORDINAL`` on its own wants an ``st|nd|rd|th`` suffix and
+#: ``_TYPED_FILE_COUNT`` wants digits against the word ``files``, so *"this
+#: file sorts 72 of 151 in the collection"* -- the same claim with the
+#: suffix taken off -- defeats both, and did: driven on this page, beside
+#: the sentence saying the entry names no ordinal and no count, with the
+#: guard green.
+#:
+#: **THE SEVEN ARE TWO KINDS AND THE ANCHOR ONLY REACHES ONE OF THEM**,
+#: which is the correction this split exists for and the thing that was
+#: wrong when the escape was written. Three of the shapes are shapes A
+#: READING OF A NAMED RUN TAKES -- a count of tests, an ``N of M`` ratio, a
+#: run's own outcome line -- and for those a commit is exactly the right
+#: remedy: the figure was produced by running something at a named tree, and
+#: a reader can go to that tree and run it again. Four of them are
+#: COORDINATES OF A COLLECTION -- an ordinal, a rank in digits, a rank in
+#: words, a count of files -- and for those a commit is no remedy at all,
+#: because what a command collects is a property of the ENVIRONMENT and not
+#: of the tree, so the same sha answers differently in different lanes and
+#: in one of this project's lanes does not reach this file at all. Applied
+#: to all seven alike the escape did not merely fail to catch that; it
+#: OPENED it, and *"sorts <ordinal> of <count> at `<sha>`"* went green
+#: end to end across every test file in ``tests/`` that reads
+#: ``CHANGELOG.md``. There is no anchored remedy for the second group. The
+#: remedy is to derive the figure, which
+#: :func:`test_this_file_is_collected_where_the_hazard_requires` does and
+#: prints.
+#:
+#: These are refused TOGETHER in the material that describes the position
+#: and nowhere else: the ``CHANGELOG.md`` entry for this repair, and the two
+#: docstrings here that describe it. What that scope holds is NOT that a
+#: figure of one of these shapes can only be this coordinate -- it said so
+#: and it was false, and the counter-example is on this page: *"the same
+#: drive fires 20 of 20"* is an honest reading and this guard refused it.
+#: What it holds is that inside those three regions a figure of a
+#: run-reading shape must name the commit it was read at
+#: (:data:`_COMMIT_ANCHOR`), and a figure of a collection-coordinate shape
+#: is refused whether it names one or not. Page-wide the shapes part
+#: company, for the reason and with the two qualifications set out at
+#: :data:`_TYPED_FILE_COUNT`; both page-wide legs are collection-coordinate
+#: shapes, so no anchor applies to either of them anywhere.
+#:
+#: THE SPELLING IN WORDS IS CLOSED WITH THE INSTRUMENT THAT WAS ALREADY
+#: HERE. *"this file sorts seventy-second of one hundred and fifty-one"*
+#: matched none of the digit shapes and was green, driven. The last shape
+#: was already contextual -- a rank VERB and then a numeral -- and the same
+#: construction reads the word form: a rank verb and then an ordinal word.
+#: It is the context that makes it safe: a BARE ordinal word -- which is how
+#: this page writes an honest one, the running count of changes to the
+#: vendored predicate included -- is untouched, and the earlier argument
+#: that refusing word-ordinals *"would refuse the remedy"* was true only of
+#: a bare list of ordinal words. (The example is not spelt out here: a
+#: sentence of that exact shape is a figure in `test_prop_guard_ledger.py`'s
+#: tree scan, which reads every file for a count of those changes. Written
+#: as an example it arrives there as a claim -- driven, and this file was
+#: the extra one in its declared set.)
+#:
+#: WHAT IT STILL DOES NOT REFUSE, said out loud rather than left to be
+#: discovered, because a shape guard has edges and an unstated edge reads as
+#: a claim of completeness. All five below are the same coordinate and all
+#: five are green here. They are DRIVEN, against all seven shapes at once,
+#: in
+#: :func:`test_the_anchor_buys_a_run_reading_past_and_never_a_coordinate`,
+#: so that one of them quietly closing arrives as a red on this list rather
+#: than as a comment that has gone stale under a regex somebody widened:
+#:
+#: 1. **The verb taken off** -- *"this file is seventy-second of one hundred
+#:    and fifty-one"*. This one is left open ON PURPOSE and it is a trade
+#:    rather than an oversight: reaching it means refusing bare ordinal
+#:    words, and a bare ordinal word is exactly where an honest ordinal
+#:    lives once this page has told everybody to write them that way. The
+#:    running count of changes to the vendored predicate, one file over, is
+#:    written like that today.
+#: 2. **A rank of a hundred or more, in words** -- *"sorts one hundred and
+#:    fifty-first"*. The word alternation runs from ``first`` to
+#:    ``hundredth`` with an optional tens prefix, so nothing composed with
+#:    ``hundred and`` matches. Closing it is arithmetic on a word list, not
+#:    a new idea; it is not closed here because the coordinate it would
+#:    catch is the same one, in a spelling nobody has written yet.
+#: 3. **A verb outside the list** -- *"comes seventy-second"*, *"falls
+#:    seventy-second"*, *"appears seventy-second"*, *"lands
+#:    seventy-second"*. The list is ``sort``/``rank``/``position``/``place``
+#:    and their inflections, which is a census of how this repository has
+#:    said it, not a closure over how English can. Two forms that LOOK like
+#:    this edge are in fact caught, and are named here so that nobody
+#:    reopens them by mistake: *"in position 72"* and *"in position
+#:    seventy-second"* both match, because ``position`` is on the verb list;
+#:    what walks through is the noun order, *"in the seventy-second
+#:    position"*.
+#: 4. **The hash form** -- *"this file is #72 in the collection"*. No
+#:    ordinal suffix, no rank verb, no ``N of M``.
+#: 5. **A CARDINAL after the verb, in words** -- *"sorts seventy-two of one
+#:    hundred and fifty-one"*. The word shape wants an ORDINAL word after
+#:    the verb, so the cardinal spelling of the same claim walks through, as
+#:    does the word form of ``N of M``, which has no digits for that shape
+#:    to find.
+#:
+#: The honest name for all five is that this is a shape guard and its
+#: strength is a census of the spellings this repository has actually used.
+#: What keeps that from being a hole is that the figure has no reason to be
+#: on the page at all: it is derived and printed, the entry says so, and any
+#: of these five arriving is a sentence somebody had to go out of their way
+#: to write.
+_RUN_READING = (
+    ("a count of tests", re.compile(r"[0-9][0-9,]*\s+tests?\b")),
+    ("a rank as N of M", re.compile(r"[0-9][0-9,]*\s+of\s+[0-9][0-9,]*")),
+    ("a count of tests as a run's own outcome line",
+     re.compile(r"[0-9][0-9,]*\s+(?:passed|failed|skipped|errors?|"
+                r"xfailed|xpassed|deselected)\b", re.IGNORECASE)),
+)
+
+#: THE FOUR NO COMMIT BUYS. A rank is a coordinate of a checkout's FILE SET
+#: and a denominator is a coordinate of the ENVIRONMENT on top of that, and
+#: neither becomes reproducible by having a sha written beside it.
+_COORDINATE_OF_A_COLLECTION = (
+    ("an ordinal in digits", _TYPED_ORDINAL),
+    ("a count of files", _TYPED_FILE_COUNT),
+    ("a rank named and then written in digits",
+     re.compile(r"\b(?:sorts?|sorted|ranks?|ranked|position(?:ed)?|placed?)"
+                r"\s+(?:at\s+|as\s+|of\s+)?[0-9][0-9,]*", re.IGNORECASE)),
+    ("a rank named and then spelled in words",
+     re.compile(r"\b(?:sorts?|sorted|ranks?|ranked|position(?:ed)?|placed?)"
+                r"\s+(?:at\s+|as\s+|of\s+)?(?:the\s+)?"
+                r"(?:(?:twenty|thirty|forty|fifty|sixty|seventy|eighty"
+                r"|ninety)[-\s])?"
+                r"(?:first|second|third|fourth|fifth|sixth|seventh|eighth"
+                r"|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth"
+                r"|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth"
+                r"|twentieth|thirtieth|fortieth|fiftieth|sixtieth"
+                r"|seventieth|eightieth|ninetieth|hundredth)\b",
+                re.IGNORECASE)),
+)
+
+#: THE SEVEN, each carrying the decision about whether an anchor reaches it,
+#: so that the scoped check reads one list and the decision travels with the
+#: shape instead of living in the function that applies it.
+_REFUSED_SHAPES = tuple(
+    (label, shape, anchorable)
+    for group, anchorable in ((_RUN_READING, True),
+                              (_COORDINATE_OF_A_COLLECTION, False))
+    for label, shape in group
+)
+
+
+#: WHAT THE SHIPPED PAGE MUST KEEP SAYING, declared claim by claim with the
+#: reason each one is on the list. The old check held ``CHANGELOG.md`` to a
+#: sentence about this file's RANK; taking the rank off the page took the
+#: only hold with it, and left the disclosure itself pinned by nothing.
+#: Measured before this was written: the entire first paragraph -- the
+#: sentence saying every test collected after this file ran unprotected, and
+#: the zero it produced -- can be DELETED from the page with every test that
+#: reads ``CHANGELOG.md`` still green (888 passed, 1 skipped, across the
+#: nineteen test files in ``tests/`` that read it).
+#:
+#: None of these is a quantity a stranger's checkout can falsify: they are
+#: what happened, not how big this tree is, so none of them can bring the
+#: tax back. What holding them does and does NOT amount to is set out in
+#: :func:`test_the_disclosures_phrases_are_still_PRESENT_and_nothing_more`,
+#: and only one direction of it is true: a rewrite that loses one of these
+#: is told which one went and why it was load-bearing, and a rewrite that
+#: keeps all of them has been told nothing at all.
+#:
+#: WHAT IS DELIBERATELY NOT ON THIS LIST, since every phrase added is also a
+#: phrase a faithful paraphrase can break: *"raising if it cannot"*, the
+#: ``NOT ARMED [detached]`` line, and the entry's severity headline. Each is
+#: a REFINEMENT of something already held -- the repair, the reading, the
+#: framing -- and an entry that loses one still says what happened. The two
+#: added in this commit are not refinements but PREMISES: without the
+#: position clause the blast radius is a claim about nothing, and without
+#: the commit the zero is a number with no run behind it.
+_INCIDENT_DISCLOSURE = (
+    ("the file whose fixture did it",
+     re.compile(r"tests/test_narrowing_perimeter\.py"),
+     "a disclosure that does not name the file it is about cannot be acted "
+     "on by the person reading it"),
+    ("that the restore was UNCONDITIONAL",
+     re.compile(r"restored\s+unconditionally", re.IGNORECASE),
+     "the defect is releasing a hold this file did not take, not releasing "
+     "a hold -- `arm(owner=...)` exists for exactly that distinction"),
+    ("whose hold it took",
+     re.compile(r"session's own hold", re.IGNORECASE),
+     "it unhooked the SESSION's hold, which is what made the dial "
+     "unreadable for everything that came after"),
+    ("that the file is collected EARLY, and before the memo stand-in",
+     re.compile(r"collected\s+EARLY\b[^.]*?" + re.escape(_MEMO_STAND_IN),
+                re.IGNORECASE),
+     "this is the PREMISE of the sentence below and the whole subject of "
+     "`test_this_file_is_collected_where_the_hazard_requires`: collected "
+     "LATE, nothing runs after this file and the blast radius is a claim "
+     "about nothing; collected AFTER the stand-in, this file's verdict is a "
+     "reading of another file's teardown discipline and not of the "
+     "perimeter. Driven: this clause could be cut out of the entry on its "
+     "own with all three of those checks green"),
+    ("the blast radius",
+     re.compile(r"every test collected after it ran unprotected",
+                re.IGNORECASE),
+     "this is the sentence that makes where this file sits load-bearing at "
+     "all; without it the position checks below are about nothing"),
+    ("the tally the earlier files had earned",
+     re.compile(r"`reset_counters\(\)`[^.]*wiped the tally", re.IGNORECASE),
+     "the other half of the same fixture: the count before this file was "
+     "erased, so the reading is not merely incomplete, it is zero"),
+    ("the reading the two halves produced together",
+     re.compile(r"0 integer literal\(s\)[^`]*were\s+checked", re.IGNORECASE),
+     "the one number a reader can go and reproduce, and the reason this "
+     "entry exists"),
+    ("the commit that reading was taken at",
+     re.compile(r"`" + _INCIDENT_COMMIT + r"`"),
+     "claim 6's own stated reason is `the one number a reader can go and "
+     "reproduce`, and with no commit against it there is nothing to "
+     "reproduce it on: the zero becomes a number with no run behind it. "
+     "Driven: the sha could be taken off the entry altogether with all "
+     "three of these checks green, which is the sharpest thing the eight "
+     "claims did not hold -- the pin's own justification naming the "
+     "property it failed to hold"),
+    ("that the run was NOT green",
+     re.compile(r"ERROR at teardown", re.IGNORECASE),
+     "the entry used to say the later tests ran unprotected *with nothing "
+     "red*, which reads as `the run was green`. It was not: that run "
+     "carried `_isolate`'s own hand-back assertion failing at teardown of "
+     "this file's first test -- the incident's own shape. Losing this "
+     "sentence puts the misleading reading back"),
+    ("the repair",
+     re.compile(r"hands it back by identity", re.IGNORECASE),
+     "what replaced the unconditional restore, which is the half of the "
+     "entry a reader needs in order to know the defect is gone"),
+)
+
+#: The two variables pytest reads as EXTRA COMMAND LINE. They are stripped
+#: from the collection child below, because an exported
+#: ``PYTEST_ADDOPTS="--ignore=tests/test_tripwire_record.py"`` otherwise turns
+#: :func:`test_this_file_is_collected_where_the_hazard_requires` red -- driven
+#: -- and a red produced by an environment variable is not a reading of this
+#: tree. It fails CLOSED, so it was never a hole; it was a false alarm
+#: waiting for whoever exports one.
+_PYTEST_ENV_OPTS = ("PYTEST_ADDOPTS", "PYTEST_PLUGINS")
 
 
 #: The numerals this page writes as words, so a count can be compared against
@@ -434,22 +908,45 @@ def _isolate():
     release, which is exactly the asymmetry ``perimeter.arm(owner=...)``
     exists to prevent, aimed at the session's own hold. Under
     ``--stelling-narrowing-perimeter=error`` the plugin arms under the
-    session's ``Config`` before any test runs; this file sorts **72nd** of the
-    files ``pytest --collect-only -q -p no:randomly`` names in this tree
-    -- derived in
-    :func:`test_this_files_position_in_the_collection_is_the_measured_one`,
-    which is also what holds the CHANGELOG's copy of it -- so its
-    FIRST test unhooked that hold and the ~4,300 tests after it ran
-    unprotected with nothing red.
+    session's ``Config`` before any test runs, and this file is collected
+    EARLY -- so its FIRST test unhooked that hold and everything collected
+    after it ran unprotected, while the ``reset_counters()`` in the same
+    fixture wiped what the files before it had already earned. Over the
+    whole suite the dial-on command therefore reported ZERO literals
+    checked, which is the reading both halves make together.
 
-    **HOW MANY FILES THAT IS BELONGS TO THE ENVIRONMENT AND NOT TO THIS
-    TREE, so no count is written here.** A module whose imports are
-    unavailable is never collected, so the denominator moves with which
-    optional dependencies a lane installs while the tree stands still --
-    which is why this sentence names the COMMAND instead of a number: run it
-    for the figure where you are. The RANK is the half that does not move,
-    and it is the load-bearing half anyway, since it is what sets the size
-    of "the ~4,300 tests after it".
+    **AND THAT RUN WAS NOT GREEN, WHICH THIS PARAGRAPH USED TO IMPLY IT
+    WAS.** It said the later tests ran unprotected *with nothing red*, and a
+    reader can take that for "the run came back clean". Re-driven at
+    ``e6968fe`` with the dial on, this file on its own ends ``56 passed, 1
+    error``, and the error is ``ERROR at teardown of
+    test_the_vendored_predicates_own_selftest_passes_in_this_cell`` -- the
+    version of this fixture that ended ``assert perimeter.armed_faces() ==
+    before == ()``, failing on this file's FIRST test with ``assert () ==
+    ('tracer', 'array')``. The incident reported its own shape, on the first
+    test it touched, in the run that recorded the zero. What was missing was
+    not a red mark; it was a reader.
+
+    **NO ORDINAL FOR THAT POSITION IS WRITTEN ANYWHERE, HERE OR ON A SHIPPED
+    PAGE.** A rank is a property of the checkout's file set and moves the
+    moment anyone adds a test file; a denominator is a property of the
+    ENVIRONMENT on top of that, since a module whose imports are unavailable
+    is never collected. Both were once typed out here and in ``CHANGELOG.md``,
+    which made "write a new test" cost an edit to a shipped page. What is
+    load-bearing is not the numeral but two RELATIONS, and they are derived
+    and asserted in
+    :func:`test_this_file_is_collected_where_the_hazard_requires`: that tests
+    are still collected after this file at all -- otherwise the paragraph
+    above is a claim about nothing -- and that this file is collected BEFORE
+    ``tests/test_tripwire_record.py``, whose ``_stub_jax`` binds a stand-in
+    over ``prop_guard``'s module memos. That second one is the accident this
+    file's assertions have always stood on: run after it and a memo left
+    poisoned makes every ``classify()`` here decline internally -- driven at
+    ``e308a76``, 53 of this file's tests fail against one, and the two
+    ``FINDINGS == 0`` readings that survive are the cases whose answer is
+    *no fire* either way, which a dead predicate satisfies for free. The
+    split is a reading of this file and moves with it, so it names the tree
+    it was taken on.
 
     Driven at ``e6968fe``, the documented dial-on command over the whole
     suite reported::
@@ -493,7 +990,7 @@ def _isolate():
         # save/run/write-back `selfcheck()` performs, for the same reason.
         # These tests count their own fires (`assert perimeter.FINDINGS == 0`
         # is how seven of them say "nothing was refused here"), and with the
-        # dial on they would otherwise start from whatever the 70 files before
+        # dial on they would otherwise start from whatever the files before
         # this one had accumulated. Zeroing only the window keeps both
         # readings true: the test counts itself, and the session's denominator
         # is not spent on it.
@@ -1868,92 +2365,743 @@ def test_the_host_half_is_the_TARGET_FORMAT_and_not_the_door():
 
 
 
-def test_this_files_position_in_the_collection_is_the_measured_one():
-    """``72nd`` -- counted, not typed. And the TOTAL is not demanded at all.
+def test_this_file_is_collected_where_the_hazard_requires():
+    """POSITION, derived -- and the two relations it has to satisfy.
 
-    Two artefacts carry the rank: :func:`_isolate`'s docstring, which is
-    where the incident it explains is recorded, and the CHANGELOG entry for
-    the same repair. It stood at **149** in both, one measurement behind --
-    the hand-maintained-numeral class this batch's own first commit is named
-    for, in the batch that named it.
+    This used to be an ordinal. The rank was derived here and then demanded
+    VERBATIM in two artefacts -- this file's own :func:`_isolate` docstring
+    and ``CHANGELOG.md``, a shipped page -- so a rank of ``72`` was typed on
+    a page whose subject is the release. **A rank is a property of the
+    checkout's file set.** It moves whenever anyone adds a test file:
+    measured, five guard files landing ahead of this one carried it 72 -> 75,
+    which turned this test red and made an edit to ``CHANGELOG.md``
+    MANDATORY for a change that had nothing to do with the changelog. That
+    is a standing tax on writing tests, in a repository whose answer to its
+    own recurring defects is to write more of them, and it is the same class
+    as the checkout coordinates taken off ``docs/supported-primitives.md``
+    one axis over.
 
-    **AND CORRECTING IT TO 148 DID NOT FIX IT, BECAUSE THE DENOMINATOR IS A
-    PROPERTY OF THE ENVIRONMENT AND NOT OF THE TREE.** A module whose
-    imports are unavailable is never collected, so at ``c7cf164`` -- one
-    tree, one commit -- this command named 148 files here, 147 in a lane on
-    the jax 0.10 series, 144 in a lane with no solver wheels, and never
-    reaches this file at all in the zero-dep lane, which does not collect
-    it. Two CI lanes went red against a static 148, and no static numeral
-    could have been right in all of them. Relaxing this to a substring or a
-    range would have thrown the check away, and a hard-coded set of accepted
-    totals is the same hand-maintained-numeral defect with more entries.
+    So no ordinal is written down. What the incident actually rests on is
+    two RELATIONS, and a relation survives a file being added:
 
-    So this holds what it can actually establish -- which is the reasoning
-    :func:`test_the_dial_on_figures_agree_between_the_page_and_the_changelog`
-    already applies to the whole-suite pass count, one numeral over. The
-    RANK is derived here and demanded verbatim in both artefacts, because it
-    is stable (72 in every environment above) and it is the load-bearing
-    half: it is why *"the ~4,300 tests after it ran unprotected"* is the size
-    it is. The COMMAND that produces the total is demanded too, because
-    naming it is what keeps the unwritten figure obtainable -- and it is
-    built from the argv this test just ran rather than typed, for the reason
-    the comment beside it gives. The TOTAL itself is measured and then only
-    PRINTED, in the failure message.
+    1. **Tests are still collected after this file.** ``_isolate``'s
+       paragraph -- and the CHANGELOG entry for the same repair -- say that
+       the unconditional restore left everything after this file running
+       unprotected. Collected LAST, that sentence is a claim about nothing.
+       The floor is a SHARE of the suite rather than a count, so that
+       adding tests never moves it: a quarter. **The readings themselves are
+       not written down here, and that is this check's own subject turned on
+       its own docstring.** A tip figure used to stand in this sentence, and
+       it was already wrong by one when it was typed -- off by exactly the
+       test the commit that wrote it had just added -- inside the paragraph
+       arguing that a hand-maintained count of this checkout does not
+       survive its own commit. What the reading is, in whichever lane and at
+       whichever commit you are standing, is DERIVED below and PRINTED in
+       the failure message. It was 45% of the suite at ``e6968fe``, the
+       commit the incident was driven at, and it has not been near the floor
+       since.
 
-    **The demanded phrase deliberately spans the slot the denominator sat
-    in** -- it runs from ``sorts``, through the bolded rank, to ``of the
-    files`` -- so a sentence that puts a count back between the two no
-    longer matches, and the numeral cannot return unnoticed.
+    2. **This file is collected BEFORE** ``tests/test_tripwire_record.py``,
+       which is the only file in this tree that binds a stand-in over the
+       predicate's module memos. Its ``_stub_jax`` puts a
+       ``SimpleNamespace`` in front of ``stelling._jax_compat``, and
+       ``prop_guard._JNP``/``_ML``/``_JAX`` are module globals that
+       ``monkeypatch`` knows nothing about -- so a lookup inside that window
+       caches THE FAKE permanently, after which every ``classify()`` in the
+       process declines with an internal ``AttributeError``. That stub
+       carries three lines of its own teardown against exactly this, and a
+       comment saying it *"did not show up in file order --
+       ``test_narrowing_perimeter.py`` sorts before this file"*.
 
-    ``-p no:randomly`` is part of the claim and not an implementation detail:
-    with ``pytest-randomly`` active the order is shuffled and a rank means
-    nothing, so the artefacts name that spelling too.
+       **WHAT THAT ORDER BUYS IS THIS FILE'S INDEPENDENCE, AND IT IS WORTH
+       BEING PRECISE ABOUT WHICH DIRECTION IS WHICH.** Driven at
+       ``e308a76``, with ``prop_guard._JAX`` bound to a bare
+       ``SimpleNamespace`` at session start and this file run against it:
+       **53 failed, 30 passed**. So a poisoned memo does not make this file
+       quietly green -- it makes it loudly wrong, which is the half that is
+       load-bearing. **AND THAT SENTENCE NAMES A COMMIT BECAUSE THE
+       PARAGRAPH ABOVE IS ABOUT WHY IT MUST.** It read *"53 failed, 29
+       passed"* with no commit against it, presented as the tip -- and at
+       ``e308a76``, the commit that typed it, the drive already read one
+       more pass than that: off by exactly the test that same commit had
+       just added, two sentences after the sentence above diagnosing
+       precisely this in its own predecessor. The split is a reading of THIS
+       FILE and moves whenever a test is added to it, so either it names the
+       tree it was read on or it is a claim about the reader's.
+
+       The survivors do include readings of ``FINDINGS == 0`` as *"nothing
+       was refused here"*, which a dead predicate satisfies for free -- but
+       *several*
+       overstated it, and the driven figure is TWO of this file's
+       ``FINDINGS == 0`` assertions:
+       ``test_a_size_zero_array_is_exempt_on_the_arithmetic_face_too`` and
+       ``test_a_numpy_operand_is_not_ours_and_numpy_says_so_itself``, both
+       of them cases whose expected answer is *no fire* either way. Every
+       other one of them goes red with the rest. Collected after the stub,
+       this file's verdict would be a reading of another file's teardown
+       discipline rather than of the perimeter, which is not its subject.
+
+       **The other direction is a real cost and it is not this check's to
+       pay.** Deterministic order is also what keeps a regression in that
+       teardown invisible, which is precisely what
+       ``test_lanes.py::test_exactly_one_lane_runs_in_randomised_order``
+       says the single shuffled lane exists to find: order is deterministic
+       in every merge-bearing lane by policy, so order-dependent pollution
+       is invisible there BY CONSTRUCTION and the ``random-order`` lane is
+       the designated cover. This assertion does not decide that trade; it
+       makes the arrangement a stated one, so an inversion arrives as a
+       decision instead of as a side effect of somebody's rename.
+
+       **AND THE ORIGINAL POISONING COULD NOT BE REPRODUCED THROUGH THE
+       STUB TODAY, WHICH IS RECORDED RATHER THAN PAPERED OVER.** With those
+       three teardown lines deleted, the whole of
+       ``tests/test_tripwire_record.py`` runs green and leaves ``_JNP`` and
+       ``_JAX`` still ``None`` -- the window no longer reaches
+       ``classify()`` at all -- and the reversed pair
+       (``test_tripwire_record.py`` then this file) is green too. The
+       teardown is dormant, not load-bearing, on this tree.
+       That is why the drive above injects the stand-in directly instead of
+       claiming the stub still produces it.
+
+       **A PASS COUNT STOOD IN THAT SENTENCE, AND THE REASON IT IS GONE IS
+       NOT THE ONE THAT WAS FIRST WRITTEN HERE.** The reason given was that
+       it could not be RE-TAKEN: a reading of a file this one does not own,
+       obtained with an edit this one is not allowed to make. It was
+       re-taken. With those three teardown lines deleted, in the default
+       lane, the reversed pair reads `207 passed` at `ac3038d`, which is the
+       commit that typed that very figure into this sentence -- so the
+       stronger charge, that it was false at the commit that wrote it, does
+       not hold, and it is not a third case of the two above. What is true
+       is quieter and is the same disease. The same drive reads `208 passed`
+       at `e308a76`, ONE COMMIT LATER, and `209 passed` at `c479a044`. And
+       the drift belongs to the wrong file: at each of those three commits
+       the record file on its own reads `125 passed` and does not move,
+       while this file alone reads `82 passed` at `ac3038d`, `83 passed` at
+       `e308a76` and `84 passed` at `c479a044`. Every unit of a number
+       offered as evidence about ANOTHER file's teardown was a count of THIS
+       one, and it went stale on the next commit for the ordinary reason:
+       somebody added a test here. Dropping it was right, and for a reason
+       better than the one first given -- not that it could not be re-taken,
+       but that re-taking it shows the figure was never a reading of its own
+       subject. The colour is the whole of the claim.
+
+    Both are read off ``pytest --collect-only -q -p no:randomly`` in this
+    checkout -- the subject IS this checkout's collection order, so reading
+    it is what this check is allowed to do. ``-p no:randomly`` is part of
+    the claim and not an implementation detail: with ``pytest-randomly``
+    active the order is shuffled and neither relation means anything.
+
+    **The TOTAL is not demanded, and never was.** A module whose imports are
+    unavailable is never collected, so the denominator belongs to the
+    environment and not to the tree: at ``c7cf164`` -- ONE tree, ONE commit
+    -- this command named a different number of files in the default lane,
+    in a lane on the jax 0.10 series and in a lane with no solver wheels,
+    and it never reaches this file at all in the zero-dep lane. Two CI lanes
+    went red against a static one. It is measured and PRINTED in the failure
+    messages and written nowhere -- here included, which is why the three
+    figures that used to stand in this sentence are gone with the rest.
+
+    **AND THE CHILD IS GIVEN AN ENVIRONMENT RATHER THAN INHERITING ONE.**
+    ``PYTHONPATH`` is forced to this checkout's ``src`` off ``__file__``, so
+    the reading is of THIS tree even under the editable install that points
+    a shared virtualenv at another one; and ``PYTEST_ADDOPTS`` and
+    ``PYTEST_PLUGINS`` -- the two variables pytest reads as extra command
+    line -- are stripped, so that an exported
+    ``PYTEST_ADDOPTS="--ignore=tests/test_tripwire_record.py"`` cannot make
+    this check red. Driven both ways. That red fails CLOSED, so it was never
+    a hole in the check; it is a red produced by an environment variable
+    rather than by the tree, which is not what this check claims to read.
     """
     repo = pathlib.Path(__file__).resolve().parents[1]
-    collect_args = ("--collect-only", "-q", *deterministic_order_args())
+    collect_args = (*_COLLECT_ARGS, *ORDER_ARGS)
+    child = {k: v for k, v in os.environ.items() if k not in _PYTEST_ENV_OPTS}
+    child.update(PYTHONPATH=str(repo / "src"),
+                 JAX_PLATFORMS="cpu", COLUMNS="200")
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", *collect_args],
-        cwd=repo, capture_output=True, text=True,
-        env={**os.environ, "PYTHONPATH": str(repo / "src"),
-             "JAX_PLATFORMS": "cpu", "COLUMNS": "200"},
+        cwd=repo, capture_output=True, text=True, env=child,
     )
     assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
-    seen, order = set(), []
+    order, per_file = [], collections.Counter()
     for line in proc.stdout.splitlines():
         if "::" not in line:
             continue
         rel = line.split("::", 1)[0].strip()
-        if rel not in seen:
-            seen.add(rel)
+        if rel not in per_file:
             order.append(rel)
+        per_file[rel] += 1
     assert order, proc.stdout[-2000:]
 
-    mine = pathlib.Path(__file__).name
-    rank = next(i + 1 for i, rel in enumerate(order) if rel.endswith(mine))
-    total = len(order)
-
-    ordinal = f"{rank}{_ORDINAL[rank % 10]}"
-    phrase = f"sorts **{ordinal}** of the files"
-    # ...and the command the artefacts must name is BUILT FROM THE ARGV THAT
-    # WAS JUST RUN rather than typed here. Typed, it stood in this file's own
-    # source -- and one of the two artefacts IS this file, read whole, so the
-    # assertion line satisfied itself: the .py half of the command check
-    # could not go red however the prose was rewritten. Derived, it also
-    # cannot drift from the run it describes.
     command = " ".join(("pytest", *collect_args))
-    for rel in ("tests/test_narrowing_perimeter.py", "CHANGELOG.md"):
-        flowed = " ".join((repo / rel).read_text(encoding="utf-8").split())
-        assert phrase in flowed, (
-            f"{rel} does not say {phrase!r}. `{command}` sorts {mine} "
-            f"{ordinal} here. It names {total} files in this environment -- "
-            f"but that figure is a property of the environment, so it is "
-            f"deliberately not written in either artefact; if the sentence "
-            f"has acquired a count between the rank and `of the files`, "
-            f"take it out."
+    mine = pathlib.Path(__file__).resolve().relative_to(repo).as_posix()
+    assert mine in order, (
+        f"`{command}` does not collect {mine} in this checkout, so this "
+        f"check has no subject. It named {len(order)} files."
+    )
+    rank = order.index(mine)
+    total_tests = sum(per_file.values())
+    after = sum(per_file[rel] for rel in order[rank + 1:])
+
+    # 1 -- THE BLAST RADIUS IS REAL. A SHARE, not a count: a count would be
+    # this defect again, one numeral over.
+    assert after * 4 >= total_tests, (
+        f"only {after} of {total_tests} test(s) are collected after {mine} "
+        f"({len(order) - rank - 1} of {len(order)} files). `_isolate`'s "
+        f"docstring and the CHANGELOG entry for the same repair both say "
+        f"that an unconditional restore here left EVERYTHING AFTER THIS "
+        f"FILE running unprotected; collected this late that sentence "
+        f"stops being about anything. Either this file moved, or the tests "
+        f"after it did -- fix the position, or rewrite both paragraphs to "
+        f"say what is true instead. `{command}`"
+    )
+
+    # 2 -- AND BEFORE THE FILE THAT PLANTS A STAND-IN IN THE PREDICATE'S
+    # MODULE MEMOS. This is the one that was an accident of the alphabet.
+    assert _MEMO_STAND_IN in order, (
+        f"{_MEMO_STAND_IN} is not collected here, and it is where "
+        f"`prop_guard`'s module memos get a stand-in bound over them. If it "
+        f"has been renamed, this check needs the new name; if it has been "
+        f"deleted, say so here rather than deleting the assertion. "
+        f"`{command}`"
+    )
+    assert rank < order.index(_MEMO_STAND_IN), (
+        f"{mine} is now collected AFTER {_MEMO_STAND_IN}, whose `_stub_jax` "
+        f"binds a stand-in over `prop_guard._JNP`/`_ML`/`_JAX`. Those are "
+        f"module globals, so a memo left holding the fake is permanent and "
+        f"every later `classify()` declines with an internal error -- "
+        f"driven at `e308a76`, this file reads 53 failed / 30 passed "
+        f"against one, and the two survivors that assert `FINDINGS == 0` "
+        f"are asserting it about a dead predicate, which satisfies them "
+        f"for free. "
+        f"Downstream of that stub this "
+        f"file's verdict is a reading of another file's teardown and not "
+        f"of the perimeter. That may still be the right trade -- it is the "
+        f"direction in which a regression in that teardown would finally "
+        f"be caught in a deterministic lane -- but it is a decision, not a "
+        f"rename's side effect, so make it here. `{command}`"
+    )
+
+
+def _changelog_bullets(repo):
+    """Every top-level bullet of ``CHANGELOG.md``, each flowed to one line.
+
+    The page is a list of entries and this repair is ONE of them. A check
+    that reads the whole page can be satisfied by a sentence in somebody
+    else's entry -- and can equally refuse a sentence in somebody else's
+    entry, which is worse, because the two other agents holding regions of
+    this file today cannot fix a red they did not cause. A bullet opens at
+    column 0 with ``- `` and runs to the next one or to the next thing that
+    starts at column 0; blank and indented lines belong to the bullet they
+    are inside.
+    """
+    raw = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+    bullets, current = [], None
+    for line in raw.splitlines():
+        if line.startswith("- "):
+            current = [line]
+            bullets.append(current)
+        elif line[:1] not in ("", " "):
+            current = None
+        elif current is not None:
+            current.append(line)
+    return [" ".join(" ".join(b).split()) for b in bullets]
+
+
+def _incident_entry(repo, command):
+    """The bullets on the page that name the collection command.
+
+    The command is what makes the unwritten figures obtainable, so the entry
+    for this repair is exactly the entry that names it -- located by the
+    thing it is required to carry rather than by a heading a rewrite would
+    move.
+    """
+    return [b for b in _changelog_bullets(repo)
+            if f"`{command}`" in b or f"``{command}``" in b]
+
+
+def test_the_disclosures_phrases_are_still_PRESENT_and_nothing_more():
+    """THE DISCLOSURE'S ANCHORS, pinned -- AND THAT IS ALL THIS HOLDS.
+
+    **THE NAME IS PART OF THE RETRACTION.** This was called
+    ``test_the_shipped_page_still_discloses_what_this_files_fixture_did``
+    while its own docstring said, at length, that it holds nothing of the
+    kind. A green CI line shows the NAME and not the docstring, so a name
+    that asserts the strong reading is a false claim delivered to exactly
+    the reader who is not going to open the file. What is left is what the
+    check does: the phrases are PRESENT, and nothing more follows from that.
+
+    The check this replaces held ``CHANGELOG.md`` to a sentence naming this
+    file's RANK. That was the wrong thing to hold a page to, and it is gone;
+    but it was also, accidentally, the only thing holding the ENTRY on the
+    page at all. With it gone the residual hold was that the collection
+    command occurs once here, in the entry's SECOND paragraph -- so the
+    FIRST paragraph, which is the disclosure, could be deleted outright.
+    Driven before this test was written: paragraph removed, then every test
+    file in ``tests/`` that reads ``CHANGELOG.md`` run -- 888 passed, 1
+    skipped, nothing red. A release page can lose the thing it is disclosing
+    and no check in this repository notices.
+
+    **WHAT THIS HOLDS IS THAT THE PHRASES IN :data:`_INCIDENT_DISCLOSURE`
+    CANNOT BE DELETED, NOR REWORDED FAR ENOUGH TO LOSE THEM. IT DOES NOT
+    HOLD THAT THE DISCLOSURE IS INTACT.** This is a presence-of-tokens check
+    wearing the vocabulary of a substance check, and the distance between
+    the two is not a quibble: it has no notion of polarity, of scope, of
+    assertion against denial, of quotation, or of contradiction. Driven, on
+    the entry as it stands: rewritten so that every one of these phrases is
+    still there and every claim carrying it is NEGATED -- *"a rumour went
+    round that ... It did not ... It is simply false that ..."* -- this
+    check, the position check and the coordinate check are all green, and so
+    is every file in ``tests/`` that reads the page. A weaker attack is
+    worse, because it costs nothing at all: leave the entry byte-for-byte as
+    it is and append one sentence retracting it. Green. *(No count stands in
+    those two sentences on purpose. The colour is the finding, and a tally
+    of this checkout's tests written into a docstring is the defect the
+    check above this one exists to keep off a page.)*
+
+    **THAT IS NOT CLOSABLE BY ADDING PATTERNS, AND CLOSING IT IS NOT BEING
+    ATTEMPTED HERE.** No arrangement of them separates an assertion from its
+    denial, and a guard that appeared to would be worse than this one rather
+    than better, because its green would read as a warrant that the page is
+    honest. So read the green as what it is: *the anchors are still on the
+    page*. It is not a reading of what the sentences around them now say.
+    A reader who wants that has to read the entry -- and what this check
+    does for them is guarantee there is still an entry to read, located, in
+    a page several agents are editing at once.
+
+    **ONLY ONE DIRECTION OF THE OLD CLAIM HOLDS.** It said *"a rewrite that
+    keeps the disclosure keeps them"*, and that is the false half: a
+    FAITHFUL paraphrase -- the same ten claims said in other words --
+    reddens this check, which is the ordinary cost of pinning phrases and is
+    the direction the failure message is written for. The true half is the
+    converse: a rewrite that DROPS one of them is told which one went and
+    why it was load-bearing. That is the whole of the protection, and it is
+    worth having, because it is the direction the paragraph actually went in
+    -- deleted outright, with the suite green.
+
+    **AND THE LOCATOR IS ITSELF A PAGE-WIDE HOLD ON OTHER PEOPLE'S
+    ENTRIES.** The entry is found by the command it is required to name
+    rather than by a heading, so that this check and
+    :func:`test_neither_artefact_writes_this_checkouts_collection_coordinate`
+    are reading the same bullet, and a page with no such entry is a red here
+    rather than a silent skip. The price is the ``len(named) == 1`` below:
+    a second bullet anywhere on the page naming that command turns this red,
+    and the agent who wrote it did not cause the failure. That is the same
+    hazard this file refuses to accept for a page-wide count of tests, taken
+    on deliberately here -- it is narrower (one exact command string rather
+    than a shape that honest sentences take) and it is loud (the message
+    names the command and says to keep it) -- but it is the same hazard, and
+    saying so is cheaper than discovering it from a red.
+    """
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    command = " ".join(("pytest", *_COLLECT_ARGS, *ORDER_ARGS))
+    named = _incident_entry(repo, command)
+    assert len(named) == 1, (
+        f"CHANGELOG.md has {len(named)} entries naming `{command}`, and the "
+        f"disclosure of what `_isolate` did lives in exactly one of them. "
+        f"If the entry was rewritten, keep the command in it -- that is "
+        f"what makes this file's position obtainable to a reader without "
+        f"putting a coordinate on a shipped page. If a SECOND entry now "
+        f"names the same command, this red belongs to this check and not "
+        f"to whoever wrote it: locate them apart, here."
+    )
+    entry = named[0]
+    for label, pattern, why in _INCIDENT_DISCLOSURE:
+        assert pattern.search(entry), (
+            f"CHANGELOG.md's entry for this repair no longer carries the "
+            f"phrase this file holds it to for {label}. {why}. This is a "
+            f"DISCLOSURE, and the reason it needs holding down is that the "
+            f"check which used to hold it demanded a rank instead -- so "
+            f"when the rank came off, the paragraph could be deleted with "
+            f"the suite green. Rewrite it however you like; keep what it "
+            f"discloses -- and note that this check reads PHRASES, so a "
+            f"faithful paraphrase reddens it too, and the fix for that is "
+            f"to move the pattern here rather than to unsay the sentence. "
+            f"Looking for {pattern.pattern!r} in:\n{entry}"
         )
-        assert f"`{command}`" in flowed or f"``{command}``" in flowed, (
-            f"{rel} no longer names the command this figure comes from, "
-            f"which is what keeps the unwritten total obtainable: {command}"
+
+
+def test_neither_artefact_writes_this_checkouts_collection_coordinate():
+    """No coordinate of this collection, on either page, in any spelling --
+    and no reading of a run that does not say which run.
+
+    :func:`test_this_file_is_collected_where_the_hazard_requires` derives the
+    position; this holds the two artefacts that DESCRIBE it to saying nothing
+    a stranger's checkout can falsify. It is the negative of the check that
+    used to live there -- that one demanded ``sorts <ordinal> of the files``
+    verbatim in both, which is what made a shipped page carry a coordinate
+    and made adding a test file cost a CHANGELOG edit.
+
+    **IT USED TO REFUSE ONE SPELLING AND CALL IT THE CONCEPT.** A typed
+    ordinal needs its ``st|nd|rd|th`` and a file count needs digits against
+    the word ``files``, so *"this file sorts 72 of 151 in the collection"*
+    walked through both -- driven, written onto this page next to the
+    sentence saying the entry names no ordinal and no count, guard green.
+    :data:`_REFUSED_SHAPES` names seven shapes and refuses them here
+    together, one of them being the same claim spelt in words, which was
+    green here until recently.
+
+    **TWO SCOPES, AND THE DIFFERENCE IS THE POINT.**
+
+    - Over the WHOLE of both artefacts: a typed ordinal (in these two files
+      it has only ever been this rank -- at the commit the negative was
+      written there were exactly three in the pair and all three were it),
+      and over the whole of ``CHANGELOG.md`` a count of FILES.
+    - Over the material that DESCRIBES the position -- this page's entry for
+      the repair, ``_isolate``'s docstring and the docstring of the check
+      that derives it -- all seven shapes, including a count of TESTS, a
+      bare ``N of M``, and a run's own ``N passed`` line.
+
+    **AND WHAT AN ANCHOR BUYS IS SHAPE-AWARE, WHICH IS THE CORRECTION THIS
+    CHECK MOST NEEDED.** A figure whose sentence names the commit it was
+    read at is a reading of that commit: it does not move when anyone adds a
+    test file, and a reader can go and take it again. That is true of a
+    figure a RUN produced, and leaving the escape out cost real disclosure
+    -- the entry's own *"zero, over the 4,393 tests that passed in that run
+    (`e6968fe`)"* was refused as a count of tests, and the page complied by
+    DELETING the number, on the one paragraph whose pinned reason is *"the
+    one number a reader can go and reproduce"*. **It is not true of a rank
+    or of a denominator**, and applying the escape to those handed back the
+    coordinate this whole repair exists to take off the page: *"sorts
+    <ordinal> of <count> at `<sha>`"* was refused before the escape existed
+    and GREEN after it, driven end to end over every test file in ``tests/``
+    that reads ``CHANGELOG.md``. What gets collected is a property of the
+    ENVIRONMENT, so at one sha this tree's own collect names one number of
+    files in the two lanes that carry ``sympy``, one fewer in the two that
+    do not, and about half as many in the zero-dep lane, which does not
+    reach this file at all -- an anchored rank is false wherever the
+    denominator moved and meaningless where there is no rank to have, AT THE
+    SHA IT NAMES. So the seven are split:
+    the three shapes a named run's reading takes are exemptible by an
+    anchor, the four that are coordinates of a collection are not, and the
+    decision travels with the shape. The mechanics, and what the escape
+    still does not check, are at :data:`_COMMIT_ANCHOR`.
+
+    **THE SCOPED CLAIM USED TO BE STRONGER THAN THE TRUTH.** It read
+    *"scoped there, a count of tests or an `N of M` can only be this
+    coordinate"*. That is false, and this page carries the counter-example:
+    *"the same drive fires 20 of 20"* is an honest reading of a drive, and
+    written inside this scope the guard refused it -- driven. The scope does
+    not make a shape unambiguous; it makes an ANCHOR cheap to require, on
+    three regions this file owns, where the numeral has twice now been a
+    hand-maintained claim about `now` that its own commit falsified.
+
+    **THE PAGE-WIDE LEGS ARE JUSTIFIED BY A CENSUS, NOT BY A MEANING.** The
+    principle is that a denominator is a property of the environment, and
+    that is as true of tests as of files -- so where the concept lives, both
+    are refused and there is no asymmetry at all. Page-wide they part
+    company because of what is measurably on the page: a count of files
+    occurs nowhere on it, a typed ordinal that is not a date occurs nowhere
+    on it, and a count of tests occurs once -- *"changing it to `x + 300`
+    left 325 tests green"*, a drive reading in another agent's entry, which
+    a page-wide refusal would turn red for somebody who did not cause it.
+    That is a reading of this page today and not a property of the shapes,
+    the two qualifications it carries are written at
+    :data:`_TYPED_FILE_COUNT`, and the honest name for the typed-ordinal leg
+    is that it is grandfathered: it costs nobody a red today, and the day it
+    does, it is this leg that is wrong.
+
+    What both must still name is the COMMAND, because that is what keeps the
+    unwritten figures obtainable by a reader who wants them. It is assembled
+    from argv at the point of comparison rather than typed as a sentence
+    anywhere in this file, and it is required in the DOCSTRING of the check
+    that derives the position rather than anywhere in this file's source:
+    this file is one of the two artefacts, and a sentence typed into an
+    assertion message would otherwise satisfy the assertion carrying it.
+    """
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    command = " ".join(("pytest", *_COLLECT_ARGS, *ORDER_ARGS))
+    mine = pathlib.Path(__file__).resolve().relative_to(repo).as_posix()
+
+    for rel in (mine, "CHANGELOG.md"):
+        raw = (repo / rel).read_text(encoding="utf-8")
+        flowed = " ".join(raw.split())
+        typed = _coordinate_hits(flowed, _TYPED_ORDINAL, anchorable=False)
+        assert typed == [], (
+            f"{rel} writes {typed} -- a typed ordinal that is not a date. "
+            f"In these two files that has only ever meant this file's rank "
+            f"in the collection, which is a property of the checkout's "
+            f"file set and changes whenever anyone adds a test: pinning it "
+            f"here cost a "
+            f"{'shipped page' if rel == 'CHANGELOG.md' else 'docstring'} "
+            f"edit per new test file. Derive it -- see "
+            f"`test_this_file_is_collected_where_the_hazard_requires`, "
+            f"which derives it and PRINTS it -- or spell it in words if it "
+            f"is a different ordinal altogether. NAMING A COMMIT DOES NOT "
+            f"BUY THIS SHAPE PAST, and that is deliberate rather than an "
+            f"omission: a sha makes a RUN reproducible, and a rank is not "
+            f"a run. What a command collects is a property of the "
+            f"ENVIRONMENT, so at one and the same sha this tree's own "
+            f"collect names one number of files in the default lane, fewer "
+            f"in the CI lanes that carry no `sympy`, and about half as many "
+            f"in the zero-dep lane, which does not reach this file at all "
+            f"-- an anchored rank is false wherever the denominator moved "
+            f"and meaningless where there is no rank to have."
+        )
+        if rel == "CHANGELOG.md":
+            counts = _coordinate_hits(flowed, _TYPED_FILE_COUNT,
+                                      anchorable=False)
+            assert counts == [], (
+                f"CHANGELOG.md writes {counts}. How many files this tree "
+                f"collects belongs to the ENVIRONMENT -- a module whose "
+                f"imports are unavailable is never collected, and one tree "
+                f"at one commit answers differently in three lanes -- so "
+                f"it is not a figure a release page can hold true, and no "
+                f"sha written beside it makes it one. Name the command "
+                f"instead: `{command}`"
+            )
+
+    named = _incident_entry(repo, command)
+    assert len(named) == 1, (
+        f"CHANGELOG.md no longer has exactly one entry naming the command "
+        f"the position comes from, which is what keeps the unwritten "
+        f"figures obtainable: {command}"
+    )
+    position_doc = " ".join(
+        inspect.getdoc(test_this_file_is_collected_where_the_hazard_requires)
+        .split()
+    )
+    isolate_doc = " ".join((inspect.getdoc(_isolate) or "").split())
+    assert f"``{command}``" in position_doc, (
+        f"the docstring of the check that derives the position no longer "
+        f"names the command it derives it from: {command}"
+    )
+
+    for where, text in (
+        ("CHANGELOG.md's entry for this repair", named[0]),
+        ("`_isolate`'s docstring", isolate_doc),
+        ("`test_this_file_is_collected_where_the_hazard_requires`'s "
+         "docstring", position_doc),
+    ):
+        assert text, where
+        for label, shape, anchorable in _REFUSED_SHAPES:
+            found = _coordinate_hits(text, shape, anchorable=anchorable)
+            unanchored = (", in a sentence that names no commit"
+                          if anchorable else "")
+            remedy = (
+                "If it is an honest reading of a DRIVE -- and those live "
+                "here too -- name the commit you took it at IN THE SAME "
+                "SENTENCE, which is what makes it reproducible rather than "
+                "a claim about somebody's checkout."
+                if anchorable else
+                "NAMING A COMMIT WILL NOT BUY THIS ONE PAST, and that is "
+                "the point of the shape being in this half of the list. A "
+                "sha makes a RUN reproducible; it does nothing for a rank "
+                "or a denominator, because what a command collects is a "
+                "property of the ENVIRONMENT rather than of the tree. At "
+                "one and the same sha this tree's own collect names one "
+                "number of files in the default lane, fewer in the CI lanes "
+                "that carry no `sympy`, and about half as many in the "
+                "zero-dep lane, which does not reach this file at all -- so "
+                "an anchored rank is false wherever the denominator moved "
+                "and meaningless where there is no rank to have, AT THE SHA "
+                "IT NAMES. There is no anchored form of this figure to "
+                "write. Derive it."
+            )
+            assert found == [], (
+                f"{where} writes {found} -- {label}, which is one of the "
+                f"seven shapes `_REFUSED_SHAPES` refuses here"
+                f"{unanchored}. A rank is a property of the checkout's "
+                f"FILE SET and a "
+                f"denominator is a property of the ENVIRONMENT on top of "
+                f"that: written here, either one is a number a stranger's "
+                f"tree falsifies and an edit somebody owes for adding a "
+                f"test file. It is derived and PRINTED by "
+                f"`test_this_file_is_collected_where_the_hazard_requires` "
+                f"instead. {remedy}"
+            )
+
+
+def test_the_anchor_buys_a_run_reading_past_and_never_a_coordinate():
+    """The two subtractions in :func:`_coordinate_hits`, driven both ways,
+    over every one of the seven shapes.
+
+    The shapes are the easy half. What this guard had wrong was what happens
+    AROUND a match. First a reading of a named historical run was refused as
+    this checkout's coordinate -- and a shipped page lost the number rather
+    than the guard losing the leg -- while an honest date was refused as a
+    rank, page-wide, in entries this file does not own. Then the exemption
+    written to fix that was applied to EVERY shape, and it handed back the
+    coordinate this whole repair is about: *"sorts <ordinal> of <count> at
+    `<sha>`"* went green, end to end, in the entry whose own subject is that
+    a rank must not be written down. Both subtractions are EXEMPTIONS, so
+    each is driven in the direction that says it works and in the direction
+    that says it is not a hole -- and the anchor is driven on all seven
+    shapes, because *which* shapes it reaches is the thing that was wrong.
+
+    **THE TABLE IS THE SPLIT.** Each of the three run-reading shapes appears
+    twice, red without an anchor and green with one. Each of the four
+    collection-coordinate shapes appears twice too, red BOTH WAYS -- because
+    a sha makes a run reproducible and makes a rank neither true nor
+    reproducible, and the guard has to be able to say that difference out
+    loud. If a future edit moves a shape from one half of
+    :data:`_REFUSED_SHAPES` to the other, half of this table goes red, which
+    is the only way that move should ever be possible to make.
+
+    Three properties of the ESCAPE, rather than of any shape, are pinned
+    here too:
+
+    * The unit is a SENTENCE, so an anchor one sentence away buys nothing.
+    * The unit BREAKS AT A BULLET, so an anchor in one agent's entry buys
+      nothing in the next agent's entry -- it used to, on the live page.
+    * An all-decimal backticked integer is NOT an anchor. ``16777219`` and
+      ``2147483647`` are on the shipped page as this project's own subject
+      matter, and each of them used to buy a figure past.
+
+    The samples are ASSEMBLED rather than typed. This file is one of the two
+    artefacts :func:`test_neither_artefact_writes_this_checkouts_collection_
+    coordinate` reads whole, so a typed ordinal spelt out here as a literal
+    would be refused by that check, in this file, on account of this one.
+    """
+    ordinal = "72" + "nd"
+    by_label = {label: (shape, anchorable)
+                for label, shape, anchorable in _REFUSED_SHAPES}
+    cases = (
+        # ---- FOUR SHAPES NO COMMIT BUYS: red with an anchor and without.
+        ("an ordinal in digits",
+         f"This file sorts {ordinal} of the files in the collection.",
+         [ordinal]),
+        ("an ordinal in digits",
+         f"It sorted {ordinal} at `e6968fe`, which is where that was read.",
+         [ordinal]),
+        ("a count of files", "The collect named 151 files.", ["151 files"]),
+        ("a count of files",
+         "The collect named 151 files at `e6968fe`.", ["151 files"]),
+        ("a rank named and then written in digits",
+         "This file sorts 72 of 151 in the collection.", ["sorts 72"]),
+        ("a rank named and then written in digits",
+         "At `e6968fe` this file sorts 72 of 151 in the collection.",
+         ["sorts 72"]),
+        ("a rank named and then spelled in words",
+         "This file sorts seventy-second of one hundred and fifty-one.",
+         ["sorts seventy-second"]),
+        ("a rank named and then spelled in words",
+         "At `e6968fe` this file sorts seventy-second of one hundred and "
+         "fifty-one.",
+         ["sorts seventy-second"]),
+        # ---- AND THE ONE THE ESCAPE ACTUALLY OPENED, in both shapes that
+        # read it. This exact sentence was GREEN before the split, driven
+        # end to end over every test file in `tests/` that reads the page.
+        ("an ordinal in digits",
+         f"This file sorts {ordinal} of 151 at `e6968fe`.", [ordinal]),
+        ("a rank named and then written in digits",
+         f"This file sorts {ordinal} of 151 at `e6968fe`.", ["sorts 72"]),
+        # ---- A DATE IS NOT A RANK, in both orders, anchor or no anchor.
+        ("an ordinal in digits", "Shipped on the 3rd of March 2026.", []),
+        ("an ordinal in digits", "Shipped on March 3rd, 2026.", []),
+        # ---- THREE SHAPES A NAMED RUN TAKES: red bare, green anchored.
+        ("a count of tests",
+         "The dial reported zero, over the 4,393 tests that passed in that "
+         "run.",
+         ["4,393 tests"]),
+        ("a count of tests",
+         "The dial reported zero, over the 4,393 tests that passed in that "
+         "run (`e6968fe`).",
+         []),
+        ("a rank as N of M", "The same drive fires 20 of 20.", ["20 of 20"]),
+        ("a rank as N of M",
+         "The same drive fires 20 of 20 at `e6968fe`.", []),
+        ("a count of tests as a run's own outcome line",
+         "Against a poisoned memo this file reads 53 failed, 30 passed.",
+         ["30 passed", "53 failed"]),
+        ("a count of tests as a run's own outcome line",
+         "Driven at `e308a76` this file reads 53 failed, 30 passed.", []),
+        # ---- A BARE ORDINAL WORD IS UNTOUCHED, which is where an honest
+        # ordinal lives once the page has told everybody to write it so.
+        ("a rank named and then spelled in words",
+         "This is the fifth row of the table below.", []),
+        # ---- THE UNIT IS A SENTENCE: an anchor next door buys nothing.
+        ("a rank as N of M",
+         "Driven at `e6968fe`. This file sorts 72 of 151 in the collection.",
+         ["72 of 151"]),
+        # ---- AND IT BREAKS AT A BULLET: an anchor in one agent's entry
+        # buys nothing in the next agent's. Green before `_SENTENCE` learnt
+        # to split there, and live on the page, where not one of its
+        # top-level bullets opened a sentence.
+        ("a count of tests",
+         "- **One agent's entry, driven at `e6968fe`.** - **The next "
+         "agent's entry.** The dial reported zero over the 4,393 tests.",
+         ["4,393 tests"]),
+        # ---- AN ALL-DECIMAL BACKTICKED INTEGER IS NOT AN ADDRESS. Both of
+        # these are on the shipped page: the integer literals either side of
+        # the `float32` boundary, which is what this repository is about.
+        ("a count of tests",
+         "The guard refused `16777219`, and 325 tests stayed green.",
+         ["325 tests"]),
+        ("a count of tests",
+         "The guard refused `2147483647`, and 325 tests stayed green.",
+         ["325 tests"]),
+        # ---- AND A REAL SHA STILL IS ONE, in both the short and long form.
+        ("a count of tests",
+         "The guard refused `16777219` at `e6968fe`, and 325 tests stayed "
+         "green.",
+         []),
+    )
+    seen = set()
+    for label, text, expected in cases:
+        shape, anchorable = by_label[label]
+        seen.add(label)
+        got = _coordinate_hits(text, shape, anchorable=anchorable)
+        assert got == expected, (
+            f"{label} read {got} in {text!r}, and this case says "
+            f"{expected}. An exemption that stops working refuses an honest "
+            f"sentence and costs a page a number -- which is what happened "
+            f"-- and one that grows quietly lets this checkout's coordinate "
+            f"back onto a shipped page in a sentence that mentions any sha "
+            f"at all -- which is ALSO what happened, on the four shapes a "
+            f"commit cannot make reproducible."
+        )
+    assert seen == {label for label, _, _ in _REFUSED_SHAPES}, (
+        f"a shape in `_REFUSED_SHAPES` is not driven here: "
+        f"{sorted({label for label, _, _ in _REFUSED_SHAPES} - seen)}. Every "
+        f"shape needs a case in each direction, because the direction is "
+        f"the thing this table exists to pin."
+    )
+
+    # THE EDGES, DRIVEN AGAINST ALL SEVEN SHAPES AT ONCE. A row in the table
+    # above is checked against ONE shape; an edge is the claim that NOTHING
+    # here reaches the sentence, which only a sweep of all seven can say.
+    # Each of these is this same coordinate in a spelling the guard does not
+    # have; each is stated at `_COORDINATE_OF_A_COLLECTION` with the reason
+    # it is left open; and each is pinned GREEN so that closing one is a
+    # deliberate edit here rather than a regex quietly widening under a
+    # comment that still claims the edge is open.
+    for text in (
+        "This file is seventy-second of one hundred and fifty-one.",
+        "This file sorts one hundred and fifty-first.",
+        "This file comes seventy-second.",
+        "This file falls seventy-second.",
+        "This file is #72 in the collection.",
+        "This file sorts seventy-two of one hundred and fifty-one.",
+        "This file is in the seventy-second position.",
+    ):
+        reached = {label: _coordinate_hits(text, shape, anchorable=anchorable)
+                   for label, shape, anchorable in _REFUSED_SHAPES}
+        reached = {k: v for k, v in reached.items() if v}
+        assert reached == {}, (
+            f"{text!r} is one of the edges this file STATES it does not "
+            f"reach, and {reached} now reaches it. That is good news and a "
+            f"stale record at once: say what is true at "
+            f"`_COORDINATE_OF_A_COLLECTION` and take this line out of the "
+            f"list, because a stated edge that has quietly closed reads as "
+            f"a weaker guard than the one that is running."
+        )
+
+    # AND TWO THAT READ LIKE THAT EDGE AND ARE NOT. `position` is on the
+    # verb list, so the guard already has both of these; they are pinned
+    # RED here so the edge above is not mis-stated in the other direction.
+    for text, label, expected in (
+        ("This file is in position 72.",
+         "a rank named and then written in digits", ["position 72"]),
+        ("This file is in position seventy-second.",
+         "a rank named and then spelled in words",
+         ["position seventy-second"]),
+    ):
+        shape, anchorable = by_label[label]
+        got = _coordinate_hits(text, shape, anchorable=anchorable)
+        assert got == expected, (
+            f"{text!r} read {got}, and this case says {expected}: "
+            f"`position` is on the rank-verb list and these two are inside "
+            f"the guard, not on its edge."
         )
 
 
