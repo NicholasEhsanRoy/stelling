@@ -115,10 +115,18 @@
 # which has to be said out loud now, because the renumbering below CREATED a
 # live twelfth: under arrival order the twelfth refusal is the sdist step
 # establishing the tarball count for ITSELF — named a few paragraphs above —
-# and that is a different refusal, in a different step, from the one this
-# retracted sentence was ever about. What cannot fire here is one ARM of the
-# "examined nothing" loop, and that loop is a live refusal this header does not
-# number at all.
+# and that is a different refusal, at a different SITE IN THE SAME STEP, from
+# the one this retracted sentence was ever about: both stand inside `- name:
+# every sdist member is a committed file of the tagged tree`, which is what
+# this header already says of the loop below, placing it "in the sdist step
+# below". THIS CLAUSE READ "in a different step" FOR ONE COMMIT, and a
+# different step is the TAG step, whose sdist-count refusal is the TENTH — so
+# the clause pointed a reader at exactly the confusion these paragraphs exist
+# to prevent, reintroduced by the paragraph written to prevent it. RE-DERIVED
+# on the file this commit ships, by walking every `exit 1` site in it in order
+# and reading off the `- name:` each one falls under rather than by trusting
+# either sentence. What cannot fire here is one ARM of the "examined nothing"
+# loop, and that loop is a live refusal this header does not number at all.
 #
 # AND THE SENTENCE THAT SAID SO PUT AN ORDINAL STRAIGHT BACK, which is the
 # whole of why there is none here now. It read: *"the site it named is the
@@ -224,6 +232,34 @@
 # ordinals are held by being re-derived on every commit that adds a refusal,
 # which is a habit and not an instrument, and that is said plainly rather than
 # implied.
+#
+# TO WHOEVER ADDS THE NEXT REFUSAL: FOUR KINDS OF CLAIM IN THESE TWO FILES GO
+# STALE THE MOMENT YOU INSERT AN `exit 1` SITE, AND NOTHING CHECKS ANY OF THEM.
+# They are POSITION in the file, ARRIVAL RANK among all refusals, and ARRIVAL
+# RANK among one step's own sites — the three orders declared above — plus
+# WHICH STEP A REFUSAL IS IN, which is not an order at all and is the one the
+# `explained.txt` ARM paragraph above had to be corrected on. All four are
+# prose, held together only by a habit of re-derivation, and that defect is the
+# habit failing once, on the fourth of them. Only the TOTAL is instrumented:
+# the count pin holds this header's count to `len(exit_sites) + 2` and the
+# derived-counts pin holds two sentences to that total, and neither can see a
+# position, a rank or a step name — `tests/test_release_gates.py` says so of
+# itself, twice. So the next commit that inserts an `exit 1` site will silently
+# falsify roughly forty ordinals across this file and that one, and the full
+# suite will stay green on every one of them. Re-derive all four kinds, in both
+# files, in the same commit that moves a site — or the reader after you is
+# misled the way this one was.
+#
+# AND DO NOT RESPELL THE PHRASE THE COUNT PIN SCANS FOR, which is a hazard
+# these comments carry rather than a rule about them. That pin's breakdown
+# half is a bare substring test over the whole file, not an anchored scan like
+# the other three, so a SECOND copy of its literal anywhere in this header
+# keeps it green while the header's own breakdown is edited out from under it.
+# MEASURED in this commit: a paragraph above repeated the phrase, and mutating
+# the breakdown at the top of this file then left the pin passing; the
+# paragraph was reworded and the mutation reddens it again. Making that half
+# an exactly-once scan is the instrument that would retire the hazard, and it
+# is not built here.
 #
 # The "examined nothing" loop guards three files; the `explained.txt` arm is
 # dead. `printf '%s\n' "${GENERATED}"` emits a newline even for an empty
