@@ -675,6 +675,24 @@ RULES = (
     ),
     Rule(
         when=(
+            "`uv` or `git` is not on PATH. The three wheel-member checks in "
+            "`tests/test_sdist_contents.py` need both: `uv` to BUILD the wheel "
+            "they compare against, and `git` for the throwaway `check-ignore` "
+            "repository that answers what hatchling's exclusion spec keeps OUT "
+            "of it. Without the second the expected set would have to be "
+            "guessed, and a guess about exclusions is exactly the defect those "
+            "checks were repaired for — a gitignored `src/stelling/_probe.so` "
+            "counted as a module the wheel failed to ship. They skip rather "
+            "than degrade, because a fallback filter is a second model of "
+            "hatchling that nothing in this suite holds"
+        ),
+        reasons=frozenset(
+            {"needs `uv` to build and `git` to read hatchling's exclusions"}
+        ),
+        legitimate=lambda: shutil.which("uv") is None or shutil.which("git") is None,
+    ),
+    Rule(
+        when=(
             "hypothesis is not installed. It is a DEV-GROUP dependency, not an "
             "extra and not a runtime one, so the two shared jax venvs and the "
             "zero-dep CI job do not have it and every module under "
@@ -1464,6 +1482,7 @@ _MUST_MATCH = (
     "needs z3 to cross-check the emission",
     "needs cvc5",
     "needs `uv` to build an sdist",
+    "needs `uv` to build and `git` to read hatchling's exclusions",
     "needs git",
     "not a git checkout (an unpacked sdist, say)",
     "needs a POSIX shell and coreutils to drive a gate body",

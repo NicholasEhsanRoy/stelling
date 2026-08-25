@@ -6,19 +6,32 @@
 # disable them. Requires a (pending) Trusted Publisher configured on PyPI
 # for this repository + workflow + environment.
 #
-# EIGHT REFUSAL POINTS STAND BETWEEN A TAG AND PyPI — six `exit 1` sites
+# FOURTEEN REFUSAL POINTS STAND BETWEEN A TAG AND PyPI — twelve `exit 1` sites
 # written below, plus two steps that refuse by their own exit code — because
 # this is the one workflow whose mistakes are immutable: a release on PyPI
 # cannot be unpublished, only yanked, and a yanked file still resolves for
 # anyone who pins it. This header used to say TWO, which was the count of
 # REASONS below and never the count of refusals; the sdist checks arrived after
-# it was written and it did not move.
+# it was written and it did not move. It said EIGHT until the tag step stopped
+# PICKING among the wheels in `dist/` and started refusing a `dist/` it cannot
+# reason about; that refusal is the seventh `exit 1` site, and the sentence it
+# replaced is corrected beside the step rather than deleted. It said NINE until
+# the same argument was carried to the OTHER artefact — see "THREE MORE" below,
+# and the sentence THAT replaced, which this file used to end with. It said
+# TWELVE until the two counts below stopped being mistaken for a statement
+# about the DIRECTORY — see "THE THIRTEENTH" at the end of this header, and the
+# mitigation THAT replaced, which was measured false with a file on disk. It
+# said THIRTEEN until the sdist step stopped dying on `tar`'s own exit code
+# when the tarball cannot be read — see "THE FOURTEENTH" at the end of this
+# header, and the EXCUSE that replaced, which was this file's own argument
+# used against it.
 #
 # AND UNTIL `tests/test_release_gates.py` LANDED, NOTHING IN THIS REPOSITORY
 # READ THIS FILE. One test opened a workflow at all — `tests/test_reuse_pins.py`,
 # and only `ci.yml`. Six line-neutral mutations were applied here at once (the
 # `rm` deleted, `-ra` -> `-rs`, the `verdict=made` condition made always-true,
-# `publish: needs` losing `test`, this header's EIGHT -> TWELVE, and `comm -23`
+# `publish: needs` losing `test`, this header's refusal count (`EIGHT` as it
+# then read) -> `TWELVE`, and `comm -23`
 # -> `comm -12`, which makes the committed-members gate incapable of firing) and
 # the FULL SUITE STAYED GREEN on every one of them. That file is a text pin,
 # one test per mutation, driven RED against each of the six individually and
@@ -30,13 +43,17 @@
 #      requests — neither of which is this event. A GitHub Release can be cut
 #      from any commit, tag or branch, so "ci was green" is a statement about
 #      some other tree unless it is re-established here.
-#   2. THE TAG AND THE ARTIFACT MUST AGREE. The version is read from
-#      `src/stelling/__init__.py` by hatchling; the tag is typed by a human in
-#      a web form. Nothing connects them. Tagging `v0.2.0` on a tree that still
-#      says `0.1.0` publishes `stelling-0.1.0` under a release called v0.2.0 —
-#      silently, and permanently.
+#   2. THE TAG AND THE ARTEFACTS MUST AGREE — BOTH OF THEM. The version is
+#      read from `src/stelling/__init__.py` by hatchling; the tag is typed by a
+#      human in a web form. Nothing connects them. Tagging `v0.2.0` on a tree
+#      that still says `0.1.0` publishes `stelling-0.1.0` under a release
+#      called v0.2.0 — silently, and permanently. This reason was written about
+#      "the artifact" singular and the step read only the WHEEL's filename; the
+#      sdist is the artefact `pip install stelling` falls back to and the one
+#      whose contents this file spends three steps on, and its filename was
+#      never compared to anything. Both filenames are compared now.
 #
-# SEVEN OF THE EIGHT WERE DRIVEN IN BOTH DIRECTIONS at a61c01f, step body by
+# SEVEN OF THE FOURTEEN WERE DRIVEN IN BOTH DIRECTIONS at a61c01f, step body by
 # step body under `bash -e` with the runner environment faked, in a venv built
 # by this job's own install step (CPython 3.11.15, jax/jaxlib 0.10.2, numpy
 # 2.4.6, cvc5 1.3.4, z3-solver 5.0.0.0, pytest 9.1.1). A refusal never observed
@@ -44,18 +61,231 @@
 # made it fire, beside its own step. The `publish` job was NOT driven and must
 # not be: no tag was cut, nothing was uploaded to any index.
 #
-# THE EIGHTH CANNOT FIRE, and that is stated here rather than left as an
-# untested branch. The "examined nothing" loop guards three files; the
-# `explained.txt` arm is dead. `printf '%s\n' "${GENERATED}"` emits a newline
-# even for an empty `GENERATED`, so `generated.txt` is never empty, so
-# `explained.txt = sort -u tracked.txt generated.txt` is never empty either —
-# measured at 1 byte in the degenerate case, with an empty index AND an empty
-# `GENERATED`. The `members.txt` and `tracked.txt` arms both fire and are
+# THE NUMBER IN THAT SENTENCE IS THIS HEADER'S OWN COUNT, AND IT HAD FOLLOWED
+# IT IN LOCKSTEP THROUGH FOUR ROUNDS — EIGHT, NINE, TWELVE, THIRTEEN — AND THEN
+# STOPPED, in the commit that took the count to FOURTEEN. For one commit this
+# file stated its refusal count as FOURTEEN in one sentence and THIRTEEN in
+# another. The SEVEN is a count of DRIVES and does not move when a refusal is
+# added; the total it is seven OF is the header's count and does. Nothing read
+# either sentence: with this line set to `SEVEN OF THE NINETY` the module was
+# still 21 passed. `tests/test_release_gates.py` derives it from the header
+# now — `test_the_counts_DERIVED_from_the_header_move_with_it`.
+#
+# THE NINTH DID NOT EXIST THEN. `dist/` must hold exactly one wheel is the
+# refusal that replaced the tag step's silent pick among several, and it was
+# driven in both directions when it landed — one wheel green, two wheels and
+# zero wheels red, under `C`, `en_GB.UTF-8` and `en_US.UTF-8`, on the body this
+# file ships. The table is beside that step, and `tests/test_release_gates.py`
+# drives it inside the suite so it stays driven.
+#
+# THREE MORE DID NOT EXIST UNTIL THE SAME ARGUMENT REACHED THE OTHER ARTEFACT,
+# and the sentence they replaced is the one this file used to END with: *"The
+# sdist's own filename version is still never compared to the tag; same build,
+# so it agrees by construction."* "Same build" is precisely the premise the
+# ninth refusal stopped accepting for the wheel, and one `dist/` shows what it
+# cost. DRIVEN on the bodies this file then shipped, `dist/` holding
+# `stelling-0.2.0-py3-none-any.whl` beside a `stelling-0.0.9.tar.gz` whose
+# every member is committed, `TAG=v0.2.0`:
+#
+#   the tag step     rc=0   `tag=v0.2.0 artifact version=0.2.0`
+#   the sdist step   rc=0   `every one of 5 sdist members is committed to
+#                            this tree`
+#
+# Two green gates, and `stelling-0.0.9.tar.gz` on PyPI under a release called
+# v0.2.0 — permanently, on the artefact this header opens by calling
+# un-unpublishable. `upload-artifact` takes the whole `dist/` directory and the
+# publish step uploads every file in it, so the tag agreeing with ONE file in
+# it was never the question. The tenth is `dist/` holding exactly one SDIST,
+# the eleventh is that sdist's filename version carrying the tag, and the
+# twelfth is the sdist step establishing the count for ITSELF — see beside each
+# step. ALL THREE ARE DRIVEN IN BOTH DIRECTIONS, and inside the suite rather
+# than by hand, by `tests/test_release_gates.py`, which extracts these step
+# bodies and runs them against planted `dist/` directories:
+# `test_the_tag_gate_refuses_an_sdist_the_tag_does_not_name` (the shape above,
+# plus its mirror image and a `.dev0` segment, and the matching pair that must
+# still PASS), `test_the_tag_gate_refuses_a_dist_it_cannot_reason_about` (two
+# tarballs and none, under every locale this box has) and
+# `test_the_sdist_gate_refuses_a_dist_it_cannot_read`.
+#
+# THE `explained.txt` ARM OF THE "examined nothing" LOOP CANNOT FIRE, and that
+# is stated here rather than left as an untested branch. THIS PARAGRAPH USED TO
+# OPEN "THE TWELFTH CANNOT FIRE", AND THAT ORDINAL WAS ANCHORED TO NOTHING: it
+# was carried from "THE NINTH" and bumped by three when the count moved, with
+# no re-derivation. THAT QUOTATION IS RETRACTED TEXT AND IT NUMBERS NOTHING,
+# which has to be said out loud now, because the renumbering below CREATED a
+# live twelfth: under arrival order the twelfth refusal is the sdist step
+# establishing the tarball count for ITSELF — named a few paragraphs above —
+# and that is a different refusal, at a different SITE IN THE SAME STEP, from
+# the one this retracted sentence was ever about: both stand inside `- name:
+# every sdist member is a committed file of the tagged tree`, which is what
+# this header already says of the loop below, placing it "in the sdist step
+# below". THIS CLAUSE READ "in a different step" FOR ONE COMMIT, and a
+# different step is the TAG step, whose sdist-count refusal is the TENTH — so
+# the clause pointed a reader at exactly the confusion these paragraphs exist
+# to prevent, reintroduced by the paragraph written to prevent it. RE-DERIVED
+# on the file this commit ships, by walking every `exit 1` site in it in order
+# and reading off the `- name:` each one falls under rather than by trusting
+# either sentence. What cannot fire here is one ARM of the "examined nothing"
+# loop, and that loop is a live refusal this header does not number at all.
+#
+# AND THE SENTENCE THAT SAID SO PUT AN ORDINAL STRAIGHT BACK, which is the
+# whole of why there is none here now. It read: *"the site it named is the
+# EIGHTH `exit 1` site in file order — the TENTH refusal if the two implicit
+# ones are counted where they stand"*. Both figures were re-derived — against
+# the file as it stood BEFORE the same commit inserted the `dist/` inventory
+# refusal above them, so both shipped one short. The charge that paragraph
+# brought, *"carried … and bumped … with no re-derivation"*, landed on its own
+# repair. RE-DERIVED, on the file as it was published: the `exit 1` sites in
+# file order are 265, 276, 487, 494, 515, 539, 543, 643, 684, 693 and 700, so
+# the "examined nothing" site at 684 is the NINTH site and the ELEVENTH
+# refusal. RE-DERIVED AGAIN on the file THIS commit ships, which inserts a
+# twelfth site above it in the same step: the TENTH site and the TWELFTH
+# refusal. Two commits, three values, and the check itself never changed.
+# BOTH OF THOSE REFUSAL FIGURES ARE FILE ORDER, with the two implicit refusals
+# counted WHERE THEY STAND — the order the retracted quotation used and the one
+# this paragraph re-derives in — and NOT the arrival order this header numbers
+# with everywhere else. Re-derived once more on the file this commit ships, and
+# unmoved: the "examined nothing" site is the tenth of the file's twelve sites
+# and the twelfth of its fourteen refusals read in file order. So "the TWELFTH
+# refusal" here and "the twelfth" four paragraphs above are two different
+# refusals in two different orders, and each of them now says which.
+#
+# SO THE ORDINAL IS NOT A PROPERTY OF THE THING IT NUMBERS. It is a property of
+# how many refusals happen to be spelled above it, and any commit that adds one
+# falsifies every ordinal below it silently — which no test here can catch. The
+# count pin structurally cannot: the arithmetic it checks is the NUMBER of
+# `exit 1` sites, never a POSITION among them, and nothing in this repository
+# derives a position. The claim is anchored to the ARM and the site is NAMED
+# rather than numbered: what cannot fire is the `explained.txt` arm of the
+# "examined nothing" loop in the sdist step below, and the SITE FIRES — two of
+# its three arms are driven red. An ordinal was claiming a refusal point could
+# not fire when what cannot fire is one arm of it.
+#
+# WHERE THIS HEADER STILL NUMBERS A REFUSAL — "the seventh `exit 1` site", "THE
+# NINTH", "the tenth … the eleventh … the twelfth", "THE THIRTEENTH", "THE
+# FOURTEENTH" — IT IS NUMBERING ARRIVAL ORDER, the order the refusals were
+# added, which is what "it said EIGHT until …" above tracks. That is a
+# different order from position in the file, the two were confused in exactly
+# one paragraph, and every one of them names the refusal as well as numbering
+# it so that no reader has to resolve one order from the other.
+#
+# AND A THIRD ORDER IS LIVE IN THIS FILE, USED CORRECTLY AND UNDECLARED UNTIL
+# NOW: ARRIVAL AMONG ONE STEP'S OWN `exit 1` SITES. The sdist step's comment
+# says "the fifth site to arrive in THIS STEP (`tar` failing)". That step went
+# from four sites to five at `0ba04ba` and `tar` failing is the one that
+# arrived, so FIFTH is right — but it is not file order (`tar` failing stands
+# SECOND of that step's five as they are written) and it is not this header's
+# arrival order either (among refusals it is the FOURTEENTH). Three orders are
+# therefore live: arrival among all refusals, which is what this header numbers
+# with; position in the file, which the paragraph above is about; and arrival
+# among a single step's own sites, which only that step's comment uses. A
+# number is readable only if it says which order it is in, so each of them
+# names its order as well as its refusal, and the step-local one names its
+# step.
+#
+# AND FOUR OF THOSE ORDINALS WERE OFF BY ONE UNTIL THIS COMMIT: they named the
+# count BEFORE the refusal arrived, not after. Reconstructed from this header's
+# own count at each commit that moved it — the wheel count landed when the
+# count went 8 -> 9 and was called THE EIGHTH; the three sdist refusals landed
+# when it went 9 -> 12 and were called the ninth, tenth and eleventh; the
+# `dist/` inventory landed 12 -> 13 as THE THIRTEENTH; `tar` failing landed
+# 13 -> 14 as THE FOURTEENTH. The last two number the count AFTER arrival and
+# the first four the count BEFORE it, and the tell is that UNTIL THIS
+# CORRECTION nothing in this file had ever been called THE TWELFTH: the
+# narrative ran 8, 9, 10, 11, 13, 14 and reached this file's own total of
+# fourteen only by SKIPPING one. That is a claim about the NUMBERING as it
+# stood and not about the refusals — the renumbering below fills the gap, and
+# from here on the twelfth refusal is the sdist step establishing the tarball
+# count for ITSELF.
+#
+# THEY ARE RENUMBERED, AND THE SENTENCE THAT VOUCHES FOR THEM IS KEPT. Dropping
+# the paragraph above was the other repair available and it fixes nothing: the
+# four numbers would still be wrong, and a reader would no longer be told which
+# order to read any of them in — the confusion the paragraph above was written
+# for. Renumbering makes the claim true instead of unclaimed. Contiguous now,
+# 9, 10, 11, 12, 13, 14, landing on fourteen with no gap, and the rule is the
+# one "it said EIGHT until …" already states: the refusal called the Kth is the
+# one that took the count TO K. "the seventh `exit 1` site" above is NOT in
+# this correction and is right as it stands — it numbers a SITE among sites,
+# where six stood before it, not a refusal among refusals.
+#
+# AND WHEN ONE COMMIT ADDS SEVERAL REFUSALS AT ONCE, THE ORDER AMONG THEM IS
+# FILE POSITION. "The Kth is the one that took the count TO K" fixes where a
+# GROUP lands and says nothing about the order WITHIN it, and a group is not
+# hypothetical: `400415f` took the count 9 -> 12 with three refusals in one
+# commit. The convention that commit actually used is written down here rather
+# than inferred a second time — the members of a group are numbered by where
+# they STAND in this file, earliest lowest, and the group ends on the new
+# total. RE-DERIVED on that commit: the tag step's sdist-count refusal, the
+# tag-versus-sdist comparison and the sdist step's own tarball count stand in
+# exactly that order in it, and this header calls them the tenth, the eleventh
+# and the twelfth. It is also what makes the ordinal in "THREE MORE" below a
+# statement rather than a guess: the count PLUS ONE is the ordinal of a refusal
+# added ALONE, and a commit that adds two gives the second the count plus two,
+# the higher number going to whichever stands lower in this file.
+#
+# NOTHING DERIVES AN ORDINAL AND NOTHING CAN. The count pin holds the TOTAL,
+# and the arithmetic it checks is the NUMBER of `exit 1` sites, never a
+# POSITION among them — the paragraph above says so and it is why every ordinal
+# here NAMES its refusal as well as numbering it. What is pinned as of this
+# commit is that the two counts DERIVED from the total move with it; the
+# ordinals are held by being re-derived on every commit that adds a refusal,
+# which is a habit and not an instrument, and that is said plainly rather than
+# implied.
+#
+# TO WHOEVER ADDS THE NEXT REFUSAL: FOUR KINDS OF CLAIM IN THESE TWO FILES GO
+# STALE THE MOMENT YOU INSERT AN `exit 1` SITE, AND NOTHING CHECKS ANY OF THEM.
+# They are POSITION in the file, ARRIVAL RANK among all refusals, and ARRIVAL
+# RANK among one step's own sites — the three orders declared above — plus
+# WHICH STEP A REFUSAL IS IN, which is not an order at all and is the one the
+# `explained.txt` ARM paragraph above had to be corrected on. All four are
+# prose, held together only by a habit of re-derivation, and that defect is the
+# habit failing once, on the fourth of them. Only the TOTAL is instrumented:
+# the count pin holds this header's count to `len(exit_sites) + 2` and the
+# derived-counts pin holds two sentences to that total, and neither can see a
+# position, a rank or a step name — `tests/test_release_gates.py` says so of
+# itself, twice. So the next commit that inserts an `exit 1` site will silently
+# falsify roughly forty ordinals across this file and that one, and the full
+# suite will stay green on every one of them. Re-derive all four kinds, in both
+# files, in the same commit that moves a site — or the reader after you is
+# misled the way this one was.
+#
+# THE BREAKDOWN AT THE TOP OF THIS HEADER IS READ BY AN ANCHORED SCAN, AND
+# FOR ONE COMMIT IT WAS NOT. The count pin's second half reads the clause
+# "twelve `exit 1` sites" of the first sentence above through an `^`-anchored,
+# exactly-once scan tied to that sentence's own opening, so nothing else
+# written in this file can satisfy it, and REWORDING that clause out of the
+# sentence is a RED on zero hits rather than a silent pass. It no longer types
+# the number either: the word is read off this header and compared to this
+# file's own `exit 1` sites, the same way the total above it is.
+#
+# THE RECORD, BECAUSE THE HOLE WAS LIVE FOR A COMMIT AND IS WHY THIS PARAGRAPH
+# EXISTS: that half was a bare substring test over the whole file, where the
+# module's other scans were already anchored. A second copy of its literal
+# ANYWHERE here kept it green while the breakdown at the top of this file was
+# edited out from under it. MEASURED then — a paragraph above repeated the
+# phrase by accident, the mutation went unnoticed, the paragraph was reworded,
+# and the mutation reddened again — and this note said DO NOT RESPELL THE
+# PHRASE, because a rule addressed to the next writer was the only mitigation
+# there was. RE-MEASURED on the fix, with the phrase planted a second time and
+# the breakdown mutated: RED. The rule is retired; the instrument replaced it,
+# and the quotation of the phrase in the paragraph immediately above is
+# DELIBERATE: it is what makes this file's shipped state the two-occurrence
+# case, standing exactly where the retired rule forbade it.
+#
+# The "examined nothing" loop guards three files; the `explained.txt` arm is
+# dead. `printf '%s\n' "${GENERATED}"` emits a newline even for an empty
+# `GENERATED`, so `generated.txt` is never empty, so
+# `explained.txt = sort -u tracked.txt generated.txt` is never empty either.
+# RE-MEASURED on the body this commit ships, in the degenerate case — an empty
+# index AND an empty `GENERATED` — `members.txt` 68 bytes, `tracked.txt` 0,
+# `generated.txt` 1, `explained.txt` 1, and the step refused at rc=1 on the
+# `tracked.txt` arm. The `members.txt` and `tracked.txt` arms both fire and are
 # driven; nothing is lost by the dead arm, and it is not a third check.
 #
 # NO STEP IN THIS FILE CHECKS THE WHEEL'S MEMBER LIST, AND THE ARGUMENT THAT
-# ONE WAS NOT NEEDED WAS HALF AN ARGUMENT. Step 2 reads only the wheel's
-# FILENAME. What was said to protect the wheel is a COUPLING rather than a
+# ONE WAS NOT NEEDED WAS HALF AN ARGUMENT. Step 2 reads FILENAMES and nothing
+# else. What was said to protect the wheel is a COUPLING rather than a
 # check — both artefacts come out of one `uv build` over one tree, and the
 # sdist allowlist covers `/src` — and the coupling was driven in ONE
 # DIRECTION: an untracked `src/stelling/_relgate_probe.py` shipped in the wheel
@@ -76,9 +306,17 @@
 #
 # WHAT CATCHES IT NOW is not a step here, and that is deliberate: it is three
 # tests in `tests/test_sdist_contents.py`, which run inside the suite above and
-# therefore refuse through refusal point 1 rather than adding a ninth. The
-# wheel's package members are compared to the tree's as an EQUALITY (so it
-# fires in both directions), the drop is driven as an intervention, and the
+# therefore refuse through refusal point 1 rather than adding a FIFTEENTH —
+# this sentence said "a tenth" when the count was nine and "a FOURTEENTH" when
+# it was thirteen, and the count is what moves. IT DID NOT MOVE when the count
+# went to fourteen, and the two names then COLLIDED: "THE FOURTEENTH" is what
+# this file calls the `tar` refusal, three times, so a sentence about a refusal
+# deliberately NOT added was giving it the name of one that WAS — and a reader
+# could take the `tar` refusal for the one declined. The ordinal here is the
+# header's count PLUS ONE, the number a refusal added here would take, and
+# `tests/test_release_gates.py` derives it from the header now. The wheel's
+# package members are compared to the tree's as an EQUALITY (so it fires in
+# both directions), the drop is driven as an intervention, and the
 # built wheel is UNPACKED INTO A BARE INTERPRETER and every module of it
 # resolved — the "nothing installs or imports a built artefact" gap, closed
 # where it can be measured on this box instead of guessed at on a runner.
@@ -86,8 +324,264 @@
 # wheel: ['stelling/contracts.py', 'stelling/solvers.py']" and "these modules
 # of it do not resolve: ['contracts', 'solvers']".
 #
-# The sdist's own filename version is still never compared to the tag; same
-# build, so it agrees by construction.
+# THE THIRTEENTH IS THE DIRECTORY ITSELF, AND THE SENTENCE IT REPLACED WAS AN
+# ESCAPE HATCH IN SOMEBODY ELSE'S CODE THAT IS MEASURABLY OPEN. What stood here
+# said, correctly, that a file in `dist/` which is NEITHER a `.whl` NOR a
+# `.tar.gz` is invisible to every step — both counts are globs and neither is
+# an inventory of the directory, so a stray `dist/notes.txt` is uploaded with
+# the rest — and then excused it: *"`pypa/gh-action-pypi-publish` rejects what
+# it cannot recognise as a distribution."* MEASURED, THAT IS FALSE FOR THE CASE
+# THAT MATTERS. twine's `DIST_EXTENSIONS` is
+# `{'.whl': 'bdist_wheel', '.tar.gz': 'sdist', '.zip': 'sdist'}` — read off
+# twine 7.0.0 — so a `.zip` is a RECOGNISED SOURCE DISTRIBUTION, and PyPI
+# accepts `.zip` sdists. A real, coherent `stelling-0.0.9.zip`, built from this
+# tree's own `stelling-0.2.0.tar.gz` with `PKG-INFO`'s `Version:` rewritten,
+# passed `twine check` at rc=0. Dropped into a real `dist/` beside the real
+# `stelling-0.2.0-py3-none-any.whl` and `stelling-0.2.0.tar.gz`, `TAG=v0.2.0`,
+# on the bodies this file shipped one commit ago:
+#
+#   the tag step        rc=0   `tag=v0.2.0 wheel version=0.2.0 sdist
+#                               version=0.2.0`
+#   the sdist step      rc=0   `every one of 372 sdist members is committed to
+#                               this tree`
+#   the manifest step   rc=0   375 lines of manifest written
+#
+# Three green gates and a `0.0.9` SOURCE DISTRIBUTION on PyPI under a release
+# called v0.2.0, permanently. It is the same defect the ninth and tenth
+# refusals were written for, one file extension over, left standing on a hatch
+# in third-party code behind a MUTABLE BRANCH REF — the ref the `publish` job's
+# own comment argues is a deliberate choice precisely because it moves.
+#
+# SO THE TAG STEP INVENTORIES `dist/` NOW: once it has established the one
+# wheel and the one sdist, every remaining entry is a refusal, named. That is
+# not a new rule. It is the rule already written beside that step — *"the unit
+# of THAT answer is the DIRECTORY, because the directory is what gets
+# uploaded"* — applied to the directory instead of to two globs over it.
+#
+# AND IT IS NOT AN INVENTORY UNLESS IT SEES DOTFILES. `uv build` writes
+# `dist/.gitignore` ITSELF — one byte, `*`, verified on this tree — so EVERY
+# real release directory already holds a third entry, and every shell glob in
+# this file skipped it silently. That is the proof that "exactly one wheel and
+# exactly one sdist" was never a statement about `dist/`. `shopt -s dotglob` is
+# set in all three `dist/`-reading steps.
+#
+# AND THE EXCEPTION IS TAKEN ON THE CONTENT NOW, NOT ON THE NAME — which is
+# this paragraph's own measurement finally being USED. `dist/.gitignore` was
+# allowed BY NAME, as a literal, and a name is not a file. MEASURED on the body
+# one commit ago, `TAG=v0.2.0` against a real `dist/`, only the entry called
+# `dist/.gitignore` changed: arbitrary text rc=0; 0 bytes rc=0; a SYMLINK to
+# `/etc/passwd` rc=0; a DIRECTORY holding a `.zip` rc=0; and a coherent 4.4 MB
+# `stelling-0.0.9.zip` RENAMED to `dist/.gitignore` rc=0 — the same archive
+# built from this tree's own `stelling-0.2.0.tar.gz` that passes `twine check`
+# at rc=0 (4415389 bytes, twine 7.0.0, measured on this box). Nothing named in
+# any of them. None is weaponisable to PyPI today, and that is precisely the
+# argument this file refuses to make sixty lines above: the check whose stated
+# unit is the DIRECTORY was exempting an entry of arbitrary type, size and
+# content on its SPELLING, and the safety of that rested on the same twine
+# table and the same mutable action default those sixty lines decline to rest
+# on. The exception is now a REGULAR FILE — not a symlink, not a directory — of
+# exactly one byte, and that byte `*`. It stays ALLOW and not REQUIRE: no
+# `dist/.gitignore` at all is still rc=0. It adds no `exit 1` site and does not
+# move the count above, and `tests/test_release_gates.py` drives every row.
+#
+# THE ALTERNATIVE — IGNORE DOTFILES AS A CLASS — IS STILL REJECTED, AND NOT BY
+# LEANING ON WHAT `actions/upload-artifact@v4` DOES WITH HIDDEN FILES. THIS
+# FILE MAKES TWO CLAIMS ABOUT THAT ACTION AND RELIES ON NEITHER. What stood
+# here said it EXCLUDES hidden files by default, and rejected the class with
+# it; the annotations below say it TAKES THE WHOLE DIRECTORY and the publish
+# step uploads every file in it, and justify `dotglob` with that. The two point
+# opposite ways — under the first a hidden `.zip` never reaches PyPI and the
+# dotfile question is moot, under the second it ships — and both are
+# third-party behaviour behind a mutable ref, which is the shape of mitigation
+# the twine sentence above was retracted for. So it is said plainly: WE DO NOT
+# RELY ON EITHER DEFAULT. The conduct is identical under both — `dist/` is
+# inventoried whole and every entry that is not one of the two established
+# artefacts is refused by name — so no verdict in this file is a function of
+# what any action does with a leading dot. The annotations state the
+# whole-directory reading because it is the WORSE case, and asserting the worse
+# case in a message to a human is safe where resting a refusal on the better
+# case is not. Ignoring the class would have waved a `dist/.stelling-0.0.9.zip`
+# through the one check that exists to inventory the directory, whichever
+# reading is true. One exception costs a refusal on the day `uv` writes a
+# second dotfile into `dist/`, or writes a different byte into this one;
+# re-deciding that deliberately is the right price in the one file whose
+# mistakes cannot be undone.
+#
+# THE FOURTEENTH IS `tar` FAILING IN THE SDIST STEP, AND THE SENTENCE IT
+# REPLACED WAS THIS FILE'S OWN ARGUMENT TURNED AROUND. What stood beside that
+# step said a CORRUPT tarball "dies in the pipeline above at tar's own rc 2,
+# with no annotation. Still red, so still safe" — excused because that step IS
+# a refusal point, so failing closed is the answer it exists to give. The
+# thesis here is not FAIL CLOSED, it is A REFUSAL MUST SAY IT REFUSED: rc=2 is
+# TAR's exit code, this step's own refusals are rc=1, and this same step has
+# been repaired out of exactly that state TWICE already — the no-wheel case
+# ("`ls`'s own rc=2 with no annotation — red, but not by this gate") and the
+# two-tarball case. And nothing earlier reads the tarball's BYTES, so "an
+# earlier step would have caught it" was never available either: MEASURED, the
+# tag step returns rc=0 on every corrupt shape measured — six of them, beside
+# that step — because it reads FILENAMES and never opens either file. A corrupt tarball reached a step that dies
+# without speaking THROUGH A GREEN GATE. See beside that step for the table and
+# for what `pipefail` does and does not catch.
+#
+# ── BOTH CHECKOUTS TAKE THE WHOLE HISTORY NOW, AND THAT IS A BEHAVIOUR ──────
+# ── CHANGE ─────────────────────────────────────────────────────────────────
+#
+# THE FIRST COMMIT IN THIS CHAIN TO MOVE THIS FILE'S CODE, said first because
+# every one before it was comment-only and said so. With every comment line
+# stripped by `tests/test_release_gates.py`'s own `_code_lines`, this file was
+# 186 lines and byte-identical at `0ba04ba`, `f470d96`, `5de3ac2`, `bcdec4a`
+# and `6fa2e7f` — one sha256,
+# ee62b9ec8353c8746351ae0bf15957f14b353ccddfa95502ebed2279cf890709, five
+# ways, and `eb26d48` before them is the last commit that moved it. It is
+# 188 lines now, sha256
+# 40a96feaf4394974a0ebdc2b9fc8357d27ab59b38e2701196dea215b02f5a055, and the
+# two added lines are the whole of the difference: `fetch-depth: 0` in each of
+# this file's two `actions/checkout@v4` steps. Parsed with PyYAML and compared
+# leaf by leaf against `6fa2e7f`, this workflow gains exactly two leaves —
+# `jobs.test.steps[0].with.fetch-depth` and
+# `jobs.build.steps[0].with.fetch-depth` — with nothing else added, removed or
+# changed, and the three step bodies `tests/test_release_gates.py` extracts
+# and EXECUTES are byte-identical across the change: the sdist step 162 lines
+# a247ed53…, the tag step 87 lines 418583d9…, the manifest step 25 lines
+# a55591b1…, the same digests as at `6fa2e7f`.
+#
+# THERE ARE TWO CHECKOUTS IN THIS FILE, NOT FOUR, AND THE MISCOUNT IS PART OF
+# WHY THIS STOOD. The comparison that opened it read "`ci.yml` has ten
+# `actions/checkout` steps and all ten carry `fetch-depth: 0`; `release.yml`
+# has four and none of them do", and FOUR is what `grep -c "uses: actions/"`
+# says here. In `ci.yml` all ten `uses: actions/` lines ARE checkouts, so that
+# grep is accidentally right in the file it was calibrated on; in this file
+# two of the four are `upload-artifact` and `download-artifact`, which take no
+# `fetch-depth` input at all. RE-DERIVED by reading both files rather than
+# grepping them: `ci.yml` carries `- uses: actions/checkout@v4` at lines 134,
+# 191, 277, 376, 523, 597, 907, 1301, 1340 and 1606 — ten steps, ten
+# `fetch-depth: 0`, eight of them under one identical comment, one under a
+# reason of its own (the property suite materialises old revisions with `git
+# archive`) and one bare. This file carries two, in `test` and in `build`; the
+# `publish` job checks nothing out at all. So the repair is two lines and not
+# four — and a claim of four would have gone on being "true" with one of the
+# two real checkouts left shallow.
+#
+# WHY, IN `ci.yml`'s OWN WORDS, WHICH WERE ALREADY IN THIS REPOSITORY:
+#
+#   "FULL HISTORY, because the routing verification reads `CHANGELOG.md` AT
+#    THE COMMIT THE MANIFEST NAMES and a depth-1 clone cannot reach it. With
+#    the default depth those checks SKIP, so the one guarantee batch B8c
+#    exists to provide -- that every routed block arrived, checked against the
+#    source it left -- was not exercised by any job. Measured on a `--depth 1`
+#    clone of this repository: `19 passed, 8 skipped`, and the eight are the
+#    whole git-gated set."
+#
+# The job below runs those same tests. The reasoning was written down and not
+# carried across to the workflow whose mistakes cannot be unpublished, and
+# that is the whole of the finding.
+#
+# WHAT IT BUYS, DRIVEN IN THE JOB'S OWN TREE SHAPE AND ITS OWN LANE. The
+# sandbox is built the way `actions/checkout@v4` builds one — `git init`; `git
+# remote add`; ONE `git fetch` with the refspec and the depth the config under
+# test implies; `git checkout --force` of the tag — over a mirror of this
+# repository with `v0.2.0` cut on a tree carrying this file AND the disclosed
+# skips a sibling is landing for the same defect. The tree is identical in all
+# three rows, so the only variable is the checkout. The lane is the one this
+# job installs (`.[solvers,jax]`), `STELLING_SKIP_INVENTORY_VERDICT` set,
+# which is the second refusal point in the same step. `deadbee` was planted in
+# `docs/proposed-tier-clause.md`'s **Status:** paragraph and the page restored
+# byte-identically (sha256) after every run.
+#
+#   config                    the sandbox        `deadbee` planted
+#   ────────────────────────  ─────────────────  ─────────────────────────────
+#   depth 1 (as it stood)     shallow, 1         1 SKIPPED — with a warning
+#                             commit, `v0.1.0`   naming it, and nothing red
+#                             unresolvable
+#   `fetch-depth: 0` (this)   not shallow,       1 FAILED, named: "what is
+#                             1079 commits       wrong is the PAGE naming a
+#                                                commit that is not here"
+#   `fetch-tags`, depth 1     shallow, 1         1 SKIPPED — unchanged, and
+#                             commit, `v0.1.0`   the suite red elsewhere
+#                             RESOLVES
+#
+#   config                    the whole suite, that sandbox, that lane
+#   ────────────────────────  ──────────────────────────────────────────────
+#   depth 1 (as it stood)     4669 passed, 20 skipped, exit 0, verdict=made
+#   `fetch-depth: 0` (this)   4679 passed, 10 skipped, exit 0, verdict=made
+#   `fetch-tags`, depth 1     1 failed, 4669 passed, 19 skipped, exit 1,
+#                             verdict=made
+#
+# THE TEN REMAINING SKIPS IN THE MIDDLE ROW ARE ALL ABSENT LIBRARIES —
+# `hypothesis` seven times, `blackjax` twice, `pytest-xdist` once — and not one
+# of them is a check a checkout setting could restore. The first row's twenty
+# are those same ten PLUS the ten this line buys back.
+#
+# THE MIDDLE ROW IS THE POINT AND THE FIRST ROW IS WHAT IT REPLACES. A green
+# tagged-tree job that SKIPPED its own history checks is exactly as green as
+# one that ran them, and the skips are what a sibling's repair bought: they
+# stop the job refusing the publish over an environment, and they do not make
+# it verify anything. TEN TEST NODES MOVE FROM SKIPPED TO PASSED across the
+# three files that read history — `tests/test_soundness_routing.py` 8 (its
+# four git-gated tests over two sections),
+# `tests/test_proposed_page_headers.py` 1 (the status-paragraph ancestry
+# check) and `tests/test_soundness_log_reach.py` 1 (the tag-tree citation
+# rule): `51 passed, 10 skipped` over those three files at depth 1 against
+# `61 passed` with this line.
+#
+# AND ON THIS BRANCH'S TREE ALONE, WITHOUT THAT SIBLING — said here because
+# this line does not depend on that branch landing, and because it is the
+# sharper result. Same sandbox, the tag cut on this branch's own tree: at
+# depth 1 those three files are `1 failed, 71 passed, 8 skipped`, and the red
+# is the ancestry check dying on `89413c2` — a REAL and CORRECT sha that this
+# environment cannot reach. With this line they are `80 passed`, 0 skipped,
+# and the whole suite in that sandbox is `4675 passed, 10 skipped`, exit 0,
+# `verdict=made`.
+# The `deadbee` plant is `1 failed` in BOTH, and the two reds are not the same
+# red: at depth 1 it names `89413c2` and says nothing at all about the plant;
+# at full depth it names `deadbee`. So this line closes refusal point 1 for
+# this branch on its own, and closes it by making the check DECIDE rather than
+# by disclosing that it cannot.
+#
+# NOT `fetch-tags: true`, AND THIS IS A MEASUREMENT AND NOT A WARNING TAKEN ON
+# TRUST. Fetching the tag refs at depth 1 makes `refs/tags/v0.1.0` RESOLVE
+# while the history stays one commit deep, which is the worst of both: the
+# guard in `tests/test_soundness_log_reach.py` that skips when the tag is out
+# of reach stops firing, and the rule under it hard-fails at line 1644 —
+# "7 claim(s) that the released `v0.1.0` does not carry a defect cite nothing
+# this check can decide", because every cited commit is unreachable and every
+# commit-cited paragraph therefore reads as uncovered. Driven in the sandbox
+# above: `1 failed, 51 passed, 9 skipped` over the three files, against
+# `61 passed` with `fetch-depth: 0`. It does not restore the `deadbee` check
+# either — that row is still `1 SKIPPED`. It converts a lost check into a red
+# release job, in a new place, on a tree nobody can fix after the tag is cut.
+# THE FIX IS DEPTH, NOT TAGS.
+#
+# WHAT IT COSTS, AND THIS REPOSITORY'S HISTORY IS NOT SMALL. `fetch-depth: 0`
+# fetches EVERY BRANCH AND EVERY TAG, not just the tagged commit's ancestry.
+# Measured on this box over `file://`, three cold runs each, same origin and
+# same tag: depth 1 is 565 objects, 4.61 MiB packed, 0.56/0.57/0.56 s; the
+# same fetch with no depth limit is 7510 objects, 7.51 MiB, 2.05/2.11/2.09 s.
+# Against this repository AS IT ACTUALLY STANDS — 269 branch heads, 2 tags and
+# 1393 commits reachable from them, of which 1070 are on this branch — the
+# unrestricted fetch is 9980 objects and 10.12 MiB in 2.25/2.22/2.24 s,
+# because all 269 heads come too. So it is roughly twice
+# the bytes, eighteen times the objects and four times the wall clock, and all
+# three grow with the branch list rather than with the release. On a hosted
+# runner the wall time is network-bound and these seconds are not the ones you
+# will see; the object and byte counts are the figures that transfer. TWO JOBS
+# PAY IT AND ONLY ONE NEEDS IT — see beside the `build` job's checkout, where
+# that is said rather than implied. It is bought deliberately: a few seconds
+# per release against the only checks this repository has on which commits the
+# shipped `docs/proposed-*.md` headers name, in the one workflow whose
+# mistakes cannot be unpublished.
+#
+# AND IT IS PINNED NOW, because a line whose absence is silent is a line that
+# comes back off.
+# `tests/test_release_gates.py::test_every_checkout_in_this_file_takes_the_WHOLE_history`
+# derives the checkout steps FROM THIS FILE — matching `actions/checkout@` and
+# not `actions/`, for the reason the count paragraph above gives — and fails
+# if any of them lacks `fetch-depth: 0`. Driven RED five ways, each alone:
+# either line deleted; both deleted, which is this file at `6fa2e7f`;
+# `fetch-depth: 0` rewritten to `fetch-depth: 1`; and a NEW `actions/checkout`
+# step added to `publish` without the key. It types no count, so a checkout
+# added later is covered without a re-derivation — which the header count and
+# the four kinds of ordinal above still are not.
 
 name: release
 on:
@@ -105,6 +599,30 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # FULL HISTORY, AND IT IS THE DIFFERENCE BETWEEN A CHECK AND A SKIP.
+          # This job is refusal point 1, and some of what it runs reads git
+          # HISTORY rather than the git INDEX. At the default depth of 1 those
+          # checks do not fail — they SKIP, or they refuse over the
+          # environment — and neither outcome decides anything about the tree
+          # being published. Driven in a sandbox built the way this job builds
+          # its tree (`git init`; one `git fetch` of the tag ref; `git
+          # checkout` of the tag): at depth 1 `tests/test_soundness_routing.py`
+          # is `8 skipped`, and the status-paragraph ancestry check in
+          # `tests/test_proposed_page_headers.py` cannot resolve a single sha
+          # it is given — including `deadbee`, planted there as a control.
+          # With this line the same sandbox decides all of them, and the
+          # planted sha is the one it names. The table, the `fetch-tags`
+          # measurement and the cost are in this file's header.
+          #
+          # `ci.yml` HAD ALREADY MADE THIS DECISION, at every one of its ten
+          # checkout steps, under a comment giving exactly this reason: "FULL
+          # HISTORY, because the routing verification reads `CHANGELOG.md` AT
+          # THE COMMIT THE MANIFEST NAMES and a depth-1 clone cannot reach it.
+          # With the default depth those checks SKIP, so the one guarantee
+          # batch B8c exists to provide -- that every routed block arrived,
+          # checked against the source it left -- was not exercised by any
+          # job." This job runs those same tests.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
       - run: uv pip install -e ".[solvers,jax]" pytest
@@ -179,13 +697,32 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # FULL HISTORY HERE TOO, AND NOT BECAUSE THIS JOB NEEDS IT TODAY.
+          # That is said plainly rather than implied, because a line justified
+          # by a reason that is not its own is a line the next reader deletes.
+          # Every git call in this job is `git ls-files` — the INDEX, which a
+          # depth-1 checkout has in full — and the version hatchling stamps
+          # into both artefacts is read from `[tool.hatch.version]`'s path,
+          # never from a tag or a `git describe`. Nothing here is measurably
+          # different with it or without it, TODAY.
+          #
+          # What it buys is that history is a property of THIS FILE rather
+          # than of one step in it. The asymmetry this line closes went
+          # unnoticed for as long as it did because nobody comparing the two
+          # workflows was comparing steps: `grep -c "uses: actions/"` reads 10
+          # in `ci.yml` and 4 here, and in `ci.yml` all ten of those ARE
+          # checkouts while here two of the four are `upload-artifact` and
+          # `download-artifact`, which have no `fetch-depth` input at all. Two
+          # checkouts that agree cannot be half-fixed by a grep that cannot
+          # tell them apart. Same clone, same cost as the job above.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       # Driven for real at a61c01f (no tag, nothing uploaded): 279-member
       # `stelling-0.1.0.tar.gz` and 28-member `stelling-0.1.0-py3-none-any.whl`.
       - run: uv build
       # `tag_name` is attacker-influenced in the general case, so it goes
       # through the environment rather than being interpolated into the shell.
-      # The comparison is against the BUILT ARTIFACT's name, not against
+      # The comparison is against the BUILT ARTEFACTS' names, not against
       # `__version__` read from the source: the filename is what gets uploaded,
       # so it is the thing that has to agree with the tag.
       #
@@ -195,59 +732,302 @@ jobs:
       # and `V0.1.0` — the last three are worth knowing, because a gate that
       # normalised them would be a gate that could be talked past.
       #
-      # ONE WEAKNESS, MEASURED, AND NOT REACHABLE FROM THIS WORKFLOW. `ls
-      # dist/*.whl` returns every match, and `basename` on a multi-line string
-      # returns whatever follows the LAST `/` — so with two wheels present
-      # this reads only the LAST one's version. Driven: a planted
-      # `stelling-0.2.0-…whl` beside the real 0.1.0 made this report
-      # `artifact version=0.2.0`, and it went red there.
+      # AND THE SAME REFUSAL FOR THE SDIST, which is new and which this file's
+      # own last sentence used to argue was unnecessary: "same build, so it
+      # agrees by construction". That is a COUPLING and not a check — the same
+      # word this file already uses for what was said to protect the wheel's
+      # member list — and it is the same shape of premise the wheel COUNT
+      # refusal below was written to stop accepting. It was driven false: a
+      # `dist/` holding `stelling-0.2.0-py3-none-any.whl` beside a
+      # `stelling-0.0.9.tar.gz`
+      # whose every member is committed took `TAG=v0.2.0` through this step at
+      # rc=0 (`tag=v0.2.0 artifact version=0.2.0`) and through the sdist step
+      # at rc=0 ("every one of 5 sdist members is committed to this tree").
+      # `0.0.9` would have gone to PyPI under a release called v0.2.0. Refusal
+      # reason 2 at the top of this file — the version is read by hatchling,
+      # the tag is typed by a human, nothing connects them — is not one word
+      # weaker for the tarball than for the wheel, and the tarball is the
+      # artefact that gets built from source on every machine without a
+      # matching wheel.
       #
-      # THE GREEN SHAPE WAS DESCRIBED BACKWARDS HERE AND IS NOW DRIVEN. This
-      # said the mirror image — "a STALE 0.1.0 beside a real 0.2.0, tagged
-      # v0.1.0" — would go green. It does not, and the reason is the same
-      # sentence two lines up: `ls` SORTS, so the LAST match is the HIGHEST
-      # version, and that is the one compared. Both shapes driven on a `dist/`
-      # of two empty files with the step body verbatim:
+      # DRIVEN IN BOTH DIRECTIONS on the body below, `dist/` of empty files:
       #
-      #   0.1.0 + 0.2.0, TAG=v0.1.0   "artifact version=0.2.0"   rc=1  RED
-      #   0.0.9 + 0.1.0, TAG=v0.1.0   "artifact version=0.1.0"   rc=0  GREEN
+      #   dist/                                TAG           verdict
+      #   0.2.0.whl + 0.2.0.tar.gz             v0.2.0        rc=0
+      #   0.2.0.whl + 0.0.9.tar.gz             v0.2.0        rc=1 tag and sdist
+      #   0.0.9.whl + 0.2.0.tar.gz             v0.2.0        rc=1 tag and wheel
+      #   0.2.0.whl + 0.2.0.dev0.tar.gz        v0.2.0        rc=1 tag and sdist
+      #   0.2.0.dev0.whl + 0.2.0.dev0.tar.gz   v0.2.0.dev0   rc=0
+      #   0.2.0.whl + 0.2.0 and 0.0.9 .tar.gz  v0.2.0        rc=1 not one sdist
+      #   0.2.0.whl + no tarball               v0.2.0        rc=1 not one sdist
       #
-      # So what goes green is a stray that sorts BEFORE the real wheel, not
-      # after — and it is worse than a wrong version string, because the
-      # comparison never sees the stray at all: `upload-artifact` takes the
-      # whole `dist/` directory, `download-artifact` restores it, and the
-      # publish step uploads every file in it. A 0.0.9 nobody tagged goes to
-      # PyPI beside the 0.1.0, permanently, with this step green.
+      # The last row is why `basename … .tar.gz` strips the suffix before
+      # `cut`: without it the version reads `0.2.0.dev0.tar.gz`, which matches
+      # no tag at all and would refuse the RIGHT tarball as loudly as a wrong
+      # one. `tests/test_release_gates.py` drives every row inside the suite.
       #
-      # STILL NOT REACHABLE HERE, which is why it is recorded rather than
-      # patched: `actions/checkout@v4` gives this job a fresh clone, `dist/` is
-      # gitignored and has no tracked member, and one `uv build` fills it.
-      # The patch cannot be validated on a runner from here. With NO
-      # wheel at all, `ls` fails and `set -e` exits 2 before this compares
-      # anything — red, but not by this gate.
-      - name: the tag and the artifact must agree
+      # A SECOND REFUSAL POINT IN THIS STEP, RUNNING BEFORE THE ONE ABOVE, and
+      # it replaced a silent PICK. `ls dist/*.whl` returns EVERY match and
+      # `basename` on a multi-line string returns
+      # whatever follows the LAST `/`, so with two wheels present this step
+      # examined ONE of them and said nothing whatever about the other — while
+      # `upload-artifact` takes the whole `dist/` directory, `download-artifact`
+      # restores it, and the publish step uploads every file in it. A gate that
+      # reads "the wheel" where there is more than one is not answering its own
+      # question, so it now establishes that there is EXACTLY ONE and refuses a
+      # `dist/` it cannot reason about.
+      #
+      # THE JUSTIFICATION THAT STOOD HERE IS FALSE, AND IS CORRECTED RATHER
+      # THAN DELETED. It read: *"`ls` SORTS, so the LAST match is the HIGHEST
+      # version, and that is the one compared"*, and concluded that what goes
+      # green is a stray that sorts BEFORE the real wheel. The conclusion
+      # survives; the reason does not. It was a coincidence of the two examples
+      # it was drawn from — `0.0.9`, `0.1.0`, `0.2.0` differ in a DIGIT, and
+      # every collation agrees about digits. Put a PEP 440 dev segment beside
+      # its own release and the LAST match is the LOWER version under `C` and
+      # the HIGHER one under a UTF-8 locale: `-` sorts before `.` in ASCII,
+      # while a UTF-8 collation ignores punctuation at the primary level. So
+      # "sorts before" is a property of the RUNNER'S LOCALE and of the two
+      # filenames, and never of the version. Re-driven on a `dist/` of two
+      # empty files with the old step body verbatim:
+      #
+      #   wheels in dist/       TAG      LC_ALL=C          en_GB / en_US.UTF-8
+      #   0.1.0 + 0.2.0       v0.1.0   0.2.0      rc=1     0.2.0      rc=1
+      #   0.0.9 + 0.1.0       v0.1.0   0.1.0      rc=0 !   0.1.0      rc=0 !
+      #   0.2.0 + 0.2.0.dev0  v0.2.0   0.2.0.dev0 rc=1     0.2.0      rc=0 !
+      #
+      # The third row is the one the old sentence could not describe: one tree,
+      # two files, one tag, and a different verdict per runner locale. Every
+      # `rc=0` there is a wheel nobody tagged going to PyPI permanently.
+      #
+      # `export LC_ALL=C` IS SET AND IS NOT WHAT FIXES THIS, which is why it is
+      # not offered as the repair. Driven with ONLY the export added to the old
+      # body: row three becomes rc=1 under all three locales — deterministic —
+      # and row two is still rc=0, so a `0.0.9` nobody tagged still ships
+      # beside the `0.1.0`. Determinism is worth having and is kept; the answer
+      # it was making deterministic was the wrong answer.
+      #
+      # EXACTLY ONE WHEEL AND EXACTLY ONE SDIST, RATHER THAN CHECKING EVERY
+      # FILE FOUND — the choice, and the reason. What this step exists to
+      # answer is not "is there a file here whose version matches the tag" but
+      # "will this release publish anything the tag does not name", and the
+      # unit of THAT answer is the DIRECTORY, because the directory is what
+      # gets uploaded. Checking every match still passes a `dist/` holding two
+      # wheels that both spell the tagged version — one built here, one left by
+      # some other build of some other tree — and agreeing about a version is
+      # not provenance. `uv build` on this project produces exactly one wheel
+      # and exactly one sdist: the wheel is `py3-none-any`, there is no build
+      # matrix, no compiled extension and no `cibuildwheel`, and there is one
+      # sdist target, so a second of either is not a shape this release path
+      # can produce and is precisely the evidence that `dist/` holds something
+      # this job did not build. The cost is named rather than hidden: if this
+      # project ever ships more than one wheel, this step has to be edited, and
+      # re-deciding it deliberately is the right price in the one file whose
+      # mistakes cannot be undone.
+      #
+      # AND THE DIRECTORY, WHICH IS WHAT THE TWO COUNTS ABOVE ARE NOT. Two
+      # globs are not an inventory: a `dist/` entry that is neither `.whl` nor
+      # `.tar.gz` was invisible to every step in this file, and the header's
+      # excuse for that — the publish action rejects what it cannot recognise —
+      # is measurably false for `.zip`. See "THE THIRTEENTH" in the header for
+      # the twine reading and the three-green-gates reproduction. The rule this
+      # step now applies is the one already written above it: once the one
+      # wheel and the one sdist are established, every other entry in `dist/`
+      # is a refusal, named. DRIVEN IN BOTH DIRECTIONS on the body below,
+      # `TAG=v0.2.0`, real `stelling-0.2.0` artefacts:
+      #
+      #   dist/ holds                                          verdict
+      #   whl + tar.gz + .gitignore                            rc=0
+      #   whl + tar.gz + .gitignore + stelling-0.0.9.zip       rc=1 names it
+      #   whl + tar.gz + .gitignore + notes.txt                rc=1 names it
+      #   whl + tar.gz + .gitignore + stray/ (a directory)     rc=1 names it
+      #   whl + tar.gz + .gitignore + .stelling-0.0.9.zip      rc=1 names it
+      #   whl + tar.gz  (no .gitignore at all)                 rc=0
+      #
+      # The last two rows are the dotfile decision and they are both halves of
+      # it: `dist/.gitignore` is allowed because `uv build` writes it, it is
+      # not REQUIRED to be there, and no other dotfile is allowed —
+      # `shopt -s dotglob` is what makes the loop able to see one at all. The
+      # reasoning, and the alternative that was rejected, are in the header.
+      #
+      # AND THE ALLOWED ENTRY IS A FILE AND NOT A NAME. The exception used to
+      # be the literal `dist/.gitignore`, which exempted an entry of arbitrary
+      # type, size and content from the one check whose stated unit is the
+      # DIRECTORY. It is taken on the CONTENT now — a regular file of exactly
+      # one byte, and that byte `*`, which is what `uv build` writes and what
+      # the header measured and did not use. DRIVEN IN BOTH DIRECTIONS on the
+      # body below, `TAG=v0.2.0`, the same real artefacts, with only the entry
+      # called `dist/.gitignore` changed:
+      #
+      #   dist/.gitignore is                                   verdict
+      #   a regular file of one byte, `*`                      rc=0
+      #   absent entirely                                      rc=0
+      #   a regular file of one byte, `x`                      rc=1 names it
+      #   0 bytes                                              rc=1 names it
+      #   arbitrary text                                       rc=1 names it
+      #   `*` followed by a newline                            rc=1 names it
+      #   a coherent 4.4 MB stelling-0.0.9.zip renamed         rc=1 names it
+      #   a SYMLINK to a file whose content is `*`             rc=1 names it
+      #   a DIRECTORY holding a .zip                           rc=1 names it
+      #   a regular one-byte `*` with mode 000                 rc=1 names it
+      #
+      # The middle rows are what a NAME could not see, and the one-byte `x` and
+      # the trailing newline are the halves that keep the check honest: one
+      # byte is not enough and `*` somewhere in the file is not enough. `-L` is
+      # checked BEFORE `-f` because `-f` follows a symlink, so the symlink row
+      # would otherwise read as a regular file. The last row is the failure
+      # mode of the check itself and it fails CLOSED: `wc -c` cannot read the
+      # file, the test errors, the `&&` chain is false and the entry is named
+      # like any other — an entry this step cannot READ is not one it vouches
+      # for. NO `exit 1` SITE IS ADDED and the header's
+      # count does not move: a `dist/.gitignore` this step will not vouch for
+      # is named by the refusal that was already there.
+      # `tests/test_release_gates.py` drives every row inside the suite.
+      #
+      # THE TWO-TARBALL SHAPE DID NOT SILENTLY PICK — IT DIED WITHOUT SAYING SO,
+      # which is a different defect with the same repair, and the difference is
+      # recorded because the wheel paragraph above is about a PICK and it would
+      # be easy to copy that reading across. `sdist="$(ls dist/*.tar.gz)"` is
+      # QUOTED, so two matches become one string with a newline in it and `tar`
+      # is handed a filename that does not exist. Driven on the shipped bodies,
+      # `dist/` holding `stelling-0.0.9.tar.gz` and `stelling-0.2.0.tar.gz`:
+      # the sdist step exited 2 with `tar (child): dist/stelling-0.0.9.tar.gz`
+      # + a newline + `dist/stelling-0.2.0.tar.gz: Cannot open`, and NO
+      # annotation — "red, but not by this gate", the exact state the no-wheel
+      # case was repaired out of. Zero tarballs is the same: `ls` fails on the
+      # unexpanded glob. Both are this step's own refusal now, with a message.
+      #
+      # AND IT CLOSES THE NO-WHEEL CASE, which this comment used to record as a
+      # shortcoming: with no wheel at all the old body died on `ls`'s own rc=2
+      # with no annotation — "red, but not by this gate". Driven: rc=2 and
+      # `ls: cannot access` before, rc=1 and this step's own annotation after.
+      #
+      # NONE OF IT IS REACHABLE FROM THIS WORKFLOW TODAY — `actions/checkout@v4`
+      # gives this job a fresh clone, `dist/` is gitignored and has no tracked
+      # member, and one `uv build` fills it. It is repaired because it is
+      # wrong, not because it is urgent.
+      #
+      # DRIVEN HERE, NOT ONLY ON A RUNNER. The table above, the `LC_ALL=C`-only
+      # variant, the no-wheel case, the one-wheel green and the seven tags
+      # above were all driven on the body below under `C`, `en_GB.UTF-8` and
+      # `en_US.UTF-8`; the one-wheel green and the seven tags are unchanged in
+      # every cell. `tests/test_release_gates.py` extracts this body and drives
+      # every refusal in it inside the suite, so they stay driven.
+      #
+      # RE-DRIVEN ON THE BODY THIS COMMIT SHIPS, after `dotglob` and the
+      # directory inventory landed: the seven tags again, against real
+      # `stelling-0.2.0` artefacts in a `dist/` that also holds the
+      # `.gitignore` `uv build` writes — `v0.2.0` and `0.2.0` rc=0, and
+      # `v0.9.9`, `0.9.9`, the empty string, `v0.2.0 ` (trailing space) and
+      # `V0.2.0` rc=1. Every row of the version table above reproduces
+      # unchanged, and so does every wheel-count and sdist-count row. Nothing
+      # a release must still accept moved.
+      - name: the tag and the artifacts must agree
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          wheel="$(ls dist/*.whl)"
-          version="$(basename "${wheel}" | cut -d- -f2)"
-          echo "tag=${TAG} artifact version=${version}"
+          # Determinism for everything below, and the sdist step has it too.
+          # It is NOT what makes the count right — see the comment above.
+          export LC_ALL=C
+          # `nullglob` so an empty `dist/` reaches the refusals below as zero
+          # matches instead of arriving here as the literal glob string, and
+          # `dotglob` so every glob in this step reads the WHOLE directory. A
+          # hidden `.whl` is a wheel and a hidden `.zip` is a file that gets
+          # uploaded; a check whose subject is the directory may not be blind
+          # to an entry because of how it is spelled.
+          shopt -s nullglob dotglob
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            printf 'dist/*.whl matched %s file(s)\n' "${#wheels[@]}"
+            [ "${#wheels[@]}" -eq 0 ] || printf '  %s\n' "${wheels[@]}"
+            echo "::error title=dist/ does not hold exactly one wheel::${#wheels[@]} files match dist/*.whl, and this step can only speak for the one this job built. upload-artifact takes the whole directory and the publish step uploads every file in it, so a wheel this comparison never examined would go to PyPI permanently. One 'uv build' of this project produces exactly one py3-none-any wheel; anything else in dist/ came from somewhere this job cannot account for. Empty dist/ and re-run the build."
+            exit 1
+          fi
+          sdists=(dist/*.tar.gz)
+          if [ "${#sdists[@]}" -ne 1 ]; then
+            printf 'dist/*.tar.gz matched %s file(s)\n' "${#sdists[@]}"
+            [ "${#sdists[@]}" -eq 0 ] || printf '  %s\n' "${sdists[@]}"
+            echo "::error title=dist/ does not hold exactly one sdist::${#sdists[@]} files match dist/*.tar.gz, and this step can only speak for the one this job built. upload-artifact takes the whole directory and the publish step uploads every file in it, so a tarball this comparison never examined would go to PyPI permanently — and an sdist cannot be unpublished, only yanked. One 'uv build' of this project produces exactly one sdist; anything else in dist/ came from somewhere this job cannot account for. Empty dist/ and re-run the build."
+            exit 1
+          fi
+          # THE DIRECTORY, NOW THAT THE TWO ARTEFACTS ARE ESTABLISHED. Every
+          # entry that is neither of them is refused and named. `dist/` is what
+          # `upload-artifact` takes and what the publish step uploads, so this
+          # is the only place in the file where the question the step opens
+          # with — "will this release publish anything the tag does not
+          # name" — is actually asked of the thing that gets published.
+          extras=()
+          for entry in dist/*; do
+            case "${entry}" in
+              "${wheels[0]}"|"${sdists[0]}") continue ;;
+              # `uv build` writes this itself; see the header for why it is one
+              # exception and not a class of them, and the table above for why
+              # it is taken on the CONTENT rather than on the name. `! -L`
+              # first: `-f` follows a symlink, so a symlink to a regular file
+              # would satisfy `-f` on its own. `wc -c` pins the length to the
+              # one byte this header measured and `cat` pins that byte, so
+              # neither a longer file that starts with `*` nor a one-byte file
+              # that is not `*` is vouched for.
+              dist/.gitignore)
+                if [ ! -L "${entry}" ] && [ -f "${entry}" ] \
+                   && [ "$(wc -c < "${entry}")" -eq 1 ] \
+                   && [ "$(cat "${entry}")" = "*" ]; then
+                  continue
+                fi
+                ;;
+            esac
+            extras+=("${entry}")
+          done
+          if [ "${#extras[@]}" -ne 0 ]; then
+            printf 'dist/ holds entries that are neither the wheel nor the sdist:\n'
+            printf '  %s\n' "${extras[@]}"
+            echo "::error title=dist/ holds files this job did not build::${#extras[@]} entries in dist/ are neither the one wheel nor the one sdist this step just established, and they are listed above. upload-artifact takes the whole directory and the publish step uploads every file in it, so being neither a .whl nor a .tar.gz does not make a file safe: twine recognises .zip as a SOURCE DISTRIBUTION, a coherent stelling-0.0.9.zip passed twine check at rc=0, and with one in dist/ the tag, sdist and manifest steps of this workflow all returned 0. This step used to rely on the publish action rejecting what it cannot recognise; it recognises .zip. dist/.gitignore is the one entry this step will pass over, and only as a regular file of exactly one byte, '*', which is what uv build writes: a .gitignore of any other type, size or content is listed above like anything else. Empty dist/ and re-run the build."
+            exit 1
+          fi
+          # `cut -d- -f2` off the basename for both, and `.tar.gz` stripped
+          # first because an sdist name is `<name>-<version>.tar.gz` with no
+          # separator after the version — `cut` alone yields `0.0.9.tar.gz`.
+          #
+          # LATENT, NOT LIVE, AND IT FAILS CLOSED — recorded because the day it
+          # bites is a day somebody is renaming the project. `-f2` is the
+          # second HYPHEN-delimited field, so this reads the version correctly
+          # exactly while the distribution NAME holds no hyphen. `stelling`
+          # holds none, and PEP 625 keeps it that way for the sdist: a
+          # compliant backend normalises `a-b` to `a_b` in the filename, so
+          # `stelling_core-0.2.0.tar.gz` still reads `0.2.0` (measured). What
+          # breaks it is a filename that KEEPS the hyphen —
+          # `stelling-core-0.2.0.tar.gz` reads `core`, and the wheel spelling
+          # `stelling-core-0.2.0-py3-none-any.whl` reads `core` too (both
+          # measured) — which is what a legacy or non-normalising backend
+          # writes. Nothing is published on it: no tag equals `core`, so both
+          # comparisons below refuse, loudly, on the right side.
+          version="$(basename "${wheels[0]}" | cut -d- -f2)"
+          sdist_version="$(basename "${sdists[0]}" .tar.gz | cut -d- -f2)"
+          echo "tag=${TAG} wheel version=${version} sdist version=${sdist_version}"
           if [ "${TAG}" != "v${version}" ] && [ "${TAG}" != "${version}" ]; then
-            echo "::error title=tag and artifact disagree::The release is tagged '${TAG}' but the built artifact is version '${version}'. Publishing would put '${version}' on PyPI permanently, under a release that says otherwise. Fix __version__ or the tag; do not re-run this job until they match."
+            echo "::error title=tag and wheel disagree::The release is tagged '${TAG}' but the built wheel is version '${version}'. Publishing would put '${version}' on PyPI permanently, under a release that says otherwise. Fix __version__ or the tag; do not re-run this job until they match."
+            exit 1
+          fi
+          if [ "${TAG}" != "v${sdist_version}" ] && [ "${TAG}" != "${sdist_version}" ]; then
+            echo "::error title=tag and sdist disagree::The release is tagged '${TAG}' but the built sdist is version '${sdist_version}'. This step used to compare only the wheel, on the argument that one 'uv build' produces both so they agree by construction — which is a coupling and not a check, and a dist/ holding a matching wheel beside a stale tarball passed every gate in this file. Publishing would put '${sdist_version}' on PyPI permanently, under a release that says otherwise. Fix __version__ or the tag; do not re-run this job until they match."
             exit 1
           fi
       # THE ASSERTION `tests/test_sdist_contents.py` CANNOT MAKE ON A
       # CONTRIBUTOR'S MACHINE, and the step below used to print the manifest
       # and assert nothing about it.
       #
-      # Three tests in that module are gated on `uv` and skip without it —
+      # EIGHT tests in that module are gated on `uv` and skip without it —
       # including `test_an_arbitrary_new_file_does_not_ship`, the module's own
-      # headline property and the only one established by intervention.
-      # Measured on a PATH with no `uv`: `9 passed, 3 skipped` at a4c16fe, and
-      # one smuggling shape (a committed dangling symlink) goes from red to
-      # green with it. Making that skip a hard failure would be flaky in the
-      # environment where it matters least — a contributor's first `pytest`.
+      # headline property and the only one established by intervention. This
+      # comment said THREE, which was the count when it was written and has not
+      # been the count for a long time: five `shutil.which("uv")` gates plus
+      # the three wheel-member checks behind `_needs_a_build_and_an_oracle`.
+      # RE-MEASURED on the module this commit ships: `17 passed, 8 skipped` on
+      # a PATH with no `uv` against `25 passed` with it, and one smuggling
+      # shape (a committed dangling symlink) goes from red to green with it.
+      # Making that skip a hard failure would be flaky in the environment
+      # where it matters least — a contributor's first `pytest`.
       # It matters HERE, one step from immutable, so the failure belongs here.
       # Every pytest job in this repository already uses
       # `astral-sh/setup-uv@v6`, so no CI run takes that skip either.
@@ -260,7 +1040,53 @@ jobs:
       # `force-include` table, a `hatch_build.py` hook — and every untracked
       # file, without modelling any of them.
       #
-      # REFUSAL POINTS (three `exit 1` sites, two of which can fire), driven in
+      # AND IT RESOLVES ITS OWN TARBALL RATHER THAN INHERITING ONE. The count
+      # this step makes is the same count the tag step above already made, and
+      # it is made TWICE deliberately: nothing is carried between steps, each
+      # `run:` block is a script that has to be correct on the input it is
+      # given, and `tests/test_release_gates.py` extracts and drives each body
+      # ALONE. A body whose correctness depends on a step that ran before it is
+      # a body no drive can establish — and "an earlier step would have caught
+      # it" is the same shape of argument as "same build, so it agrees by
+      # construction", which is the sentence this file had to retract.
+      #
+      # REFUSAL POINTS: five `exit 1` sites, and ALL FIVE FIRE when this body
+      # is driven ALONE — which is the frame the paragraph directly above
+      # requires, because a `run:` block is a script that has to be correct on
+      # the input it is given. FOUR of them can fire in the workflow as it
+      # stands, and only four, because the tag step establishes the tarball
+      # count before this step runs — and it establishes NOTHING ELSE about the
+      # tarball, because it never opens it, which is why the fifth site to
+      # arrive in THIS STEP (`tar` failing) is live in the workflow and not
+      # only standalone. FIFTH is arrival among this step's OWN sites — it went
+      # four to five at `0ba04ba` — which is a third order, neither file order
+      # (`tar` failing stands second of the five as they are written) nor the
+      # header's arrival order among refusals (there it is the FOURTEENTH). The
+      # header declares that order beside the other two.
+      #
+      # THE PARENTHETICAL HERE USED TO READ "three of which can fire" WITH
+      # NEITHER FRAME NAMED, one paragraph after this file insists on the
+      # standalone one. It was inherited as "three sites, two of which can
+      # fire" — flatly wrong — and bumped by one onto a number that happens to
+      # be true in the OTHER frame, instead of being re-derived. It is
+      # re-derived on every commit that touches this step now, and this one
+      # moved it again: four sites became five. RE-DERIVED here, each site
+      # driven standalone on the body this commit ships, scrubbed environment,
+      # `GENERATED=PKG-INFO`:
+      #
+      #   dist/ + tree                     rc   what it said
+      #   two tarballs                     1    cannot tell which tarball to read
+      #   a CORRUPT tarball                1    tar exited 2 on dist/stelling-…
+      #   a VALID but EMPTY tarball        1    members.txt is empty
+      #   an empty git index               1    tracked.txt is empty
+      #   a tarball with no PKG-INFO       1    not looking at a real artefact
+      #   an uncommitted member            1    names src/stelling/_probe.py
+      #   the healthy tree                 0    every one of 5 sdist members …
+      #
+      # The tarball COUNT is driven in both directions inside the suite by
+      # `test_the_sdist_gate_refuses_a_dist_it_cannot_read`, and the CORRUPT
+      # row by `test_the_sdist_gate_refuses_a_tarball_it_cannot_read`, rather
+      # than at a61c01f, where neither existed. The other three were driven in
       # both directions at a61c01f. GREEN on the real
       # artefact: "every one of 279 sdist members is committed to this tree".
       # RED, twice, by two different routes and each with a real plant:
@@ -287,11 +1113,86 @@ jobs:
         run: |
           set -euo pipefail
           export LC_ALL=C
-          sdist="$(ls dist/*.tar.gz)"
-          tar tzf "${sdist}" | sed -e 's|^[^/]*/||' -e '/\/$/d' -e '/^$/d' | sort -u > members.txt
-          git ls-files | sort -u > tracked.txt
-          printf '%s\n' "${GENERATED}" | sort -u > generated.txt
-          sort -u tracked.txt generated.txt > explained.txt
+          # `dotglob` for the same reason the tag step sets it: the three steps
+          # that read `dist/` must agree about what is in it, and a hidden
+          # `.tar.gz` is a tarball this step would otherwise not count.
+          shopt -s nullglob dotglob
+          sdists=(dist/*.tar.gz)
+          if [ "${#sdists[@]}" -ne 1 ]; then
+            printf 'dist/*.tar.gz matched %s file(s)\n' "${#sdists[@]}"
+            [ "${#sdists[@]}" -eq 0 ] || printf '  %s\n' "${sdists[@]}"
+            echo "::error title=the sdist check cannot tell which tarball to read::${#sdists[@]} files match dist/*.tar.gz. This step reads ONE tarball and speaks only for that one, while upload-artifact takes the whole directory and the publish step uploads every file in it. With two matches it used to hand tar a filename with a newline in it and die on tar's own exit code with no annotation; with none it died on the unexpanded glob. Empty dist/ and re-run the build."
+            exit 1
+          fi
+          sdist="${sdists[0]}"
+          # NOTHING IS LEFT IN THE CHECKOUT, ON ANY PATH OUT. These four files
+          # used to be written into the checkout ROOT and removed by an `rm -f`
+          # on the SUCCESS path only, so every refusal that got as far as
+          # writing them left `members.txt`, `tracked.txt`, `generated.txt` and
+          # `explained.txt` behind. RE-DERIVED on the body this commit ships,
+          # with `work` pointed back at the checkout root and the `trap`
+          # removed — the historical shape, everything else byte for byte —
+          # each of this step's FIVE sites driven on its own input: four files
+          # on each of the THREE paths that reach the writes (examined nothing,
+          # not a real artefact, an uncommitted member) and ZERO on each of the
+          # TWO that return above them (two tarballs, a corrupt tarball). It
+          # read "three … and zero on the FOURTH" until now: correct at
+          # `eb26d48`, when this step had four sites, and stale from `0ba04ba`,
+          # the commit that made `tar` failing the second site in file order
+          # and the second that returns above the writes. The fourth site in
+          # file order is one that DOES reach them. State left in the
+          # workspace by a step whose own comment argues that nothing is
+          # carried between steps. A scratch directory plus a `trap` says the
+          # same thing in a way that survives `exit 1`; the messages below
+          # still name the plain basename, because that is what a reader
+          # needs.
+          work="$(mktemp -d)"
+          trap 'rm -rf "${work}"' EXIT
+          # THE TARBALL IS READ ONCE, AND `tar` FAILING IS THIS STEP'S OWN
+          # REFUSAL — see "THE FOURTEENTH" in the header for the sentence this
+          # replaced. tar's stderr goes to a FILE and then to this step's log,
+          # never into the pipeline: `2>&1` here would `sed` and `sort` a
+          # diagnostic into `members.txt` as though it were a member, which is
+          # the defect measured on the SUCCESS path of the manifest step below.
+          tar_status=0
+          listing="$(tar tzf "${sdist}" 2>"${work}/tar.err")" || tar_status=$?
+          cat "${work}/tar.err" >&2
+          # REFUSAL POINT, driven in both directions on this body: all five
+          # corrupt shapes rc=1 with this annotation, and the real
+          # `stelling-0.2.0.tar.gz` rc=0 unchanged.
+          if [ "${tar_status}" -ne 0 ]; then
+            echo "::error title=the sdist check cannot read the tarball::tar exited ${tar_status} on ${sdist} and this step has no member list to compare. What tar said is in this step's log, above. It used to die HERE on tar's own exit code with no annotation — red, but not by this gate, which is the state the no-wheel and two-tarball cases in this same workflow were repaired out of; rc=2 is tar's code and this step's own refusals are rc=1. It was left standing on the argument that a refusal point failing closed is the answer it exists to give, and on 'an earlier step would have caught it' — measured, the tag step returns 0 on every corrupt tarball, because it reads filenames and never opens either file. Empty dist/ and re-run the build."
+            exit 1
+          fi
+          # AND ONE SHAPE THIS REFUSAL DOES NOT CONVERT INTO AN ANNOTATED RED,
+          # recorded beside it rather than left to be met: a FIFO in `dist/`
+          # named like a tarball. `tar tzf` BLOCKS opening it — a FIFO with no
+          # writer never returns from `open` — so control never reaches the
+          # refusal above and the JOB BURNS TO ITS TIMEOUT. MEASURED on the
+          # bodies this commit ships, `dist/` holding the real wheel, a
+          # one-byte `*` `.gitignore` and a FIFO called
+          # `stelling-0.2.0.tar.gz`, `TAG=v0.2.0`:
+          #
+          #   the tag step        rc=0   `tag=v0.2.0 wheel version=0.2.0
+          #                               sdist version=0.2.0`
+          #   the sdist step      HANGS  killed at 20 s, no exit code
+          #   the manifest step   HANGS  killed at 20 s, no exit code
+          #
+          # The tag step is rc=0 for the reason it is rc=0 on every corrupt
+          # tarball above: it reads FILENAMES and never opens either file.
+          # IT FAILS CLOSED AND IT IS NOT REACHABLE FROM THIS WORKFLOW —
+          # nothing is published, because `upload-artifact` never runs; and
+          # `actions/checkout@v4` gives this job a fresh clone whose `dist/` is
+          # gitignored with no tracked member, and `uv build` writes regular
+          # files into it. It is RECORDED and not repaired because a timeout is
+          # the one refusal that cannot say it refused, and the repair — a
+          # timeout wrapped around `tar` — puts a new way to fail into the step
+          # whose own annotations are what a reader trusts. That is a decision
+          # for a commit that wants it, not a side effect of one that does not.
+          printf '%s\n' "${listing}" | sed -e 's|^[^/]*/||' -e '/\/$/d' -e '/^$/d' | sort -u > "${work}/members.txt"
+          git ls-files | sort -u > "${work}/tracked.txt"
+          printf '%s\n' "${GENERATED}" | sort -u > "${work}/generated.txt"
+          sort -u "${work}/tracked.txt" "${work}/generated.txt" > "${work}/explained.txt"
           # ZERO EXAMINED MUST NOT READ AS ZERO PROBLEMS. Each of these is a
           # way for the comparison below to come back empty because it looked
           # at nothing: an unreadable tarball, an index this job cannot see, a
@@ -299,14 +1200,59 @@ jobs:
           #
           # Driven red at a61c01f on two of the three: a VALID but EMPTY
           # tarball ("members.txt is empty", exit 1), and a checkout whose
-          # index is empty ("tracked.txt is empty", exit 1). Note what does
-          # NOT get here: a CORRUPT tarball dies in the pipeline above at
-          # tar's own rc 2, with no annotation. Still red, so still safe, but
-          # `pipefail` is what catches that one and not this loop — which is
-          # the sort of thing a comment naming "an unreadable tarball" would
-          # otherwise take credit for.
+          # index is empty ("tracked.txt is empty", exit 1).
+          #
+          # WHAT USED TO STAND HERE WAS AN EXCUSE AND IS RETRACTED ABOVE. It
+          # read: a CORRUPT tarball "dies in the pipeline above at tar's own
+          # rc 2, with no annotation. Still red, so still safe, but `pipefail`
+          # is what catches that one and not this loop" — tolerable here,
+          # because this step IS a refusal point. MEASURED ON THE BODY THAT
+          # SHIPPED IT, one tarball in `dist/`, `TAG=v0.2.0`:
+          #
+          #   dist/stelling-*.tar.gz was…    tag step   sdist step  annotation
+          #   non-gzip garbage               rc=0       rc=2        none
+          #   a truncated gzip               rc=0       rc=2        none
+          #   valid tar.gz + trailing junk   rc=0       rc=2        none
+          #   an empty file                  rc=0       rc=2        none
+          #   a gzip of a non-tar, >=512 B   rc=0       rc=2        none
+          #   a gzip of a non-tar,  <512 B   rc=0       rc=1        examined
+          #                                                         nothing
+          #
+          # The tag step column is the half that removes the excuse: it reads
+          # FILENAMES and never opens either file, so every one of these
+          # reaches this step THROUGH A GREEN GATE and nothing earlier has read
+          # a byte of the tarball. "An earlier step would have caught it" is
+          # the argument this file exists to retract, and it was not even
+          # available.
+          #
+          # AND `pipefail` WAS NOT WHAT CAUGHT IT — the verdict was a property
+          # of the corrupt file's LENGTH, which is why the last two rows are
+          # ONE class split in half. MEASURED with GNU tar 1.35: `tar tzf` on a
+          # gzip whose decompressed payload is under 512 bytes — one tar
+          # block — exits 0 and lists NOTHING; at 512 bytes and above it exits
+          # 2 (driven either side of the boundary: 511 rc=0, 512 rc=2). So one
+          # length of the same corruption walked past `pipefail` entirely and
+          # it was the `members.txt` arm of THIS loop that refused it. A
+          # sentence naming "an unreadable tarball" was taking credit for a
+          # `pipefail` that does not fire on every unreadable tarball, and the
+          # ones it misses are the ones this loop was actually holding.
+          #
+          # TWO SMALLER UNANNOTATED REDS REMAIN IN THIS STEP, named rather than
+          # left to be found: `work="$(mktemp -d)"` failing, and `GENERATED`
+          # unset (`set -u`, rc=1, no annotation — driven: "GENERATED: unbound
+          # variable"). Both are this step's own workspace rather than its
+          # input — the second is a literal in this file's `env:` block, pinned
+          # by `tests/test_release_gates.py` in
+          # `test_the_sdist_gate_refuses_a_member_that_is_not_committed`, so no
+          # `dist/`, tag or tree can produce the condition; only an edit can,
+          # and that pin is what catches an edit. `mktemp -d` is the runner's
+          # own filesystem. That is the same line this file already draws
+          # around `uv build` and `actions/checkout` — a step's workspace is
+          # not its input — and turning either into an annotated refusal would
+          # add a counted refusal point for a condition no `dist/` can produce.
+          # Recorded, not repaired, and re-endorsed rather than re-inherited.
           for f in members.txt tracked.txt explained.txt; do
-            if [ ! -s "${f}" ]; then
+            if [ ! -s "${work}/${f}" ]; then
               echo "::error title=the sdist check examined nothing::${f} is empty, so the comparison below could not have found anything. Refusing to publish."
               exit 1
             fi
@@ -315,37 +1261,154 @@ jobs:
           # (`GENERATED=NOT-A-REAL-MEMBER`): "is not in
           # dist/stelling-0.1.0.tar.gz. Refusing to publish.", exit 1.
           for required in "${GENERATED}" pyproject.toml README.md LICENSE; do
-            if ! grep -qxF "${required}" members.txt; then
+            if ! grep -qxF "${required}" "${work}/members.txt"; then
               echo "::error title=the sdist check is not looking at a real artefact::'${required}' is not in ${sdist}. Refusing to publish."
               exit 1
             fi
           done
-          unexplained="$(comm -23 members.txt explained.txt)"
+          unexplained="$(comm -23 "${work}/members.txt" "${work}/explained.txt")"
           if [ -n "${unexplained}" ]; then
             echo "${unexplained}"
             echo "::error title=the sdist ships files that are not committed to this tree::The members listed above are in ${sdist} and not in \`git ls-files\` for the tagged commit. An sdist on PyPI cannot be unpublished, only yanked, and a yanked file still resolves for anyone who pins it. Either commit them and re-tag, or find the force-include route putting them there (see tests/test_sdist_contents.py). Refusing to publish."
             exit 1
           fi
-          echo "every one of $(wc -l < members.txt) sdist members is committed to this tree"
-          rm -f members.txt tracked.txt generated.txt explained.txt
+          echo "every one of $(wc -l < "${work}/members.txt") sdist members is committed to this tree"
       # A last look at what would ship, in the log, before it becomes immutable.
       # tests/test_sdist_contents.py already holds the allowlist shut; this is
       # here so the record of a release includes the file list it published.
       #
-      # NOT a refusal, and driven to establish that rather than to assume it:
-      # at a61c01f it wrote 282 lines of manifest and exited 0. The only way it
-      # goes red is `set -u` on an unset `GITHUB_STEP_SUMMARY` (driven:
+      # NOT a refusal — and it took a repair to make that true, not just a
+      # drive. At a61c01f it wrote 282 lines of manifest and exited 0, and this
+      # comment concluded: *"The only way it goes red is `set -u` on an unset
+      # `GITHUB_STEP_SUMMARY`."* DRIVEN FALSE FOUR WAYS on the body that
+      # sentence described, one tarball in `dist/`, `GITHUB_STEP_SUMMARY` set:
+      #
+      #   dist/stelling-0.2.0.tar.gz was…       verdict
+      #   non-gzip garbage                      rc=2, no annotation
+      #   a gzip of something that is not tar   rc=2, no annotation
+      #   a truncated gzip                      rc=2, no annotation
+      #   a valid tar.gz + trailing garbage     rc=2, no annotation
+      #
+      # `pipefail` and `set -e` turn `tar`'s own exit code into a failed
+      # release, from the one step in this job whose entire purpose is to
+      # PRINT, with nothing said about why. It is unreachable in the workflow
+      # as it stands ONLY because the sdist step `tar tzf`s the same file one
+      # step earlier — which is "an earlier step would have caught it", the
+      # argument this file exists to retract, and the one the sdist step
+      # already refused by establishing its own tarball count.
+      #
+      # SO `tar` IS ALLOWED TO FAIL HERE, and what it said goes into the record
+      # instead of into the job's exit code. NO COUNT WAS ADDED: a count would
+      # make this a refusal point, which it deliberately is not. A readable
+      # tarball with no members is recorded as exactly that, because "zero
+      # examined must not read as zero problems" is no less true of a record
+      # than of a check. RE-DRIVEN on the body below: all four shapes above
+      # rc=0, each recorded as unreadable with tar's own message beneath it;
+      # the valid tarball unchanged, rc=0 with its manifest; and the one red
+      # path left is `set -u` on an unset `GITHUB_STEP_SUMMARY` (driven:
       # "GITHUB_STEP_SUMMARY: unbound variable", exit 1), which a runner always
       # sets. It asserts nothing about what it prints — the step before it is
       # what does that.
+      #
+      # AND THE `2>&1` THAT REPAIR ARRIVED WITH WAS A DEFECT ON THE SUCCESS
+      # PATH, WHICH IS THE PATH EVERY RELEASE TAKES. It was applied
+      # unconditionally, so a `tar` that exits 0 and WARNS had its warning
+      # `sed`ed and `sort`ed into the record beside the members. DRIVEN on the
+      # body one commit ago, a real one-member `stelling-0.2.0.tar.gz` carrying
+      # a pax extended header with an unknown keyword — rc=0, and the record:
+      #
+      #   PKG-INFO
+      #   tar: Ignoring unknown extended header keyword 'ANTHROPIC.weird'
+      #
+      # Two lines a reader cannot tell apart, in the one step whose entire
+      # product IS the record — the same family as "zero examined must not read
+      # as zero problems", which this step's own comment two paragraphs up
+      # invokes. So the capture takes STDOUT ONLY: on the success path tar's
+      # stderr goes to this step's log, where a warning is still visible and is
+      # not a member, and on the failure path what tar said is asked for again
+      # by a second `tar tzf` and written into the record. THE COST IS NAMED:
+      # the failure path reads the file twice, so the message in the record
+      # comes from the second read. The alternative — a `mktemp -d` scratch
+      # file, which is what the sdist step above uses — would have put a NEW
+      # way to fail into the one step whose stated property is that it cannot
+      # fail the release, and that property is the whole of this repair.
+      # RE-DRIVEN on the body below: the pax tarball rc=0 with `PKG-INFO` alone
+      # in the record and the warning in the step's log; the four shapes above
+      # and an EMPTY FILE — a fifth, and the one a half-written upload
+      # leaves — rc=0 and still recorded as unreadable with tar's own message;
+      # and a gzip of a non-tar under 512 bytes, which `tar` reads at rc=0,
+      # recorded as readable and holding no members, which is what it is.
+      #
+      # EVERY TARBALL, NOT "THE" TARBALL, and that is what keeps it a
+      # non-refusal. It carried the LAST `ls dist/` in this file — the second
+      # of the two `ls dist/*.tar.gz` sites, the wheel's having been retired in
+      # the step above — so
+      # with two tarballs it died on tar's own exit code and with none it died
+      # on the unexpanded glob — a step whose whole job is to PRINT, failing the
+      # release, with nothing said about why. Adding a count refusal here would
+      # have made it a refusal point, which it is deliberately not; a loop over
+      # the glob makes the record cover everything `dist/` would publish and
+      # still asserts nothing. `nullglob` is what makes the empty case print
+      # nothing instead of trying to read a file called `dist/*.tar.gz`.
+      #
+      # AND ONE SHAPE THIS STEP CANNOT RECORD AND CANNOT SURVIVE, noted here
+      # because every paragraph above argues that it cannot fail the release
+      # and none of them met this. A `dist/` entry that is a FIFO named like a
+      # tarball makes `tar tzf` BLOCK — a FIFO with no writer never returns
+      # from `open` — so this loop never comes back and the JOB BURNS TO ITS
+      # TIMEOUT. That is not a `tar` exit code, so the `||` below cannot turn
+      # it into a record; it is not an empty listing either; and a timeout is
+      # the one refusal that cannot say it refused. MEASURED on the bodies this
+      # commit ships, a real `dist/` — the wheel, the sdist and the one-byte
+      # `*` `.gitignore` `uv build` writes — plus a FIFO called
+      # `stelling-0.0.9.tar.gz`, `TAG=v0.2.0`:
+      #
+      #   the tag step        rc=1   dist/ does not hold exactly one sdist
+      #   the sdist step      rc=1   cannot tell which tarball to read
+      #   the manifest step   HANGS  killed at 20 s, no exit code
+      #
+      # BOTH REFUSAL POINTS CATCH THAT SHAPE AND THIS STEP STILL HANGS ON IT,
+      # which is the whole reason it is written down: they refuse on the COUNT
+      # and this step loops over EVERY match, so being third in the job is not
+      # a property of this body. "An earlier step would have caught it" is the
+      # argument this file exists to retract, and a `run:` block is a script
+      # that has to be correct on the input it is given — which is why the
+      # sdist step makes the tarball count for ITSELF one step earlier. It is
+      # UNREACHABLE from this workflow for the same reason the sdist step's
+      # FIFO note gives — `actions/checkout@v4` plus `uv build` puts regular
+      # files in a gitignored `dist/` — and it is RECORDED and not repaired for
+      # the same reason too: a `timeout` around `tar` would put a NEW way to
+      # fail into the one step whose stated property is that it cannot fail the
+      # release, and that property is what the `2>&1` repair above was for. See
+      # beside the sdist step for the single-FIFO measurement, where this step
+      # hangs and the tag step returns 0.
       - name: the sdist manifest, for the record
         run: |
           set -euo pipefail
-          sdist="$(ls dist/*.tar.gz)"
-          echo "### sdist contents (${sdist})" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          tar tzf "${sdist}" | sed 's|^[^/]*/||' | sort >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          export LC_ALL=C
+          shopt -s nullglob dotglob
+          for sdist in dist/*.tar.gz; do
+            echo "### sdist contents (${sdist})" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            # `tar` IS ALLOWED TO FAIL, and this is the whole repair: under
+            # `set -e` a command in a `||` list does not end the script, so
+            # what tar said becomes part of the record instead of the exit
+            # code of a step that only prints.
+            status=0
+            listing="$(tar tzf "${sdist}")" || status=$?
+            if [ "${status}" -ne 0 ]; then
+              # `listing` is STDOUT only, so what tar said is not in it — see
+              # the pax measurement above. Asked for again here, and only here.
+              said="$(tar tzf "${sdist}" 2>&1 >/dev/null || true)"
+              printf 'tar could not list this file (exit %s). What it said:\n' "${status}" >> "$GITHUB_STEP_SUMMARY"
+              printf '%s\n' "${said:-(tar wrote nothing to stderr)}" >> "$GITHUB_STEP_SUMMARY"
+            elif [ -z "${listing}" ]; then
+              echo '(this tarball is readable and holds no members)' >> "$GITHUB_STEP_SUMMARY"
+            else
+              printf '%s\n' "${listing}" | sed 's|^[^/]*/||' | sort >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: dist

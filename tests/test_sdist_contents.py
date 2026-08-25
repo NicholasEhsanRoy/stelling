@@ -87,6 +87,27 @@ paragraph whose subject is how much of this module a machine without `uv` does
 not run. Re-measured at bbaa251, before the two additions below: ``14 passed,
 6 skipped``. Nothing reads this number, which is how it drifted.
 
+**AND `git` IS A SECOND GATE NOW, ON THREE OF THOSE EIGHT.** The wheel-member
+checks compute what hatchling will ship out of `src/stelling`, which means
+asking :func:`_check_ignore` — a throwaway repository and the `git` binary —
+what the exclusion spec keeps out. They used to filter three names by hand
+instead, and that is the defect written up at :func:`_package_files_in_tree`.
+Measured on this tree, one `pytest` of this module each, all figures with the
+other tool present:
+
+    both `uv` and `git`         24 passed             (was 23)
+    no `uv`                     16 passed,  8 skipped  (was 15 / 8)
+    no `git`                    14 passed, 10 skipped  (was 17 / 6)
+
+The `no uv` column moves by ONE and not by three: the new pin below is where
+the exclusion model is actually held, and it needs `git` and no build at all,
+so a machine without `uv` still runs it.
+
+The three that moved skip on ``needs `uv` to build and `git` to read
+hatchling's exclusions``, which is disclosed in `tests/test_skip_inventory.py`
+— so a machine missing either tool says so through the skip inventory rather
+than through a check that quietly answers off a different model.
+
 Driven across the smuggling shapes this module carries: one of them, a
 committed dangling symlink, goes from ``1 failed`` to a green run with the
 build half skipped; the rest stay red, because what catches them is
@@ -606,21 +627,140 @@ def _wheel_package_members(wheel: pathlib.Path) -> set[str]:
     return {n for n in names if not n.split("/")[0].endswith(".dist-info")}
 
 
-def _package_files_in_tree(root: pathlib.Path) -> set[str]:
+#: Where the wheel target's `packages = ["src/stelling"]` reads from, spelled
+#: once. The wheel's own member names drop the `src/` — hatchling's `sources`
+#: rewrite — which is why the two spellings are both written down here.
+_PACKAGE_ROOT = "src/stelling/"
+
+
+def _package_files_in_tree(root: pathlib.Path, oracle: pathlib.Path) -> set[str]:
     """What `[tool.hatch.build.targets.wheel] packages` has to put in a wheel.
 
     Read off the tree rather than off a list written here, and in the wheel's
     own spelling (`stelling/x.py`, not `src/stelling/x.py`) so the comparison
     is a set equality with no translation step to get wrong.
+
+    **Through hatchling's own walk and hatchling's own exclusions, and it used
+    to be through neither.** This was an `rglob` under `src/stelling` filtering
+    three names by hand — `__pycache__`, `.pyc`, `.pyo` — in a module whose
+    whole subject is that a transcript of hatchling rots. It reported a
+    DIFFERENT SET TO DIFFERENT DEVELOPERS, which is the one thing an equality
+    over a built artefact must not do. One command::
+
+        printf '' > src/stelling/_probe.so   # `.gitignore` line 7 is `*.so`
+
+    Hatchling READS that `.gitignore`, so the file is not in the wheel. The
+    hand filter counted it as a module of the package, so the wheel was
+    accused of dropping one. Driven on this tree at 1242da4::
+
+        test_the_wheel_ships_every_module_of_the_package               FAILED
+          in the tree and NOT in the wheel: ['stelling/_probe.so']
+          in the wheel and NOT in the tree: []
+        test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken
+                                                                      FAILED
+          the intervention did not drop exactly one module:
+          ['stelling/_probe.so', 'stelling/solvers.py']
+
+    — and the sentence the first one printed, *"a package that cannot import
+    its own modules once installed"*, was FALSE about a wheel that was right.
+    A `.so` beside a package is what every in-place C build, `cythonize`,
+    `pip install -e` of a compiled dependency and `maturin develop` leaves.
+
+    **WHY :func:`_check_ignore` AND :func:`_hatchling_excluded` WERE NOT
+    ALREADY USED HERE**, which is worth writing down because they were in
+    scope: they landed on 2026-08-08 (02dd89b, eb14935) and this function
+    landed on 2026-08-09 (9166e2e), one day later and one section up, and
+    nothing connected them. They live under *"what hatchling ACTUALLY reads"*,
+    a section built for the UNTRACKED-FILE guard; this function was written for
+    a different question — *"what does `packages` have to put in a wheel"* —
+    and answered it off the disk. The three names it filtered are the
+    give-away: `__pycache__` is a member of
+    :data:`_HATCH_EXCLUDED_DIRECTORIES`, and `.pyc`/`.pyo` are two of the four
+    suffixes `*.py[cdo]` in :data:`_HATCH_DEFAULT_GLOBAL_EXCLUDE` covers. It
+    was a partial hand copy of precisely the constants it should have called,
+    and it missed `.pyd`, every :data:`_HATCH_EXCLUDED_FILES` basename, and the
+    entire `.gitignore`. The walkers sweep at ec69818 that found six of these
+    did not reach this one: it read `REPO` through `rglob` rather than through
+    any of the enumerations that sweep was auditing.
+
+    **The walk matters as well as the exclusions, measured rather than
+    assumed.** :func:`_walked_files` is `hatchling.builders.utils.safe_walk`
+    verbatim and an `rglob` is not it. CPython 3.12.3, a package holding
+    `real/a.py` and a symlink `link -> real`::
+
+        rglob("*"), is_file()   {'real/a.py'}
+        safe_walk               {'link/a.py'}
+
+    Different sets, and the build packs the second.
+
+    **THE SECOND LINE OF THAT TABLE WAS NOT A PROPERTY OF `safe_walk`**, and
+    saying it was is what hid a defect for as long as it stood. `link` and
+    `real` are the same inode; the seen-set means whichever the walk reaches
+    FIRST is the one whose files are recorded, and :func:`_walked_files` was
+    missing the `sorted` that hatchling's own `recurse_explicit_files` applies
+    to `dirnames`. So `{'link/a.py'}` was `safe_walk` PLUS the order
+    `os.scandir` happened to return two names in — it reproduces for `link`/
+    `real` and inverts for `linkdir`/`realdir`, where the build ships
+    `linkdir/a.py` and this enumeration said `realdir/a.py`. Three of eight
+    planted aliasing shapes agreed before the `sorted` landed and eight of
+    eight after; the measurement is in :func:`_walked_files` and it is pinned
+    by :func:`test_the_walk_breaks_an_alias_the_way_the_build_breaks_it`.
+
+    **THE WALK ROOT IS `root` AND NOT `src/stelling`, AND THE TWO COINCIDE FOR
+    ONLY ONE OF THE TWO BUILD PATHS.** This function walks the WHOLE repository
+    and then filters to :data:`_PACKAGE_ROOT`; hatchling's wheel target walks
+    `src/stelling` with a FRESH seen-set. On a tree with no aliasing the two
+    enumerate the same set, which is why the difference stayed invisible. With
+    an alias whose TARGET lies outside the package they diverge, because the
+    seen-set is what breaks the tie and the two walks reach the two names in
+    different orders. RE-DRIVEN on a clone of this tree at 400415f, ONE symlink
+    planted — `src/stelling/aaa_docs -> ../../docs`, 22 files under `docs/`::
+
+        build path            wheel package members   aaa_docs   this equality
+        uv build                          36                 0   0 / 0
+        uv build --wheel                  58                22   extra = 22
+
+    `uv build` agrees because it does not build the wheel from the CHECKOUT at
+    all: it builds the sdist first and the wheel from the unpacked sdist, and
+    the sdist's own walk is repo-rooted, so `docs/` — reached first, `d`
+    before `s` — claims those inodes and `src/stelling/aaa_docs` is pruned to
+    nothing. Measured on the tarball: 22 `docs/` members, zero `aaa_docs`.
+    `uv build --wheel` — and therefore `pip wheel .` and
+    `pip install <checkout>` — walks the checkout directly from `src/stelling`,
+    where `aaa_docs` is the only path to those inodes, and ships all 22.
+
+    So the equality this feeds is an equality about the `uv build` path: the
+    path `release.yml` runs, and the path :func:`_build_into` drives. On the
+    direct-wheel path the same tree reports `extra = 22`, and that is a TRUE
+    difference rather than a false red — that wheel really does carry 22 files
+    the sdist does not. What nothing here checks is the direct-wheel path
+    itself, and that is written down rather than left to be inferred from a
+    docstring that said only "wheel built with `uv build`".
+
+    `oracle` is a scratch directory for :func:`_check_ignore`'s throwaway
+    repository; it needs `git`, which is why the callers are gated on it.
     """
-    pkg = root / "src" / "stelling"
-    return {
-        f"stelling/{path.relative_to(pkg).as_posix()}"
-        for path in pkg.rglob("*")
-        if path.is_file()
-        and "__pycache__" not in path.parts
-        and path.suffix not in (".pyc", ".pyo")
-    }
+    reached = {p for p in _walked_files(root) if p.startswith(_PACKAGE_ROOT)}
+    assert reached, (
+        f"hatchling's walk reached no file under {_PACKAGE_ROOT} in {root}, so "
+        "the set equality this feeds would compare two empty sets and pass on "
+        "any wheel at all"
+    )
+    shipped = reached - _hatchling_excluded(root, reached, oracle)
+    return {f"stelling/{path[len(_PACKAGE_ROOT):]}" for path in shipped}
+
+
+#: The three wheel checks need `uv` to BUILD and `git` to ask
+#: :func:`_check_ignore` what hatchling excludes. Both, or the comparison is
+#: between an artefact and a guess — and a guess about exclusions is the defect
+#: :func:`_package_files_in_tree` was repaired for. Gated rather than degraded:
+#: a fallback filter would be a second model of hatchling that nothing holds,
+#: reporting a different verdict on a machine without `git`, which is the shape
+#: this module exists to refuse.
+_needs_a_build_and_an_oracle = pytest.mark.skipif(
+    shutil.which("uv") is None or shutil.which("git") is None,
+    reason="needs `uv` to build and `git` to read hatchling's exclusions",
+)
 
 
 def _build_into(root: pathlib.Path, out: pathlib.Path) -> pathlib.Path:
@@ -634,7 +774,7 @@ def _build_into(root: pathlib.Path, out: pathlib.Path) -> pathlib.Path:
     return wheels[0]
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+@_needs_a_build_and_an_oracle
 def test_the_wheel_ships_every_module_of_the_package(tmp_path: pathlib.Path) -> None:
     """An EQUALITY, so it fires in both directions.
 
@@ -648,9 +788,9 @@ def test_the_wheel_ships_every_module_of_the_package(tmp_path: pathlib.Path) -> 
     ``[tool.hatch.build.targets.wheel]``. That is driven rather than suggested,
     by the test below.
     """
-    wheel = _build_into(REPO, tmp_path)
+    wheel = _build_into(REPO, tmp_path / "dist")
     shipped = _wheel_package_members(wheel)
-    expected = _package_files_in_tree(REPO)
+    expected = _package_files_in_tree(REPO, tmp_path / "oracle")
     assert expected, "no package files found in the tree — this check is vacuous"
     assert shipped == expected, (
         "the built wheel's member list is not the package.\n"
@@ -667,7 +807,7 @@ def test_the_wheel_ships_every_module_of_the_package(tmp_path: pathlib.Path) -> 
     assert len([n for n in shipped if n.endswith(".py")]) > 10
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+@_needs_a_build_and_an_oracle
 def test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -691,7 +831,7 @@ def test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken(
     out = tmp_path / "dist"
     wheel = _build_into(staged, out)
     shipped = _wheel_package_members(wheel)
-    expected = _package_files_in_tree(staged)
+    expected = _package_files_in_tree(staged, tmp_path / "oracle")
     missing = expected - shipped
     assert missing == {"stelling/solvers.py"}, (
         f"the intervention did not drop exactly one module: {sorted(missing)}"
@@ -729,7 +869,7 @@ def test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken(
     )
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+@_needs_a_build_and_an_oracle
 def test_the_built_wheel_installs_and_every_module_resolves(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -761,7 +901,7 @@ def test_the_built_wheel_installs_and_every_module_resolves(
 
     modules = sorted(
         name[len("stelling/") : -len(".py")].replace("/", ".")
-        for name in _package_files_in_tree(REPO)
+        for name in _package_files_in_tree(REPO, tmp_path / "oracle")
         if name.endswith(".py") and not name.endswith("/__init__.py")
     )
     assert len(modules) > 10, modules
@@ -790,6 +930,78 @@ def test_the_built_wheel_installs_and_every_module_resolves(
         capture_output=True, text=True, timeout=300, env=env,
     )
     assert cli.returncode == 0, f"`python -m stelling` off the wheel failed:\n{cli.stdout}\n{cli.stderr}"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_the_package_enumeration_reads_what_hatchling_excludes(
+    tmp_path: pathlib.Path,
+) -> None:
+    """THE PIN ON :func:`_package_files_in_tree`, AND IT NEEDS NO BUILD.
+
+    The three checks above are set EQUALITIES between a built wheel and this
+    enumeration, and on a clean tree they are green whichever model the
+    enumeration uses — every file under `src/stelling` is a `.py` nobody
+    excludes. So the repair is INVISIBLE to them until a developer's own
+    directory carries something hatchling drops, which is precisely the
+    condition under which the old filter reported a different verdict to
+    different people. Driven at 1242da4 with one `printf` into the checkout::
+
+        src/stelling/_probe.so          (`.gitignore` line 7 is `*.so`)
+
+        test_the_wheel_ships_every_module_of_the_package             FAILED
+          in the tree and NOT in the wheel: ['stelling/_probe.so']
+        test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken
+                                                                    FAILED
+
+    — a wheel that was correct, accused of shipping "a package that cannot
+    import its own modules once installed".
+
+    BOTH DIRECTIONS, because only one of them is the defect and the other is
+    what a repair could break:
+
+    * what hatchling EXCLUDES must not be counted — a `.so` and a `.pyd`
+      (`*.py[codz]` in this `.gitignore`, `*.py[cdo]` in
+      :data:`_HATCH_DEFAULT_GLOBAL_EXCLUDE`), and a `__pycache__` member, which
+      the old filter did get right and which must stay right;
+    * what hatchling SHIPS must still be counted, including an UNTRACKED file.
+      Reading the index instead of the walk would have been the easy repair and
+      the wrong one: hatchling packs untracked files, so an enumeration of
+      tracked files would make the wheel equality blind to exactly the stray
+      `test_no_untracked_file_anywhere_would_ship` exists to catch.
+    """
+    staged = _tree_to_build(tmp_path)
+    assert not _vcs_exclusions_are_discarded(staged, tmp_path / "oracle-bail"), (
+        f"the staged copy at {staged} sits at a path this project's own "
+        "`.gitignore` matches, so hatchling would throw its whole exclusion "
+        "set away (see `_vcs_exclusions_are_discarded`) and nothing below is "
+        "measuring exclusions. Point TMPDIR somewhere else."
+    )
+    before = _package_files_in_tree(staged, tmp_path / "oracle-before")
+    assert before, "the enumeration is empty before anything was planted"
+
+    pkg = staged / "src" / "stelling"
+    (pkg / "_probe.so").write_bytes(b"\x7fELF not a module of this package\n")
+    (pkg / "_probe.pyd").write_bytes(b"nor this\n")
+    (pkg / "__pycache__").mkdir(exist_ok=True)
+    (pkg / "__pycache__" / "zz_probe.cpython-312.pyc").write_text("x\n", encoding="utf-8")
+    excluded = _package_files_in_tree(staged, tmp_path / "oracle-excluded")
+    assert excluded == before, (
+        "files hatchling excludes are being counted as modules of the package, "
+        "so the wheel equality above will accuse a correct wheel of having "
+        "dropped them:\n"
+        f"  counted and not shipped: {sorted(excluded - before)}\n"
+        f"  shipped and not counted: {sorted(before - excluded)}"
+    )
+
+    (pkg / "_probe_untracked.py").write_text("# untracked, not ignored\n", encoding="utf-8")
+    grown = _package_files_in_tree(staged, tmp_path / "oracle-grown")
+    assert grown == before | {"stelling/_probe_untracked.py"}, (
+        "an untracked, non-ignored `.py` under the package is no longer "
+        "counted. Hatchling PACKS it, so an enumeration that reads the index "
+        "rather than the walk would leave the wheel equality unable to see a "
+        "stray that really does ship:\n"
+        f"  {sorted(grown.symmetric_difference(before))}"
+    )
 
 
 # --- what a bare `pip install stelling` PULLS IN ----------------------------
@@ -1291,6 +1503,46 @@ def _walked_files(root: pathlib.Path) -> set[str]:
     utils.safe_walk` verbatim — a symlinked directory IS descended into by the
     build, so a walk that skipped it would under-report exactly where the build
     over-collects.
+
+    **`sorted` IS PART OF THE ALGORITHM AND NOT A TIDINESS.** hatchling's
+    `recurse_explicit_files` writes
+    ``dirs[:] = sorted(d for d in dirs if d not in EXCLUDED_DIRECTORIES)``;
+    this applied the same filter and kept `os.scandir` order. That is invisible
+    for a tree with no aliasing — the two orders enumerate the same set — and
+    decisive the moment two directory paths name the same inode, because the
+    seen-set means the path visited FIRST wins and the other is pruned to
+    nothing. `os.scandir` order is the filesystem's, so which alias won was a
+    property of how ext4 happened to hash the two NAMES, while the build always
+    picks the alphabetically first. MEASURED on this tree, eight aliasing
+    shapes planted under `src/stelling`, each a directory plus a symlink to it,
+    wheel built with `uv build` — the DEFAULT two-stage path, sdist first and
+    then the wheel from the unpacked sdist — and compared to
+    :func:`_package_files_in_tree`::
+
+        shape                  scandir order        wheel ships    walk said
+        link -> real           link, real           link/a.py      link/a.py
+        alias -> target        alias, target        alias/a.py     alias/a.py
+        source -> mirror       mirror, source       mirror/a.py    mirror/a.py
+        linkdir -> realdir     realdir, linkdir     linkdir/a.py   realdir/a.py
+        aaa_link -> zzz_real   zzz_real, aaa_link   aaa_link/a.py  zzz_real/a.py
+        zzz_link -> aaa_real   zzz_link, aaa_real   aaa_real/a.py  zzz_link/a.py
+        pkga -> pkgb           pkgb, pkga           pkga/a.py      pkgb/a.py
+        b -> q                 q, b                 b/a.py         q/a.py
+
+    Three of eight agreed, and the three are exactly the three whose scandir
+    order already happened to be sorted order. With `sorted` here: eight of
+    eight, and the column that used to be "walk said" is the column the build
+    ships. FALSE RED ONLY — nothing can ship wrong from this, because the wheel
+    is the wheel either way; what it breaks is the comparison that is supposed
+    to notice when the wheel is wrong.
+
+    **WHICH BUILD PATH THAT TABLE DESCRIBES, because there are two of them and
+    they do not agree in general.** Every shape above is a directory and its
+    alias BOTH under `src/stelling`, so the repo-rooted walk this function
+    makes and the package-rooted walk hatchling's wheel target makes meet the
+    same two candidates and the seen-set resolves them the same way. Move the
+    TARGET outside the package and they diverge, and the divergence is measured
+    at :func:`_package_files_in_tree`, which is where the walk ROOT is chosen.
     """
     found: set[str] = set()
     seen: set[tuple[int, int]] = set()
@@ -1301,7 +1553,12 @@ def _walked_files(root: pathlib.Path) -> set[str]:
             dirnames[:] = []
             continue
         seen.add(identifier)
-        dirnames[:] = [d for d in dirnames if d not in _HATCH_EXCLUDED_DIRECTORIES]
+        # `sorted`, as hatchling's own `recurse_explicit_files` does it: with a
+        # seen-set, traversal order is what decides which of two aliasing paths
+        # wins. See the docstring for the eight shapes this was measured on.
+        dirnames[:] = sorted(
+            d for d in dirnames if d not in _HATCH_EXCLUDED_DIRECTORIES
+        )
         relative = os.path.relpath(dirpath, root)
         prefix = "" if relative == "." else relative.replace(os.sep, "/") + "/"
         for name in filenames:
@@ -2330,6 +2587,106 @@ def test_the_scan_refuses_a_blinded_walk(tmp_path: pathlib.Path) -> None:
     # that gets switched off.
     pruned = _repo("pruned", "docs/.hatch/note.md", delete=False)
     assert _untracked_that_would_ship(pruned, {"docs"}, tmp_path / "oracle-pruned") == []
+
+
+#: Aliasing plants for :func:`test_the_walk_breaks_an_alias_the_way_the_build_breaks_it`
+#: as ``(real directory, symlink to it)``. Every pair is planted SYMLINK FIRST,
+#: and two kinds of pair are listed on purpose, because the hazard has to be
+#: EXPRESSIBLE on whatever filesystem `tmp_path` lands on. On a filesystem that
+#: returns entries in CREATION order, the pairs whose symlink sorts AFTER its
+#: target (``zzz_link``/``aaa_real``, ``source``/``mirror``) are the ones whose
+#: scandir order is not sorted order. On one that HASHES names — what ext4 does
+#: here — the order is neither, and the remaining pairs are what happened to
+#: come back unsorted. If every pair came back sorted the plant would prove
+#: nothing, and the test says so rather than passing quietly.
+_ALIAS_PLANTS = (
+    ("aaa_real", "zzz_link"),
+    ("mirror", "source"),
+    ("real", "link"),
+    ("realdir", "linkdir"),
+    ("q", "b"),
+    ("pkgb", "pkga"),
+    ("target", "alias"),
+)
+
+
+def test_the_walk_breaks_an_alias_the_way_the_build_breaks_it(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`sorted` in :func:`_walked_files`, pinned — it was missing, and the
+    enumeration and the build disagreed about a real tree.
+
+    hatchling's `recurse_explicit_files` does
+    ``dirs[:] = sorted(d for d in dirs if d not in EXCLUDED_DIRECTORIES)``.
+    :func:`_walked_files` applied that filter and kept `os.scandir` order,
+    which is nothing at all until two directory paths name one inode — and then
+    the ``(st_dev, st_ino)`` seen-set makes the FIRST path visited the winner
+    and prunes the second to nothing. So the winner was whatever order the
+    filesystem returned two names in, while the build's winner is always the
+    alphabetically first.
+
+    MEASURED before the `sorted` landed, eight aliasing shapes planted under
+    `src/stelling` and a real `uv build` compared against
+    :func:`_package_files_in_tree`: **three of eight agreed**, and the three
+    were exactly the three whose scandir order already happened to be sorted
+    order. `link -> real` was one of them, which is why
+    :func:`_package_files_in_tree`'s docstring recorded ``{'link/a.py'}`` as a
+    property of `safe_walk` — it is a property of `safe_walk` plus a
+    directory-entry order. `linkdir -> realdir` was not: the wheel shipped
+    `stelling/linkdir/a.py` and this enumeration said `stelling/realdir/a.py`,
+    so the equality in
+    :func:`test_the_wheel_ships_every_module_of_the_package` went red on a
+    wheel that was right. After the `sorted`: **eight of eight**.
+
+    FALSE RED ONLY — no artefact can ship wrong from this, because the build
+    was never consulting this function. What it breaks is the check that exists
+    to notice when the build is wrong, and a check that reports a healthy wheel
+    as broken is a check that gets switched off.
+
+    NO BUILD AND NO `uv` HERE, deliberately: the property is a property of the
+    walk, and it is asserted directly rather than through a wheel, so it holds
+    in the environment where the wheel checks skip.
+    """
+    root = tmp_path / "aliased"
+    root.mkdir()
+    for real, link in _ALIAS_PLANTS:
+        # symlink FIRST, dangling, so creation order is (link, real) — see
+        # `_ALIAS_PLANTS` for why that matters
+        os.symlink(real, root / link)
+        (root / real).mkdir()
+        (root / real / "a.py").write_text("X = 1\n", encoding="utf-8")
+
+    entries = [e.name for e in os.scandir(root)]
+    order_sensitive = [
+        (real, link)
+        for real, link in _ALIAS_PLANTS
+        if entries[min(entries.index(real), entries.index(link))]
+        != min(real, link)
+    ]
+    assert order_sensitive, (
+        "every planted alias came back from `os.scandir` in sorted order "
+        f"already ({entries}), so this plant cannot tell a sorted walk from an "
+        "unsorted one and the assertion below would hold either way. That is a "
+        "property of the filesystem `tmp_path` is on, not of the walk — plant "
+        "a shape this one returns unsorted before trusting this test."
+    )
+
+    walked = _walked_files(root)
+    for real, link in _ALIAS_PLANTS:
+        winner = min(real, link)
+        loser = max(real, link)
+        assert f"{winner}/a.py" in walked, (
+            f"the walk did not reach `{winner}/a.py`. `{link}` and `{real}` "
+            "are one inode, and hatchling sorts `dirnames` before descending, "
+            f"so `{winner}` is the path the build records and the path this "
+            f"enumeration has to record. Got: {sorted(walked)}"
+        )
+        assert f"{loser}/a.py" not in walked, (
+            f"the walk recorded BOTH `{winner}/a.py` and `{loser}/a.py`. The "
+            "`(st_dev, st_ino)` seen-set is what stops the second visit, and "
+            "the build records one of them, so recording two is a different "
+            f"disagreement with the build. Got: {sorted(walked)}"
+        )
 
 
 def test_a_record_of_a_force_included_path_is_read_as_false() -> None:
