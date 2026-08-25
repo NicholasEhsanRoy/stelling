@@ -43,6 +43,7 @@ from __future__ import annotations
 import ast
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import textwrap
@@ -922,27 +923,55 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
 #: behaviour.
 _LOADS_THIS_MODULE = ("_state_guard", "-p_state_guard", "-p=_state_guard")
 
+#: The `pytester` methods whose STRING ARGUMENT BECOMES A FILE the nested
+#: session then parses. This is the one place an EMBEDDED occurrence of the
+#: name is a load rather than a mention, because there the text stops being
+#: prose and becomes source: `makeconftest('pytest_plugins = ["_state_guard"]')`
+#: registers the plugin as surely as `-p` does — and **that spelling is live in
+#: the scanned file at two call sites**, both writing the name through a
+#: constant, which is why they are not findings.
+_GENERATES_SOURCE = frozenset(
+    {"makeconftest", "makepyfile", "makeini", "makepyprojecttoml"}
+)
+
+#: The name as a WHOLE TOKEN, for use inside generated source only. The
+#: lookbehind excludes `.` as well as word characters so `tests._state_guard`
+#: — a different module path — does not match, and the lookahead keeps
+#: `_state_guardian` and `_state_guard_` out.
+_EMBEDDED = re.compile(r"(?<![\w.])_state_guard(?![\w])")
+
 
 def state_guard_references(source: str) -> list[tuple[int, str]]:
-    """`(line, spelling)` for every STRING LITERAL in `source` naming this module.
+    """`(line, spelling)` for every literal in `source` that LOADS this module.
 
-    **A LITERAL, NOT A CALL ARGUMENT, AND THE DIFFERENCE IS THE WHOLE POINT.**
-    An earlier version of this read only the direct arguments of `Call` nodes,
-    and an audit drove eleven spellings through it: five reaching ones were
-    silent. `*("-p", "_state_guard")` and `[..., "_state_guard"]` hide the
-    constant one container down; `plugins=("_state_guard",)` hides it in a
-    keyword's tuple; `-p_state_guard` is argparse's joined form and is one
-    string rather than two; and a module-level tuple spread as `*ARGS` puts the
-    constant in no call at all — **which is `tests/test_tripwire_plugin.py`'s
-    own prevailing idiom** (`*ORDER_ARGS`, `*PLUGIN_ARGS`). A guard blind to
-    the file's usual spelling is a guard aimed at the one edit nobody was going
-    to make.
+    **TWO RULES, BECAUSE A STRING MEANS DIFFERENT THINGS DEPENDING ON WHO
+    PARSES IT.** Reading that wrong is what made both earlier versions of this
+    scan miss the idiom the scanned file actually uses — the first read only
+    direct `Call` arguments, the second only whole-string matches, and each
+    was blind to a spelling sitting live in that file.
 
-    So the rule is the general one: **a string literal naming this module is a
-    reference to it, wherever it sits.** Prose is excluded by what it IS rather
-    than by where it is — a docstring and a bare string statement are the two
-    ways Python holds text that is not a value, and comments never reach the
-    AST at all. That is what keeps this from firing on its own explanation.
+    1. **A literal that IS one of** :data:`_LOADS_THIS_MODULE`, wherever it
+       sits — a call argument, a module-level tuple later spread as ``*ARGS``,
+       a keyword's tuple, an inline list, a dict, a comprehension. Whole-string
+       match, because in an argument list the name is the whole argument.
+    2. **A literal that CONTAINS the name as a whole token, but only inside an
+       argument to** :data:`_GENERATES_SOURCE`. There, and only there, the
+       string becomes a file a nested session parses, so an embedded
+       occurrence is a load. Everywhere else an embedded occurrence is prose —
+       ``NOTE = "we never pass -p _state_guard here"`` is a sentence, and a
+       guard that fires on sentences about itself is a guard that gets
+       deleted.
+
+    **Rule 2 is deliberately a little conservative.** It also catches
+    ``makeini`` writing ``addopts = -p _state_guard``, which does NOT register
+    the plugin today. That is pytest's current behaviour rather than a
+    guarantee, and the failure mode here is silent state-sharing between a
+    nested session and the outer one, so an attempt to load is worth naming
+    even where the attempt would not currently work.
+
+    **What it does not reach**, stated rather than implied: a literal defined
+    in another module and imported in. This is a single-file scan, and the
+    test below says so in its own title.
     """
     tree = ast.parse(source)
     prose: set[int] = set()
@@ -952,14 +981,29 @@ def state_guard_references(source: str) -> list[tuple[int, str]]:
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
             if isinstance(node.value.value, str):
                 prose.add(id(node.value))
-    return sorted(
-        (node.lineno, node.value)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and node.value in _LOADS_THIS_MODULE
-        and id(node) not in prose
-    )
+
+    found: set[tuple[int, str]] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value in _LOADS_THIS_MODULE
+            and id(node) not in prose
+        ):
+            found.add((node.lineno, node.value))
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _GENERATES_SOURCE
+        ):
+            for inner in ast.walk(node):
+                if (
+                    isinstance(inner, ast.Constant)
+                    and isinstance(inner.value, str)
+                    and _EMBEDDED.search(inner.value)
+                ):
+                    found.add((inner.lineno, " ".join(inner.value.split())))
+    return sorted(found)
 
 
 def test_no_nested_session_in_the_tripwire_file_loads_this_module():
@@ -1002,6 +1046,9 @@ _REACHING = (
     'pytester.runpytest(plugins=("_state_guard",))',
     'ARGS = ("-p", "_state_guard")\npytester.runpytest(*ARGS)',
     'def f():\n    args = ["-p", "_state_guard"]\n    return args',
+    'pytester.makeconftest(\'pytest_plugins = ["_state_guard"]\')',
+    'pytester.makepyfile(conftest=\'pytest_plugins = ["_state_guard"]\')',
+    'pytester.makeini("[pytest]" + chr(10) + "addopts = -p _state_guard")',
 )
 _PROSE = (
     '# deliberately not `-p _state_guard`: see tests/test_state_guard.py',
@@ -1010,6 +1057,11 @@ _PROSE = (
     '"_state_guard"\n',
     'x = "_state_guardian"',
     'x = "state_guard"',
+    'x = "tests._state_guard"',
+    'x = "__state_guard"',
+    'x = "_state_guard_"',
+    'NOTE = "we never pass -p _state_guard here, see test_state_guard.py"',
+    'pytester.makeconftest("# nothing about _state_guardian here")',
 )
 
 
@@ -1025,9 +1077,14 @@ def test_the_reference_scan_is_driven_both_ways(source):
     a measurement; this is the check.
 
     The prose half is the direction that gets a guard deleted rather than the
-    one that gets a defect shipped, and it is the harder half: two of its
-    entries (`_state_guardian`, `state_guard`) are near-misses that a
-    substring test would fire on.
+    one that gets a defect shipped, and it is the harder half. Four entries —
+    `_state_guardian`, `tests._state_guard`, `__state_guard` and
+    `_state_guard_` — are near-misses a naive `in` test fires on. The fifth,
+    `state_guard`, is there for the opposite reason: it does NOT contain this
+    module's name, and it is the shorter spelling rule 2's token boundary must
+    not reach down to. **An earlier version of this sentence claimed
+    `state_guard` for the first group**, which is the one case that does not
+    hold — measured, `"_state_guard" in "state_guard"` is False.
     """
     assert state_guard_references(source), (
         f"a reaching spelling is invisible to the scan:\n  {source!r}\n"
