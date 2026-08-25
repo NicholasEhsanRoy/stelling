@@ -35,15 +35,31 @@ and type inside this release cycle, and it is in ``__all__``.
 **``UNAUDITED`` IS RETIRED, AND ON EVIDENCE THAT IS IN THIS TREE.** The
 fire condition's exact reading is checked, on every run, against an
 independent ``Fraction`` oracle that shares no code with this module:
-``tests/test_probe_oracle.py``. Over eight fixtures and a 27-point grid
-apiece it drives **243 gate readings and 216 obligation readings, and
-asserts that all 216 point-comparisons agree** — and it asserts those
+``tests/test_probe_oracle.py``. Over ten fixtures and a 27-point grid
+apiece it drives **297 gate readings and 270 obligation readings, and
+asserts that all 270 point-comparisons agree** — and it asserts those
 counts, so a figure that drifts fails there instead of going stale here.
-Two of the eight fixtures state an assume whose float answer and whose ℚ
-answer differ over most of the grid, and a separate test asserts that they
-still do, because an oracle that agrees on every route is measuring
-nothing. The three defects the blind audit behind this word was pointed at
-are fixed and driven, each at its own site below.
+Two of the ten fixtures state an assume whose float answer and whose ℚ
+answer differ at **20 and 12 of the 27 points** — a separate test asserts
+both counts, because an oracle that agrees on every route is measuring
+nothing. (That sentence used to read *"over most of the grid"*, which is
+true of the first fixture and FALSE of the second; the counts are quoted
+because a count cannot round in the flattering direction.) The three
+defects the blind audit behind this word was pointed at are fixed and
+driven, each at its own site below.
+
+**AND AN AGREEMENT COUNT IS NOT A COVERAGE FIGURE.** Measured by breaking
+this module in 32 single-edit ways and re-running that file, **the oracle
+catches 10 of the 32** — three of them added by two fixtures on this
+branch, which is the whole delta from the 7 the eight-fixture version
+caught. Three of the misses cannot be closed there at all: the oracle
+calls :func:`_replay` directly, so :func:`_window` and :func:`_admissible`
+are outside its reach and :func:`_body_runs_once` has no fixture to bite
+on. The rest are named fixture gaps — no ``_REDUCTIONS``, no
+``_MOVEMENT``, no boolean, no strict comparison, ``jit`` but never
+``remat2``, and ``jax_enable_x64`` forced on. **The list is in that
+file's own docstring**, by name and not by count, so that nothing here
+reads as coverage it does not have.
 
 **THE FIGURES THIS PARAGRAPH USED TO CARRY WERE NOT IN THE TREE, AND THAT
 IS THE SAME DEFECT AS A MISSING CHECK.** It read *"363 gate readings, 363
@@ -100,16 +116,27 @@ deciding whether to switch this on does not have to find them:
    checked against the every-depth census and declines
    (``assume-not-fully-executed``), and :func:`_replay` abstains on the
    primitive. That is a DECLINE STANDING IN FOR A GUARD, and descending
-   those bodies is a plausible reach improvement, so the descent now
-   REFUSES a body that does not run exactly once per equation
-   (:func:`_body_runs_once`) rather than trusting a list of names to be
-   complete. **It is guarded, not closed**, and closing it is reach work
-   this release did not do.
+   those bodies is a plausible reach improvement, so the descent REFUSES
+   a body that does not run exactly once per equation
+   (:func:`_body_runs_once`) — by a name, an iteration count, and a
+   signature, in that order. The version of this list that said *"rather
+   than trusting a list of names to be complete"* had dropped the name
+   check for the derivation alone, and that lost ``lax.fori_loop``: a
+   static-bound loop traces to a ``scan`` whose body has the equation's
+   own signature, so no structural fact fires. Both lists are back and
+   the commentary at :func:`_body_runs_once` says which shape each of the
+   three opinions covers and which none of them can. **It is guarded, not
+   closed**, and closing it is reach work this release did not do.
 
-Items 1, 3 and 6 are the same shape — *a decline standing in for a
-guard* — and none of the three is closed by this release; 1 cannot be
-closed inside this module's import rule at all, and the section of its own
-name below says why.
+Items 3 and 6 are the same shape — *a decline standing in for a guard* —
+and neither is closed by this release. **ITEM 1 IS NOT ONE OF THEM**, and
+this sentence used to say it was, which is an overclaim in the reassuring
+direction inside a list of caveats. There is no decline there: the section
+of item 1's own name below says the module *"does neither correctly nor
+incorrectly: it does not do it at all"*. It is the MIRROR of the class
+rather than an instance of it, it is the only one of the six that cannot
+be closed inside this module's import rule at all, and nothing stands in
+for the guard it does not have.
 
 Nothing in that list is a reason to distrust a FIRING: only an exact test
 may admit one, and the message names which test did. They are reasons a
@@ -1128,6 +1155,25 @@ DECLINE_REASONS = (
     "empty-box",
     "box-outside-the-dtype-range",
     "dtype-not-sampleable",
+    # AND THE ONE THIS TUPLE SHIPPED WITHOUT, WHICH IS THE FAILURE THIS
+    # TUPLE EXISTS TO PREVENT.  `dtype-narrowed-by-jax` is emitted three
+    # lines after the `_window` loop, for a declaration whose dtype does
+    # not survive `jax.numpy.asarray` under the live config -- a 64-bit
+    # box under `jax_enable_x64=0`.  It is a live, user-visible decline and
+    # it was NOT here, because the completeness test that guards this
+    # tuple grepped for three EMISSION SHAPES (`skips.add("...")`,
+    # `return None, "..."`, and `_confirm`'s tuple) and this reason is an
+    # f-string inside a `ProbeReport(declined=...)` -- a fourth shape,
+    # invisible to all three.  A completeness check a grep cannot reach is
+    # the same defect as no check, which is this file's own rule; the scan
+    # in `test_every_decline_reason_is_declared_and_accounted_for` no
+    # longer reads emission shapes at all.  It reads the module's
+    # hyphenated-code VOCABULARY -- every string literal that IS a
+    # reason-shaped code, and every reason-shaped token inside any
+    # `declined=` argument -- so a fifth emission shape cannot hide
+    # either, and every such token has to be classified as a decline
+    # reason or as something else by name.
+    "dtype-narrowed-by-jax",
     # a built point that could not be used
     "point-outside-declaration",
     "program-raised",
@@ -3413,6 +3459,48 @@ def probe(
     # The assertion in `run_one` stays, and its premise is now a decline
     # three lines from it in THIS module rather than a refusal in another
     # one.
+    #
+    # **AND THE DECLINE IS ON THE DTYPE NAME RATHER THAN ON THE BOX, WHICH
+    # WAS PROPOSED AND IS REFUSED.**  The proposal: decline only when the
+    # declared WINDOW is not exactly representable in the narrowed dtype,
+    # since an `int64` box of `(0, 9)` plainly is, and admit the rest.
+    # The reach it would buy is real and it is measured: with this decline
+    # and the `run_one` assertion both removed at `jax_enable_x64=0`, a
+    # 51-program corpus fires on **52 of 95 probe calls** where the shipped
+    # code fires on **9** -- and of those 52, **33 are adjudicated
+    # `ieee-executed-float`**, which is a float32 EXECUTION admitting a
+    # firing about a float64-DECLARED program with no exact test behind
+    # it.  Declining those is right whatever the box says.  The other 19
+    # (16 `exact-replay-refutes-over-the-rationals`, 3
+    # `exact-integer-arithmetic`) are sound as claims about R, and they
+    # are the reach on the table.  It is refused on two measurements,
+    # both taken here:
+    #
+    # * **A REPRESENTABLE BOX DOES NOT CONTAIN ONLY REPRESENTABLE POINTS,
+    #   FOR A FLOAT DTYPE.**  `float64 (0.0, 2.0)` has float32-exact
+    #   endpoints, and of 1,000 uniform `float64` points drawn from it,
+    #   **0 are float32-exact**; three `nextafter` steps from `1.0` --
+    #   which is what the `ulp` phase does by construction -- reach
+    #   `1.0000000000000007`, which is not.  So the box test admits
+    #   exactly the case it was meant to exclude: a witness reported at a
+    #   value jax never executed.  The condition that would actually mean
+    #   what the proposal wants is per-POINT, not per-window, and it is a
+    #   different and larger change.
+    # * **AND FOR AN INTEGER DTYPE, WHERE THE BOX TEST *DOES* IMPLY THE
+    #   POINT TEST, THE PROGRAM IS STILL NOT THE DECLARED ONE.**  Every
+    #   integer in `(0, 9)` is int32-exact, but the executed program then
+    #   computes in int32 throughout: `2**30 * 3` is `3221225472` in
+    #   int64 and `-1073741824` in int32.  The probe's integer branch
+    #   admits a firing under *"exact integer arithmetic: no rounding
+    #   involved"*, and it would be admitting one about an overflow that
+    #   exists only in the narrowed width -- reporting a violation of a
+    #   program the caller did not declare, which is the false-alarm shape
+    #   this whole module is built to avoid.
+    #
+    # The dtype name is a SUFFICIENT condition for *"the executed program
+    # is the declared program"*, cheap and provable in one line.  The box
+    # test is neither, and what it buys is reach.  Reach is the thing this
+    # module is allowed to lose.
     for d in census.declarations:
         narrowed = _dtype_after_jax(d.dtype)
         if narrowed != d.dtype:
@@ -4491,10 +4579,37 @@ def _replay_cost(jaxpr) -> int:
 # read `'jit' has no exact rational reading`.  Every one of those was a
 # violation adjudicated by the weaker test instead.
 #
-# The historical spellings stay because a name that is not a primitive on
-# this jax simply never matches, and losing them would be the same failure
-# in the other direction on an older series.  What keeps the tuple honest
-# is not the list, it is two tests in
+# **THE FIVE SPELLINGS THAT MATCH NOTHING TODAY ARE KEPT, AND THAT IS A
+# DECISION WITH A MEASUREMENT BEHIND IT RATHER THAN THE RHETORIC THIS FILE
+# RETIRED.**  Traced across every jax in reach -- 0.5.1, 0.10.2, 0.11.0 --
+# `pjit` IS the live call primitive on 0.5.1, and `jit` is on the two
+# supported series; so `pjit` is a backward-compatibility claim with
+# evidence behind it and not a guess.  `closed_call`, `core_call`,
+# `xla_call`, `remat` and `checkpoint` match nothing on any of the three,
+# and jax's own rematerialisation primitive object reports its name as
+# `remat2` on all three, so neither historical spelling is live anywhere.
+#
+# What makes keeping them different from the deny-list this file condemned
+# is the DIRECTION a dead name fails in, and the two are opposites:
+#
+# * a dead name in a DENY-list subtracts protection, silently.  It is only
+#   consulted to say *"refuse this"*, so a name nothing matches refuses
+#   nothing, and the guard reads as armed while it is inert.  Four of the
+#   eight names in the first `_REPEATING_OR_CONDITIONAL_BODIES` were
+#   exactly that, which is why the restored list below carries a test that
+#   traces every one of its names off the live jax;
+# * a dead name in an ALLOW-list subtracts nothing.  This mapping is only
+#   ever consulted with a LIVE primitive name in hand (`if name in
+#   _CALL_PRIMITIVES`), so a key no equation carries is never reached, can
+#   admit nothing, and cannot make any claim true or false on this series.
+#   And should one go live, membership is still not trusted: the descent
+#   re-derives the property from the equation before it walks anything.
+#
+# So a dead ALLOW-list name costs one thing only -- an UNCHECKED claim
+# about a jax nobody here runs -- and that is what this paragraph is: the
+# claim, and the measurement of which names it covers.  What keeps the
+# mapping honest for the names that ARE live is not the list, it is two
+# tests in
 # `tests/test_falsify_fire_condition.py` that trace the LIVE jax and
 # assert the primitive they find is one of these:
 # `test_the_call_primitive_the_live_jax_emits_is_replayed` for `jnp.where`
@@ -4523,19 +4638,22 @@ _CALL_PRIMITIVES = {
 
 # **AND MEMBERSHIP OF THAT MAPPING IS A CLAIM: THE BODY AT THAT KEY RUNS
 # EXACTLY ONCE PER EQUATION, WITH THE EQUATION'S OWN OPERANDS AS ITS
-# ARGUMENTS.**  It is one list to keep true rather than two, and this is
-# the second version of that arrangement.  The first was a companion
-# DENY-LIST -- `_REPEATING_OR_CONDITIONAL_BODIES`, a frozenset of names
-# checked at the descent -- and it protected nothing, measured on this
-# jax:
+# ARGUMENTS.**  The claim is checked at the descent, by THREE opinions in
+# order -- a name, an iteration count, and a signature -- and this is the
+# third version of that arrangement.  The history is worth the space,
+# because each version lost something the one before it caught.
 #
-# * four of its eight names (`cond_p`, `fori_loop`, `switch`,
-#   `while_loop`) are not primitive names on either supported series at
-#   all, and a fifth (`platform_index`) is a primitive that carries no
-#   jaxpr and so could never be descended.  Only `scan`, `while` and
-#   `cond` were live.  That is exactly the *"a name that matches nothing
-#   costs reach, silently"* failure the commentary below condemns, sitting
-#   INSIDE the guard meant to catch it;
+# **VERSION ONE: A DENY-LIST OF NAMES, AND IT PROTECTED LESS THAN IT READ
+# AS.**  `_REPEATING_OR_CONDITIONAL_BODIES` held eight names checked at
+# the descent, and measured on this jax:
+#
+# * four of them (`cond_p`, `fori_loop`, `switch`, `while_loop`) are not
+#   primitive names on either supported series at all, and a fifth
+#   (`platform_index`) is a primitive that carries no jaxpr and so could
+#   never be descended.  Only `scan`, `while` and `cond` were live.  That
+#   is exactly the *"a name that matches nothing costs reach, silently"*
+#   failure the commentary below condemns, sitting INSIDE the guard meant
+#   to catch it;
 # * `reduce` and `reduce_window` were NOT in it, are real primitives on
 #   both series, and carry their bodies under the key `jaxpr` -- the first
 #   key `_call_jaxpr_of` used to look for.  So the single-set edit the
@@ -4544,28 +4662,83 @@ _CALL_PRIMITIVES = {
 #   four-element `lax.reduce` combiner read `[False]` where the body's
 #   four real invocations all satisfy it, and the `assumes_only` early
 #   stop then called that reading COMPLETE;
-# * and the deny-list could only ever have named what someone thought of.
+# * and a deny-list can only ever name what someone thought of.
 #
-# **THE PROPERTY IS THEREFORE DERIVED FROM THE EQUATION RATHER THAN FROM A
-# SECOND NAME LIST** (:func:`_body_runs_once`), and the derivation is two
-# structural facts that hold for every call primitive and fail for every
-# repeating or conditional one on both supported series, traced:
+# **VERSION TWO REPLACED IT WITH THE DERIVATION ALONE, AND THAT LOST
+# `fori_loop`.**  The derivation (:func:`_body_runs_once`) is structural
+# and cannot be behind a rename, which is the property the name list did
+# not have -- but it is a NECESSARY condition and not a sufficient one,
+# and the module's own docstring conceded as much with the words *"a
+# hypothetical primitive with one signature-matching body could iterate
+# it"*.  **IT IS NOT HYPOTHETICAL.  IT IS `lax.fori_loop`.**  A
+# static-bound `fori_loop` -- and `lax.scan(f, init, None, length=N)` --
+# traces to a `scan` equation carrying ONE nested jaxpr whose signature is
+# the equation's, element for element, on jax 0.11.0 and on 0.10.2 alike:
+# there is no `xs` to lose a leading axis and no stacked `ys` to grow one,
+# so NEITHER structural fact fires and the body reads as a call.  Driven
+# end to end on the one edit this guard exists to police, with `scan`
+# added to the descent set and `assert_(fori_loop(0, 3, lambda i, c: c +
+# 1.0, y) <= 3.0)` over `float64 [1, 2]` -- an obligation FALSE at every
+# declared point::
 #
-#     primitive        nested jaxprs   body signature vs equation
-#     ---------        -------------   --------------------------
-#     jit / remat2                 1   identical
-#     scan                         1   xs invar loses its leading axis
-#     reduce                       1   operand invar is an ARRAY, body scalar
-#     reduce_window                1   operand and result both differ
-#     while                        2   (cond_jaxpr and body_jaxpr)
-#     cond                       N>=1  index operand has no body invar
+#     version one   ProbeInvariantViolated, both `assumes_only` settings
+#     version two   `_replay` reads `asserts == [True]`, no guard at all,
+#                   and the probe DECLINES 31 real violations under
+#                   `exact-replay-holds-over-the-rationals`
 #
-# A body entered once with the equation's own operands must have the
-# equation's own signature, and a primitive that carries a second jaxpr is
-# not a call.  Neither fact is a name, so neither can be a name that
-# matches nothing; both are checked at the descent and both raise
-# :class:`ProbeInvariantViolated` rather than reading one iteration's
-# assume as the program's.
+# That is a positively wrong adjudication label where the deny-list
+# abstained, and `length=1` and `length=0` -- a body that runs ONCE with
+# the wrong carry, and a body that runs NOT AT ALL -- pass the derivation
+# too.  The executed-assume gate does not cover it either: this program
+# states no assume, so `census.assumes_in_program` is 0.
+#
+# **VERSION THREE, HERE, IS BOTH, PLUS THE ONE STRUCTURAL FACT THAT SEES A
+# TRIP COUNT.**  In the order :func:`_body_runs_once` asks them:
+#
+#     1. FIRST OPINION, A NAME.  `_REPEATING_OR_CONDITIONAL_BODIES`,
+#        restored and corrected to the five names that are LIVE primitives
+#        on both supported series -- and pinned by a test that traces each
+#        one off the running jax, so no name in it can match nothing.
+#     2. AN ITERATION COUNT.  A `scan` equation carries `length`; no call
+#        primitive on any series in reach carries any parameter naming a
+#        number of iterations.  A construct that says how many times it
+#        runs its body is not a call, whatever it is called.
+#     3. THE SIGNATURE, AND THE JAXPR COUNT.  A body entered once on the
+#        equation's own operands must have the equation's own signature,
+#        and a primitive carrying a second jaxpr is not a call.
+#
+# Traced on both supported series, this is what each opinion sees:
+#
+#     primitive       name  trip count  nested  body signature vs equation
+#     ---------       ----  ----------  ------  --------------------------
+#     jit / remat2      -       -          1    identical                 
+#     scan, xs          Y    length=N      1    xs invar loses leading axis
+#     scan, ys          Y    length=N      1    ys outvar GAINS one       
+#     scan, neither     Y    length=N      1    IDENTICAL -- fori_loop    
+#     reduce            Y       -          1    operand ARRAY, body scalar
+#     reduce_window     Y       -          1    operand and result differ 
+#     while             Y       -          2    (cond_jaxpr, body_jaxpr)  
+#     cond              Y       -        N>=1   index operand has no invar
+#
+# **WHICH SHAPES THIS COVERS, AND WHICH IT DOES NOT.**  Covered: every row
+# above, each by at least one opinion, and the `scan, neither` row -- the
+# `fori_loop` row -- by opinions 1 and 2 and by nothing else.  NOT
+# covered: a primitive that carries exactly one signature-matching body,
+# no parameter naming a trip count, and a name in neither list, which
+# iterates that body anyway.  Nothing here can see such a thing, and the
+# honest statement of the guard is therefore that it makes the ONE EDIT a
+# reader makes -- adding a name to `_CALL_PRIMITIVES` -- loud for every
+# repeating construct jax ships today, on both series, rather than that it
+# is closed.  Version one covered `{scan-with-xs, scan-without-xs, while,
+# cond}` and not `{reduce, reduce_window}`; version two covered
+# `{scan-with-xs, scan-with-ys, while, cond, reduce, reduce_window}` and
+# not `{scan-without-xs}`; this covers the union, which is every one of
+# them.
+#
+# All three opinions raise :class:`ProbeInvariantViolated` rather than
+# reading one iteration's assume as the program's, and all three are
+# asked by the SAME function, so `_replay` and `_assume_sites_reachable`
+# cannot come to different answers about which bodies are walked.
 #
 # What the mapping's VALUE buys is the other half of the same lesson.  The
 # key used to be probed -- `("jaxpr", "call_jaxpr")`, first hit wins -- for
@@ -4575,37 +4748,113 @@ _CALL_PRIMITIVES = {
 # (`_Unreplayable`) instead of finding somebody else's jaxpr.
 
 
+# THE FIRST OPINION, RESTORED AND CORRECTED.
+#
+# Five names, and every one of them is a LIVE primitive on both supported
+# jax series -- which is the property the eight-name version did not have
+# and is pinned by
+# `tests/test_falsify_fire_condition.py::test_every_name_in_the_repeating_deny_list_is_a_LIVE_primitive`,
+# which traces a fixture per name off the running jax rather than taking
+# this comment's word for it.  A name that matches nothing in a DENY-list
+# reads as protection and provides none; see the commentary above for the
+# four that did.
+#
+# Four of the five are ALSO refused structurally today, so on this jax the
+# list is load-bearing for exactly one of them: **`scan`**, whose
+# no-`xs`-no-`ys` shape -- `lax.fori_loop`, and `lax.scan(f, init, None,
+# length=N)` -- has the equation's own signature and is invisible to every
+# structural fact but the trip count.  It is not written as a one-name set
+# because a deny-list whose entries are redundant TODAY is how a rename or
+# a jax version bump gets caught, and because the entry a reader needs to
+# find when they add a name to `_CALL_PRIMITIVES` is the name they typed.
+_REPEATING_OR_CONDITIONAL_BODIES = frozenset({
+    "scan",
+    "while",
+    "cond",
+    "reduce",
+    "reduce_window",
+})
+
+# AND THE ONE STRUCTURAL FACT THAT SEES A TRIP COUNT WITHOUT KNOWING A
+# NAME.  `scan` carries `length` on both supported series (and on 0.5.1);
+# `jit` and `remat2` carry no such parameter on any of the three, traced,
+# so this clause costs no reach on anything this replay descends today --
+# which is measured, not assumed, by the no-lost-reach control.
+#
+# A parameter name is still a name, and this one fails in the same safe
+# direction as the deny-list: if jax ever spells a trip count differently
+# the clause refuses nothing, and the equation still has to get past the
+# deny-list and the signature check.  What it buys is the case those two
+# cannot have: a repeating primitive nobody here has heard of that
+# announces its own trip count.
+_ITERATION_COUNT_PARAMS = ("length",)
+
+
 def _body_runs_once(eqn, body):
     """Is ``body`` entered exactly once per ``eqn``, on ``eqn``'s operands?
 
     Returns ``(True, None)`` or ``(False, reason)``.  This is the property
-    :data:`_CALL_PRIMITIVES` membership CLAIMS, checked against the
-    equation instead of against a list of names somebody has to keep
-    complete -- see the commentary above for what the list version missed.
+    :data:`_CALL_PRIMITIVES` membership CLAIMS, and it is checked here
+    rather than trusted -- by three opinions, asked in this order.  The
+    commentary above carries the history and the traced table; this is
+    what the code does.
 
-    Two structural facts, and a repeating or conditional construct fails
-    at least one of them on both supported jax series:
+    **FIRST, THE NAME.**  :data:`_REPEATING_OR_CONDITIONAL_BODIES` names
+    the five constructs that are live primitives on both supported series
+    and whose bodies are known to repeat or to branch.  It is the only
+    opinion that sees a `scan` with no `xs` and no stacked `ys` -- which
+    is what a static-bound `lax.fori_loop` traces to, whose body has the
+    equation's own signature exactly, and which the derivation below
+    passes as a call on both series.  That was a real regression and it
+    is why this list is back.
+
+    **SECOND, AN ITERATION COUNT.**  An equation carrying a parameter that
+    says how many times its body runs (:data:`_ITERATION_COUNT_PARAMS`) is
+    not a call, whatever it is named.  `scan` carries `length`; no call
+    primitive in reach carries any of these.
+
+    **THIRD, THE STRUCTURE.**  Two facts, neither of them a name:
 
     * **the equation carries exactly one nested jaxpr.**  `while` carries
       two (`cond_jaxpr`, `body_jaxpr`) and `cond` carries one per branch;
       a call carries one body.
     * **that jaxpr's signature is the equation's.**  `scan` strips the
-      leading axis off every `xs`, `reduce` and `reduce_window` hand their
-      combiner two SCALARS where the equation takes an array, and `cond`
-      consumes a branch index the body never sees.  A body entered once on
-      the equation's own operands cannot do any of that.
+      leading axis off every `xs` and grows one on every stacked `ys`,
+      `reduce` and `reduce_window` hand their combiner two SCALARS where
+      the equation takes an array, and `cond` consumes a branch index the
+      body never sees.  A body entered once on the equation's own operands
+      cannot do any of that.
 
-    Neither fact proves a body cannot repeat -- a hypothetical primitive
-    with one signature-matching body could iterate it -- so this is a
-    second opinion on the mapping and not a replacement for it.  It is a
-    second opinion that no name list can be behind on, which is the
-    property the deny-list did not have.
+    **WHAT NONE OF THE THREE CAN SEE** is a primitive with one
+    signature-matching body, no parameter naming a trip count, and a name
+    in neither list, which iterates that body anyway.  The structural
+    facts are NECESSARY conditions for a call and not sufficient ones, and
+    the first version of this function said so and then named the
+    counterexample *hypothetical*; it was `fori_loop`.  The claim this
+    docstring makes is therefore the narrow one: every repeating or
+    conditional construct jax ships on either supported series fails at
+    least one of the three, traced, and the one edit this file expects a
+    reader to make is loud for all of them.
 
     A dtype or shape neither side can be read from compares EQUAL to the
     same unreadable thing on the other side: refusing an ordinary `jit`
     over a token operand would cost reach, and reach lost silently is the
     failure this file is built around.
     """
+    name = eqn.primitive.name
+    if name in _REPEATING_OR_CONDITIONAL_BODIES:
+        return False, (
+            f"{name!r} is named in `_REPEATING_OR_CONDITIONAL_BODIES` as a "
+            f"construct whose body repeats or branches, and the structural "
+            f"facts below cannot see every shape of it -- a `scan` with no "
+            f"`xs` and no stacked `ys` has the equation's own signature"
+        )
+    for param in _ITERATION_COUNT_PARAMS:
+        if param in eqn.params:
+            return False, (
+                f"it carries an iteration count ({param}="
+                f"{eqn.params[param]!r}) and a call carries none"
+            )
     nested = _sub_jaxprs(eqn)
     if len(nested) != 1:
         return False, (
@@ -5255,13 +5504,15 @@ def _replay(census, point, guard=None, assumes_only=False):
                 # operands"*, and everything downstream of this descent --
                 # the assume reading, the assert reading, the early stop --
                 # is only a reading of the PROGRAM while that holds.  It
-                # used to be checked by a companion deny-list of names,
-                # which named four things that are not primitives on this
-                # jax and did not name `reduce`, whose combiner carries a
-                # `jaxpr` param `_call_jaxpr_of` would have handed over
-                # without a word.  It is derived from the equation now;
-                # the derivation and its measurements are at
-                # :func:`_body_runs_once`.
+                # is checked by THREE opinions -- a name, an iteration
+                # count, and a signature -- because neither a name list
+                # nor a derivation is complete on its own, and this file
+                # has now shipped each of them alone and lost something
+                # both times: a deny-list that named four non-primitives
+                # and not `reduce`, and then a derivation that admitted
+                # `fori_loop` as a call.  The three, their traced
+                # coverage table, and the shape none of them can see are
+                # at :func:`_body_runs_once`.
                 once, why = _body_runs_once(eqn, body)
                 if not once:
                     raise ProbeInvariantViolated(
@@ -5313,7 +5564,23 @@ def _replay(census, point, guard=None, assumes_only=False):
                     #   * a reading that is SHORT leaves `reachable -
                     #     assume_sites` non-empty and cannot fire the stop;
                     #   * a SECOND reading of one occurrence can only come
-                    #     from a walk that iterated, and raises;
+                    #     from a walk that iterated, and raises -- ON THE
+                    #     `assumes_only` PATH THAT IS TRUE FOR A REPEAT
+                    #     THAT LANDS WHILE THE READING IS STILL SHORT, AND
+                    #     ONLY THEN.  Measured on both series, with a
+                    #     `jit` body listed twice: one assume in the
+                    #     program and `assumes_only=True` returns
+                    #     `([True], [])`, because the stop fires on the
+                    #     first reading and the second never happens; the
+                    #     same program under `assumes_only=False` raises.
+                    #     Put a SECOND assume after the `jit` and the
+                    #     repeat lands with `reachable - assume_sites`
+                    #     non-empty, and it raises on both settings.  That
+                    #     is not a hole -- the stop it would have fooled
+                    #     fired on a COMPLETE reading, which is exactly
+                    #     what it is allowed to do -- but the claim is the
+                    #     narrow one and the test drives both sides
+                    #     (`test_the_replay_refuses_to_read_one_assume_occurrence_twice`);
                     #   * a reading of an occurrence the rule cannot reach
                     #     means this walk and `_assume_sites_reachable`
                     #     disagree about the descent, and raises.

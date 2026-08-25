@@ -199,9 +199,11 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     declared set. **SHIPPED AND PROVISIONAL**: audited — the fire
     condition's exact reading is checked against an independent
     ``Fraction`` oracle sharing no code with that module, on every run, by
-    ``tests/test_probe_oracle.py`` (243 gate readings, 216 obligation
-    readings, all 216 point-comparisons agreeing, and the counts asserted
-    there rather than quoted here) — and its SIGNATURE is not frozen;
+    ``tests/test_probe_oracle.py`` (297 gate readings, 270 obligation
+    readings, all 270 point-comparisons agreeing, and the counts asserted
+    there rather than quoted here — as is what that file does NOT reach,
+    which is 22 of the 32 single-edit defects it was measured against) —
+    and its SIGNATURE is not frozen;
     ``probe()``'s own first parameter changed name and type inside this
     release cycle. This sentence used to cite *"363 gate readings and 363
     agreements"*, a figure that appeared nowhere in this repository except
@@ -209,19 +211,27 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     same defect as a check that does not exist, which is a rule this
     project applies to everything else it ships.
     :mod:`stelling.falsify`'s docstring opens with the list of what
-    "provisional" names, and **three of its six items are a decline
-    standing in for a guard**: the analysis's constrained region is never
-    read (the one this file used to call *"the one hole"*, and it is
-    disclosed and open); an ``ieee`` firing cannot tell a caller's own
+    "provisional" names. **Two of its six items are a decline standing in
+    for a guard**: an ``ieee`` firing cannot tell a caller's own
     ``libm_budget`` declaration from an unsound analysis, so the firing
-    message names the declaration instead of guessing; and the rational replay
-    does not descend a loop or branch body, which this release GUARDS —
-    the descent refuses a body that does not run once per equation — and
-    does not close. The same docstring carries the measured reach on
-    ordinary ``jnp`` code. It exists because this library is asymmetric
-    about its two answers: a REFUTED's witness is replayed through the
-    real program, and a VERIFIED — a universal claim with no witness — has
-    had nothing downstream at all.
+    message names the declaration instead of guessing; and the rational
+    replay does not descend a loop or branch body, which this release
+    GUARDS — the descent refuses a body that does not run once per
+    equation, by a name, an iteration count and a signature — and does not
+    close. **A THIRD ITEM IS NOT ONE OF THEM AND THIS SENTENCE USED TO
+    SAY IT WAS**: the analysis's constrained region is never read — the
+    one this file used to call *"the one hole"* — and there is no decline
+    standing in for anything there, because the probe does not read the
+    analysis's region correctly OR incorrectly; it does not read it at
+    all. It is the MIRROR of that class rather than an instance of it, it
+    is disclosed and open, and it is the one item of the six that cannot
+    be closed inside that module's import rule. Counting it among the
+    guarded ones was an overclaim in the reassuring direction. The same
+    docstring carries the measured reach on ordinary ``jnp`` code. It
+    exists because this library is asymmetric about its two answers: a
+    REFUTED's witness is replayed through the real program, and a
+    VERIFIED — a universal claim with no witness — has had nothing
+    downstream at all.
 
     Two properties of it are not negotiable and are enforced rather than
     described. First, **it can only refute**: finding nothing adds no

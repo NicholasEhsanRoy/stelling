@@ -47,8 +47,56 @@ The fixtures are chosen so that the float answer and the ℚ answer DISAGREE
 on part of the grid. An oracle that agreed with the probe only where every
 route agrees would be measuring nothing: ``y*0.1*10.0 <= y`` and
 ``(1e16 + y) - 1e16 <= y`` are both true for every real ``y >= 0`` and
-both false in float64 at most of the points below, and the probe must read
-them TRUE.
+both false in float64 at MANY of the points below — 20 of 27 for the
+first, 12 of 27 for the second, counted by
+``test_the_fixtures_would_CATCH_a_float_reading_of_the_assume_region`` —
+and the probe must read them TRUE.
+
+--------------------------------------------------------------------------
+WHAT THIS ORACLE DOES **NOT** REACH, MEASURED
+--------------------------------------------------------------------------
+
+An agreement count says how much was compared, not how much is covered,
+and this file's counts are quoted in two module docstrings. So the reach
+is measured the only way a checker's reach can be: **by breaking the thing
+it checks and seeing whether it notices.** Thirty-two single-edit defects
+in ``stelling/falsify.py`` — one text substitution each, applied to a
+private copy of the package, no monkeypatching — were run against this
+file. **It catches 10 of the 32.** Against the eight-fixture version this
+file shipped with it caught 7; the three the two new fixtures below add
+are named in ``test_the_two_fixtures_that_close_a_STRUCTURAL_gap_really_do``.
+
+The 22 it misses are not all the same kind of miss, and the difference is
+what a reader needs:
+
+* **THREE ARE STRUCTURAL AND NO FIXTURE CAN CLOSE THEM.** This file calls
+  ``_replay`` directly, so ``_window`` and ``_admissible`` — the code that
+  decides which points exist at all — are outside its reach entirely:
+  ``_admissible`` always-True and ``_window`` one-wider-on-each-side both
+  stay GREEN here. So does ``_body_runs_once`` always-yes, because every
+  fixture is a program the replay can read and none contains a loop or a
+  branch body. Closing those means testing ``probe`` rather than
+  ``_replay``, which is a different file's job
+  (``tests/test_falsify_fire_condition.py`` drives all three).
+* **THE REST ARE FIXTURE GAPS, AND THEY ARE NAMED RATHER THAN COUNTED.**
+  No fixture separates ``max`` from ``min`` (``mixed-comparison`` clamps
+  at the box edge, where both readings agree); none separates a STRICT
+  comparison from its non-strict partner (``lt``/``le``, ``gt``/``ge``,
+  ``eq``/``ne``); none states a boolean ``and``/``or``/``xor``; none
+  reaches ``_REDUCTIONS`` (no ``jnp.sum``, ``prod``, ``max`` or ``min``
+  over an axis) or ``_MOVEMENT`` (no ``reshape``, ``transpose``,
+  ``concatenate``, ``slice`` or ``pad``); and none reaches
+  ``_EXACT_UNARY`` beyond what the arithmetic above emits, so ``neg``,
+  ``abs``, ``sign``, ``floor``, ``ceil`` and ``copy`` are all uncovered.
+  The descent is covered for ``jit`` only, never for ``remat2``.
+* **``jax_enable_x64`` IS FORCED ON HERE**, so the ``dtype-narrowed-by-jax``
+  decline — the whole x64-off path — is untested by this file.
+
+**NONE OF THAT MAKES THE AGREEMENT COUNT WRONG; IT MAKES IT NARROW.** What
+the count is evidence for is what it says: over these ten programs and
+this grid, the probe's exact reading and an independent ``Fraction``
+reading of the same predicates agree at every point. Anything a reader
+wants to conclude beyond that is on the list above.
 
 **WHY THIS IS NOT CALLED ``test_falsify_oracle.py``, WHICH IS THE NAME ITS
 SUBJECT WOULD SUGGEST.** ``tests/test_narrowing_perimeter.py`` records a
@@ -217,34 +265,95 @@ def _mixed_comparison_oracle(v):
     )
 
 
-# label, harness, oracle, dtype, (lo, hi), shape
+def _two_declarations():
+    """TWO ``stelling_any`` declarations, which no other fixture has.
+
+    ``_replay`` substitutes ``point[decl[0]]`` for each ``stelling_any``
+    and advances ``decl[0]``; with one declaration in every fixture, a
+    replay that read ``point[0]`` for ALL of them would be indistinguishable
+    from the correct one, and a mutation to exactly that stays green. So
+    the predicates below are chosen to separate ``(a, b)`` from
+    ``(a, a)``: the boxes do not overlap, ``b - a >= 2.0`` is true at some
+    grid points and false at others while ``a - a >= 2.0`` is false at all
+    of them, and ``a + b <= 6.0`` is false at some while ``a + a <= 6.0``
+    is true at all of them.
+    """
+    a = any_array((), "float64", (0.0, 2.0))
+    b = any_array((), "float64", (3.0, 5.0))
+    assume(b - a >= 2.0)
+    return assert_(a + b <= 6.0)
+
+
+def _two_declarations_oracle(v):
+    a, b = v
+    return [b - a >= Q(2.0)], [a + b <= Q(6.0)]
+
+
+def _array_gate_partly_true():
+    """An array whose assume is true of SOME elements and not others.
+
+    Every other array fixture states an assume that holds at every
+    element of every grid point, so ``all`` and ``any`` agree everywhere
+    and a replay that aggregated the gate with ``any`` — admitting a
+    point where one element satisfies the assume and three do not — reads
+    identically to the correct one. ``y >= 0.0`` over ``[-2, 2]`` with a
+    per-element offset separates them; the count of separating points is
+    asserted in
+    ``test_the_two_fixtures_that_close_a_STRUCTURAL_gap_really_do``.
+
+    The OBLIGATION is separated the same way and for the same reason: an
+    assert reading that aggregated with ``any`` — reporting an obligation
+    satisfied because ONE element of the array satisfies it — read
+    identically to the correct one on every other fixture here, because
+    every other array obligation holds at every element of every point.
+    """
+    y = any_array((4,), "float64", (-2.0, 2.0))
+    assume(y >= 0.0)
+    return assert_(y + y <= 0.0)
+
+
+def _array_gate_partly_true_oracle(v):
+    return (
+        [all(e >= 0 for e in v)],
+        [all(e + e <= 0 for e in v)],
+    )
+
+
+# label, harness, oracle, declarations as ((dtype, (lo, hi), shape), ...)
 CASES = [
     ("scaled-roundtrip", _scaled_roundtrip, _scaled_roundtrip_oracle,
-     "float64", (0.0, 2.0), ()),
+     (("float64", (0.0, 2.0), ()),)),
     ("kahan-cancellation", _kahan_cancellation, _kahan_cancellation_oracle,
-     "float64", (0.0, 2.0), ()),
+     (("float64", (0.0, 2.0), ()),)),
     ("two-assumes", _two_assumes, _two_assumes_oracle,
-     "float64", (-1.0, 3.0), ()),
+     (("float64", (-1.0, 3.0), ()),)),
     ("assume-behind-a-jit", _assume_behind_a_jit, _assume_behind_a_jit_oracle,
-     "float64", (0.0, 4.0), ()),
+     (("float64", (0.0, 4.0), ()),)),
     ("elementwise-over-an-array", _elementwise_over_an_array,
-     _elementwise_over_an_array_oracle, "float64", (-2.0, 2.0), (4,)),
+     _elementwise_over_an_array_oracle, (("float64", (-2.0, 2.0), (4,)),)),
     ("division-and-subtraction", _division_and_subtraction,
-     _division_and_subtraction_oracle, "float64", (1.0, 3.0), ()),
+     _division_and_subtraction_oracle, (("float64", (1.0, 3.0), ()),)),
     ("integer-program", _integer_program, _integer_program_oracle,
-     "int32", (-8, 8), ()),
+     (("int32", (-8, 8), ()),)),
     ("mixed-comparison", _mixed_comparison, _mixed_comparison_oracle,
-     "float64", (-1.0, 1.0), (3,)),
+     (("float64", (-1.0, 1.0), (3,)),)),
+    ("two-declarations", _two_declarations, _two_declarations_oracle,
+     (("float64", (0.0, 2.0), ()), ("float64", (3.0, 5.0), ()))),
+    ("array-gate-partly-true", _array_gate_partly_true,
+     _array_gate_partly_true_oracle, (("float64", (-2.0, 2.0), (4,)),)),
 ]
 
 GRID = 27  # points per fixture; see `test_the_oracle_agreement_COUNT`
 
 
-def _points(dtype, box, shape):
-    """A deterministic grid over the declared box. No stelling code.
+def _one_declaration_points(dtype, box, shape, offset=0):
+    """A deterministic grid over one declared box. No stelling code.
 
     Every element of an array declaration gets its own offset so that the
-    fixtures with a shape are not eight readings of one scalar.
+    fixtures with a shape are not eight readings of one scalar, and
+    ``offset`` walks a SECOND declaration through the grid out of step
+    with the first, so that no point of a two-declaration fixture has the
+    two declarations at the same position in their boxes.
     """
     lo, hi = box
     size = 1
@@ -254,7 +363,7 @@ def _points(dtype, box, shape):
     for i in range(GRID):
         arr = np.empty(size, dtype=dtype)
         for j in range(size):
-            t = ((i * size + j) % GRID) / (GRID - 1)
+            t = ((i * size + j + offset) % GRID) / (GRID - 1)
             value = lo + t * (hi - lo)
             arr[j] = np.dtype(dtype).type(
                 round(value) if np.dtype(dtype).kind in "iu" else value
@@ -263,12 +372,30 @@ def _points(dtype, box, shape):
     return out
 
 
-def _as_rationals(arr):
-    """The point as exact rationals. ``Fraction(float)`` is exact."""
-    flat = np.asarray(arr).reshape(-1)
-    if np.asarray(arr).dtype.kind in "iub":
-        return tuple(Q(int(x)) for x in flat)
-    return tuple(Q(float(x)) for x in flat)
+def _points(decls):
+    """One grid per declaration, zipped into the tuple ``_replay`` takes."""
+    per = [
+        _one_declaration_points(dtype, box, shape, offset=7 * k)
+        for k, (dtype, box, shape) in enumerate(decls)
+    ]
+    return [tuple(arrays) for arrays in zip(*per)]
+
+
+def _as_rationals(point):
+    """The point as exact rationals, in declaration order.
+
+    ``Fraction(float)`` is exact. The declarations are flattened into one
+    tuple because that is what the oracles take: element values in
+    declaration order, which is also the order ``_replay`` consumes them.
+    """
+    out = []
+    for arr in point:
+        flat = np.asarray(arr).reshape(-1)
+        if np.asarray(arr).dtype.kind in "iub":
+            out.extend(Q(int(x)) for x in flat)
+        else:
+            out.extend(Q(float(x)) for x in flat)
+    return tuple(out)
 
 
 # --------------------------------------------------------------------------
@@ -278,12 +405,12 @@ def _as_rationals(arr):
 
 def _readings():
     """Every (label, point, probe reading, oracle reading) this file drives."""
-    for label, harness, oracle, dtype, box, shape in CASES:
+    for label, harness, oracle, decls in CASES:
         census = F._read(traced(harness))
-        for point in _points(dtype, box, shape):
+        for point in _points(decls):
             want_assumes, want_asserts = oracle(_as_rationals(point))
-            got_assumes, _ = F._replay(census, (point,), assumes_only=True)
-            _, got_asserts = F._replay(census, (point,))
+            got_assumes, _ = F._replay(census, point, assumes_only=True)
+            _, got_asserts = F._replay(census, point)
             yield (
                 label, point,
                 (got_assumes, got_asserts),
@@ -298,7 +425,8 @@ def test_the_exact_reading_agrees_with_an_independent_Fraction_oracle(label):
         if got_label != label:
             continue
         assert got == want, (
-            f"{label} at {np.asarray(point).reshape(-1).tolist()}: the "
+            f"{label} at "
+            f"{[np.asarray(a).reshape(-1).tolist() for a in point]}: the "
             f"probe's exact reading is {got} and an independent Fraction "
             f"reading of the same predicates is {want}"
         )
@@ -321,21 +449,21 @@ def test_the_oracle_agreement_COUNT_is_the_figure_the_prose_may_cite():
         obligation_readings += len(got[1])
         agreements += int(got == want)
 
-    assert gate_readings == 243, gate_readings
-    assert obligation_readings == 216, obligation_readings
-    assert agreements == 8 * GRID == 216, agreements
+    assert gate_readings == 297, gate_readings
+    assert obligation_readings == 270, obligation_readings
+    assert agreements == len(CASES) * GRID == 270, agreements
 
 
 @pytest.mark.parametrize(
-    "label,least", [("scaled-roundtrip", 15), ("kahan-cancellation", 10)]
+    "label,exactly", [("scaled-roundtrip", 20), ("kahan-cancellation", 12)]
 )
 def test_the_fixtures_would_CATCH_a_float_reading_of_the_assume_region(
-    label, least
+    label, exactly
 ):
     """An oracle that agrees everywhere agrees about nothing.
 
     Two fixtures state an assume whose FLOAT answer and whose ℚ answer are
-    different at most points of the grid — which is the shape this module
+    different over part of the grid — which is the shape this module
     measured on a clean VERIFIED, where 47 of 55 float-admitted points
     were not in the assumed region over ℚ. If the gate ever read the
     region in float, the comparison above would fail at exactly the points
@@ -345,13 +473,20 @@ def test_the_fixtures_would_CATCH_a_float_reading_of_the_assume_region(
     correct agreement from a tautology, and a fixture set that drifted
     into agreeing on every route would leave the count in the docstrings
     still passing and still meaning nothing.
+
+    **THE COUNTS ARE ASSERTED EXACTLY, AND THEY USED TO BE FLOORS.** With
+    ``>= 15`` and ``>= 10`` in place, ``falsify.py`` described both
+    fixtures as differing *"over most of the grid"* — true of the first at
+    20 of 27 and FALSE of the second at 12 of 27, which is under half. A
+    floor cannot catch a sentence that rounds in the flattering direction;
+    an exact count can, and both are now quoted rather than characterised.
     """
     disagreements = 0
-    for got_label, harness, _oracle, dtype, box, shape in CASES:
+    for got_label, harness, _oracle, decls in CASES:
         if got_label != label:
             continue
-        for point in _points(dtype, box, shape):
-            y = float(np.asarray(point).reshape(-1)[0])
+        for point in _points(decls):
+            y = float(np.asarray(point[0]).reshape(-1)[0])
             if label == "scaled-roundtrip":
                 in_float = (y * 0.1 * 10.0) <= y
                 over_q = Q(y) * Q(0.1) * Q(10.0) <= Q(y)
@@ -360,10 +495,59 @@ def test_the_fixtures_would_CATCH_a_float_reading_of_the_assume_region(
                 over_q = (Q(1e16) + Q(y)) - Q(1e16) <= Q(y)
             disagreements += int(in_float != over_q)
 
-    assert disagreements >= least, (
-        f"{label}: only {disagreements} of {GRID} points separate the float "
-        f"reading of this assume from the ℚ one, and the agreement counted "
-        f"above is that far from being a tautology"
+    assert disagreements == exactly, (
+        f"{label}: {disagreements} of {GRID} points separate the float "
+        f"reading of this assume from the ℚ one, and this test — and the "
+        f"sentence in `falsify.py` that cites it — say {exactly}"
+    )
+
+
+@pytest.mark.parametrize(
+    "label,least",
+    [("array-gate-partly-true", 6), ("two-declarations", 20)],
+)
+def test_the_two_fixtures_that_close_a_STRUCTURAL_gap_really_do(label, least):
+    """The two gaps that were one fixture each, and the count that closes them.
+
+    Measured with the mutation battery described in this file's docstring,
+    against the eight fixtures this file shipped with:
+
+    * ``stelling_any`` reading ``point[0]`` instead of ``point[decl[0]]``
+      stayed GREEN, because no fixture had two declarations;
+    * the assume gate aggregating an array with ``any`` instead of ``all``
+      stayed GREEN, and so did the same inversion on the obligation,
+      because no fixture had an array where the two differ.
+
+    Three defects, two fixtures, and 7 of 32 caught became 10 of 32.
+
+    A fixture that closes a gap can drift back into not closing it without
+    failing anything — the agreement count keeps passing either way — so
+    what is asserted here is the SEPARATING POWER itself: how many of the
+    27 grid points read differently under the defect than under the
+    correct reading. If that number goes to zero the fixture is decoration
+    and this test says so.
+    """
+    case = next(c for c in CASES if c[0] == label)
+    _label, _harness, oracle, decls = case
+    separating = 0
+    for point in _points(decls):
+        v = _as_rationals(point)
+        right = oracle(v)
+        if label == "two-declarations":
+            # THE DEFECT: every declaration reads the first one's value
+            first = _as_rationals((point[0],) * len(point))
+            wrong = oracle(first)
+        else:
+            # THE DEFECT: the array is aggregated with `any`, not `all`
+            wrong = (
+                [any(e >= 0 for e in v)],
+                [any(e + e <= 0 for e in v)],
+            )
+        separating += int(right != wrong)
+    assert separating >= least, (
+        f"{label}: only {separating} of {GRID} points read differently "
+        f"under the defect this fixture exists to catch, so the agreement "
+        f"count above would pass with the defect in place"
     )
 
 
@@ -377,6 +561,19 @@ def test_the_oracle_shares_no_code_with_the_module_it_checks():
     census) and ``_replay`` (which is the subject); every other name in
     ``stelling.falsify`` would make the oracle a second reading through the
     machinery it is reading.
+
+    **THIS IS A DISCIPLINE RAIL, NOT A PROOF, AND THE DIFFERENCE IS ONE
+    BUILTIN.** The scan below reads ``ast.Attribute`` nodes, so it sees
+    ``F._exact(point)`` and does not see ``getattr(F, "_exact")(point)``.
+    Driven both ways: patching one oracle to call ``F._exact`` turns this
+    test RED, and patching it to call ``getattr(F, "_exact")`` leaves it
+    GREEN with the independence just as gone. Nothing here can close that
+    — a dynamic attribute lookup is not visible to a static scan, and the
+    module-level ban would have to be enforced at runtime by something
+    this file also controls — so what the rail buys is that the ordinary
+    spelling of the mistake fails loudly and on purpose, not that the
+    property holds. A reader auditing the independence claim reads the
+    fixtures, not this test.
     """
     import ast
     import pathlib
