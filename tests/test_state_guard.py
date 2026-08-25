@@ -992,18 +992,57 @@ def state_guard_references(
     failure mode here is silent state-sharing, so an attempt to load is worth
     naming even where the attempt would not currently work.
 
-    **WHAT THIS DOES NOT REACH.** Three limits, declared rather than
-    discovered, because the previous three docstrings each claimed a
-    completeness the code did not have:
+    **THIS SCAN IS A TRIPWIRE, NOT A PROOF, AND FIVE ROUNDS OF AUDIT ARE THE
+    EVIDENCE FOR THAT SENTENCE.** Each round closed one syntactic form and the
+    next found another, and the miss was always **one indirection** further
+    out: direct call arguments missed a splat; whole-string matching missed a
+    generated conftest; four wrapper names missed the base method they all
+    delegate to; and naming the base method still misses a source constant
+    reached through a variable. A syntactic single-file scan cannot close this
+    class — there is always one more indirection — so the honest thing is to
+    say what it does not reach and to say where the guarantee actually lives.
+
+    **WHERE THE GUARANTEE ACTUALLY LIVES**, and it is not here: the trajectory
+    hangs off the session's ``Config`` rather than off module-level dicts
+    (``tests/_state_guard.py``, the comment above ``_TRAJECTORY``). A nested
+    session builds a fresh ``Config``, **so the separation holds BY
+    CONSTRUCTION whether or not this module is loaded there.** That is the
+    braces. This scan is the belt: it catches a reaching edit at review time,
+    when the cost of the conversation is low, and nothing rests on it being
+    complete.
+
+    **WHAT IT DOES NOT REACH**, declared rather than discovered — the previous
+    four docstrings each claimed a completeness the code did not have, which is
+    the defect this list exists to stop repeating:
 
     * a literal defined in **another module** and imported in — this is a
       single-file scan, and the test below says so in its own title;
     * a **direct write** into the nested tree
       (``(pytester.path / "conftest.py").write_text(...)``), which loads the
-      plugin and is invisible here because it goes through no ``make*`` call;
-    * a **local helper** wrapping one of those methods, which is one
-      indirection past a syntactic scan — and is worth naming precisely
-      because helper-wrapping is the scanned file's prevailing idiom.
+      plugin and goes through no ``make*`` call;
+    * a **local helper** wrapping one of those methods, one indirection past a
+      syntactic scan — worth naming because helper-wrapping is the scanned
+      file's prevailing idiom, which is how several of these gaps arrived;
+    * a **module-level source constant** handed to a ``make*`` call
+      (``SG = 'pytest_plugins = ["_state_guard"]'``; ``makeconftest(SG)``).
+      Measured to load the plugin. This is the same idiom the scanned file
+      already uses for generated source — ``WRAPPING_TEST`` is defined once
+      and handed to ``makepyfile`` at a dozen sites — so it is the likeliest
+      of these four to be written by accident;
+    * a **generated conftest that imports and registers**
+      (``import _state_guard; config.pluginmanager.register(_state_guard)``).
+      Measured to load the plugin. Rule 1 matches string literals, and here
+      the name is an ``import`` alias and a ``Name``, never a literal. A bare
+      ``import`` with no ``register`` does not load, and is correctly silent.
+
+    **THE REPAIR THAT WOULD ACTUALLY CLOSE IT** is not a sixth form. It is to
+    stop modelling the behaviour and measure it — assert on the nested
+    session's plugin manager rather than on the spelling that reaches it,
+    which is decidable, immune to every indirection above, and the same
+    measure-don't-model cut this project applies everywhere else. That is
+    recorded as work rather than done here, because it changes this from a
+    static check into one that runs nested sessions, and the property it
+    guards already holds by construction.
     """
     tree = ast.parse(source)
     prose: set[int] = set()
@@ -1119,6 +1158,41 @@ _PROSE = (
     'pytester.makepyfile(test_x=\'"""Not _state_guard."""\')',
     'pytester.makefile(".py", x="# _state_guard is not loaded here")',
 )
+
+
+#: THE TWO REACHING ROUTES THIS SCAN IS KNOWN NOT TO SEE, pinned so the gap is
+#: a fixture rather than a memory. Both were measured to load the plugin in a
+#: real nested session. If a later change makes one of them visible, this test
+#: fails and the limit above should be struck — a declared limit that has
+#: quietly stopped being a limit is its own defect, and the whole point of
+#: writing them down is that they stay checked.
+_KNOWN_MISSES = (
+    'SG = \'pytest_plugins = ["_state_guard"]\'\npytester.makeconftest(SG)',
+    'pytester.makeconftest("def pytest_configure(c):\\n"'
+    ' "    import _state_guard\\n"'
+    ' "    c.pluginmanager.register(_state_guard)\\n")',
+)
+
+
+@pytest.mark.parametrize("source", _KNOWN_MISSES, ids=("via-constant", "import-and-register"))
+def test_the_declared_limits_are_still_limits(source):
+    """The two routes the docstring declares unreachable are still unreached.
+
+    **A DECLARED LIMIT THAT HAS STOPPED BEING ONE IS ITS OWN DEFECT.** Writing
+    a limit down is worth nothing if nothing notices when it changes, and the
+    direction that matters here is the happy one: if a later edit widens the
+    scan so one of these becomes visible, this fails, and whoever did it
+    should strike the bullet rather than leave the file claiming a blindness
+    it no longer has.
+    """
+    assert not state_guard_references(source), (
+        "a route the docstring declares unreachable is now caught:\n"
+        f"  {source!r}\n"
+        "That is good news, not a bug. Strike the matching bullet from "
+        "`state_guard_references`'s WHAT IT DOES NOT REACH list and delete "
+        "this fixture entry, so the file stops claiming a limit it has "
+        "outgrown."
+    )
 
 
 @pytest.mark.parametrize("source", _REACHING, ids=range(len(_REACHING)))
