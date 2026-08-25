@@ -296,20 +296,27 @@ def test_a_documented_name_presented_as_existing_is_in_src():
     """The gate. **RED on `main` at `115d771`: EIGHT findings, seven lines.**
 
     Four names, and NINE rewritten sentences — the enumeration below is by
-    sentence, and the gate reaches eight of the nine. **The two counts differ
-    for a reason worth keeping**, and the headline used to give only the nine:
-    §6.4's *"a claim about ℝ, with margin"* is narrative, so it is outside the
-    four constructions BY DESIGN, and one line (§2.5's, carrying two names)
-    yields two findings, which is why eight findings sit on seven lines. A
-    number a reader cannot re-derive is the same defect as a check that does
-    not exist — including in the file whose whole subject is that defect — so:
-    copy this module into a worktree at `115d771` and run it, and the failure
-    message prints all eight with their lines, labels and quotations.
+    sentence, and the gate reaches EIGHT of the nine. **The two counts differ
+    for two separate reasons and both are worth keeping.** §2.5's line 744
+    carries two of the four names, so one line yields two findings — which is
+    why eight findings sit on seven lines. And the ninth sentence, §2.6's
+    `"arithmetic": "real-with-margin",` at line 866, is inside the FENCED
+    JSON schema sketch, so the fenced-code-block exclusion takes it. That is
+    not a limit being tolerated: a fence showing a proposed record is an
+    illustration of a design rather than a statement about the tree, and a
+    schema sketch is the paradigm case the exclusion was written for.
 
-    That the gate reaches eight of nine is not a gap to close. It is the
-    declared limit doing its job: this file lints CONSTRUCTIONS and not prose,
-    because a lint that tries to tell a plan from a claim by reading prose gets
-    silenced within a week, and the paragraph above the constructions says so.
+    **THE SENTENCE THAT STOOD HERE NAMED THE WRONG ONE.** It said §6.4's
+    *"a claim about ℝ, with margin"* was narrative and so outside the four
+    constructions. Measured: §6.4's is at line 1504, it carries the pair form,
+    and it IS one of the eight. **A false explanation of a corrected figure is
+    the same defect as the figure, one level up** — and it was written into
+    this file while repairing exactly that, which is how cheap the mistake is.
+    A number a reader cannot re-derive is the same defect as a check that does
+    not exist, so: copy this module into a worktree at `115d771` and run it,
+    and the failure message prints all eight with their lines, labels and
+    quotations. Section boundaries there are §2.5 at 712, §2.6 at 790 and
+    §6.4 at 1486, which is what decides which line belongs to which.
 
     What each sentence says now. None of the four was allowlisted: an
     allowlist entry for the defect a gate was written to catch is the gate

@@ -40,6 +40,7 @@ something.
 
 from __future__ import annotations
 
+import ast
 import os
 import pathlib
 import subprocess
@@ -914,8 +915,55 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
 # the numbers are gone rather than corrected.
 
 
+#: The spellings that put this module's name into a nested session's
+#: arguments. `-p` takes its value joined as well as separated, so the joined
+#: forms are the same instruction written shorter — argparse accepts all three
+#: and a scan that reads only the separated one is a scan of a style, not of a
+#: behaviour.
+_LOADS_THIS_MODULE = ("_state_guard", "-p_state_guard", "-p=_state_guard")
+
+
+def state_guard_references(source: str) -> list[tuple[int, str]]:
+    """`(line, spelling)` for every STRING LITERAL in `source` naming this module.
+
+    **A LITERAL, NOT A CALL ARGUMENT, AND THE DIFFERENCE IS THE WHOLE POINT.**
+    An earlier version of this read only the direct arguments of `Call` nodes,
+    and an audit drove eleven spellings through it: five reaching ones were
+    silent. `*("-p", "_state_guard")` and `[..., "_state_guard"]` hide the
+    constant one container down; `plugins=("_state_guard",)` hides it in a
+    keyword's tuple; `-p_state_guard` is argparse's joined form and is one
+    string rather than two; and a module-level tuple spread as `*ARGS` puts the
+    constant in no call at all — **which is `tests/test_tripwire_plugin.py`'s
+    own prevailing idiom** (`*ORDER_ARGS`, `*PLUGIN_ARGS`). A guard blind to
+    the file's usual spelling is a guard aimed at the one edit nobody was going
+    to make.
+
+    So the rule is the general one: **a string literal naming this module is a
+    reference to it, wherever it sits.** Prose is excluded by what it IS rather
+    than by where it is — a docstring and a bare string statement are the two
+    ways Python holds text that is not a value, and comments never reach the
+    AST at all. That is what keeps this from firing on its own explanation.
+    """
+    tree = ast.parse(source)
+    prose: set[int] = set()
+    for node in ast.walk(tree):
+        # A bare string statement is text, not a value — and that covers every
+        # docstring, which is only ever the first such statement in a body.
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            if isinstance(node.value.value, str):
+                prose.add(id(node.value))
+    return sorted(
+        (node.lineno, node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value in _LOADS_THIS_MODULE
+        and id(node) not in prose
+    )
+
+
 def test_no_nested_session_in_the_tripwire_file_loads_this_module():
-    """No call in `tests/test_tripwire_plugin.py` passes `-p _state_guard`.
+    """No literal in `tests/test_tripwire_plugin.py` names this module.
 
     THE HALF OF THE PARAGRAPH ABOVE THAT IS A CLAIM RATHER THAN A STORY. That
     file's `_run` helper reaches `pytester.runpytest` IN-PROCESS, so a nested
@@ -925,32 +973,77 @@ def test_no_nested_session_in_the_tripwire_file_loads_this_module():
     argument re-derivable, which the line number and call count it replaced
     never were.
 
-    Read off the SYNTAX, not off the text: a string inside a `Call` node's
-    arguments is an argument to a nested session, and the same characters in a
-    comment or a docstring are prose about one. Grepping cannot tell those
-    apart, and a guard that fires on its own explanation is a guard that gets
-    deleted.
+    The scan is :func:`state_guard_references`, and
+    :func:`test_the_reference_scan_is_driven_both_ways` drives it — because a
+    guard nobody can drive is the thing this suite refuses everywhere else.
     """
-    import ast  # noqa: PLC0415 - local to the one test that parses
-
     path = pathlib.Path(__file__).resolve().parent / "test_tripwire_plugin.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    passed = [
-        node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        for arg in [*node.args, *(kw.value for kw in node.keywords)]
-        if isinstance(arg, ast.Constant) and arg.value == "_state_guard"
-    ]
-    assert not passed, (
-        "tests/test_tripwire_plugin.py hands `_state_guard` to a nested "
-        f"session at line(s) {passed}. Its sessions reach `pytester.runpytest` "
-        "IN-PROCESS, so loading this module there puts a nested session and "
-        "the outer one on the same bookkeeping — which is the defect the "
-        "trajectory-on-Config fix closed. If a nested session there genuinely "
-        "needs the guard, it needs a SUBPROCESS, the way this file's own "
-        "nested sessions get it."
+    found = state_guard_references(path.read_text(encoding="utf-8"))
+    assert not found, (
+        "tests/test_tripwire_plugin.py names `_state_guard` at "
+        f"{[line for line, _ in found]}. Its sessions reach "
+        "`pytester.runpytest` IN-PROCESS, so loading this module there puts a "
+        "nested session and the outer one on the same bookkeeping — which is "
+        "the defect the trajectory-on-Config fix closed. If a nested session "
+        "there genuinely needs the guard, it needs a SUBPROCESS, the way this "
+        "file's own nested sessions get it."
     )
+
+
+#: Reaching spellings and prose spellings, as SOURCE. Each reaching entry was
+#: silent against the call-argument scan this replaced, except the first, which
+#: is the only one that version caught.
+_REACHING = (
+    'pytester.runpytest("-p", "_state_guard")',
+    'pytester.runpytest("-p_state_guard")',
+    'pytester.runpytest("-p=_state_guard")',
+    'pytester.runpytest(*("-p", "_state_guard"))',
+    'pytester.runpytest(*["-p", "_state_guard"])',
+    'pytester.runpytest(plugins=("_state_guard",))',
+    'ARGS = ("-p", "_state_guard")\npytester.runpytest(*ARGS)',
+    'def f():\n    args = ["-p", "_state_guard"]\n    return args',
+)
+_PROSE = (
+    '# deliberately not `-p _state_guard`: see tests/test_state_guard.py',
+    '"""Explains why `_state_guard` is not passed here."""',
+    'def f():\n    """Not `-p _state_guard`, on purpose."""\n    return 1',
+    '"_state_guard"\n',
+    'x = "_state_guardian"',
+    'x = "state_guard"',
+)
+
+
+@pytest.mark.parametrize("source", _REACHING, ids=range(len(_REACHING)))
+def test_the_reference_scan_is_driven_both_ways(source):
+    """Every reaching spelling is found and no prose spelling is.
+
+    **THE ANTI-VACUITY SIBLING, AND IT IS NOT OPTIONAL HERE.** Every other
+    gate this release added has one, and the guard above arrived without: an
+    audit had to drive it by hand to learn that five reaching spellings were
+    silent, and `.github/workflows/release.yml`'s own rule is that a refusal
+    nothing observes is not known to be a refusal. Driving it by hand once is
+    a measurement; this is the check.
+
+    The prose half is the direction that gets a guard deleted rather than the
+    one that gets a defect shipped, and it is the harder half: two of its
+    entries (`_state_guardian`, `state_guard`) are near-misses that a
+    substring test would fire on.
+    """
+    assert state_guard_references(source), (
+        f"a reaching spelling is invisible to the scan:\n  {source!r}\n"
+        "It puts this module's name into a nested session's arguments, so the "
+        "guard above would pass on a tree that has the defect."
+    )
+
+
+@pytest.mark.parametrize("source", _PROSE, ids=range(len(_PROSE)))
+def test_the_reference_scan_is_silent_on_prose_and_near_misses(source):
+    """Prose about the module, and names that merely resemble it, do not fire."""
+    assert not state_guard_references(source), (
+        f"the scan fires on text that loads nothing:\n  {source!r}\n"
+        "A guard that reports its own explanation is a guard that gets deleted."
+    )
+
 
 #: ``test_one``'s body for the two controls below: an in-process pytest session
 #: over a trivial, well-behaved tree, loading the SAME ``_state_guard`` module
