@@ -706,6 +706,37 @@ def _package_files_in_tree(root: pathlib.Path, oracle: pathlib.Path) -> set[str]
     eight after; the measurement is in :func:`_walked_files` and it is pinned
     by :func:`test_the_walk_breaks_an_alias_the_way_the_build_breaks_it`.
 
+    **THE WALK ROOT IS `root` AND NOT `src/stelling`, AND THE TWO COINCIDE FOR
+    ONLY ONE OF THE TWO BUILD PATHS.** This function walks the WHOLE repository
+    and then filters to :data:`_PACKAGE_ROOT`; hatchling's wheel target walks
+    `src/stelling` with a FRESH seen-set. On a tree with no aliasing the two
+    enumerate the same set, which is why the difference stayed invisible. With
+    an alias whose TARGET lies outside the package they diverge, because the
+    seen-set is what breaks the tie and the two walks reach the two names in
+    different orders. RE-DRIVEN on a clone of this tree at 400415f, ONE symlink
+    planted — `src/stelling/aaa_docs -> ../../docs`, 22 files under `docs/`::
+
+        build path            wheel package members   aaa_docs   this equality
+        uv build                          36                 0   0 / 0
+        uv build --wheel                  58                22   extra = 22
+
+    `uv build` agrees because it does not build the wheel from the CHECKOUT at
+    all: it builds the sdist first and the wheel from the unpacked sdist, and
+    the sdist's own walk is repo-rooted, so `docs/` — reached first, `d`
+    before `s` — claims those inodes and `src/stelling/aaa_docs` is pruned to
+    nothing. Measured on the tarball: 22 `docs/` members, zero `aaa_docs`.
+    `uv build --wheel` — and therefore `pip wheel .` and
+    `pip install <checkout>` — walks the checkout directly from `src/stelling`,
+    where `aaa_docs` is the only path to those inodes, and ships all 22.
+
+    So the equality this feeds is an equality about the `uv build` path: the
+    path `release.yml` runs, and the path :func:`_build_into` drives. On the
+    direct-wheel path the same tree reports `extra = 22`, and that is a TRUE
+    difference rather than a false red — that wheel really does carry 22 files
+    the sdist does not. What nothing here checks is the direct-wheel path
+    itself, and that is written down rather than left to be inferred from a
+    docstring that said only "wheel built with `uv build`".
+
     `oracle` is a scratch directory for :func:`_check_ignore`'s throwaway
     repository; it needs `git`, which is why the callers are gated on it.
     """
@@ -1484,7 +1515,8 @@ def _walked_files(root: pathlib.Path) -> set[str]:
     property of how ext4 happened to hash the two NAMES, while the build always
     picks the alphabetically first. MEASURED on this tree, eight aliasing
     shapes planted under `src/stelling`, each a directory plus a symlink to it,
-    wheel built with `uv build` and compared to
+    wheel built with `uv build` — the DEFAULT two-stage path, sdist first and
+    then the wheel from the unpacked sdist — and compared to
     :func:`_package_files_in_tree`::
 
         shape                  scandir order        wheel ships    walk said
@@ -1503,6 +1535,14 @@ def _walked_files(root: pathlib.Path) -> set[str]:
     ships. FALSE RED ONLY — nothing can ship wrong from this, because the wheel
     is the wheel either way; what it breaks is the comparison that is supposed
     to notice when the wheel is wrong.
+
+    **WHICH BUILD PATH THAT TABLE DESCRIBES, because there are two of them and
+    they do not agree in general.** Every shape above is a directory and its
+    alias BOTH under `src/stelling`, so the repo-rooted walk this function
+    makes and the package-rooted walk hatchling's wheel target makes meet the
+    same two candidates and the seen-set resolves them the same way. Move the
+    TARGET outside the package and they diverge, and the divergence is measured
+    at :func:`_package_files_in_tree`, which is where the walk ROOT is chosen.
     """
     found: set[str] = set()
     seen: set[tuple[int, int]] = set()

@@ -20,8 +20,10 @@ suite green and the skip-inventory verdict `made`. The six:
 4. `publish: needs: [test, build]` -> `[build]` — the suite stops gating the
    upload while still running, so a red suite and a green publish;
 5. the header's `EIGHT` -> `TWELVE` — a count of refusals nobody can check
-   (`release.yml` now says TWELVE and MEANS it: three refusals landed when the
-   tag comparison was carried to the sdist. That is not mutation 5 surviving —
+   (`release.yml` says THIRTEEN now and MEANS it: three refusals landed when
+   the tag comparison was carried to the sdist, and a fourth when the two
+   counts stopped being mistaken for a statement about the DIRECTORY. That is
+   not mutation 5 surviving —
    :func:`test_the_headers_refusal_COUNT_is_the_count_of_refusals` derives the
    number from the file's own `exit 1` sites, so the word and the arithmetic
    are checked against each other whatever the word is);
@@ -37,20 +39,23 @@ reads the file and asserts the load-bearing literals are still there. That is
 enough to kill all six mutations above, and it is measured against them below
 rather than argued.
 
-The second is a DRIVE. Two gate bodies are EXTRACTED from `release.yml` and
-EXECUTED here against planted trees, and asserted on their exit code and their
-annotation. Extracted, not copied: a test that runs its own transcription of a
-step body is a test of the transcription, and the rewrite it has to catch
-lands in `release.yml`.
+The second is a DRIVE. Three gate bodies — the tag step, the sdist step and
+the manifest step — are EXTRACTED from `release.yml` and EXECUTED here against
+planted trees, and asserted on their exit code, their annotation and, for the
+one that only prints, on the record it writes. Extracted, not copied: a test
+that runs its own transcription of a step body is a test of the transcription,
+and the rewrite it has to catch lands in `release.yml`.
 
 THE SENTENCE THAT USED TO STAND HERE WAS FALSE, and how it was false is worth
 writing down, because it is what licensed the gap. It read: this is "NOT a
 check that the gates WORK — nothing in this repository can be, because a
 gate's behaviour is a property of a runner". The premise does not hold for
-these two bodies. Neither contains one thing a runner supplies: they are
-`tar`, `git ls-files`, `sort`, `comm`, `ls`, `basename` and `cut`, over a
-`dist/` directory and a git index, both of which a test can plant. And
-`release.yml`'s own comments record driving these same bodies by hand at
+these three bodies. None of them contains one thing a runner supplies: they
+are `tar`, `git ls-files`, `sort`, `comm`, `basename`, `cut` and `mktemp`, over
+a `dist/` directory and a git index, both of which a test can plant. (The
+manifest body wants `GITHUB_STEP_SUMMARY`, which is one environment variable
+and a file this test writes.) And `release.yml`'s own comments record driving
+these same bodies by hand at
 a61c01f — so the file already knew they were drivable, and the impossibility
 claim was contradicted a few lines from where it was written.
 
@@ -99,7 +104,7 @@ now a shorter list than the argument that used to stand for it:
 * the OTHER gate bodies. `-ra` being present still says nothing about what
   pytest prints. The two verdict refusals are pinned as literals and, below,
   as a PATH-COHERENCE check — but the recorder itself is not driven here.
-  What is driven is the two bodies above and nothing else.
+  What is driven is the three `dist/`-reading bodies and nothing else.
 * the sdist drive's plant is keyed on the allowlist's DIRECTORY roots, so a
   member filter keyed on anything else is outside it, as the paragraph above
   says.
@@ -133,12 +138,15 @@ purpose is an environment with nothing in it — could not import one.
 """
 from __future__ import annotations
 
+import gzip
+import io
 import os
 import pathlib
 import re
 import shutil
 import subprocess
 import tarfile
+import zipfile
 
 import pytest
 
@@ -151,7 +159,9 @@ RELEASE = REPO / ".github" / "workflows" / "release.yml"
 _NUMBER_WORDS = {
     "ZERO": 0, "ONE": 1, "TWO": 2, "THREE": 3, "FOUR": 4, "FIVE": 5,
     "SIX": 6, "SEVEN": 7, "EIGHT": 8, "NINE": 9, "TEN": 10, "ELEVEN": 11,
-    "TWELVE": 12,
+    "TWELVE": 12, "THIRTEEN": 13, "FOURTEEN": 14, "FIFTEEN": 15,
+    "SIXTEEN": 16, "SEVENTEEN": 17, "EIGHTEEN": 18, "NINETEEN": 19,
+    "TWENTY": 20,
 }
 
 # The two refusals that are not `exit 1` sites: a step that refuses by its own
@@ -470,14 +480,24 @@ def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
     IT MOVED A THIRD TIME, by three, when the tag comparison was carried to the
     OTHER artefact: `dist/` must hold exactly one SDIST, that sdist's filename
     version must carry the tag, and the sdist step establishes the count for
-    itself instead of trusting a step that ran earlier. Ten `exit 1` sites,
-    TWELVE with the two implicit ones. `TWELVE` is also the wrong number
-    mutation 5 planted when the right one was EIGHT, and that collision costs
-    nothing here: the word is compared to `len(exit_sites) + _IMPLICIT_REFUSALS`
-    rather than to a constant, so a header that says TWELVE while the file
-    holds nine `exit 1` sites is exactly as red as it was before. The literals
-    here — `ten` and `10` — are the claim; the arithmetic below is what holds
-    them to the file.
+    itself instead of trusting a step that ran earlier. `TWELVE` is also the
+    wrong number mutation 5 planted when the right one was EIGHT, and that
+    collision cost nothing: the word is compared to
+    `len(exit_sites) + _IMPLICIT_REFUSALS` rather than to a constant, so a
+    header that says TWELVE while the file holds nine `exit 1` sites is exactly
+    as red as it was before.
+
+    IT MOVED A FOURTH TIME, by one, when the two counts stopped being mistaken
+    for a statement about the DIRECTORY: the tag step inventories `dist/` and
+    refuses any entry that is neither of the two artefacts it just established.
+    Eleven `exit 1` sites, THIRTEEN with the two implicit ones. The literals
+    here — `eleven` and `11` — are the claim; the arithmetic below is what
+    holds them to the file, and both halves are driven red. THE OFF-BY-ONE A
+    PERSON ACTUALLY MAKES is not a wild number, it is one step either side, so
+    that is what this was driven against: `THIRTEEN` -> `TWELVE` red,
+    `THIRTEEN` -> `FOURTEEN` red, and the breakdown `eleven` -> `ten` red, each
+    on its own, each naming this test. A well-formed `exit 1` added to the
+    manifest step reddens it too, from the other direction.
 
     Derived from the file, not from a constant here: the `exit 1` sites are
     counted, and the two refusals that are a step's own exit code are added
@@ -502,8 +522,8 @@ def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
         "the arithmetic changed — this count was already wrong once."
     )
     # ...and the header's own breakdown must agree with the same arithmetic
-    assert "ten `exit 1` sites" in text and len(exit_sites) == 10, (
-        f"the header's breakdown says ten `exit 1` sites and there are "
+    assert "eleven `exit 1` sites" in text and len(exit_sites) == 11, (
+        f"the header's breakdown says eleven `exit 1` sites and there are "
         f"{len(exit_sites)}"
     )
 
@@ -530,11 +550,17 @@ def test_the_uncommitted_member_comparison_is_the_difference_not_the_overlap():
     named one), and the `explained.txt` rewrite is caught only there.
     """
     text = _release_text()
-    assert 'unexplained="$(comm -23 members.txt explained.txt)"' in text, (
+    assert (
+        'unexplained="$(comm -23 "${work}/members.txt" "${work}/explained.txt")"'
+        in text
+    ), (
         "the sdist committed-members comparison is no longer `comm -23 "
         "members.txt explained.txt`. `-23` suppresses columns 2 and 3, leaving "
         "lines ONLY in members.txt — the unexplained ones. `-12` leaves the "
-        "common lines, which is not a check at all."
+        "common lines, which is not a check at all. (The two operands moved "
+        "into a `mktemp -d` scratch directory when the step stopped leaving "
+        "four files in the checkout root on its refusal paths; the flags and "
+        "the order of the operands are what this pins.)"
     )
     # CODE lines only, and the forbidden flags are assembled rather than
     # written: the header of `release.yml` names the mutation in prose, and so
@@ -734,8 +760,15 @@ def _plant_tree(tree: pathlib.Path, *, uncommitted: tuple[str, ...] = ()) -> pat
     Each `uncommitted` path goes into the TARBALL and deliberately not into the
     index — the exact shape this gate exists to refuse: a file that ships and is
     not in the tagged tree.
+
+    `dist/.gitignore` IS PART OF THE SHAPE and is planted here for the same
+    reason :func:`_dist_of` plants it: `uv build` writes it (one byte, `*`), so
+    a `dist/` without one is not the directory a release actually has, and a
+    drive over a `dist/` that never held a dotfile could not notice a step that
+    started refusing the real thing.
     """
     (tree / "dist").mkdir(parents=True)
+    (tree / "dist" / ".gitignore").write_text("*", encoding="utf-8")
     for rel in _TRACKED:
         path = tree / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -818,15 +851,18 @@ def test_the_sdist_gate_refuses_a_member_that_is_not_committed(tmp_path):
         "drive plants exactly the members the body demands by name"
     )
 
-    healthy = _drive(body, _plant_tree(tmp_path / "healthy"), **env)
+    healthy_tree = _plant_tree(tmp_path / "healthy")
+    healthy = _drive(body, healthy_tree, **env)
     assert healthy.returncode == 0, (
         "the sdist gate refuses a tree in which every member IS committed; a "
         f"gate that cannot pass is not a gate.\n{healthy.stdout}\n{healthy.stderr}"
     )
     assert "sdist members is committed to this tree" in healthy.stdout
+    _no_workings_left_behind(healthy_tree, "the passing path")
 
     planted = tuple(_plants())
-    bad = _drive(body, _plant_tree(tmp_path / "planted", uncommitted=planted), **env)
+    planted_tree = _plant_tree(tmp_path / "planted", uncommitted=planted)
+    bad = _drive(body, planted_tree, **env)
     assert bad.returncode != 0, (
         "THE SDIST GATE PASSED A TARBALL CONTAINING FILES THAT ARE NOT IN THE "
         f"INDEX ({', '.join(planted)}). It reported:\n{bad.stdout}\n"
@@ -844,6 +880,30 @@ def test_the_sdist_gate_refuses_a_member_that_is_not_committed(tmp_path):
         f"  unnamed: {missing}\n{bad.stdout}"
     )
     assert "not committed to this tree" in bad.stdout
+    # THE REFUSAL PATH LEAVES NOTHING EITHER, and it used to leave four files.
+    # See :func:`_no_workings_left_behind`.
+    _no_workings_left_behind(planted_tree, "a refusal path")
+
+
+#: The four files the sdist step builds its comparison out of. They were
+#: written into the CHECKOUT ROOT and removed by an `rm -f` on the success path
+#: only, so every refusal that reached them left all four behind — measured at
+#: four files on each of the three refusal paths that get that far, in a step
+#: whose own comment argues that nothing is carried between steps. They live in
+#: a `mktemp -d` scratch directory now, removed by a `trap` on every way out.
+_WORKINGS = ("members.txt", "tracked.txt", "generated.txt", "explained.txt")
+
+
+def _no_workings_left_behind(tree: pathlib.Path, path_taken: str) -> None:
+    left = sorted(name for name in _WORKINGS if (tree / name).exists())
+    assert not left, (
+        f"the sdist step left {left} in the checkout root on {path_taken}. "
+        "This step's own comment argues that nothing is carried between steps "
+        "and that each `run:` block must be correct on the input it is given; "
+        "a step that leaves its workings in the workspace is handing the next "
+        "one an input nobody wrote down. They belong in the scratch directory "
+        "the `trap` removes."
+    )
 
 
 def _dist_of(base: pathlib.Path, name: str, *, wheels=("0.1.0",),
@@ -855,9 +915,18 @@ def _dist_of(base: pathlib.Path, name: str, *, wheels=("0.1.0",),
     a single `uv build` leaves beside the wheel — a `dist/` with a wheel and no
     tarball is not the shape this release path produces, and after the sdist
     count landed it is not a shape the step accepts either.
+
+    AND `dist/.gitignore`, WHICH IS NOT DECORATION. `uv build` writes it
+    itself — one byte, `*`, verified on this tree — so every real release
+    directory holds a third entry, and the step now inventories the WHOLE
+    directory rather than two globs over it. Planting it here means every
+    accepting drive in this module is a drive over the directory a release
+    actually has: without it, a rewrite that refused `dist/.gitignore` would
+    leave this module green and every release red.
     """
     tree = base / name
     (tree / "dist").mkdir(parents=True)
+    (tree / "dist" / ".gitignore").write_text("*", encoding="utf-8")
     for version in wheels:
         (tree / "dist" / f"stelling-{version}-py3-none-any.whl").write_bytes(b"")
     for version in sdists:
@@ -929,9 +998,44 @@ def test_the_sdist_gate_refuses_a_dist_it_cannot_read(tmp_path):
     )
 
 
+def _valid_tarball_bytes(version: str = "0.2.0") -> bytes:
+    """A real one-member `stelling-<version>.tar.gz`, as bytes."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        payload = (f"Metadata-Version: 2.4\nName: stelling\n"
+                   f"Version: {version}\n").encode("utf-8")
+        info = tarfile.TarInfo(f"stelling-{version}/PKG-INFO")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def _corrupt_tarballs() -> dict[str, bytes]:
+    """The four ways a `dist/*.tar.gz` fails `tar tzf`, as real bytes.
+
+    Each one took the manifest body `release.yml` shipped one commit ago to
+    rc=2 with no annotation, from a step that file calls a non-refusal. They
+    are built here rather than named because "a corrupt tarball" is four
+    different failures of `tar` and the last of them still prints a member
+    list on stdout while exiting 2.
+    """
+    valid = _valid_tarball_bytes()
+    return {
+        # not a gzip stream at all
+        "non-gzip garbage": b"this is not a gzip stream\n" * 40,
+        # a gzip stream whose payload is not a tar archive
+        "gzip of a non-tar": gzip.compress(b"not a tar archive\n" * 200),
+        # a gzip stream that stops half way
+        "truncated gzip": valid[: len(valid) // 2],
+        # decompresses, lists a member, and still exits non-zero
+        "valid tar.gz + trailing garbage": valid + b"TRAILING GARBAGE" * 50,
+    }
+
+
 @_needs_a_shell
 def test_the_manifest_step_records_every_tarball_and_refuses_nothing(tmp_path):
-    """`release.yml` calls this step NOT A REFUSAL, and that is now driven.
+    """`release.yml` calls this step NOT A REFUSAL, AND THE NAME USED TO
+    OVERCLAIM: this drove 0, 1 and 2 tarballs and never a CORRUPT one.
 
     It carried the LAST `ls dist/` in the file — the second of the two
     `ls dist/*.tar.gz` sites — which made a step whose entire job is to PRINT
@@ -941,26 +1045,46 @@ def test_the_manifest_step_records_every_tarball_and_refuses_nothing(tmp_path):
     every tarball the release would publish is recorded, and nothing is
     asserted about any of them.
 
-    Both halves are driven: it exits 0 on every shape, and the summary it
-    writes NAMES every tarball. A loop that silently recorded one of two would
-    satisfy the exit code and lose the record.
+    WHAT THE COUNTS DID NOT COVER IS WHAT IS INSIDE ONE FILE. `release.yml`
+    said beside this step: *"The only way it goes red is `set -u` on an unset
+    `GITHUB_STEP_SUMMARY`."* DRIVEN FALSE FOUR WAYS on the body that sentence
+    described, ONE tarball in `dist/` and `GITHUB_STEP_SUMMARY` set::
+
+        non-gzip garbage                     rc=2, no annotation
+        a gzip of something that is not tar  rc=2, no annotation
+        a truncated gzip                     rc=2, no annotation
+        a valid tar.gz + trailing garbage    rc=2, no annotation
+
+    `pipefail` and `set -e` turn `tar`'s own exit code into a failed release,
+    from the one step whose entire purpose is to print, with nothing said about
+    why. It was unreachable in the workflow ONLY because the sdist step
+    `tar tzf`s the same file one step earlier — "an earlier step would have
+    caught it", the argument this whole file exists to retract and the one the
+    sdist step already refused by establishing its own tarball count.
+
+    THE REPAIR IS NOT A COUNT, deliberately: a count would make this a refusal
+    point. `tar` is allowed to fail and what it said goes into the RECORD. All
+    four shapes are driven here, in both halves — the step exits 0, and the
+    summary says the file could not be listed rather than silently omitting
+    it. A readable tarball with no members is driven too, for the same reason
+    the sdist step refuses an empty `members.txt`: zero examined must not read
+    as zero problems, in a record any more than in a check.
     """
     body = _step_body(_MANIFEST_STEP)
 
-    def _summary(name: str, sdists: tuple[str, ...]):
+    def _run(name: str, files: dict[str, bytes]):
         tree = tmp_path / name
         (tree / "dist").mkdir(parents=True)
-        for version in sdists:
-            member = tree / f"stelling-{version}" / "PKG-INFO"
-            member.parent.mkdir(parents=True, exist_ok=True)
-            member.write_text("Metadata-Version: 2.4\n", encoding="utf-8")
-            with tarfile.open(tree / "dist" / f"stelling-{version}.tar.gz",
-                              "w:gz") as tar:
-                tar.add(member, arcname=f"stelling-{version}/PKG-INFO")
+        for filename, payload in files.items():
+            (tree / "dist" / filename).write_bytes(payload)
         out = tree / "summary.md"
         out.write_text("", encoding="utf-8")
         result = _drive(body, tree, GITHUB_STEP_SUMMARY=str(out))
         return result, out.read_text(encoding="utf-8")
+
+    def _summary(name: str, sdists: tuple[str, ...]):
+        return _run(name, {f"stelling-{v}.tar.gz": _valid_tarball_bytes(v)
+                           for v in sdists})
 
     for label, sdists in (("one", ("0.2.0",)),
                           ("two", ("0.2.0", "0.0.9")),
@@ -982,6 +1106,64 @@ def test_the_manifest_step_records_every_tarball_and_refuses_nothing(tmp_path):
         assert written.count("PKG-INFO") == len(sdists), (
             f"expected one manifest per tarball, got:\n{written}"
         )
+
+    # THE FOUR CORRUPTIONS, one at a time, each a real file on disk.
+    for index, (label, payload) in enumerate(_corrupt_tarballs().items()):
+        result, written = _run(
+            f"corrupt-{index}", {"stelling-0.2.0.tar.gz": payload}
+        )
+        assert result.returncode == 0, (
+            f"THE MANIFEST STEP FAILED THE RELEASE on a tarball that is "
+            f"{label}. It is not a refusal point — `release.yml` says so "
+            "beside it and gives it no count — so a `dist/` it cannot read "
+            "must reach the record, not the exit code. `pipefail` plus `set "
+            f"-e` on a bare `tar tzf` is how it used to go red at rc=2 with no "
+            f"annotation.\n{result.stdout}\n{result.stderr}"
+        )
+        assert "stelling-0.2.0.tar.gz" in written, (
+            f"a tarball that is {label} is missing from the job summary "
+            f"entirely, so the record of this release is silently short one "
+            f"file it would publish:\n{written}"
+        )
+        assert "could not list this file" in written, (
+            f"a tarball that is {label} was recorded as though it had been "
+            f"read. A record that cannot distinguish 'no members' from 'could "
+            f"not be opened' is the shape the sdist step refuses:\n{written}"
+        )
+        assert "::error" not in result.stdout, (
+            "the manifest step emitted an annotation, which makes it a "
+            f"refusal the header does not count:\n{result.stdout}"
+        )
+
+    # AND A READABLE TARBALL WITH NO MEMBERS, which is not a corruption and
+    # must not be recorded as one — nor as nothing.
+    empty = io.BytesIO()
+    with tarfile.open(fileobj=empty, mode="w:gz"):
+        pass
+    result, written = _run("empty-archive",
+                           {"stelling-0.2.0.tar.gz": empty.getvalue()})
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert "holds no members" in written, (
+        "a valid but empty tarball is recorded as an empty code fence, so the "
+        f"record cannot tell it from a tarball that was never opened:\n{written}"
+    )
+    assert "could not list this file" not in written, (
+        f"an empty but READABLE tarball was recorded as unreadable:\n{written}"
+    )
+
+    # THE ONE RED PATH THAT IS LEFT, driven rather than asserted: `set -u` on
+    # an unset `GITHUB_STEP_SUMMARY`. `release.yml` names it as the only one,
+    # and that sentence was false four ways until the body above landed.
+    tree = tmp_path / "no-summary"
+    (tree / "dist").mkdir(parents=True)
+    (tree / "dist" / "stelling-0.2.0.tar.gz").write_bytes(_valid_tarball_bytes())
+    unset = _drive(body, tree)
+    assert unset.returncode != 0, (
+        "the manifest step no longer fails on an unset GITHUB_STEP_SUMMARY, so "
+        "it is writing this release's record somewhere nobody named: "
+        f"{unset.stdout}\n{unset.stderr}"
+    )
+    assert "GITHUB_STEP_SUMMARY" in unset.stderr, unset.stderr
 
 
 @_needs_a_shell
@@ -1301,9 +1483,162 @@ def test_the_tag_gate_refuses_a_dist_it_cannot_reason_about(tmp_path):
         assert "does not hold exactly one sdist" in alone.stdout
 
 
+def _a_real_zip_sdist(path: pathlib.Path, version: str = "0.0.9") -> pathlib.Path:
+    """A real ZIP archive shaped like a source distribution, on disk.
+
+    NOT an empty file, and that is the point. `.zip` is in twine's
+    `DIST_EXTENSIONS` as a `sdist` — measured off twine 7.0.0 as
+    `{'.whl': 'bdist_wheel', '.tar.gz': 'sdist', '.zip': 'sdist'}` — and PyPI
+    accepts `.zip` source distributions, so the file this drive plants is a
+    file the publish action would have recognised and uploaded. The coherent
+    version of it (built from this tree's own `stelling-0.2.0.tar.gz` with
+    `PKG-INFO`'s `Version:` rewritten to 0.0.9) passed `twine check` at rc=0;
+    that check is not repeated here because `twine` is not a dependency of this
+    project and the zero-dep job could not import one. What the gate reads is
+    the DIRECTORY ENTRY, so a real archive with a real `PKG-INFO` is all this
+    drive needs to be honest about what it is planting.
+    """
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            f"stelling-{version}/PKG-INFO",
+            f"Metadata-Version: 2.4\nName: stelling\nVersion: {version}\n",
+        )
+        archive.writestr(f"stelling-{version}/pyproject.toml", "[project]\n")
+    return path
+
+
+@_needs_a_shell
+def test_the_tag_gate_refuses_a_dist_entry_it_did_not_build(tmp_path):
+    """THE THIRTEENTH `exit 1` SITE: THE UNIT OF THE ANSWER IS THE DIRECTORY.
+
+    `release.yml` said, in its own header, that a `dist/` file which is neither
+    a `.whl` nor a `.tar.gz` is invisible to every step — and then excused it:
+    *"`pypa/gh-action-pypi-publish` rejects what it cannot recognise as a
+    distribution."* MEASURED, false for the case that matters. twine's
+    `DIST_EXTENSIONS` carries `.zip` as a SOURCE DISTRIBUTION; a coherent
+    `stelling-0.0.9.zip` built from this tree's real `stelling-0.2.0.tar.gz`
+    passed `twine check` at rc=0; and dropped into a real `dist/` beside the
+    real wheel and tarball with `TAG=v0.2.0`, on the bodies the parent commit
+    shipped::
+
+        the tag step        rc=0   tag=v0.2.0 wheel version=0.2.0 sdist
+                                   version=0.2.0
+        the sdist step      rc=0   every one of 372 sdist members is committed
+                                   to this tree
+        the manifest step   rc=0   375 lines of manifest written
+
+    Three green gates and a `0.0.9` source distribution on PyPI under a release
+    called v0.2.0, permanently — the same defect the wheel COUNT and the sdist
+    COUNT refusals were written for, one file extension over, resting on an
+    escape hatch in third-party code behind a mutable branch ref.
+
+    SO THE STEP INVENTORIES `dist/`, and this drives both directions of that.
+    Every shape below is planted on disk; the `.zip` is a real archive, not an
+    empty file, because the claim being retracted was about what a publisher
+    RECOGNISES.
+
+    THE DOTFILE DECISION IS DRIVEN AS TWO ROWS, not asserted. `uv build` writes
+    `dist/.gitignore` itself, so the accepting shape HAS a dotfile in it and
+    must still pass; a dotfile that is not that one must still be refused. That
+    is why the exception is a literal name in the step and not "ignore hidden
+    files": ignoring the class would rest the answer on
+    `actions/upload-artifact@v4` excluding hidden files by default — third-party
+    behaviour behind a mutable ref, which is the shape of mitigation this whole
+    refusal exists to stop relying on — and would wave a
+    `dist/.stelling-0.0.9.zip` straight through.
+    """
+    body = _step_body(_TAG_STEP)
+
+    # THE ACCEPTING SHAPE, with the dotfile a real `uv build` leaves.
+    ok = _drive(body, _dist_of(tmp_path, "real", wheels=("0.2.0",),
+                               sdists=("0.2.0",)), TAG="v0.2.0")
+    assert ok.returncode == 0, (
+        "the tag gate refuses the `dist/` a single `uv build` leaves — one "
+        "wheel, one sdist and the `.gitignore` uv writes itself — so it would "
+        f"refuse every release.\n{ok.stdout}\n{ok.stderr}"
+    )
+
+    # AND WITHOUT THE DOTFILE, so `dist/.gitignore` is an exception and not a
+    # requirement: a `uv build --out-dir` elsewhere, or a cleaned directory,
+    # must not be refused for the file it does not have.
+    bare = _dist_of(tmp_path, "bare", wheels=("0.2.0",), sdists=("0.2.0",))
+    (bare / "dist" / ".gitignore").unlink()
+    still_ok = _drive(body, bare, TAG="v0.2.0")
+    assert still_ok.returncode == 0, (
+        "the tag gate now REQUIRES `dist/.gitignore`, which `uv build` happens "
+        "to write and nothing guarantees. It is an allowed entry, not a "
+        f"demanded one.\n{still_ok.stdout}\n{still_ok.stderr}"
+    )
+
+    def _extra(label, plant) -> tuple[pathlib.Path, str]:
+        tree = _dist_of(tmp_path, label, wheels=("0.2.0",), sdists=("0.2.0",))
+        return tree, plant(tree / "dist")
+
+    def _zip(dist):
+        _a_real_zip_sdist(dist / "stelling-0.0.9.zip")
+        return "dist/stelling-0.0.9.zip"
+
+    def _dotzip(dist):
+        _a_real_zip_sdist(dist / ".stelling-0.0.9.zip")
+        return "dist/.stelling-0.0.9.zip"
+
+    def _notes(dist):
+        (dist / "notes.txt").write_text("left here by a human\n", encoding="utf-8")
+        return "dist/notes.txt"
+
+    def _subdir(dist):
+        (dist / "stray").mkdir()
+        (dist / "stray" / "stelling-0.0.9.tar.gz").write_bytes(b"")
+        return "dist/stray"
+
+    for label, plant in (("zip", _zip), ("dotzip", _dotzip),
+                         ("notes", _notes), ("subdir", _subdir)):
+        tree, named = _extra(label, plant)
+        bad = _drive(body, tree, TAG="v0.2.0")
+        assert bad.returncode != 0, (
+            f"THE TAG GATE PASSED A `dist/` HOLDING {named}. `upload-artifact` "
+            "takes the whole directory and the publish step uploads what it "
+            "globs, so an entry no gate examined is an entry that ships. For "
+            "the `.zip` rows this is not hypothetical: twine recognises `.zip` "
+            "as a source distribution and PyPI accepts one. It "
+            f"reported:\n{bad.stdout}"
+        )
+        assert "holds files this job did not build" in bad.stdout, (
+            f"the {label} shape is not reaching this step's own refusal:\n"
+            f"{bad.stdout}\n{bad.stderr}"
+        )
+        assert named in bad.stdout, (
+            f"the refusal did not name {named}, so the publish log does not "
+            f"say what is in `dist/`:\n{bad.stdout}"
+        )
+        # and the two artefacts must NOT be named: a refusal that lists the
+        # files it accepted is a refusal a reader cannot act on.
+        for artefact in ("dist/stelling-0.2.0-py3-none-any.whl",
+                         "dist/stelling-0.2.0.tar.gz"):
+            assert f"  {artefact}\n" not in bad.stdout, (
+                f"the refusal listed {artefact}, which is one of the two "
+                f"artefacts it just established:\n{bad.stdout}"
+            )
+
+    # THREE AT ONCE, so the refusal is an inventory and not a first-hit.
+    many = _dist_of(tmp_path, "many", wheels=("0.2.0",), sdists=("0.2.0",))
+    _a_real_zip_sdist(many / "dist" / "stelling-0.0.9.zip")
+    (many / "dist" / "notes.txt").write_text("x\n", encoding="utf-8")
+    (many / "dist" / "stelling-0.2.0.tar.gz.asc").write_text("x\n", encoding="utf-8")
+    all_of_them = _drive(body, many, TAG="v0.2.0")
+    assert all_of_them.returncode != 0, all_of_them.stdout
+    for name in ("dist/stelling-0.0.9.zip", "dist/notes.txt",
+                 "dist/stelling-0.2.0.tar.gz.asc"):
+        assert name in all_of_them.stdout, (
+            "the refusal named some of the unaccounted entries and not all of "
+            f"them, so it is reporting a first hit rather than an inventory — "
+            f"{name} is missing:\n{all_of_them.stdout}"
+        )
+
+
 @_needs_a_shell
 def test_the_drives_are_reading_the_real_step_bodies():
-    """Anti-vacuity for the two drives, in the shape this file already uses.
+    """Anti-vacuity for the three drives, in the shape this file already uses.
 
     The drives assert on exit codes of a script this file did not write. Three
     ways that goes quietly wrong — a step name that no longer resolves, a
@@ -1311,12 +1646,20 @@ def test_the_drives_are_reading_the_real_step_bodies():
     and the first two are fatal in `_step_lines`/`_step_body` already. This
     pins what the extracted text must CONTAIN, so that a body reduced to its
     `set -euo pipefail` cannot satisfy the drives above by exiting 0.
+
+    AND TWO CONSTRUCTS ARE PINNED AS ABSENT rather than as present, which is
+    the shape this file already uses for `ls dist/`: a construct that is the
+    defect is asserted GONE, because pinning the repair by its spelling pins
+    the spelling. The second is an `exit 1` in the manifest step — `release.yml`
+    calls that step a non-refusal and gives it no count, so an `exit 1` there
+    is a refusal point the header's arithmetic never saw.
     """
     sdist = _step_body(_SDIST_STEP)
     tag = _step_body(_TAG_STEP)
     manifest = _step_body(_MANIFEST_STEP)
     for needle in ("tar tzf", "git ls-files", "comm -23", "explained.txt",
-                   "dist/*.tar.gz", "${#sdists[@]}", "shopt -s nullglob"):
+                   "dist/*.tar.gz", "${#sdists[@]}",
+                   "shopt -s nullglob dotglob", "mktemp -d", "trap "):
         assert needle in sdist, f"{needle!r} is gone from the sdist step body"
     # `ls dist/*.whl` USED TO BE ON THIS LIST and is deliberately not: reading
     # the LAST line of `ls` is the defect that step was repaired for, so a pin
@@ -1326,11 +1669,38 @@ def test_the_drives_are_reading_the_real_step_bodies():
     # for — each of which a rewrite back to `ls` would drop. The tarball
     # spellings below are the same decision made a second time.
     for needle in ("basename", "cut -d- -f2", "dist/*.whl", "dist/*.tar.gz",
-                   "export LC_ALL=C", "shopt -s nullglob", "${#wheels[@]}",
-                   "${#sdists[@]}", ".tar.gz | cut -d- -f2"):
+                   "export LC_ALL=C", "shopt -s nullglob dotglob",
+                   "${#wheels[@]}", "${#sdists[@]}", ".tar.gz | cut -d- -f2",
+                   # THE DIRECTORY, which the two globs above are not. A
+                   # rewrite that drops the inventory loop leaves both counts
+                   # standing and re-opens the `.zip` shape driven in
+                   # `test_the_tag_gate_refuses_a_dist_entry_it_did_not_build`.
+                   "for entry in dist/*", "${#extras[@]}"):
         assert needle in tag, f"{needle!r} is gone from the tag step body"
-    for needle in ("dist/*.tar.gz", "shopt -s nullglob", "tar tzf"):
+    # `dotglob` IS LOAD-BEARING AND NOT TIDINESS: without it the inventory loop
+    # cannot see a `dist/.stelling-0.0.9.zip` at all, and the one exception
+    # this step makes is a NAME rather than a class, so the loop has to be able
+    # to reach every dotfile in order to refuse the ones that are not it.
+    assert "dist/.gitignore) continue" in tag, (
+        "the tag step's dotfile exception is no longer the literal "
+        "`dist/.gitignore`. If it has become a pattern over hidden files, the "
+        "answer now rests on `actions/upload-artifact@v4` excluding them by "
+        "default — third-party behaviour behind a mutable ref, which is the "
+        "shape of mitigation the thirteenth refusal exists to stop relying on."
+    )
+    for needle in ("dist/*.tar.gz", "shopt -s nullglob dotglob", "tar tzf",
+                   "|| status=$?"):
         assert needle in manifest, f"{needle!r} is gone from the manifest step"
+    # THE ABSENT CONSTRUCT, asserted absent rather than the fix pinned by
+    # spelling: `release.yml` calls this step NOT a refusal and gives it no
+    # count, so an `exit 1` in it is a refusal point nobody counted — and the
+    # header's arithmetic would move without anyone deciding to move it.
+    assert "exit 1" not in manifest, (
+        "an `exit 1` has appeared in the manifest step. `release.yml` says "
+        "beside it that it is not a refusal and asserts nothing about what it "
+        "prints; the header counts refusal points and would now be wrong. If "
+        "this step is meant to refuse, say so there and move the count."
+    )
     assert "for sdist in dist/*.tar.gz" in manifest, (
         "the manifest step is back to reading ONE tarball. It is not a "
         "refusal — `release.yml` says so beside it — so with more than one "

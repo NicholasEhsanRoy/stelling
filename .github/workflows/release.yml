@@ -6,7 +6,7 @@
 # disable them. Requires a (pending) Trusted Publisher configured on PyPI
 # for this repository + workflow + environment.
 #
-# TWELVE REFUSAL POINTS STAND BETWEEN A TAG AND PyPI — ten `exit 1` sites
+# THIRTEEN REFUSAL POINTS STAND BETWEEN A TAG AND PyPI — eleven `exit 1` sites
 # written below, plus two steps that refuse by their own exit code — because
 # this is the one workflow whose mistakes are immutable: a release on PyPI
 # cannot be unpublished, only yanked, and a yanked file still resolves for
@@ -17,7 +17,10 @@
 # reason about; that refusal is the seventh `exit 1` site, and the sentence it
 # replaced is corrected beside the step rather than deleted. It said NINE until
 # the same argument was carried to the OTHER artefact — see "THREE MORE" below,
-# and the sentence THAT replaced, which this file used to end with.
+# and the sentence THAT replaced, which this file used to end with. It said
+# TWELVE until the two counts below stopped being mistaken for a statement
+# about the DIRECTORY — see "THE THIRTEENTH" at the end of this header, and the
+# mitigation THAT replaced, which was measured false with a file on disk.
 #
 # AND UNTIL `tests/test_release_gates.py` LANDED, NOTHING IN THIS REPOSITORY
 # READ THIS FILE. One test opened a workflow at all — `tests/test_reuse_pins.py`,
@@ -46,7 +49,7 @@
 #      whose contents this file spends three steps on, and its filename was
 #      never compared to anything. Both filenames are compared now.
 #
-# SEVEN OF THE TWELVE WERE DRIVEN IN BOTH DIRECTIONS at a61c01f, step body by
+# SEVEN OF THE THIRTEEN WERE DRIVEN IN BOTH DIRECTIONS at a61c01f, step body by
 # step body under `bash -e` with the runner environment faked, in a venv built
 # by this job's own install step (CPython 3.11.15, jax/jaxlib 0.10.2, numpy
 # 2.4.6, cvc5 1.3.4, z3-solver 5.0.0.0, pytest 9.1.1). A refusal never observed
@@ -90,13 +93,27 @@
 # tarballs and none, under every locale this box has) and
 # `test_the_sdist_gate_refuses_a_dist_it_cannot_read`.
 #
-# THE TWELFTH CANNOT FIRE, and that is stated here rather than left as an
-# untested branch. The "examined nothing" loop guards three files; the
-# `explained.txt` arm is dead. `printf '%s\n' "${GENERATED}"` emits a newline
-# even for an empty `GENERATED`, so `generated.txt` is never empty, so
-# `explained.txt = sort -u tracked.txt generated.txt` is never empty either —
-# measured at 1 byte in the degenerate case, with an empty index AND an empty
-# `GENERATED`. The `members.txt` and `tracked.txt` arms both fire and are
+# THE `explained.txt` ARM OF THE "examined nothing" LOOP CANNOT FIRE, and that
+# is stated here rather than left as an untested branch. THIS PARAGRAPH USED TO
+# OPEN "THE TWELFTH CANNOT FIRE", AND THAT ORDINAL WAS ANCHORED TO NOTHING: it
+# was carried from "THE NINTH" and bumped by three when the count moved, with
+# no re-derivation. Under this file's own enumeration the site it named is the
+# EIGHTH `exit 1` site in file order — the TENTH refusal if the two implicit
+# ones are counted where they stand — and never the twelfth. And the SITE
+# FIRES: two of its three arms are driven red. So an ordinal was claiming a
+# refusal point could not fire when what cannot fire is one ARM of it, and the
+# count pin cannot catch that — the arithmetic it checks is the NUMBER of
+# sites, and this was a claim about the inside of one. The claim is anchored to
+# the arm now, where it is checkable.
+#
+# The "examined nothing" loop guards three files; the `explained.txt` arm is
+# dead. `printf '%s\n' "${GENERATED}"` emits a newline even for an empty
+# `GENERATED`, so `generated.txt` is never empty, so
+# `explained.txt = sort -u tracked.txt generated.txt` is never empty either.
+# RE-MEASURED on the body this commit ships, in the degenerate case — an empty
+# index AND an empty `GENERATED` — `members.txt` 68 bytes, `tracked.txt` 0,
+# `generated.txt` 1, `explained.txt` 1, and the step refused at rc=1 on the
+# `tracked.txt` arm. The `members.txt` and `tracked.txt` arms both fire and are
 # driven; nothing is lost by the dead arm, and it is not a third check.
 #
 # NO STEP IN THIS FILE CHECKS THE WHEEL'S MEMBER LIST, AND THE ARGUMENT THAT
@@ -122,7 +139,7 @@
 #
 # WHAT CATCHES IT NOW is not a step here, and that is deliberate: it is three
 # tests in `tests/test_sdist_contents.py`, which run inside the suite above and
-# therefore refuse through refusal point 1 rather than adding a THIRTEENTH —
+# therefore refuse through refusal point 1 rather than adding a FOURTEENTH —
 # this sentence said "a tenth" when the count was nine, and the count is what
 # moves. The
 # wheel's package members are compared to the tree's as an EQUALITY (so it
@@ -134,15 +151,55 @@
 # wheel: ['stelling/contracts.py', 'stelling/solvers.py']" and "these modules
 # of it do not resolve: ['contracts', 'solvers']".
 #
-# WHAT IS STILL NOT CHECKED ABOUT `dist/`, said plainly rather than left to be
-# inferred from the two counts above: a file in `dist/` that is NEITHER a
-# `.whl` NOR a `.tar.gz`. Both counts are globs, and neither is an inventory of
-# the directory, so a stray `dist/notes.txt` is invisible to every step here
-# and is uploaded with the rest. `pypa/gh-action-pypi-publish` rejects what it
-# cannot recognise as a distribution, which is a refusal in somebody else's
-# code rather than one written down here; it is named because "exactly one
-# wheel and exactly one sdist" reads like a statement about the whole directory
-# and is not one.
+# THE THIRTEENTH IS THE DIRECTORY ITSELF, AND THE SENTENCE IT REPLACED WAS AN
+# ESCAPE HATCH IN SOMEBODY ELSE'S CODE THAT IS MEASURABLY OPEN. What stood here
+# said, correctly, that a file in `dist/` which is NEITHER a `.whl` NOR a
+# `.tar.gz` is invisible to every step — both counts are globs and neither is
+# an inventory of the directory, so a stray `dist/notes.txt` is uploaded with
+# the rest — and then excused it: *"`pypa/gh-action-pypi-publish` rejects what
+# it cannot recognise as a distribution."* MEASURED, THAT IS FALSE FOR THE CASE
+# THAT MATTERS. twine's `DIST_EXTENSIONS` is
+# `{'.whl': 'bdist_wheel', '.tar.gz': 'sdist', '.zip': 'sdist'}` — read off
+# twine 7.0.0 — so a `.zip` is a RECOGNISED SOURCE DISTRIBUTION, and PyPI
+# accepts `.zip` sdists. A real, coherent `stelling-0.0.9.zip`, built from this
+# tree's own `stelling-0.2.0.tar.gz` with `PKG-INFO`'s `Version:` rewritten,
+# passed `twine check` at rc=0. Dropped into a real `dist/` beside the real
+# `stelling-0.2.0-py3-none-any.whl` and `stelling-0.2.0.tar.gz`, `TAG=v0.2.0`,
+# on the bodies this file shipped one commit ago:
+#
+#   the tag step        rc=0   `tag=v0.2.0 wheel version=0.2.0 sdist
+#                               version=0.2.0`
+#   the sdist step      rc=0   `every one of 372 sdist members is committed to
+#                               this tree`
+#   the manifest step   rc=0   375 lines of manifest written
+#
+# Three green gates and a `0.0.9` SOURCE DISTRIBUTION on PyPI under a release
+# called v0.2.0, permanently. It is the same defect the eighth and ninth
+# refusals were written for, one file extension over, left standing on a hatch
+# in third-party code behind a MUTABLE BRANCH REF — the ref the `publish` job's
+# own comment argues is a deliberate choice precisely because it moves.
+#
+# SO THE TAG STEP INVENTORIES `dist/` NOW: once it has established the one
+# wheel and the one sdist, every remaining entry is a refusal, named. That is
+# not a new rule. It is the rule already written beside that step — *"the unit
+# of THAT answer is the DIRECTORY, because the directory is what gets
+# uploaded"* — applied to the directory instead of to two globs over it.
+#
+# AND IT IS NOT AN INVENTORY UNLESS IT SEES DOTFILES. `uv build` writes
+# `dist/.gitignore` ITSELF — one byte, `*`, verified on this tree — so EVERY
+# real release directory already holds a third entry, and every shell glob in
+# this file skipped it silently. That is the proof that "exactly one wheel and
+# exactly one sdist" was never a statement about `dist/`. `shopt -s dotglob` is
+# set in all three `dist/`-reading steps, and `dist/.gitignore` is allowed BY
+# NAME, as a literal. The alternative — ignore dotfiles as a class — was
+# rejected on measurement rather than on taste: it would rest the answer on
+# `actions/upload-artifact@v4` excluding hidden files by default, which is the
+# same shape of mitigation as the twine sentence above (third-party behaviour,
+# mutable ref, not written down here), and it would wave through a
+# `dist/.stelling-0.0.9.zip` at the one check that exists to inventory the
+# directory. One literal exception costs a refusal on the day `uv` writes a
+# second dotfile into `dist/`; re-deciding that deliberately is the right price
+# in the one file whose mistakes cannot be undone.
 
 name: release
 on:
@@ -343,6 +400,32 @@ jobs:
       # re-deciding it deliberately is the right price in the one file whose
       # mistakes cannot be undone.
       #
+      # AND THE DIRECTORY, WHICH IS WHAT THE TWO COUNTS ABOVE ARE NOT. Two
+      # globs are not an inventory: a `dist/` entry that is neither `.whl` nor
+      # `.tar.gz` was invisible to every step in this file, and the header's
+      # excuse for that — the publish action rejects what it cannot recognise —
+      # is measurably false for `.zip`. See "THE THIRTEENTH" in the header for
+      # the twine reading and the three-green-gates reproduction. The rule this
+      # step now applies is the one already written above it: once the one
+      # wheel and the one sdist are established, every other entry in `dist/`
+      # is a refusal, named. DRIVEN IN BOTH DIRECTIONS on the body below,
+      # `TAG=v0.2.0`, real `stelling-0.2.0` artefacts:
+      #
+      #   dist/ holds                                          verdict
+      #   whl + tar.gz + .gitignore                            rc=0
+      #   whl + tar.gz + .gitignore + stelling-0.0.9.zip       rc=1 names it
+      #   whl + tar.gz + .gitignore + notes.txt                rc=1 names it
+      #   whl + tar.gz + .gitignore + stray/ (a directory)     rc=1 names it
+      #   whl + tar.gz + .gitignore + .stelling-0.0.9.zip      rc=1 names it
+      #   whl + tar.gz  (no .gitignore at all)                 rc=0
+      #
+      # The last two rows are the dotfile decision and they are both halves of
+      # it: `dist/.gitignore` is allowed BY NAME because `uv build` writes it,
+      # it is not REQUIRED to be there, and no other dotfile is allowed —
+      # `shopt -s dotglob` is what makes the loop able to see one at all. The
+      # reasoning, and the alternative that was rejected, are in the header.
+      # `tests/test_release_gates.py` drives every row inside the suite.
+      #
       # THE TWO-TARBALL SHAPE DID NOT SILENTLY PICK — IT DIED WITHOUT SAYING SO,
       # which is a different defect with the same repair, and the difference is
       # recorded because the wheel paragraph above is about a PICK and it would
@@ -371,7 +454,16 @@ jobs:
       # above were all driven on the body below under `C`, `en_GB.UTF-8` and
       # `en_US.UTF-8`; the one-wheel green and the seven tags are unchanged in
       # every cell. `tests/test_release_gates.py` extracts this body and drives
-      # both refusals inside the suite, so they stay driven.
+      # every refusal in it inside the suite, so they stay driven.
+      #
+      # RE-DRIVEN ON THE BODY THIS COMMIT SHIPS, after `dotglob` and the
+      # directory inventory landed: the seven tags again, against real
+      # `stelling-0.2.0` artefacts in a `dist/` that also holds the
+      # `.gitignore` `uv build` writes — `v0.2.0` and `0.2.0` rc=0, and
+      # `v0.9.9`, `0.9.9`, the empty string, `v0.2.0 ` (trailing space) and
+      # `V0.2.0` rc=1. Every row of the version table above reproduces
+      # unchanged, and so does every wheel-count and sdist-count row. Nothing
+      # a release must still accept moved.
       - name: the tag and the artifacts must agree
         env:
           TAG: ${{ github.event.release.tag_name }}
@@ -381,8 +473,12 @@ jobs:
           # It is NOT what makes the count right — see the comment above.
           export LC_ALL=C
           # `nullglob` so an empty `dist/` reaches the refusals below as zero
-          # matches instead of arriving here as the literal glob string.
-          shopt -s nullglob
+          # matches instead of arriving here as the literal glob string, and
+          # `dotglob` so every glob in this step reads the WHOLE directory. A
+          # hidden `.whl` is a wheel and a hidden `.zip` is a file that gets
+          # uploaded; a check whose subject is the directory may not be blind
+          # to an entry because of how it is spelled.
+          shopt -s nullglob dotglob
           wheels=(dist/*.whl)
           if [ "${#wheels[@]}" -ne 1 ]; then
             printf 'dist/*.whl matched %s file(s)\n' "${#wheels[@]}"
@@ -397,9 +493,44 @@ jobs:
             echo "::error title=dist/ does not hold exactly one sdist::${#sdists[@]} files match dist/*.tar.gz, and this step can only speak for the one this job built. upload-artifact takes the whole directory and the publish step uploads every file in it, so a tarball this comparison never examined would go to PyPI permanently — and an sdist cannot be unpublished, only yanked. One 'uv build' of this project produces exactly one sdist; anything else in dist/ came from somewhere this job cannot account for. Empty dist/ and re-run the build."
             exit 1
           fi
+          # THE DIRECTORY, NOW THAT THE TWO ARTEFACTS ARE ESTABLISHED. Every
+          # entry that is neither of them is refused and named. `dist/` is what
+          # `upload-artifact` takes and what the publish step uploads, so this
+          # is the only place in the file where the question the step opens
+          # with — "will this release publish anything the tag does not
+          # name" — is actually asked of the thing that gets published.
+          extras=()
+          for entry in dist/*; do
+            case "${entry}" in
+              # `uv build` writes this itself; see the header for why it is a
+              # literal exception and not a class of them.
+              "${wheels[0]}"|"${sdists[0]}"|dist/.gitignore) continue ;;
+            esac
+            extras+=("${entry}")
+          done
+          if [ "${#extras[@]}" -ne 0 ]; then
+            printf 'dist/ holds entries that are neither the wheel nor the sdist:\n'
+            printf '  %s\n' "${extras[@]}"
+            echo "::error title=dist/ holds files this job did not build::${#extras[@]} entries in dist/ are neither the one wheel nor the one sdist this step just established, and they are listed above. upload-artifact takes the whole directory and the publish step uploads every file in it, so being neither a .whl nor a .tar.gz does not make a file safe: twine recognises .zip as a SOURCE DISTRIBUTION, a coherent stelling-0.0.9.zip passed twine check at rc=0, and with one in dist/ the tag, sdist and manifest steps of this workflow all returned 0. This step used to rely on the publish action rejecting what it cannot recognise; it recognises .zip. Empty dist/ and re-run the build."
+            exit 1
+          fi
           # `cut -d- -f2` off the basename for both, and `.tar.gz` stripped
           # first because an sdist name is `<name>-<version>.tar.gz` with no
           # separator after the version — `cut` alone yields `0.0.9.tar.gz`.
+          #
+          # LATENT, NOT LIVE, AND IT FAILS CLOSED — recorded because the day it
+          # bites is a day somebody is renaming the project. `-f2` is the
+          # second HYPHEN-delimited field, so this reads the version correctly
+          # exactly while the distribution NAME holds no hyphen. `stelling`
+          # holds none, and PEP 625 keeps it that way for the sdist: a
+          # compliant backend normalises `a-b` to `a_b` in the filename, so
+          # `stelling_core-0.2.0.tar.gz` still reads `0.2.0` (measured). What
+          # breaks it is a filename that KEEPS the hyphen —
+          # `stelling-core-0.2.0.tar.gz` reads `core`, and the wheel spelling
+          # `stelling-core-0.2.0-py3-none-any.whl` reads `core` too (both
+          # measured) — which is what a legacy or non-normalising backend
+          # writes. Nothing is published on it: no tag equals `core`, so both
+          # comparisons below refuse, loudly, on the right side.
           version="$(basename "${wheels[0]}" | cut -d- -f2)"
           sdist_version="$(basename "${sdists[0]}" .tar.gz | cut -d- -f2)"
           echo "tag=${TAG} wheel version=${version} sdist version=${sdist_version}"
@@ -448,8 +579,30 @@ jobs:
       # it" is the same shape of argument as "same build, so it agrees by
       # construction", which is the sentence this file had to retract.
       #
-      # REFUSAL POINTS (four `exit 1` sites, three of which can fire). The
-      # tarball COUNT is the new one and is driven in both directions by
+      # REFUSAL POINTS: four `exit 1` sites, and ALL FOUR FIRE when this body
+      # is driven ALONE — which is the frame the paragraph directly above
+      # requires, because a `run:` block is a script that has to be correct on
+      # the input it is given. THREE of them can fire in the workflow as it
+      # stands, and only three, because the tag step establishes the tarball
+      # count before this step runs.
+      #
+      # THE PARENTHETICAL HERE USED TO READ "three of which can fire" WITH
+      # NEITHER FRAME NAMED, one paragraph after this file insists on the
+      # standalone one. It was inherited as "three sites, two of which can
+      # fire" — flatly wrong — and bumped by one onto a number that happens to
+      # be true in the OTHER frame, instead of being re-derived. RE-DERIVED
+      # here, each site driven standalone on the body this commit ships,
+      # scrubbed environment, `GENERATED=PKG-INFO`:
+      #
+      #   dist/ + tree                     rc   what it said
+      #   two tarballs                     1    cannot tell which tarball to read
+      #   a VALID but EMPTY tarball        1    members.txt is empty
+      #   an empty git index               1    tracked.txt is empty
+      #   a tarball with no PKG-INFO       1    not looking at a real artefact
+      #   an uncommitted member            1    names src/stelling/_probe.py
+      #   the healthy tree                 0    every one of 5 sdist members …
+      #
+      # The tarball COUNT is driven in both directions inside the suite by
       # `test_the_sdist_gate_refuses_a_dist_it_cannot_read` rather than at
       # a61c01f, where it did not exist. The other three were driven in both
       # directions at a61c01f. GREEN on the real
@@ -478,7 +631,10 @@ jobs:
         run: |
           set -euo pipefail
           export LC_ALL=C
-          shopt -s nullglob
+          # `dotglob` for the same reason the tag step sets it: the three steps
+          # that read `dist/` must agree about what is in it, and a hidden
+          # `.tar.gz` is a tarball this step would otherwise not count.
+          shopt -s nullglob dotglob
           sdists=(dist/*.tar.gz)
           if [ "${#sdists[@]}" -ne 1 ]; then
             printf 'dist/*.tar.gz matched %s file(s)\n' "${#sdists[@]}"
@@ -487,10 +643,23 @@ jobs:
             exit 1
           fi
           sdist="${sdists[0]}"
-          tar tzf "${sdist}" | sed -e 's|^[^/]*/||' -e '/\/$/d' -e '/^$/d' | sort -u > members.txt
-          git ls-files | sort -u > tracked.txt
-          printf '%s\n' "${GENERATED}" | sort -u > generated.txt
-          sort -u tracked.txt generated.txt > explained.txt
+          # NOTHING IS LEFT IN THE CHECKOUT, ON ANY PATH OUT. These four files
+          # used to be written into the checkout ROOT and removed by an `rm -f`
+          # on the SUCCESS path only, so every refusal that got as far as
+          # writing them left `members.txt`, `tracked.txt`, `generated.txt` and
+          # `explained.txt` behind — measured at four files on each of the
+          # three refusal paths that reach them, and zero on the fourth, which
+          # returns above before any is written. State left in the workspace by
+          # a step whose own comment argues that nothing is carried between
+          # steps. A scratch directory plus a `trap` says the same thing in a
+          # way that survives `exit 1`; the messages below still name the plain
+          # basename, because that is what a reader needs.
+          work="$(mktemp -d)"
+          trap 'rm -rf "${work}"' EXIT
+          tar tzf "${sdist}" | sed -e 's|^[^/]*/||' -e '/\/$/d' -e '/^$/d' | sort -u > "${work}/members.txt"
+          git ls-files | sort -u > "${work}/tracked.txt"
+          printf '%s\n' "${GENERATED}" | sort -u > "${work}/generated.txt"
+          sort -u "${work}/tracked.txt" "${work}/generated.txt" > "${work}/explained.txt"
           # ZERO EXAMINED MUST NOT READ AS ZERO PROBLEMS. Each of these is a
           # way for the comparison below to come back empty because it looked
           # at nothing: an unreadable tarball, an index this job cannot see, a
@@ -503,9 +672,14 @@ jobs:
           # tar's own rc 2, with no annotation. Still red, so still safe, but
           # `pipefail` is what catches that one and not this loop — which is
           # the sort of thing a comment naming "an unreadable tarball" would
-          # otherwise take credit for.
+          # otherwise take credit for. That is tolerable HERE and was not
+          # tolerable in the manifest step below, and the difference is the
+          # whole of it: this step is a refusal point, so failing closed on a
+          # tarball it cannot read is the answer it exists to give; that one is
+          # not, so failing closed there was a refusal nobody counted. See
+          # beside it.
           for f in members.txt tracked.txt explained.txt; do
-            if [ ! -s "${f}" ]; then
+            if [ ! -s "${work}/${f}" ]; then
               echo "::error title=the sdist check examined nothing::${f} is empty, so the comparison below could not have found anything. Refusing to publish."
               exit 1
             fi
@@ -514,26 +688,51 @@ jobs:
           # (`GENERATED=NOT-A-REAL-MEMBER`): "is not in
           # dist/stelling-0.1.0.tar.gz. Refusing to publish.", exit 1.
           for required in "${GENERATED}" pyproject.toml README.md LICENSE; do
-            if ! grep -qxF "${required}" members.txt; then
+            if ! grep -qxF "${required}" "${work}/members.txt"; then
               echo "::error title=the sdist check is not looking at a real artefact::'${required}' is not in ${sdist}. Refusing to publish."
               exit 1
             fi
           done
-          unexplained="$(comm -23 members.txt explained.txt)"
+          unexplained="$(comm -23 "${work}/members.txt" "${work}/explained.txt")"
           if [ -n "${unexplained}" ]; then
             echo "${unexplained}"
             echo "::error title=the sdist ships files that are not committed to this tree::The members listed above are in ${sdist} and not in \`git ls-files\` for the tagged commit. An sdist on PyPI cannot be unpublished, only yanked, and a yanked file still resolves for anyone who pins it. Either commit them and re-tag, or find the force-include route putting them there (see tests/test_sdist_contents.py). Refusing to publish."
             exit 1
           fi
-          echo "every one of $(wc -l < members.txt) sdist members is committed to this tree"
-          rm -f members.txt tracked.txt generated.txt explained.txt
+          echo "every one of $(wc -l < "${work}/members.txt") sdist members is committed to this tree"
       # A last look at what would ship, in the log, before it becomes immutable.
       # tests/test_sdist_contents.py already holds the allowlist shut; this is
       # here so the record of a release includes the file list it published.
       #
-      # NOT a refusal, and driven to establish that rather than to assume it:
-      # at a61c01f it wrote 282 lines of manifest and exited 0. The only way it
-      # goes red is `set -u` on an unset `GITHUB_STEP_SUMMARY` (driven:
+      # NOT a refusal — and it took a repair to make that true, not just a
+      # drive. At a61c01f it wrote 282 lines of manifest and exited 0, and this
+      # comment concluded: *"The only way it goes red is `set -u` on an unset
+      # `GITHUB_STEP_SUMMARY`."* DRIVEN FALSE FOUR WAYS on the body that
+      # sentence described, one tarball in `dist/`, `GITHUB_STEP_SUMMARY` set:
+      #
+      #   dist/stelling-0.2.0.tar.gz was…       verdict
+      #   non-gzip garbage                      rc=2, no annotation
+      #   a gzip of something that is not tar   rc=2, no annotation
+      #   a truncated gzip                      rc=2, no annotation
+      #   a valid tar.gz + trailing garbage     rc=2, no annotation
+      #
+      # `pipefail` and `set -e` turn `tar`'s own exit code into a failed
+      # release, from the one step in this job whose entire purpose is to
+      # PRINT, with nothing said about why. It is unreachable in the workflow
+      # as it stands ONLY because the sdist step `tar tzf`s the same file one
+      # step earlier — which is "an earlier step would have caught it", the
+      # argument this file exists to retract, and the one the sdist step
+      # already refused by establishing its own tarball count.
+      #
+      # SO `tar` IS ALLOWED TO FAIL HERE, and what it said goes into the record
+      # instead of into the job's exit code. NO COUNT WAS ADDED: a count would
+      # make this a refusal point, which it deliberately is not. A readable
+      # tarball with no members is recorded as exactly that, because "zero
+      # examined must not read as zero problems" is no less true of a record
+      # than of a check. RE-DRIVEN on the body below: all four shapes above
+      # rc=0, each recorded as unreadable with tar's own message beneath it;
+      # the valid tarball unchanged, rc=0 with its manifest; and the one red
+      # path left is `set -u` on an unset `GITHUB_STEP_SUMMARY` (driven:
       # "GITHUB_STEP_SUMMARY: unbound variable", exit 1), which a runner always
       # sets. It asserts nothing about what it prints — the step before it is
       # what does that.
@@ -553,11 +752,24 @@ jobs:
         run: |
           set -euo pipefail
           export LC_ALL=C
-          shopt -s nullglob
+          shopt -s nullglob dotglob
           for sdist in dist/*.tar.gz; do
             echo "### sdist contents (${sdist})" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            tar tzf "${sdist}" | sed 's|^[^/]*/||' | sort >> "$GITHUB_STEP_SUMMARY"
+            # `tar` IS ALLOWED TO FAIL, and this is the whole repair: under
+            # `set -e` a command in a `||` list does not end the script, so
+            # what tar said becomes part of the record instead of the exit
+            # code of a step that only prints.
+            status=0
+            listing="$(tar tzf "${sdist}" 2>&1)" || status=$?
+            if [ "${status}" -ne 0 ]; then
+              printf 'tar could not list this file (exit %s). What it said:\n' "${status}" >> "$GITHUB_STEP_SUMMARY"
+              printf '%s\n' "${listing}" >> "$GITHUB_STEP_SUMMARY"
+            elif [ -z "${listing}" ]; then
+              echo '(this tarball is readable and holds no members)' >> "$GITHUB_STEP_SUMMARY"
+            else
+              printf '%s\n' "${listing}" | sed 's|^[^/]*/||' | sort >> "$GITHUB_STEP_SUMMARY"
+            fi
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           done
       - uses: actions/upload-artifact@v4
