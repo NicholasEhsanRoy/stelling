@@ -379,14 +379,29 @@ through `contracts.check_contract`, which takes the same `vacuity_mode`,
 `solver_timeout_ms`, `refine` and `falsify` as `check` does.
 
 **`falsify` is not an ordinary parameter, and it is listed beside them
-here because the signature prints it there.** It is **shipped since 0.2.0,
-DEFAULT-OFF and UNAUDITED** — with the default `None` nothing changes and
+here because the signature prints it there.** It is **shipped since 0.2.0
+and default-off** — with the default `None` nothing changes and
 `stelling.falsify` is never imported; with `"sample"` a VERIFIED is
 attacked by executing the real program at concrete points inside the
-declared set. No audit has been run against it and it may be changed or
-withdrawn in any release without a deprecation cycle, so it is here to be
-measured rather than to be built on. Its docstring in
-`stelling.preconditions.check` says the same.
+declared set. Its stability level is `experimental` —
+`DOCUMENTATION_ARCHITECTURE.md` §8.5's *"may change without notice"*,
+guarantee *"none"* — so the keyword may be changed or withdrawn in any
+release with **no deprecation cycle and no notice**, and it is here to be
+measured rather than to be built on. Whether the probe has been *audited*
+is a separate question from that level, and it is answered rather than
+open: the fire condition's exact reading is checked on every run against
+an independent `Fraction` oracle that shares no code with it, in
+`tests/test_probe_oracle.py`, which asserts its own reading counts rather
+than leaving them to prose. **Two caller-facing facts reach you through
+this door exactly as they reach you through `check()`**, and both are
+stated in full above, under *The `falsify` pass is `experimental`, and it
+can only refute* and *`check()` can also raise*: with the probe on, the
+call **may raise instead of returning a verdict**, and one of the two
+classes it can raise is a `BaseException` that `except Exception:` will
+not catch; and **a firing is a counterexample while a silence is
+nothing** — the probe can only refute, so a probed VERIFIED is not a
+better VERIFIED. Its docstring in `stelling.preconditions.check` says the
+same.
 
 **One difference worth knowing before you reach for it:** `check_contract`
 does **not** take `solver=`, so the portfolio cannot be restricted from the

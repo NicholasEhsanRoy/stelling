@@ -78,8 +78,55 @@ sits with `test_probe_oracle.py` and `test_probe_witness.py`, which are
 its siblings by subject as well as by sort order.
 
 ────────────────────────────────────────────────────────────────────────────
+BOTH HALVES: THE LEVEL IS STATED, *AND* THE RETIRED WORDS ARE GONE
+────────────────────────────────────────────────────────────────────────────
+
+**EVERYTHING ABOVE IS A PRESENCE CHECK, AND A PRESENCE CHECK PASSED A
+PAGE THAT CONTRADICTED ITSELF.** `docs/preconditions.md` carried both of
+these two hundred and forty-seven lines apart on `4d29a63`, and every
+assertion in this file was green across the pair — the first in the section
+that reads a verdict, the second in the one that reaches `check_contract`:
+
+    **Stability: `experimental`.** That is the level from
+    `DOCUMENTATION_ARCHITECTURE.md` §8.5 …
+
+    It is **shipped since 0.2.0, DEFAULT-OFF and UNAUDITED** … No audit
+    has been run against it …
+
+Neither section is reachable from the other's check. The four sites are
+matched by four templates and the meaning by one quotation, and **none of
+those five looks at anything a page says a second time** — so a paragraph
+that assigns the keyword a word this project has retired sits beside them,
+untouched, reading to a caller as a decision. That is how it got there: the
+two sections came from different branches, each true alone, and the merge
+was clean.
+
+So the pin has an ABSENCE half.
+:func:`test_no_retired_level_word_about_the_probe_stands_as_a_live_claim`
+holds that no retired level-word about this keyword survives as a LIVE
+CLAIM in the pages read here — `UNAUDITED` and `UNRELEASED`, which the
+record says were retired, and `provisional`, which is a level §8.5 still
+defines but no longer this keyword's. The pages QUOTE all three, at
+length and on purpose, and §8.5 defines `provisional` outright, so a rule
+that forbade the strings would forbid the explanation. What the rule
+forbids is the strings STANDING UNMARKED IN THE PAGE'S OWN VOICE; the
+seams it cannot see are written out in that function.
+
+────────────────────────────────────────────────────────────────────────────
 WHAT IS DELIBERATELY *NOT* PINNED HERE
 ────────────────────────────────────────────────────────────────────────────
+
+**IT READS FIVE FILES AND NOTHING ELSE, SO A CONTRADICTION ANYWHERE ELSE
+IS INVISIBLE TO IT.** They are `src/stelling/falsify.py`,
+`src/stelling/preconditions.py`, `DOCUMENTATION_ARCHITECTURE.md`,
+`docs/harness-api.md` and `docs/preconditions.md`. A sixth page that
+assigns this keyword a level, or repeats a retired one — `README.md`,
+`CHANGELOG.md`, `docs/reading-a-verdict.md`, a release note, a docstring
+in `contracts.py` — is outside every assertion below and always was. The
+defect this half answers was inside a page the pin already read; a
+paragraph one file over would have passed both halves in silence. Adding a
+page to `_PAGES` is the whole fix, and it is not automatic: nothing here
+discovers the pages, and a page nobody adds is a page nobody checks.
 
 The six disclosures in `falsify.py`'s docstring are NOT a restatement of the
 level and are not checked against it. A level is a promise about future
@@ -205,6 +252,226 @@ _SITES: tuple[tuple[Path, str], ...] = (
     (HARNESS_API, "**Stability: `{level}`**"),
     (PRECONDITIONS_DOC, "**Stability: `{level}`.**"),
 )
+
+
+#: The five files every assertion in this module reads, and the only five.
+#: The four SITES above are where the level is STATED; this is where it may be
+#: CONTRADICTED, which is a wider set by one file: the policy page states no
+#: level for this keyword at all and is read for §8.5 alone. Nothing here
+#: discovers a page: a sixth page that assigns this keyword a level, or
+#: leaves a retired one standing, is invisible to both halves until somebody
+#: adds it to this tuple.
+_PAGES: tuple[Path, ...] = (
+    FALSIFY,
+    PRECONDITIONS,
+    POLICY,
+    HARNESS_API,
+    PRECONDITIONS_DOC,
+)
+
+#: The two words the record says were RETIRED from this keyword's shipped text,
+#: neither of which §8.5 ever defined, so neither can be derived from the policy
+#: table the way the level-words are. `falsify.py`'s own heading names them
+#: together -- *"THE TWO IT REPLACES WERE ``PROVISIONAL`` AND ``UNAUDITED``"* --
+#: and `UNRELEASED` is the half of *"unreleased and unaudited"* that went with
+#: it, recorded in `CHANGELOG.md` and in `tests/test_falsify_default_path.py`.
+#: They are typed here because they are HISTORY, and history is not parseable
+#: out of a current table; the third retired word, `provisional`, IS derived.
+_RETIRED_HISTORICAL: tuple[str, ...] = ("UNAUDITED", "UNRELEASED")
+
+#: A retired word is a MENTION when the text marks it as one, and in this
+#: repository a mention is delimited: ``rst double backticks``, `markdown
+#: backticks`, or "quotation marks" -- §8.5's own table row, `falsify.py`'s
+#: retirement paragraphs and both user-facing pages' contrast sentences are all
+#: one of the three. Italics are deliberately NOT a marker: `**bold**` is the
+#: register a claim is made in on these pages, and a `*...*` rule reads the
+#: inner half of a bold run as a quotation, which is exactly the paragraph this
+#: absence half exists to catch.
+_MENTION = re.compile(r"``[^`]*``|`[^`]*`|\"[^\"]*\"")
+
+#: The other way a retired word is not a claim: the sentence REPORTS it rather
+#: than asserting it. Reporting verbs and retirement verbs only -- a sentence
+#: saying what the text said, or that the word is gone. Definitions are not in
+#: this list, because every definition in these five files marks its word.
+_REPORTED = re.compile(
+    r"\b(said|says|read|reads|wrote|written|called|named|names|quoted|quotes"
+    r"|retired|retires|replaced|replaces|used to|no longer|former|formerly"
+    r"|old)\b",
+    re.IGNORECASE,
+)
+
+#: A paragraph is about this keyword when it names it. `probe` and `falsify`
+#: are matched as substrings, not words, so `tests/test_probe_oracle.py` and
+#: `stelling.falsify` bring their paragraphs into scope -- the retirement
+#: paragraphs name the keyword only through those.
+_SUBJECT = re.compile(r"falsify|probe", re.IGNORECASE)
+
+
+def _retired_words() -> tuple[str, ...]:
+    """The words that may not stand as a live claim about this keyword.
+
+    `provisional` is DERIVED: it is a level §8.5 still defines and this
+    keyword no longer carries, so if the constant is ever moved TO it the
+    word stops being retired and drops out of this tuple by itself, leaving
+    the positive half above to hold it. The other two are typed.
+    """
+    level = _source_level()
+    levels = _policy_levels()
+    assert "provisional" in levels, (
+        f"§8.5 no longer defines 'provisional'; it defines {sorted(levels)}. "
+        f"This keyword's shipped text was assigned that word and it was "
+        f"retired, and this pin derives the retirement from the table"
+    )
+    return tuple(
+        word for word in ("provisional", *_RETIRED_HISTORICAL)
+        if word.lower() != level.lower()
+    )
+
+
+def _blocks(path: Path) -> list[tuple[list[tuple[int, str]], str]]:
+    """Blank-line-delimited blocks of one file: its numbered lines, flattened.
+
+    The unit is the paragraph rather than the file because SCOPE is what
+    keeps this rule off the policy's own vocabulary: §8.5's table and
+    `DOCUMENTATION_ARCHITECTURE.md`'s `Stability` enum both spell
+    `provisional` bare, and neither is a claim about this keyword. The
+    flattening is `_flat`'s, for `_flat`'s reason.
+    """
+    numbered: list[tuple[int, str]] = []
+    out: list[tuple[list[tuple[int, str]], str]] = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if line.strip():
+            numbered.append((number, line))
+            continue
+        if numbered:
+            out.append((numbered, re.sub(r"\s+", " ", " ".join(l for _, l in numbered))))
+            numbered = []
+    if numbered:
+        out.append((numbered, re.sub(r"\s+", " ", " ".join(l for _, l in numbered))))
+    return out
+
+
+def _sentence_around(flat: str, index: int) -> str:
+    """The sentence of `flat` containing `index`, split as `_flat`'s siblings do."""
+    bounds = [0] + [m.end() for m in re.finditer(r"(?<=[.!?]) ", flat)] + [len(flat)]
+    for start, stop in zip(bounds, bounds[1:]):
+        if start <= index < stop:
+            return flat[start:stop]
+    return flat
+
+
+def test_no_retired_level_word_about_the_probe_stands_as_a_live_claim():
+    """THE ABSENCE HALF. A page may quote a retired word; it may not use one.
+
+    Everything else in this file checks that something is PRESENT — the
+    level at four sites, §8.5's meaning at two, both exception classes,
+    *"only refute"*. A presence check cannot see a second paragraph
+    contradicting the first, and one stood in `docs/preconditions.md` from
+    the merge that made it until this branch: the section that reads a
+    verdict assigned `experimental` and quoted the policy, and the contracts
+    section, two hundred and forty-seven lines down, said the keyword was
+    *"DEFAULT-OFF and UNAUDITED"* and that *"no audit has been run against
+    it"*. Both sections were true on the branch each arrived from; the
+    merge was clean; every assertion above was green.
+
+    **THE RULE.** In the paragraphs of `_PAGES` that name this keyword, a
+    retired word may appear only as a MENTION, and a mention is one of two
+    things:
+
+    * **marked** — inside backticks or quotation marks, which is how §8.5's
+      row, `falsify.py`'s retirement heading and both pages' *"it is
+      deliberately not `provisional`"* sentences all spell theirs; or
+    * **reported** — in a sentence that says the word was said, read,
+      replaced or retired, which is how `falsify.py`'s level comment spells
+      the one bare occurrence in everything this scans (*"This module's
+      heading said PROVISIONAL while its own next sentence disclosed …"*).
+
+    Anything else is the page asserting the word in its own voice, and
+    fails. The forbidden paragraph was neither: `UNAUDITED` stood unmarked
+    inside a `**bold**` run, with no reporting verb anywhere in its
+    sentence.
+
+    **WHAT THIS RULE CANNOT TELL APART, STATED RATHER THAN HOPED.**
+
+    1. **A marked live claim reads as a mention.** ``**Stability:
+       `UNAUDITED`.**`` is backticked and would pass the paragraph scan.
+       The four ASSIGNMENT TEMPLATES are re-checked against the retired
+       words below to close that for the four forms this repository
+       actually uses, and a fifth form is open.
+    2. **An unmarked mention reads as a claim.** A page that says the probe
+       *was* UNAUDITED, bare and with no reporting verb, is a false
+       positive. The rule enforces the convention that a mention is marked;
+       it does not read the English, and it has no notion of tense.
+    3. **A paraphrase carries no retired word at all.** *"No audit has been
+       run against it"* — the second half of the very paragraph this test
+       was written for — contains none of the three strings and is
+       invisible here. This is a WORD rule. Only the sibling checks that
+       hold the pages to §8.5's own meaning reach a claim spelled out in
+       other words.
+    4. **`stable` and `deprecated` are excluded, though §8.5 defines them
+       too.** They are ordinary English on these pages — `falsify.py`
+       describes a band *"every point of it stable under a one-ulp input
+       perturbation"*, in its docstring and again in a comment — and
+       nothing here can tell that adjective from a level assignment.
+       Scanning them was tried and produced exactly those two false
+       positives and no others.
+    5. **Scope is the paragraph that NAMES the keyword.** `falsify.py`'s
+       ruled `STABILITY:` heading and its six-disclosures paragraph both
+       carry retired words and name neither `falsify` nor `probe` in the
+       same block, so neither is scanned. Both are marked; the rule would
+       pass them if it saw them. A block that discusses the keyword without
+       naming it is out of reach.
+    """
+    retired = _retired_words()
+    assert retired, (
+        "every word this pin treats as retired is the level the source "
+        "assigns; there is nothing left to forbid"
+    )
+    live: list[str] = []
+
+    # (a) A retired word in one of the four ASSIGNMENT forms, marked or not.
+    for path, template in _SITES:
+        text = _flat(path).lower()
+        for word in retired:
+            claim = template.format(level=word).lower()
+            if claim in text:
+                live.append(
+                    f"{path.relative_to(REPO)}: assigns "
+                    f"{template.format(level=word)!r}"
+                )
+
+    # (b) A retired word standing unmarked and unreported in the page's voice.
+    for path in _PAGES:
+        for numbered, flat in _blocks(path):
+            if not _SUBJECT.search(flat):
+                continue
+            marked = [m.span() for m in _MENTION.finditer(flat)]
+            for word in retired:
+                for found in re.finditer(rf"\b{re.escape(word)}\b", flat, re.IGNORECASE):
+                    if any(a <= found.start() and found.end() <= b for a, b in marked):
+                        continue
+                    sentence = _sentence_around(flat, found.start())
+                    if _REPORTED.search(sentence):
+                        continue
+                    line = next(
+                        (
+                            number for number, text in numbered
+                            if re.search(rf"\b{re.escape(word)}\b", text, re.IGNORECASE)
+                        ),
+                        numbered[0][0],
+                    )
+                    live.append(
+                        f"{path.relative_to(REPO)}:{line}: {found.group(0)!r} "
+                        f"stands unmarked and unreported in: "
+                        f"{sentence.strip()[:160]}"
+                    )
+
+    assert not live, (
+        f"the `falsify` keyword's level is {_source_level()!r} and these "
+        f"words are retired from its shipped text: {list(retired)}. A page "
+        f"may quote one while explaining what was retired; these use one as "
+        f"a live claim:\n  " + "\n  ".join(live)
+    )
 
 
 def test_the_source_names_a_level_the_policy_table_defines():
