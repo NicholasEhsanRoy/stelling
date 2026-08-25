@@ -84,8 +84,15 @@ blackjax: same-key 5, different-results 4, stuck 3, silently 3, key-reuse
   generates 5.6% of the tracker (usage burden), and **jmd#141 is a defect
   in the detector itself** (update misbehaves when there is *no*
   overflow). Zero incidents of silent int32 *arithmetic* overflow were
-  found in any tracker — the int-overflow candidate dies on field
-  evidence despite the probed silent wrap.
+  found in any tracker — **and that zero is uninterpretable for this
+  class, by this file's own argument three bullets up.** A tracker counts
+  what somebody noticed; the probed behaviour is a silent wrap, so a
+  filing requires the user to have discovered a wrong number by some
+  other route. *This read "the int-overflow candidate dies on field
+  evidence despite the probed silent wrap" — the concessive clause names
+  the confound and then proceeds through it. Corrected 2026-08-24: the
+  candidate is UNMEASURED, and `design/jax-verification-categories.md`'s
+  D9 row is corrected with it.*
 - **New incidents, bucketed and attributed:** dfx#707 (open c5,
   compile-time hang in VirtualBrownianTree — termination, compile-time
   variant); dfx#185 (controller thrash on a switched system — Perf bucket,

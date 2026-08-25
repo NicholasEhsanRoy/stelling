@@ -307,9 +307,19 @@ The two causes are distinct:
 **We are saying:** no existing tool in the JAX ecosystem performs trace-time
 overflow detection for operator-syntax integer narrowings (`x + N`, `x * N`,
 `x.at[i].set(N)`, etc. — the spellings where the literal is destroyed before
-the trace exists). Confirmed: zero tools on GitHub, PyPI, or in academic
-literature. JAX's own attempt was abandoned; the community's was rejected as
-fundamentally infeasible.
+the trace exists). **What was measured: a prior-art sweep of GitHub, PyPI and
+the literature on 2026-08-11 returned no such tool.** JAX's own attempt was
+abandoned; the community's was rejected as fundamentally infeasible — and
+those two are positive findings, which is why they carry the claim and the
+sweep does not.
+
+*This read "Confirmed: zero tools on GitHub, PyPI, or in academic literature",
+and a sweep cannot confirm a universal negative — it bounds where somebody
+looked and what they searched for. The claim is kept in the weaker form
+because the weaker form is what the sweep supports, and because the two
+abandoned attempts are better evidence for the same point than the silence
+is. This page's own line four screens up is the rule it broke: "no narrowing
+was seen" and "no narrowing occurred" are different claims.*
 
 **We are NOT saying:** static analysis is universally blind to all integer
 operations. For `jnp.where` and `jnp.clip`, the literal survives in the
@@ -346,6 +356,6 @@ be narrowed, not on all of them.
 | Issue #31426 — deprecation warning request | [jax-ml/jax#31426](https://github.com/jax-ml/jax/issues/31426) (2025-08, open, zero comments) |
 | PR #34797 — community attempt, rejected | [jax-ml/jax#34797](https://github.com/jax-ml/jax/pull/34797) (2026-02-03, closed in 44 min by jakevdp) |
 | Issue #278 — OOB indexing (broader context) | [jax-ml/jax#278](https://github.com/jax-ml/jax/issues/278) (2019-01, P2, still open) |
-| No tools on PyPI/GitHub/Scholar | prior-art sweep 2026-08-11; zero results for "jaxpr verification", "jax overflow detection", "jax static analysis" |
+| No tool FOUND on PyPI/GitHub/Scholar | prior-art sweep 2026-08-11; zero results for the three queries "jaxpr verification", "jax overflow detection", "jax static analysis" — a bound on the search, not on the population |
 | `const_fold_rules` not exported publicly | 7 candidate `jax.extend` modules measured on both series, none exports it |
 | JAX 0.11.0 is latest release | [PyPI](https://pypi.org/project/jax/) + [GitHub releases](https://github.com/jax-ml/jax/releases), checked 2026-08-11 |

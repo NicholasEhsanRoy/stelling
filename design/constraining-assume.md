@@ -330,9 +330,12 @@ the rule found an UNSOUND escape in the F1 fix on its first use.**
   the measured cost.
 
 **Second re-attack (on the exactness split): 0 UNSOUND / 0 FRAGILE —
-the split held** under scope-descent bookkeeping attacks, flag
-persistence, ordering edges, exactness-leak probes, and
-certified-behavior regression checks. The auditor also corrected its
+the attacks that were built did not break it**, and they were
+scope-descent bookkeeping attacks, flag persistence, ordering edges,
+exactness-leak probes, and certified-behavior regression checks. *Read
+"the split held" until 2026-08-24. A round that found nothing bounds the
+round; the split is held by the exactness argument this note states, and
+that argument is what a reader should check.* The auditor also corrected its
 own round-2 pin (an in-branch-REFUTED nonemptiness argument that was
 construction-specific — selector correlation defeats it in general;
 the builder's in-tree test generalizes it correctly). Two COSMETICs

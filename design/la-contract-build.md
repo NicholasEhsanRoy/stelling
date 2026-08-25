@@ -82,10 +82,13 @@ interval-only (no dependency), and both REFUTE through their own path.
 Mandate led with the emptiness asymmetry; report format required the
 "attacks that did not land" list — a clean audit that cannot show its
 attack list is not a clean audit. Result: **ten findings, zero
-UNSOUND** — no route to a false VERIFIED/REFUTED on the requires face
-(survived: overflow at the comparison with both sides at [maxfloat,
-inf]; κ=1 and closure boundaries; nine witnesses re-derived in exact
-rationals, endpoints landing on the declared floats' dyadic values;
+UNSOUND** — **no route to a false VERIFIED/REFUTED on the requires face
+was found by these attacks**, which is the attack list and not a
+statement about the face (*read as the stronger claim until 2026-08-24*).
+The attacks that did not land: overflow at the comparison with both sides
+at [maxfloat, inf]; κ=1 and closure boundaries; nine witnesses re-derived
+in exact rationals, endpoints landing on the declared floats' dyadic
+values;
 budget edge measured 512@n=128 admit / 516@n=129 decline;
 nested-assert misattribution unconstructible; empty and
 requires-empty envelopes honest both ways).
