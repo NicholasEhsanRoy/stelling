@@ -287,9 +287,33 @@ THE_SIX_THE_PAGE_NAMED = (
 )
 
 
-#: Ordinal suffixes, for the collection-rank sentence below.
-_ORDINAL = {1: "st", 2: "nd", 3: "rd", 0: "th", 4: "th", 5: "th",
-            6: "th", 7: "th", 8: "th", 9: "th"}
+#: The collection command both artefacts name, kept as ARGV and joined into
+#: a sentence only at the point of comparison. Typed as a sentence it would
+#: stand in this file's own source -- and this file is one of the two
+#: artefacts, read whole -- so the assertion would satisfy itself.
+_COLLECT_ARGS = ("--collect-only", "-q")
+
+#: The one file in this tree that binds a ``SimpleNamespace`` over
+#: ``prop_guard``'s module memos. This file is collected BEFORE it, which is
+#: what keeps this file's verdict a reading of the perimeter rather than of
+#: that file's teardown -- an accident of the alphabet until
+#: :func:`test_this_file_is_collected_where_the_hazard_requires` said it out
+#: loud, along with what the arrangement costs.
+_MEMO_STAND_IN = "tests/test_tripwire_record.py"
+
+#: An ordinal written in DIGITS. In this file and in ``CHANGELOG.md`` that
+#: has only ever been one thing -- this file's rank in the collection, which
+#: is a property of the checkout's file set. Refused outright by
+#: :func:`test_neither_artefact_writes_this_checkouts_collection_coordinate`;
+#: an ordinal meant honestly goes in words. The suffix must follow the digits
+#: with nothing between, or ``2 states`` reads as an ordinal.
+_TYPED_ORDINAL = re.compile(r"[0-9]+(?:st|nd|rd|th)\b")
+
+#: A file COUNT, refused in ``CHANGELOG.md`` only. How many files this tree
+#: collects belongs to the environment -- a module whose imports are
+#: unavailable is never collected -- so a release page cannot hold it true.
+#: This file may quote one against the commit it was measured at.
+_TYPED_FILE_COUNT = re.compile(r"[0-9][0-9,]*\s+files\b")
 
 
 #: The numerals this page writes as words, so a count can be compared against
@@ -434,22 +458,31 @@ def _isolate():
     release, which is exactly the asymmetry ``perimeter.arm(owner=...)``
     exists to prevent, aimed at the session's own hold. Under
     ``--stelling-narrowing-perimeter=error`` the plugin arms under the
-    session's ``Config`` before any test runs; this file sorts **72nd** of the
-    files ``pytest --collect-only -q -p no:randomly`` names in this tree
-    -- derived in
-    :func:`test_this_files_position_in_the_collection_is_the_measured_one`,
-    which is also what holds the CHANGELOG's copy of it -- so its
-    FIRST test unhooked that hold and the ~4,300 tests after it ran
-    unprotected with nothing red.
+    session's ``Config`` before any test runs, and this file is collected
+    EARLY -- so its FIRST test unhooked that hold and everything collected
+    after it ran unprotected with nothing red, while the
+    ``reset_counters()`` in the same fixture wiped what the files before it
+    had already earned. Over the whole suite the dial-on command therefore
+    reported ZERO literals checked, which is the reading both halves make
+    together.
 
-    **HOW MANY FILES THAT IS BELONGS TO THE ENVIRONMENT AND NOT TO THIS
-    TREE, so no count is written here.** A module whose imports are
-    unavailable is never collected, so the denominator moves with which
-    optional dependencies a lane installs while the tree stands still --
-    which is why this sentence names the COMMAND instead of a number: run it
-    for the figure where you are. The RANK is the half that does not move,
-    and it is the load-bearing half anyway, since it is what sets the size
-    of "the ~4,300 tests after it".
+    **NO ORDINAL FOR THAT POSITION IS WRITTEN ANYWHERE, HERE OR ON A SHIPPED
+    PAGE.** A rank is a property of the checkout's file set and moves the
+    moment anyone adds a test file; a denominator is a property of the
+    ENVIRONMENT on top of that, since a module whose imports are unavailable
+    is never collected. Both were once typed out here and in ``CHANGELOG.md``,
+    which made "write a new test" cost an edit to a shipped page. What is
+    load-bearing is not the numeral but two RELATIONS, and they are derived
+    and asserted in
+    :func:`test_this_file_is_collected_where_the_hazard_requires`: that tests
+    are still collected after this file at all -- otherwise the paragraph
+    above is a claim about nothing -- and that this file is collected BEFORE
+    ``tests/test_tripwire_record.py``, whose ``_stub_jax`` binds a stand-in
+    over ``prop_guard``'s module memos. That second one is the accident this
+    file's assertions have always stood on: run after it and a memo left
+    poisoned makes every ``classify()`` here decline internally -- driven,
+    53 of this file's tests fail against one, and the survivors include the
+    ``FINDINGS == 0`` readings, which a dead predicate satisfies for free.
 
     Driven at ``e6968fe``, the documented dial-on command over the whole
     suite reported::
@@ -493,7 +526,7 @@ def _isolate():
         # save/run/write-back `selfcheck()` performs, for the same reason.
         # These tests count their own fires (`assert perimeter.FINDINGS == 0`
         # is how seven of them say "nothing was refused here"), and with the
-        # dial on they would otherwise start from whatever the 70 files before
+        # dial on they would otherwise start from whatever the files before
         # this one had accumulated. Zeroing only the window keeps both
         # readings true: the test counts itself, and the session's denominator
         # is not spent on it.
@@ -1868,49 +1901,97 @@ def test_the_host_half_is_the_TARGET_FORMAT_and_not_the_door():
 
 
 
-def test_this_files_position_in_the_collection_is_the_measured_one():
-    """``72nd`` -- counted, not typed. And the TOTAL is not demanded at all.
+def test_this_file_is_collected_where_the_hazard_requires():
+    """POSITION, derived -- and the two relations it has to satisfy.
 
-    Two artefacts carry the rank: :func:`_isolate`'s docstring, which is
-    where the incident it explains is recorded, and the CHANGELOG entry for
-    the same repair. It stood at **149** in both, one measurement behind --
-    the hand-maintained-numeral class this batch's own first commit is named
-    for, in the batch that named it.
+    This used to be an ordinal. The rank was derived here and then demanded
+    VERBATIM in two artefacts -- this file's own :func:`_isolate` docstring
+    and ``CHANGELOG.md``, a shipped page -- so a rank of ``72`` was typed on
+    a page whose subject is the release. **A rank is a property of the
+    checkout's file set.** It moves whenever anyone adds a test file:
+    measured, five guard files landing ahead of this one carried it 72 -> 75,
+    which turned this test red and made an edit to ``CHANGELOG.md``
+    MANDATORY for a change that had nothing to do with the changelog. That
+    is a standing tax on writing tests, in a repository whose answer to its
+    own recurring defects is to write more of them, and it is the same class
+    as the checkout coordinates taken off ``docs/supported-primitives.md``
+    one axis over.
 
-    **AND CORRECTING IT TO 148 DID NOT FIX IT, BECAUSE THE DENOMINATOR IS A
-    PROPERTY OF THE ENVIRONMENT AND NOT OF THE TREE.** A module whose
-    imports are unavailable is never collected, so at ``c7cf164`` -- one
-    tree, one commit -- this command named 148 files here, 147 in a lane on
-    the jax 0.10 series, 144 in a lane with no solver wheels, and never
-    reaches this file at all in the zero-dep lane, which does not collect
-    it. Two CI lanes went red against a static 148, and no static numeral
-    could have been right in all of them. Relaxing this to a substring or a
-    range would have thrown the check away, and a hard-coded set of accepted
-    totals is the same hand-maintained-numeral defect with more entries.
+    So no ordinal is written down. What the incident actually rests on is
+    two RELATIONS, and a relation survives a file being added:
 
-    So this holds what it can actually establish -- which is the reasoning
-    :func:`test_the_dial_on_figures_agree_between_the_page_and_the_changelog`
-    already applies to the whole-suite pass count, one numeral over. The
-    RANK is derived here and demanded verbatim in both artefacts, because it
-    is stable (72 in every environment above) and it is the load-bearing
-    half: it is why *"the ~4,300 tests after it ran unprotected"* is the size
-    it is. The COMMAND that produces the total is demanded too, because
-    naming it is what keeps the unwritten figure obtainable -- and it is
-    built from the argv this test just ran rather than typed, for the reason
-    the comment beside it gives. The TOTAL itself is measured and then only
-    PRINTED, in the failure message.
+    1. **Tests are still collected after this file.** ``_isolate``'s
+       paragraph -- and the CHANGELOG entry for the same repair -- say that
+       the unconditional restore left everything after this file running
+       unprotected. Collected LAST, that sentence is a claim about nothing.
+       The floor is a share of the suite rather than a count, so that adding
+       tests never moves it: measured at a quarter, with the reading at
+       ``e6968fe`` (the commit the incident was driven at) **1,995 of 4,396
+       tests after this file, 45%**, and **2,210 of 4,666, 47%** at the tip
+       of this branch, identical on the jax 0.10 series and 2,198 of 4,654
+       with no solver wheels.
 
-    **The demanded phrase deliberately spans the slot the denominator sat
-    in** -- it runs from ``sorts``, through the bolded rank, to ``of the
-    files`` -- so a sentence that puts a count back between the two no
-    longer matches, and the numeral cannot return unnoticed.
+    2. **This file is collected BEFORE** ``tests/test_tripwire_record.py``,
+       which is the only file in this tree that binds a stand-in over the
+       predicate's module memos. Its ``_stub_jax`` puts a
+       ``SimpleNamespace`` in front of ``stelling._jax_compat``, and
+       ``prop_guard._JNP``/``_ML``/``_JAX`` are module globals that
+       ``monkeypatch`` knows nothing about -- so a lookup inside that window
+       caches THE FAKE permanently, after which every ``classify()`` in the
+       process declines with an internal ``AttributeError``. That stub
+       carries three lines of its own teardown against exactly this, and a
+       comment saying it *"did not show up in file order --
+       ``test_narrowing_perimeter.py`` sorts before this file"*.
 
-    ``-p no:randomly`` is part of the claim and not an implementation detail:
-    with ``pytest-randomly`` active the order is shuffled and a rank means
-    nothing, so the artefacts name that spelling too.
+       **WHAT THAT ORDER BUYS IS THIS FILE'S INDEPENDENCE, AND IT IS WORTH
+       BEING PRECISE ABOUT WHICH DIRECTION IS WHICH.** Driven, with
+       ``prop_guard._JAX`` bound to a bare ``SimpleNamespace`` at session
+       start and this file run against it: **53 failed, 29 passed**. So a
+       poisoned memo does not make this file quietly green -- it makes it
+       loudly wrong, and the survivors include the several tests that read
+       ``FINDINGS == 0`` to mean *"nothing was refused here"*, which a dead
+       predicate satisfies for free. Collected after the stub, this file's
+       verdict would be a reading of another file's teardown discipline
+       rather than of the perimeter, which is not its subject.
+
+       **The other direction is a real cost and it is not this check's to
+       pay.** Deterministic order is also what keeps a regression in that
+       teardown invisible, which is precisely what
+       ``test_lanes.py::test_exactly_one_lane_runs_in_randomised_order``
+       says the single shuffled lane exists to find: order is deterministic
+       in every merge-bearing lane by policy, so order-dependent pollution
+       is invisible there BY CONSTRUCTION and the ``random-order`` lane is
+       the designated cover. This assertion does not decide that trade; it
+       makes the arrangement a stated one, so an inversion arrives as a
+       decision instead of as a side effect of somebody's rename.
+
+       **AND THE ORIGINAL POISONING COULD NOT BE REPRODUCED THROUGH THE
+       STUB TODAY, WHICH IS RECORDED RATHER THAN PAPERED OVER.** With those
+       three teardown lines deleted, the whole of
+       ``tests/test_tripwire_record.py`` runs green and leaves ``_JNP`` and
+       ``_JAX`` still ``None`` -- the window no longer reaches
+       ``classify()`` at all -- and the reversed pair
+       (``test_tripwire_record.py`` then this file) is green too, 207
+       passed. The teardown is dormant, not load-bearing, on this tree.
+       That is why the drive above injects the stand-in directly instead of
+       claiming the stub still produces it.
+
+    Both are read off ``pytest --collect-only -q -p no:randomly`` in this
+    checkout -- the subject IS this checkout's collection order, so reading
+    it is what this check is allowed to do. ``-p no:randomly`` is part of
+    the claim and not an implementation detail: with ``pytest-randomly``
+    active the order is shuffled and neither relation means anything.
+
+    **The TOTAL is not demanded, and never was.** A module whose imports are
+    unavailable is never collected, so the denominator belongs to the
+    environment and not to the tree: at ``c7cf164`` -- one tree, one commit
+    -- this command named 148 files here, 147 in a lane on the jax 0.10
+    series, 144 in a lane with no solver wheels, and never reaches this file
+    at all in the zero-dep lane. Two CI lanes went red against a static 148.
+    It is measured and PRINTED in the failure messages, and written nowhere.
     """
     repo = pathlib.Path(__file__).resolve().parents[1]
-    collect_args = ("--collect-only", "-q", *deterministic_order_args())
+    collect_args = (*_COLLECT_ARGS, *ORDER_ARGS)
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", *collect_args],
         cwd=repo, capture_output=True, text=True,
@@ -1918,42 +1999,119 @@ def test_this_files_position_in_the_collection_is_the_measured_one():
              "JAX_PLATFORMS": "cpu", "COLUMNS": "200"},
     )
     assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
-    seen, order = set(), []
+    order, per_file = [], collections.Counter()
     for line in proc.stdout.splitlines():
         if "::" not in line:
             continue
         rel = line.split("::", 1)[0].strip()
-        if rel not in seen:
-            seen.add(rel)
+        if rel not in per_file:
             order.append(rel)
+        per_file[rel] += 1
     assert order, proc.stdout[-2000:]
 
-    mine = pathlib.Path(__file__).name
-    rank = next(i + 1 for i, rel in enumerate(order) if rel.endswith(mine))
-    total = len(order)
-
-    ordinal = f"{rank}{_ORDINAL[rank % 10]}"
-    phrase = f"sorts **{ordinal}** of the files"
-    # ...and the command the artefacts must name is BUILT FROM THE ARGV THAT
-    # WAS JUST RUN rather than typed here. Typed, it stood in this file's own
-    # source -- and one of the two artefacts IS this file, read whole, so the
-    # assertion line satisfied itself: the .py half of the command check
-    # could not go red however the prose was rewritten. Derived, it also
-    # cannot drift from the run it describes.
     command = " ".join(("pytest", *collect_args))
-    for rel in ("tests/test_narrowing_perimeter.py", "CHANGELOG.md"):
-        flowed = " ".join((repo / rel).read_text(encoding="utf-8").split())
-        assert phrase in flowed, (
-            f"{rel} does not say {phrase!r}. `{command}` sorts {mine} "
-            f"{ordinal} here. It names {total} files in this environment -- "
-            f"but that figure is a property of the environment, so it is "
-            f"deliberately not written in either artefact; if the sentence "
-            f"has acquired a count between the rank and `of the files`, "
-            f"take it out."
+    mine = pathlib.Path(__file__).resolve().relative_to(repo).as_posix()
+    assert mine in order, (
+        f"`{command}` does not collect {mine} in this checkout, so this "
+        f"check has no subject. It named {len(order)} files."
+    )
+    rank = order.index(mine)
+    total_tests = sum(per_file.values())
+    after = sum(per_file[rel] for rel in order[rank + 1:])
+
+    # 1 -- THE BLAST RADIUS IS REAL. A SHARE, not a count: a count would be
+    # this defect again, one numeral over.
+    assert after * 4 >= total_tests, (
+        f"only {after} of {total_tests} test(s) are collected after {mine} "
+        f"({len(order) - rank - 1} of {len(order)} files). `_isolate`'s "
+        f"docstring and the CHANGELOG entry for the same repair both say "
+        f"that an unconditional restore here left EVERYTHING AFTER THIS "
+        f"FILE running unprotected; collected this late that sentence "
+        f"stops being about anything. Either this file moved, or the tests "
+        f"after it did -- fix the position, or rewrite both paragraphs to "
+        f"say what is true instead. `{command}`"
+    )
+
+    # 2 -- AND BEFORE THE FILE THAT PLANTS A STAND-IN IN THE PREDICATE'S
+    # MODULE MEMOS. This is the one that was an accident of the alphabet.
+    assert _MEMO_STAND_IN in order, (
+        f"{_MEMO_STAND_IN} is not collected here, and it is where "
+        f"`prop_guard`'s module memos get a stand-in bound over them. If it "
+        f"has been renamed, this check needs the new name; if it has been "
+        f"deleted, say so here rather than deleting the assertion. "
+        f"`{command}`"
+    )
+    assert rank < order.index(_MEMO_STAND_IN), (
+        f"{mine} is now collected AFTER {_MEMO_STAND_IN}, whose `_stub_jax` "
+        f"binds a stand-in over `prop_guard._JNP`/`_ML`/`_JAX`. Those are "
+        f"module globals, so a memo left holding the fake is permanent and "
+        f"every later `classify()` declines with an internal error -- "
+        f"driven, this file reads 53 failed / 29 passed against one, and "
+        f"the survivors include the `FINDINGS == 0` tests, which a dead "
+        f"predicate satisfies for free. Downstream of that stub this "
+        f"file's verdict is a reading of another file's teardown and not "
+        f"of the perimeter. That may still be the right trade -- it is the "
+        f"direction in which a regression in that teardown would finally "
+        f"be caught in a deterministic lane -- but it is a decision, not a "
+        f"rename's side effect, so make it here. `{command}`"
+    )
+
+
+def test_neither_artefact_writes_this_checkouts_collection_coordinate():
+    """The numeral cannot come back, on either page, unnoticed.
+
+    :func:`test_this_file_is_collected_where_the_hazard_requires` derives the
+    position; this holds the two artefacts that DESCRIBE it to saying nothing
+    a stranger's checkout can falsify. It is the negative of the check that
+    used to live there -- that one demanded ``sorts <ordinal> of the files``
+    verbatim in both, which is what made a shipped page carry a coordinate
+    and made adding a test file cost a CHANGELOG edit.
+
+    **A typed ordinal in either of these two files has only ever been this
+    coordinate**: at the commit this was written there were exactly three in
+    the pair, and all three were the same rank. So the shape is refused
+    outright rather than compared, and an ordinal meant honestly can be
+    spelt in words, the way this file already spells *fifth* and *eighth*.
+    ``CHANGELOG.md`` is held to the stronger rule, because its subject is the
+    RELEASE and not this tree: it may carry no file count either.
+
+    What both must still name is the COMMAND, because that is what keeps the
+    unwritten figures obtainable by a reader who wants them. It is assembled
+    from argv at the point of comparison rather than typed as a sentence
+    anywhere in this file -- one of the two artefacts IS this file, read
+    whole, so a typed one would satisfy its own assertion.
+    """
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    command = " ".join(("pytest", *_COLLECT_ARGS, *ORDER_ARGS))
+    mine = pathlib.Path(__file__).resolve().relative_to(repo).as_posix()
+    for rel in (mine, "CHANGELOG.md"):
+        raw = (repo / rel).read_text(encoding="utf-8")
+        flowed = " ".join(raw.split())
+        typed = sorted({m.group(0) for m in _TYPED_ORDINAL.finditer(flowed)})
+        assert typed == [], (
+            f"{rel} writes {typed} -- a typed ordinal. In these two files "
+            f"that has only ever meant this file's rank in the collection, "
+            f"which is a property of the checkout's file set and changes "
+            f"whenever anyone adds a test: pinning it here cost a "
+            f"{'shipped page' if rel == 'CHANGELOG.md' else 'docstring'} "
+            f"edit per new test file. Derive it -- see "
+            f"`test_this_file_is_collected_where_the_hazard_requires` -- or, "
+            f"if this is a different ordinal altogether, spell it in words."
         )
+        if rel == "CHANGELOG.md":
+            counts = sorted(
+                {m.group(0) for m in _TYPED_FILE_COUNT.finditer(flowed)}
+            )
+            assert counts == [], (
+                f"CHANGELOG.md writes {counts}. How many files this tree "
+                f"collects belongs to the ENVIRONMENT -- a module whose "
+                f"imports are unavailable is never collected -- so it is "
+                f"not a figure a release page can hold true. Name the "
+                f"command instead: `{command}`"
+            )
         assert f"`{command}`" in flowed or f"``{command}``" in flowed, (
-            f"{rel} no longer names the command this figure comes from, "
-            f"which is what keeps the unwritten total obtainable: {command}"
+            f"{rel} no longer names the command the position comes from, "
+            f"which is what keeps the unwritten figures obtainable: {command}"
         )
 
 

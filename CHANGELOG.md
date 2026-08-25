@@ -393,16 +393,29 @@ only release"* while that was so.)
   therefore unmeasurable on the shipped tree.**
   `tests/test_narrowing_perimeter.py`'s autouse fixture restored
   unconditionally — the exact asymmetry `arm(owner=...)` exists to prevent,
-  aimed at the plugin's hold. That file sorts **72nd** of the files `pytest
-  --collect-only -q -p no:randomly` names in this tree — how many files that
-  is belongs to the environment and not to the tree, since a module whose
-  imports are unavailable is never collected, so the count is not written
-  down here and the command that produces it is named instead — so its
-  first test took the perimeter out and roughly **4,300 later
-  tests ran unprotected with nothing red**; the documented dial-on command reported `NOT ARMED
-  [detached] ... 0 integer literal(s) ... were checked`. It now records what
-  it found, lowers the hold for its own window only, and hands it back by
-  identity through `arm()`, raising if it cannot.
+  aimed at the plugin's hold. That file is collected EARLY — and before
+  `tests/test_tripwire_record.py`, the one file that binds a stand-in over
+  the predicate memos this instrument classifies through, which is what
+  keeps its verdict a reading of the perimeter rather than of another file's
+  teardown. So its first test took the perimeter out and **every test
+  collected after it ran unprotected with nothing red**, while the
+  `reset_counters()` in the same fixture wiped the tally the tests before it
+  had already earned. Both halves read as one number: the documented dial-on
+  command over the whole suite reported `NOT ARMED [detached] ... 0 integer
+  literal(s) ... were checked` — **zero**, over the 4,393 tests that passed
+  in that run (`e6968fe`). It now records what it found, lowers the hold for
+  its own window only, and hands it back by identity through `arm()`,
+  raising if it cannot.
+
+  **WHERE THAT FILE SITS IN THE COLLECTION IS LOAD-BEARING, AND IT IS
+  CHECKED RATHER THAN WRITTEN DOWN HERE.** A rank is a property of a
+  checkout's file set: it moves whenever anyone adds a test file, in any
+  lane, for any reason — so an ordinal on this page would be a number a
+  stranger's tree falsifies, and a page edit would be the price of writing a
+  new test. This entry names no ordinal and no count. The file derives its
+  own position instead, from `pytest --collect-only -q -p no:randomly`, and
+  asserts the two relations the incident above actually rests on; a second
+  check reads this page and refuses the numeral if it ever comes back.
 
 - **`prop_guard._target_dtype` no longer memoises a fault.** It cached the
   `None` produced inside its own `except` branch, so one transient failure
