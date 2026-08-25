@@ -503,10 +503,12 @@ def test_the_fixtures_would_CATCH_a_float_reading_of_the_assume_region(
 
 
 @pytest.mark.parametrize(
-    "label,least",
-    [("array-gate-partly-true", 6), ("two-declarations", 20)],
+    "label,exactly",
+    [("array-gate-partly-true", 7), ("two-declarations", 20)],
 )
-def test_the_two_fixtures_that_close_a_STRUCTURAL_gap_really_do(label, least):
+def test_the_two_fixtures_that_close_a_STRUCTURAL_gap_really_do(
+    label, exactly
+):
     """The two gaps that were one fixture each, and the count that closes them.
 
     Measured with the mutation battery described in this file's docstring,
@@ -526,6 +528,19 @@ def test_the_two_fixtures_that_close_a_STRUCTURAL_gap_really_do(label, least):
     27 grid points read differently under the defect than under the
     correct reading. If that number goes to zero the fixture is decoration
     and this test says so.
+
+    **THE COUNTS WERE FLOORS AND ARE NOW EXACT, FOR THE REASON ITS
+    SIBLING FORTY LINES ABOVE ALREADY GIVES.**
+    ``test_the_fixtures_would_CATCH_a_float_reading_of_the_assume_region``
+    gave up its own floors because *"a floor cannot catch a sentence that
+    rounds in the flattering direction"*, and this test kept them —
+    with ``>= 6`` standing under a measured 7, so the floor was not even
+    a description of the fixture it guarded. Both numbers are measured on
+    jax 0.11.0 and 0.10.2 alike: **7 of 27** for the ``any``/``all``
+    inversion and **20 of 27** for the second declaration. Asserted
+    exactly, a fixture that gains separating power fails here too — which
+    is right, because that number is quoted, and a quoted number that has
+    moved is the defect this file exists to prevent.
     """
     case = next(c for c in CASES if c[0] == label)
     _label, _harness, oracle, decls = case
@@ -544,10 +559,12 @@ def test_the_two_fixtures_that_close_a_STRUCTURAL_gap_really_do(label, least):
                 [any(e + e <= 0 for e in v)],
             )
         separating += int(right != wrong)
-    assert separating >= least, (
-        f"{label}: only {separating} of {GRID} points read differently "
-        f"under the defect this fixture exists to catch, so the agreement "
-        f"count above would pass with the defect in place"
+    assert separating == exactly, (
+        f"{label}: {separating} of {GRID} points read differently under "
+        f"the defect this fixture exists to catch, and this test says "
+        f"{exactly}. At zero the fixture is decoration and the agreement "
+        f"count above would pass with the defect in place; at any other "
+        f"number the fixture has changed and the figure is stale"
     )
 
 

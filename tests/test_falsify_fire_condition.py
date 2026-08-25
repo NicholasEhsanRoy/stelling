@@ -1242,6 +1242,16 @@ def _hyphenated_codes(source):
     Returns ``(whole_literals, in_declined)``. A ``.pyc`` beside the
     source cannot change either, and neither can a new way of spelling an
     emission.
+
+    ``whole_literals`` EXCLUDES the literals of the ``DECLINE_REASONS``
+    tuple itself. That tuple is a list of bare literals in the module
+    being scanned, so counting it made ``whole`` a superset of
+    ``DECLINE_REASONS`` by construction — see
+    ``test_every_decline_reason_is_declared_and_accounted_for``, whose
+    ``dead`` leg was vacuous for exactly that reason. Excluding it here
+    rather than at the one call site keeps the two directions of the scan
+    honest about the same set: a literal has to be spelled somewhere
+    OTHER than the declaration to count as spelled.
     """
     tree = ast.parse(source)
     docstrings = set()
@@ -1261,12 +1271,27 @@ def _hyphenated_codes(source):
     code = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$")
     token = re.compile(r"\b[a-z][a-z0-9]*(?:-[a-z0-9]+)+\b")
 
+    # the literals of the `DECLINE_REASONS` tuple itself, which are the
+    # DECLARATION and not an emission
+    listing = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "DECLINE_REASONS"
+            for t in node.targets
+        ):
+            for inner in ast.walk(node.value):
+                if isinstance(inner, ast.Constant) and isinstance(
+                    inner.value, str
+                ):
+                    listing.add(id(inner))
+
     whole = set()
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)
             and id(node) not in docstrings
+            and id(node) not in listing
             and code.match(node.value)
         ):
             whole.add(node.value)
@@ -1288,6 +1313,180 @@ def _hyphenated_codes(source):
                 ):
                     declined.update(token.findall(inner.value))
     return whole, declined
+
+
+def _reason_positions(source):
+    """Where ``falsify.py`` puts a code, by POSITION rather than by shape.
+
+    ``NOT_A_DECLINE_REASON`` is an escape hatch as long as membership of
+    it is the only thing that says a token is not a decline reason: one
+    ``skips.add("brand-new-decline-reason")`` plus one line saying *"an
+    adjudication name"* turns the completeness test above green with the
+    reason still user-visible and out of both ``DECLINE_REASONS`` and the
+    coverage table. Driven, at this branch's parent and here.
+
+    The discriminator that closes it is not a shape and not a spelling.
+    It is the SLOT the literal sits in, and the module has exactly two
+    that make a code a decline reason and two that make it an
+    adjudication:
+
+    * DECLINE — a literal argument to ``skips.add(…)``, the counter that
+      becomes ``ProbeReport.skips`` and is rendered to the user by
+      ``ProbeReport.stamp_line``; and the second element of one of
+      ``_confirm``'s four-element return tuples, which ``run_one`` passes
+      straight to that same ``skips.add``.
+    * ADJUDICATION — a literal argument to ``adjudged.add(…)``, and the
+      third element of one of those same tuples, which becomes
+      ``Falsification.adjudication``.
+
+    Returns ``(declines, adjudications)``. Non-literal arguments
+    (``skips.add(why)``, ``adjudged.add(how)``) are invisible here on
+    purpose: they carry a value this scan cannot read, and the reason they
+    carry is reached through the literal that produced it.
+
+    **THE LOOSER TEST WAS TRIED AND IS WRONG.** Asking instead whether a
+    token appears inside any ``declined=`` argument false-positives on
+    ``top-level``, which is ordinary English in three decline sentences
+    and a census label — measured, and it is why this reads slots.
+    """
+    tree = ast.parse(source)
+
+    def literal_args(receiver, method):
+        out = set()
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == method
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == receiver
+            ):
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and isinstance(
+                        arg.value, str
+                    ):
+                        out.add(arg.value)
+        return out
+
+    declines = literal_args("skips", "add")
+    adjudications = literal_args("adjudged", "add")
+
+    confirm = next(
+        (
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name == "_confirm"
+        ),
+        None,
+    )
+    assert confirm is not None, (
+        "stelling/falsify.py no longer defines `_confirm`; this scan reads "
+        "its return tuples and is inert without it"
+    )
+    slots = 0
+    for node in ast.walk(confirm):
+        if not (
+            isinstance(node, ast.Return)
+            and isinstance(node.value, ast.Tuple)
+            and len(node.value.elts) == 4
+        ):
+            continue
+        slots += 1
+        for index, bag in ((1, declines), (2, adjudications)):
+            elt = node.value.elts[index]
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                bag.add(elt.value)
+    assert slots >= 5, (
+        f"`_confirm` returns {slots} four-element tuple(s); this scan reads "
+        f"the decline slot out of them and would be inert if the return "
+        f"shape changed"
+    )
+    return declines, adjudications
+
+
+# what a `NOT_A_DECLINE_REASON` value has to say for the token to be
+# allowed in an ADJUDICATION slot.  Every other classification means the
+# token may appear in neither slot.
+_ADJUDICATION_CLASSES = (
+    "an adjudication name",
+    "a `_confirm` non-firing name",
+)
+
+
+def test_no_entry_in_the_NOT_A_DECLINE_REASON_TABLE_sits_in_a_DECLINE_SLOT():
+    """The escape hatch in the table above, and what shuts it.
+
+    ``test_every_decline_reason_is_declared_and_accounted_for`` demands
+    that every reason-shaped token in ``falsify.py`` be classified — but
+    it accepts EITHER classification, and one of the two is a
+    thirteen-line table in this file. So the cheapest way past it is not
+    to list a new reason in ``DECLINE_REASONS`` and drive it; it is to add
+    one line here. **Driven: ``skips.add("brand-new-decline-reason")`` in
+    ``falsify.py``, plus one line in ``NOT_A_DECLINE_REASON`` reading "an
+    adjudication name", and the completeness test goes GREEN** — with the
+    reason still counted into ``ProbeReport.skips`` and printed to the
+    user by ``ProbeReport.stamp_line`` as *"declined 1
+    brand-new-decline-reason"*, and out of
+    ``DECLINE_REASONS`` (an ``__all__`` symbol whose own comment calls
+    itself *"EVERY DECLINE REASON THIS MODULE CAN EMIT, in one place"*),
+    and out of the drive-or-explain coverage table.
+
+    A classification is a claim, and this is the claim checked against the
+    module rather than taken: **a token that is not a decline reason may
+    not appear in a slot that makes it one.** Both slots are read by
+    :func:`_reason_positions`, and the property holds for all thirteen
+    entries today.
+
+    The second assertion confirms the split the table asserts in prose:
+    the eight entries classified as adjudication names are found in an
+    ADJUDICATION slot, so the classification is checkable and not just
+    plausible; the other five are in neither slot, which is what a census
+    label or an ``_aval_shape_dtype`` stand-in should be.
+    """
+    source = PROBE_SRC.read_text(encoding="utf-8")
+    declines, adjudications = _reason_positions(source)
+
+    smuggled = sorted(set(NOT_A_DECLINE_REASON) & declines)
+    assert not smuggled, (
+        f"{smuggled} is classified in NOT_A_DECLINE_REASON and "
+        f"stelling/falsify.py emits it from a DECLINE slot — a literal "
+        f"`skips.add(...)` argument or `_confirm`'s decline slot. A "
+        f"user-visible decline reason belongs in DECLINE_REASONS and in "
+        f"this file's REASON_COVERAGE table; classifying it here removes "
+        f"it from both while leaving it in the report"
+    )
+
+    claimed = {
+        name
+        for name, what in NOT_A_DECLINE_REASON.items()
+        if what in _ADJUDICATION_CLASSES
+    }
+    missing = sorted(claimed - adjudications)
+    assert not missing, (
+        f"{missing} are classified as adjudication names and appear in no "
+        f"ADJUDICATION slot in stelling/falsify.py (a literal "
+        f"`adjudged.add(...)` argument or `_confirm`'s adjudication slot), "
+        f"so the classification is unchecked"
+    )
+    stray = sorted(
+        (set(NOT_A_DECLINE_REASON) - claimed) & (declines | adjudications)
+    )
+    assert not stray, (
+        f"{stray} are classified as neither a decline reason nor an "
+        f"adjudication, and stelling/falsify.py emits them from one of "
+        f"those slots"
+    )
+    assert (len(claimed), len(NOT_A_DECLINE_REASON) - len(claimed)) == (
+        8,
+        5,
+    ), (
+        f"the table classifies {len(claimed)} adjudication name(s) and "
+        f"{len(NOT_A_DECLINE_REASON) - len(claimed)} other(s); it was 8 "
+        f"and 5 when this split was derived, and a table that grows "
+        f"without a reader re-deriving it is how the last escape hatch "
+        f"got here"
+    )
 
 
 def test_every_decline_reason_is_declared_and_accounted_for():
@@ -1320,9 +1519,34 @@ def test_every_decline_reason_is_declared_and_accounted_for():
 
     Every token either scan finds must be classified: a decline reason in
     ``DECLINE_REASONS``, or something else BY NAME in
-    ``NOT_A_DECLINE_REASON``. A fifth emission shape therefore cannot
-    hide a reason as long as the reason is spelled in the module at all,
-    and a token nobody has classified fails here rather than shipping.
+    ``NOT_A_DECLINE_REASON``. A token nobody has classified fails here
+    rather than shipping, and a fifth EMISSION SHAPE cannot hide a reason:
+    the shape is irrelevant to a scan that reads vocabulary.
+
+    **AND THE QUALIFIER THAT STOOD HERE — "as long as the reason is
+    spelled in the module at all" — IS TOO GENEROUS.** Six shapes were
+    driven past this scan, each emitting ``brand-new-decline-reason`` from
+    ``run_one`` and each invisible to it: an f-string interpolating a
+    variable; ``"-".join((...))``; ``"%s-%s" % parts``; a constant
+    imported from a sibling module; ``"brand" + "-new-decline-reason"``;
+    and a literal that lives only in a DOCSTRING, emitted via
+    ``__doc__``. **The last two SPELL the reason in this module and hide
+    anyway** — the ``+`` operands are two literals neither of which is
+    reason-shaped, and docstrings are excluded by construction, since
+    every reason in ``DECLINE_REASONS`` is discussed in one. What is
+    actually true, and what is therefore claimed:
+
+    * a reason spelled as ONE WHOLE literal in code, in any position, is
+      caught — driven;
+    * a reason spelled as a reason-shaped TOKEN inside a ``declined=``
+      argument is caught, including inside an f-string, which is how
+      ``dtype-narrowed-by-jax`` is caught — driven;
+    * a reason ASSEMBLED at run time out of pieces, or spelled only in
+      prose, is NOT caught, and the module must not emit one that way.
+
+    That is a rule about how ``falsify.py`` may spell a reason, not a
+    closed check, and it is written down because the difference is what a
+    reader auditing this test needs.
     """
     source = PROBE_SRC.read_text(encoding="utf-8")
     whole, declined = _hyphenated_codes(source)
@@ -1341,13 +1565,32 @@ def test_every_decline_reason_is_declared_and_accounted_for():
     both = set(DECLINE_REASONS) & set(NOT_A_DECLINE_REASON)
     assert not both, f"{sorted(both)} is both a decline reason and not one"
 
-    # a reason listed but spelled nowhere is the other direction: a dead
-    # entry that reads as coverage
+    # A reason listed but spelled nowhere ELSE is the other direction: a
+    # dead entry that reads as coverage.
+    #
+    # **THIS LEG WAS STRUCTURALLY VACUOUS AND IS NOT ANY MORE.**
+    # `DECLINE_REASONS` is itself a tuple of bare literals in the module
+    # being scanned, so `whole` found all 20 of 20 by construction and
+    # `dead` was `[]` whatever the module did.  What actually caught a
+    # listed-but-unemitted reason was the `uncovered` leg below — and that
+    # is a table in THIS file, so adding one coverage entry alongside the
+    # listing let a reason nothing emits pass both.  Driven, before the
+    # fix: `"nothing-emits-this"` in `DECLINE_REASONS` plus one
+    # `REASON_COVERAGE` line, and this test stayed GREEN.
+    #
+    # `_hyphenated_codes` now excludes the `DECLINE_REASONS` literals from
+    # `whole`, so the set this subtracts from is what the module SPELLS
+    # somewhere other than the declaration, and the leg means what its
+    # message says.  `dtype-narrowed-by-jax` is spelled nowhere else as a
+    # whole literal and survives on the `declined` half — which is the
+    # emission shape that hid in the first place, so the two halves are
+    # both load-bearing.
     dead = set(DECLINE_REASONS) - (whole | declined)
     assert not dead, (
         f"DECLINE_REASONS lists {sorted(dead)}, which stelling/falsify.py "
-        f"does not spell anywhere: either it is emitted under another "
-        f"name or nothing emits it"
+        f"spells nowhere outside the tuple itself: either it is emitted "
+        f"under another name, or nothing emits it and the entry reads as "
+        f"coverage it does not provide"
     )
 
     uncovered = set(DECLINE_REASONS) - set(REASON_COVERAGE)
@@ -4047,6 +4290,128 @@ def test_the_replay_refuses_a_scan_with_NO_xs_and_NO_stacked_ys(
                       budget=64)
         finally:
             F._CALL_PRIMITIVES = old
+
+
+@pytest.mark.parametrize(
+    "opinion,other,emptied,phrase",
+    [
+        pytest.param(
+            "_REPEATING_OR_CONDITIONAL_BODIES",
+            "_ITERATION_COUNT_PARAMS",
+            (),
+            "_REPEATING_OR_CONDITIONAL_BODIES",
+            id="the-name",
+        ),
+        pytest.param(
+            "_ITERATION_COUNT_PARAMS",
+            "_REPEATING_OR_CONDITIONAL_BODIES",
+            frozenset(),
+            "iteration count",
+            id="the-trip-count",
+        ),
+    ],
+)
+def test_each_opinion_that_covers_fori_loop_is_LOAD_BEARING_ON_ITS_OWN(
+    opinion, other, emptied, phrase
+):
+    """DEFENCE IN DEPTH IS THE DESIGN; A DELETABLE LAYER IS NOT.
+
+    ``_body_runs_once`` asks three opinions and the ``fori_loop`` shape is
+    seen by exactly two of them — the name and the trip count — which is
+    what ``test_which_OPINION_refuses_each_repeating_shape`` records. Two
+    covers of one shape is the right design and the reason the deny-list
+    came back rather than being replaced.
+
+    **BUT UNTIL THIS TEST, EITHER ONE COULD BE DELETED AND NOTHING WENT
+    RED.** Driven at this branch's parent, on jax 0.11.0 and 0.10.2, x64
+    both ways: removing ``if name in _REPEATING_OR_CONDITIONAL_BODIES:
+    return False, …`` from ``_body_runs_once`` left the entire falsify
+    suite GREEN at 199 passed; removing the ``_ITERATION_COUNT_PARAMS``
+    loop instead left it GREEN at 199 passed; only removing BOTH went red,
+    at 4 failed. The DATA tables are pinned — every name traced off the
+    live jax, every call primitive asserted to carry no trip count — but
+    the two CODE PATHS that consult them had no test that failed if one
+    was taken out, because the other silently answered for it.
+
+    That is this module's own rule, one level up. ``falsify.py`` argues
+    that *"a dead name in a DENY-list subtracts protection, silently"* and
+    carries a test per name for it; a deletable OPINION subtracts
+    protection the same way and needs the same thing. So each opinion is
+    driven here with the OTHER one emptied, on the one shape both cover:
+
+    * with ``_ITERATION_COUNT_PARAMS`` empty, the NAME must still refuse
+      ``fori_loop``;
+    * with ``_REPEATING_OR_CONDITIONAL_BODIES`` empty, the TRIP COUNT
+      must still refuse it.
+
+    Delete either code path — or empty either table in the module — and
+    the parameter named for it fails here, by name, alone. The premise
+    that makes the test mean that is asserted rather than assumed: with
+    both emptied the same equation reads as a CALL, so nothing structural
+    is quietly doing the work.
+    """
+    import stelling.falsify as F
+    from stelling.falsify import ProbeInvariantViolated
+
+    closed = traced(_fori_violation)
+    eqn = next(e for e in closed.jaxpr.eqns if e.primitive.name == "scan")
+    body = getattr(eqn.params["jaxpr"], "jaxpr", eqn.params["jaxpr"])
+
+    # THE PREMISE. With BOTH opinions emptied the three structural facts
+    # admit this equation as a call — so a refusal below is this opinion's
+    # doing and not something else's.
+    saved = {
+        n: getattr(F, n)
+        for n in (
+            "_REPEATING_OR_CONDITIONAL_BODIES",
+            "_ITERATION_COUNT_PARAMS",
+        )
+    }
+    try:
+        F._REPEATING_OR_CONDITIONAL_BODIES = frozenset()
+        F._ITERATION_COUNT_PARAMS = ()
+        both_gone, _why = F._body_runs_once(eqn, body)
+    finally:
+        for n, v in saved.items():
+            setattr(F, n, v)
+    assert both_gone is True, (
+        "with both the name and the trip count emptied, `_body_runs_once` "
+        "still refuses the `fori_loop` shape — so something structural now "
+        "covers it and this test is measuring nothing. Re-derive the row "
+        "in `test_which_OPINION_refuses_each_repeating_shape` first"
+    )
+
+    # AND THIS OPINION ALONE REFUSES IT, with the other one emptied.
+    keep = getattr(F, other)
+    setattr(F, other, emptied)
+    try:
+        once, why = F._body_runs_once(eqn, body)
+        assert once is False, (
+            f"with `{other}` emptied, `{opinion}` alone no longer refuses "
+            f"the `fori_loop` shape: `_body_runs_once` answers "
+            f"{(once, why)!r} and a `lax.fori_loop` body would be walked "
+            f"ONCE as if it were a call. That opinion is deletable"
+        )
+        assert phrase in why, (
+            f"`{opinion}` is expected to refuse this shape and the reason "
+            f"given is {why!r}, which does not name it"
+        )
+
+        # end to end, on the one edit this guard exists to police
+        census = F._read(closed)
+        old = F._CALL_PRIMITIVES
+        F._CALL_PRIMITIVES = dict(old, scan="jaxpr")
+        try:
+            for only in (True, False):
+                with pytest.raises(
+                    ProbeInvariantViolated,
+                    match="runs exactly once per equation",
+                ):
+                    F._replay(census, (np.asarray(1.5),), assumes_only=only)
+        finally:
+            F._CALL_PRIMITIVES = old
+    finally:
+        setattr(F, other, keep)
 
 
 def test_which_OPINION_refuses_each_repeating_shape():

@@ -126,7 +126,16 @@ deciding whether to switch this on does not have to find them:
    own signature, so no structural fact fires. Both lists are back and
    the commentary at :func:`_body_runs_once` says which shape each of the
    three opinions covers and which none of them can. **It is guarded, not
-   closed**, and closing it is reach work this release did not do.
+   closed**, and closing it is reach work this release did not do. The
+   shape none of the three covers now has a NAME, and it is a live jax
+   API: ``jax.shard_map`` under replicated specs passes all three while
+   its body runs once per mesh shard — measured at **4 runs on a
+   four-device host and 1 on a one-device host, on both series**, so the
+   guard's answer there is a function of the machine rather than of the
+   program. It is not exploitable today only because no collective is in
+   this replay's readable vocabulary; the measurement, and three
+   accelerator-only candidates named as untested, are at
+   :func:`_body_runs_once`.
 
 Items 3 and 6 are the same shape — *a decline standing in for a guard* —
 and neither is closed by this release. **ITEM 1 IS NOT ONE OF THEM**, and
@@ -1168,11 +1177,45 @@ DECLINE_REASONS = (
     # the same defect as no check, which is this file's own rule; the scan
     # in `test_every_decline_reason_is_declared_and_accounted_for` no
     # longer reads emission shapes at all.  It reads the module's
-    # hyphenated-code VOCABULARY -- every string literal that IS a
-    # reason-shaped code, and every reason-shaped token inside any
-    # `declined=` argument -- so a fifth emission shape cannot hide
-    # either, and every such token has to be classified as a decline
-    # reason or as something else by name.
+    # hyphenated-code VOCABULARY -- every WHOLE string literal outside a
+    # docstring that IS a reason-shaped code, and every reason-shaped
+    # token inside any `declined=` argument -- and every such token has to
+    # be classified as a decline reason or as something else by name.
+    #
+    # **WHAT THAT DOES AND DOES NOT REACH, DRIVEN RATHER THAN CLAIMED.**
+    # A fifth emission SHAPE cannot hide a reason the module spells as one
+    # complete literal in code: the shape is irrelevant to the scan, which
+    # is the point of reading vocabulary instead.  It does NOT reach a
+    # reason ASSEMBLED at run time, and the module must not spell one that
+    # way.  Driven past the scan, each of these emits
+    # `brand-new-decline-reason` and none of them is seen: an f-string
+    # interpolating a variable; `"-".join((...))`; `"%s-%s" % parts`;
+    # `"brand" + "-new-decline-reason"`; a constant imported from a
+    # sibling module; and a literal that lives only in a DOCSTRING,
+    # emitted via `__doc__`.  The last two SPELL the reason in this module
+    # and hide anyway, so *"spelled in the module at all"* is not the
+    # qualifier -- *"spelled as one whole literal in code, or as a token
+    # inside a `declined=` argument"* is.  See
+    # `test_every_decline_reason_is_declared_and_accounted_for`.
+    #
+    # **AND THE OTHER DIRECTION -- A REASON LISTED HERE THAT NOTHING
+    # EMITS -- WAS UNCHECKED, BECAUSE THIS TUPLE IS ITSELF A LIST OF BARE
+    # LITERALS IN THIS MODULE.**  The scan therefore found every entry by
+    # construction, so its dead-entry leg was vacuous and what actually
+    # caught a dead reason was the coverage table in the test file --
+    # which the same edit can add a line to.  Driven: one entry here plus
+    # one coverage line, and the test stayed green.  The scan now excludes
+    # this tuple's own literals, so an entry has to be spelled somewhere
+    # ELSE to count as emitted.
+    #
+    # The classification table that says a token is NOT a decline reason
+    # is checked the same way, by
+    # `test_no_entry_in_the_NOT_A_DECLINE_REASON_TABLE_sits_in_a_DECLINE_SLOT`:
+    # no entry of it may appear as a literal argument to `skips.add(...)`
+    # or in `_confirm`'s decline slot.  Without that, one `skips.add` plus
+    # one classification line takes a live, user-visible decline out of
+    # this tuple and out of the coverage table -- driven, and green before
+    # that test existed.
     "dtype-narrowed-by-jax",
     # a built point that could not be used
     "point-outside-declaration",
@@ -3470,11 +3513,21 @@ def probe(
     # code fires on **9** -- and of those 52, **33 are adjudicated
     # `ieee-executed-float`**, which is a float32 EXECUTION admitting a
     # firing about a float64-DECLARED program with no exact test behind
-    # it.  Declining those is right whatever the box says.  The other 19
-    # (16 `exact-replay-refutes-over-the-rationals`, 3
-    # `exact-integer-arithmetic`) are sound as claims about R, and they
-    # are the reach on the table.  It is refused on two measurements,
-    # both taken here:
+    # it.  Declining those is right whatever the box says.  Of the other
+    # 19, **16** (`exact-replay-refutes-over-the-rationals`) are sound as
+    # claims about R and are the reach genuinely on the table.  **THE
+    # OTHER 3 ARE NOT, AND A SENTENCE HERE SAID ALL 19 WERE.**  Those 3
+    # are adjudicated `exact-integer-arithmetic`, and that slice is
+    # exactly the false alarm the SECOND measurement below describes: the
+    # integer branch returns before any replay and admits its firing under
+    # *"exact integer arithmetic: no rounding involved"*, while at
+    # `jax_enable_x64=0` the executed program computed in the NARROWED
+    # width -- so the arithmetic it is exact about is int32's and the
+    # declared program's is int64's, and `2**30 * 3` is a violation in one
+    # and not in the other.  The error ran AGAINST the refusal it appears
+    # in: it credited the proposal with 3 sound firings it does not have,
+    # so the case for declining is stronger than the sentence made it, not
+    # weaker.  It is refused on two measurements, both taken here:
     #
     # * **A REPRESENTABLE BOX DOES NOT CONTAIN ONLY REPRESENTABLE POINTS,
     #   FOR A FLOAT DTYPE.**  `float64 (0.0, 2.0)` has float32-exact
@@ -4598,12 +4651,27 @@ def _replay_cost(jaxpr) -> int:
 #   eight names in the first `_REPEATING_OR_CONDITIONAL_BODIES` were
 #   exactly that, which is why the restored list below carries a test that
 #   traces every one of its names off the live jax;
-# * a dead name in an ALLOW-list subtracts nothing.  This mapping is only
-#   ever consulted with a LIVE primitive name in hand (`if name in
-#   _CALL_PRIMITIVES`), so a key no equation carries is never reached, can
-#   admit nothing, and cannot make any claim true or false on this series.
-#   And should one go live, membership is still not trusted: the descent
-#   re-derives the property from the equation before it walks anything.
+# * a dead name in an ALLOW-list subtracts nothing -- and the reason is
+#   THE FAILURE DIRECTION OF A MISS, not anything about how the list is
+#   consulted.  **THE MECHANISM THIS BULLET USED TO GIVE WAS HALF-RIGHT
+#   AND IS CORRECTED HERE.**  It said the mapping *"is only ever consulted
+#   with a LIVE primitive name in hand"*; that is true, and it is equally
+#   true of the deny-list -- both are asked `name = eqn.primitive.name` in
+#   :func:`_body_runs_once`, off the same live equation -- so it
+#   discriminates nothing between them.  What discriminates them is what a
+#   MISS DOES.  A `_CALL_PRIMITIVES` miss ABSTAINS: the equation is not
+#   descended, `_replay` raises `_Unreplayable`, and the cost is reach,
+#   paid out loud in `ProbeReport.abstentions`.  A deny-list miss FALLS
+#   THROUGH to the next opinion, and if none of them catches the shape the
+#   body is walked as a call -- fail-open, and silent, which is the
+#   `fori_loop` reading recorded below.  A dead allow-list key can
+#   therefore admit nothing and a dead deny-list name can admit
+#   everything, and that asymmetry -- fail-safe against fail-open -- is
+#   the whole of the argument; it is the same asymmetry the bullet above
+#   states as *"subtracts protection, silently"*.
+#   And should an allow-list key go live, membership is still not
+#   trusted: the descent re-derives the property from the equation before
+#   it walks anything.
 #
 # So a dead ALLOW-list name costs one thing only -- an UNCHECKED claim
 # about a jax nobody here runs -- and that is what this paragraph is: the
@@ -4735,6 +4803,69 @@ _CALL_PRIMITIVES = {
 # not `{scan-without-xs}`; this covers the union, which is every one of
 # them.
 #
+# **AND THE UNCOVERED SHAPE HAS A NAME ON BOTH SUPPORTED SERIES:
+# `shard_map`.**  The paragraph above states the gap as a possibility, and
+# a stated possibility is what the word *hypothetical* was doing for
+# `fori_loop` one version ago.  So it is measured instead.  Traced on jax
+# 0.11.0 and on 0.10.2, `jax.shard_map(f, mesh=Mesh(devices, ("i",)),
+# in_specs=P(), out_specs=P())` emits a `shard_map` equation which
+#
+# * is in NEITHER list -- not `_CALL_PRIMITIVES`, not
+#   `_REPEATING_OR_CONDITIONAL_BODIES`;
+# * carries NO parameter naming a trip count (its params are `check_vma`,
+#   `in_specs`, `jaxpr`, `mesh`, `newly_manual_axes`, `out_specs`); and
+# * carries exactly ONE nested jaxpr whose signature, under replicated
+#   specs, IS the equation's -- same arity, same shape and dtype, element
+#   for element.
+#
+# `_body_runs_once` therefore returns `(True, None)` for it: **all three
+# opinions pass**, while the body runs ONCE PER MESH SHARD.  Measured with
+# `jax.lax.psum(1.0, "i")` in the body, from the same source and the same
+# jaxpr shape: **4 runs on a four-device host
+# (`XLA_FLAGS=--xla_force_host_platform_device_count=4`) and 1 on a
+# one-device host**, on both series.  **The guard's answer for `shard_map`
+# is a function of the MACHINE and not of the program** -- which is worse
+# than an unknown shape, because it is a shape that tests green on the
+# host that develops it and reads a body N-1 times too few on the host
+# that runs it.
+#
+# **IT IS NOT EXPLOITABLE TODAY, AND THAT IS THE REPLAY'S DOING RATHER
+# THAN THIS GUARD'S.**  A body that reads its shard at all emits a
+# shard-dependent primitive, and this replay can read none of them.  Its
+# whole readable vocabulary is the 46 names in `_EXACT_BINARY`,
+# `_EXACT_UNARY`, `_COMPARISONS`, `_BOOLEAN`, `_MOVEMENT`, `_REDUCTIONS`
+# and `_CALL_PRIMITIVES`, plus eight special cases in `_replay` (`not`,
+# `div`, `integer_pow`, `pow`, `sqrt`, `square`, `select_n`,
+# `convert_element_type`) and stelling's own primitives -- and no
+# COLLECTIVE is in any of them: no `psum`, `pvary`, `axis_index`,
+# `all_gather`, `ppermute`.  Everything unlisted abstains, which is the
+# default and the direction this module loses in.  Driven with `shard_map`
+# added to `_CALL_PRIMITIVES` on a four-device host: `jax.lax.psum(c,
+# "i")` traces to `pvary`/`psum_invariant` and `_replay` raises `'pvary'
+# has no exact rational reading` before any of this is consulted -- where
+# a one-shot reading of that body would have read `c` for a value the
+# executed run computes as `4*c`.  A body that does NOT read its shard
+# computes the same thing on every shard, so reading it once is right.
+# The exposure is the gap between those two, nothing here can see it, and
+# what closes it today is that `shard_map` has not been added to
+# `_CALL_PRIMITIVES` -- which is the reader's discipline, the thing this
+# deny-list exists BECAUSE we cannot rely on.  It is recorded by name so
+# that the reader who reaches for that edit meets the measurement first.
+#
+# **THREE FURTHER CANDIDATES ARE NAMED HERE AS UNTESTED, because naming
+# them is the honest version of not having traced them.**  `core_map`
+# (`jax/_src/pallas/core.py`), `mpmd_map` (`jax/_src/pallas/mpmd.py`) and
+# `parallel_loop` (`jax/_src/pallas/mosaic/sc_primitives.py`) are declared
+# primitives on BOTH supported series -- read off jax's own source -- and
+# every one of them needs an accelerator (pallas, Mosaic TPU) to trace.
+# **No jaxpr for any of the three has been read on this CPU host, and NO
+# claim is made about which opinion would refuse them**; `run_state` is in
+# the same position, unreachable from this host's jax API surface.  What
+# HAS been traced on CPU, and which opinion refuses each, on both series:
+# `scatter-add` and `pallas_call` on OPERAND COUNT (a body taking 2
+# arguments for 3 and for 1 operand respectively), `custom_linear_solve`
+# and `while` on JAXPR COUNT (2 nested jaxprs each).
+#
 # All three opinions raise :class:`ProbeInvariantViolated` rather than
 # reading one iteration's assume as the program's, and all three are
 # asked by the SAME function, so `_replay` and `_assume_sites_reachable`
@@ -4830,11 +4961,19 @@ def _body_runs_once(eqn, body):
     in neither list, which iterates that body anyway.  The structural
     facts are NECESSARY conditions for a call and not sufficient ones, and
     the first version of this function said so and then named the
-    counterexample *hypothetical*; it was `fori_loop`.  The claim this
-    docstring makes is therefore the narrow one: every repeating or
-    conditional construct jax ships on either supported series fails at
-    least one of the three, traced, and the one edit this file expects a
-    reader to make is loud for all of them.
+    counterexample *hypothetical*; it was `fori_loop`.  **AND IT HAS A
+    SECOND, LIVE INSTANCE: `jax.shard_map` under replicated specs passes
+    all three of these while its body runs once per mesh shard -- 4 runs
+    on a four-device host, 1 on a one-device host, traced on both series.**
+    It is not exploitable today only because no COLLECTIVE is in this
+    replay's readable vocabulary, so a body that reads its shard abstains
+    before any of this is consulted; the measurement, and the three
+    accelerator-only candidates that could not be traced at all, are in
+    the commentary above.  The claim this docstring makes is therefore the
+    narrow one: every repeating or conditional construct jax ships on
+    either supported series fails at least one of the three, traced, and
+    the one edit this file expects a reader to make is loud for all of
+    them.
 
     A dtype or shape neither side can be read from compares EQUAL to the
     same unreadable thing on the other side: refusing an ordinary `jit`
