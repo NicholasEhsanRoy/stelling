@@ -32,12 +32,31 @@ byte-identical — and it is **provisional**: what it does when it fires is
 settled, its SIGNATURE is not. ``probe()``'s first parameter changed name
 and type inside this release cycle, and it is in ``__all__``.
 
-**``UNAUDITED`` IS RETIRED, AND ON EVIDENCE RATHER THAN ON AGE.** The fire
-condition was audited blind against an independent ``Fraction`` oracle
-that shares no code with this package: **363 gate readings, 363
-agreements**, over 266 driven base-versus-fix comparisons, and the three
-defects that audit was pointed at are fixed and driven. That is what the
-word was withheld for and it is what retires it.
+**``UNAUDITED`` IS RETIRED, AND ON EVIDENCE THAT IS IN THIS TREE.** The
+fire condition's exact reading is checked, on every run, against an
+independent ``Fraction`` oracle that shares no code with this module:
+``tests/test_probe_oracle.py``. Over eight fixtures and a 27-point grid
+apiece it drives **243 gate readings and 216 obligation readings, and
+asserts that all 216 point-comparisons agree** — and it asserts those
+counts, so a figure that drifts fails there instead of going stale here.
+Two of the eight fixtures state an assume whose float answer and whose ℚ
+answer differ over most of the grid, and a separate test asserts that they
+still do, because an oracle that agrees on every route is measuring
+nothing. The three defects the blind audit behind this word was pointed at
+are fixed and driven, each at its own site below.
+
+**THE FIGURES THIS PARAGRAPH USED TO CARRY WERE NOT IN THE TREE, AND THAT
+IS THE SAME DEFECT AS A MISSING CHECK.** It read *"363 gate readings, 363
+agreements, over 266 driven base-versus-fix comparisons"*, and those three
+numbers appeared in exactly one place in this repository — the sentence
+that cited them, here and in ``preconditions.check``. No test, no
+CHANGELOG entry, no doc. This module's whole subject is what a reader may
+believe about a verdict, and a number nobody can re-derive is prose
+asserting a check that does not exist. The audit that produced them ran
+against two trees at once and cannot be a standing test of one; what could
+be, and now is, is its ORACLE. The base-versus-fix comparisons that DO
+re-derive in a single tree are the corpus re-runs recorded below, which
+name the corpus, the files and the counts.
 
 **WHAT "PROVISIONAL" NAMES IS A LIST, NOT A MOOD.** Every item is
 disclosed in full at its own site; they are gathered here so that a reader
@@ -65,13 +84,32 @@ deciding whether to switch this on does not have to find them:
    what the obligation is computed from instead of guessing.
 4. **THE ASSUME CONFIRMATION'S BUDGET SATURATES ON ORDINARY SHAPES.** A
    ``(60000,)`` float64 declaration with one assume leaves 90 of 91
-   admissible points unconfirmed; the numbers are in :func:`probe`. That
-   costs evidence, never soundness, and the count is reported.
+   admissible points unconfirmed on one machine; the table is in
+   :func:`probe` and **its admissible and unconfirmed columns are
+   machine-dependent**, because an unread gate counts its point
+   admissible. That costs evidence, never soundness, and the count is
+   reported.
 5. **THE CLOCK IS PART OF THE FIRE CONDITION.** ``REPLAY_SECONDS_BUDGET``
    is a wall-clock backstop, so whether this instrument fires on a given
    program can depend on the machine. It can only ABSTAIN, so a slow
    machine buys fewer firings and never wrong ones; the reasoning is at
    that constant.
+6. **NEITHER WALKER ENTERS A LOOP OR BRANCH BODY**, so an assume or an
+   obligation inside a ``scan``, ``while`` or ``cond`` is not read. The
+   probe does not report one anyway: :func:`_execute`'s reading is
+   checked against the every-depth census and declines
+   (``assume-not-fully-executed``), and :func:`_replay` abstains on the
+   primitive. That is a DECLINE STANDING IN FOR A GUARD, and descending
+   those bodies is a plausible reach improvement, so the descent now
+   REFUSES a body that does not run exactly once per equation
+   (:func:`_body_runs_once`) rather than trusting a list of names to be
+   complete. **It is guarded, not closed**, and closing it is reach work
+   this release did not do.
+
+Items 1, 3 and 6 are the same shape — *a decline standing in for a
+guard* — and none of the three is closed by this release; 1 cannot be
+closed inside this module's import rule at all, and the section of its own
+name below says why.
 
 Nothing in that list is a reason to distrust a FIRING: only an exact test
 may admit one, and the message names which test did. They are reasons a
@@ -1238,7 +1276,7 @@ class ProbeInvariantViolated(BaseException):
     *an ordinary ``except Exception:`` must not be able to swallow an
     instrument's alarm.*  This class had exactly the property those two
     were written to avoid, in the module least able to afford it: **this
-    file contains seven bare ``except Exception`` handlers**, and three of
+    file contains eight bare ``except Exception`` handlers**, and three of
     them sit on the paths an invariant check would be placed on.  Driven,
     with a raise injected at each site on the tree that shipped it:
 
@@ -1264,16 +1302,20 @@ class ProbeInvariantViolated(BaseException):
     **WHAT THAT LETS ESCAPE IS THE POINT, AND THE PATHS WERE CHECKED ONE
     BY ONE.**  Every ``except`` in this module and in
     ``stelling.preconditions`` was read against this change.  Five of the
-    seven bare handlers wrap work an invariant check does or could sit
+    eight bare handlers wrap work an invariant check does or could sit
     inside -- :func:`_execute`'s equation loop,
     :func:`_granularity_stable`'s second route, :func:`probe`'s read,
     ``probe.assumes_over_the_rationals``'s confirmation replay, and
     :func:`_confirm`'s replay -- and all five now let this class through
     instead of converting it into a skip, a decline, an unconfirmed point
-    or an abstention; each says so at its own site.  The other two wrap a
-    single arithmetic conversion apiece (reading a ``pow`` literal in
-    :func:`_read`, reading a margin in :func:`_execute`) and can raise
-    nothing but the numeric errors they are for.  The remaining handlers
+    or an abstention; each says so at its own site.  Two of the other
+    three wrap a single arithmetic conversion apiece (reading a ``pow``
+    literal in :func:`_read`, reading a margin in :func:`_execute`) and
+    can raise nothing but the numeric errors they are for; the eighth is
+    :func:`_dtype_after_jax`, which asks jax what it would do with one
+    dtype and answers *"the same dtype"* when jax refuses the question --
+    a refusal :func:`_window` has already declined for by the time this
+    runs.  The remaining handlers
     name concrete types (``TypeError``,
     ``ValueError``, ``OverflowError``, :class:`_Unreplayable`,
     :class:`_AssumesComplete`) and are unaffected.  ``preconditions``
@@ -1663,6 +1705,29 @@ class _Counter:
 # --------------------------------------------------------------------------
 # the declared set, re-derived
 # --------------------------------------------------------------------------
+
+
+def _dtype_after_jax(name: str) -> str:
+    """What ``jax.numpy.asarray`` makes of a numpy array of dtype ``name``.
+
+    The identity under ``jax_enable_x64=1``.  Under ``jax_enable_x64=0``
+    jax NARROWS the 64-bit formats on conversion -- ``float64`` becomes
+    ``float32``, ``int64`` becomes ``int32`` -- silently, and that is the
+    whole reason this function exists: :func:`probe` declines a
+    declaration it cannot hand to jax unchanged, because the executed run
+    and the exact rational reading would then be readings of two different
+    programs.  See the decline in :func:`probe` for the driven evidence.
+
+    A dtype jax refuses outright answers with its own name, so the caller
+    declines for the reason it already has (:func:`_window` reaches the
+    unsupported formats first) rather than for this one.
+    """
+    try:
+        return str(
+            np.dtype(jax.numpy.asarray(np.zeros((), dtype=name)).dtype).name
+        )
+    except Exception:  # noqa: BLE001 - jax cannot hold it; not this decline
+        return name
 
 
 def _window(decl: Declaration):
@@ -3311,6 +3376,58 @@ def probe(
             )
         windows.append(w)
 
+    # AND A DECLARATION WHOSE DTYPE JAX WILL NARROW IS NOT SAMPLEABLE
+    # EITHER, WHICH IS THE SAME KIND OF FACT AND WAS NOT BEING SAID.
+    #
+    # `run_one` builds each point as a numpy array of the declaration's
+    # dtype and then converts it with `jax.numpy.asarray` for `_execute`,
+    # while `_confirm` and `_replay` are handed the UN-converted numpy
+    # array.  Under `jax_enable_x64=0` that conversion is a NARROWING one
+    # -- float64 arrives as float32, int64 as int32 -- so the executed run
+    # and the exact test would be about different programs.  There is an
+    # assertion at that conversion, and it is the last line of defence
+    # rather than the policy: what it used to rest on was a comment
+    # claiming *"nothing reaches it today ... an int64 box is admitted
+    # only where it provably fits int32"*, which is INVERTED.  Fitting
+    # int32 is the condition under which the box is admitted, the probe
+    # runs and the assertion fires.  Driven through the public door at
+    # `2bd7bc8` and at its parent, with `jax_enable_x64=0`::
+    #
+    #     check(h, vacuity_mode="inputs-only", falsify="sample")
+    #       float64 declaration -> UNKNOWN, no probe note
+    #       int64   declaration -> ProbeInvariantViolated out of `check()`
+    #       float32 declaration -> VERIFIED, probe note present
+    #
+    # The reach is older than the class's move to `BaseException`; what
+    # that move changed is the CONTAINMENT, from a batch caller's
+    # `except Exception` recording one node and carrying on to the run
+    # dying.  Neither disposition is right, because neither is what
+    # happened: nothing about stelling's invariants broke.  The caller
+    # turned x64 off and declared a 64-bit box, and THIS PROBE CANNOT
+    # SAMPLE THAT -- which is a sentence this module already knows how to
+    # say, once, in the report, for an unbounded declaration and for a
+    # dtype it cannot construct.  It says it here too.  The verdict the
+    # analysis reached is not touched: a probe that cannot run says
+    # nothing, and saying nothing must not cost the caller their verdict.
+    #
+    # The assertion in `run_one` stays, and its premise is now a decline
+    # three lines from it in THIS module rather than a refusal in another
+    # one.
+    for d in census.declarations:
+        narrowed = _dtype_after_jax(d.dtype)
+        if narrowed != d.dtype:
+            return ProbeReport(
+                declarations=census.declarations,
+                declined=(
+                    f"declaration #{d.position} is not sampleable: "
+                    f"dtype-narrowed-by-jax ({d.dtype} becomes {narrowed} "
+                    f"when a point is handed to jax, which jax does under "
+                    f"jax_enable_x64=0). The executed run and the exact "
+                    f"test would be about different programs, so this "
+                    f"probe declines rather than reporting either"
+                ),
+            )
+
     report_kw = dict(
         declarations=census.declarations,
         obligations=len(targets),
@@ -3364,13 +3481,41 @@ def probe(
     # and there is nothing exotic about it: it is one array and one
     # elementwise assume.
     #
+    # **EVERY COLUMN OF THAT TABLE IS MACHINE-DEPENDENT, INCLUDING THE
+    # LAST TWO, AND IT USED TO READ AS FIVE MEASURED CONSTANTS.**  The
+    # first two columns are obviously a clock.  The last two are the same
+    # clock one step removed: an UNREAD gate counts its point ADMISSIBLE
+    # and UNCONFIRMED (`exact_assumes is None` below), while a gate that
+    # was read and said NO does not count the point at all -- so buying
+    # fewer confirmations INFLATES both columns.  Driven on the `(1000,)`
+    # row by shrinking the budget, which is what a slower machine does:
+    #
+    #     REPLAY_SECONDS_BUDGET   admissible   unconfirmed
+    #     ---------------------   ----------   -----------
+    #     5.0 (default)                    8             0
+    #     0.5                              8             0
+    #     0.05                            94            93
+    #     0.005                          107           106
+    #
+    # and measured across machines on the `(10000,)` row, the same probe
+    # at the default budget reads 14/6, 11/3 and 10/2.  The shape of the
+    # table is the result -- saturation arrives on ordinary array sizes
+    # and costs evidence rather than soundness -- and the individual cells
+    # are one machine's.  This is the same fact as stability item 5 in the
+    # module docstring, THE CLOCK IS PART OF THE FIRE CONDITION, seen from
+    # the reporting side instead of the firing side.
+    #
     # THAT IS THE BUDGET WORKING, NOT FAILING, and it is written down
     # because a reader who believed the old sentence would read
     # `points_admissible_unconfirmed = 90` as a defect rather than as the
     # bound doing its job. What the saturation costs is EVIDENCE, never
     # soundness: an unconfirmed point is counted, named in the stamp line
-    # (`_admissible_clause`), and still attacked -- `_confirm` re-reads
-    # the assumes on its own fresh budget before anything may fire. The
+    # (`_admissible_clause`), and still attacked -- under `real`,
+    # `_confirm` re-reads the assumes on its own fresh budget before
+    # anything may fire; under `ieee` it returns on the executed float
+    # before any replay, and the executed float reading of the assumes is
+    # what an `ieee` claim is about, which is why this budget is zero
+    # there. The
     # alternative, one full backstop per point, is 256 x 5.0s = twenty-one
     # minutes for a probe that finds nothing, which is why it is shared.
     #
@@ -3460,14 +3605,29 @@ def probe(
         # are handed the un-narrowed numpy `point`.  The executed run
         # would then be a run of a different program from the one the
         # exact test admits, which is the class this module keeps finding.
-        # Nothing reaches it today, and both reasons are DECLINES IN
-        # ANOTHER MODULE: with x64 off a float64 declaration shows up as a
-        # value-changing `convert_element_type` that `propagate` refuses,
-        # so no VERIFIED exists to probe, and an int64 box is admitted only
-        # where it provably fits int32.  An invariant that holds because of
-        # a decline somewhere else is an invariant one line of that other
-        # module can remove, so it is ASSERTED here rather than reasoned
-        # about here.
+        #
+        # **THE JUSTIFICATION THAT SHIPPED HERE WAS INVERTED AND THE RAISE
+        # WAS LIVE OUT OF THE PUBLIC DOOR.**  It read *"nothing reaches it
+        # today ... an int64 box is admitted only where it provably fits
+        # int32"* -- but fitting int32 is exactly the condition under which
+        # the box IS admitted, the probe runs and this check fires.  Driven
+        # at `2bd7bc8` and at its parent with `jax_enable_x64=0`, an
+        # `int64` declaration raised `ProbeInvariantViolated` straight out
+        # of `check(..., falsify="sample")`.
+        #
+        # What reaches it now is nothing, and the reason is a DECLINE IN
+        # THIS FUNCTION: `probe` refuses any declaration whose dtype does
+        # not survive `jax.numpy.asarray` under the live config
+        # (`dtype-narrowed-by-jax`) before a point is built.  That is the
+        # standard this comment set for itself and did not meet -- *"an
+        # invariant that holds because of a decline somewhere else is an
+        # invariant one line of that other module can remove"* -- and the
+        # decline it used to lean on (`propagate` refusing the
+        # `convert_element_type` a truncated float64 declaration produces,
+        # so no VERIFIED exists to probe) is corroboration and no longer
+        # the argument.  This stays ASSERTED because a probe that reported
+        # anything at all about two different programs would be reporting
+        # it as a fact about the caller's verdict.
         for a, j in zip(point, jpoint):
             if np.dtype(np.asarray(a).dtype) != np.dtype(j.dtype):
                 raise ProbeInvariantViolated(
@@ -3533,8 +3693,20 @@ def probe(
         # silently folded into either.
         #
         # The unread point is still attacked, and that is deliberate: an
-        # unreadable assume costs reach, not soundness, and `_confirm`
-        # re-checks the assumes on its own budget before anything fires.
+        # unreadable assume costs reach, not soundness, because under
+        # `real` semantics `_confirm` re-checks the assumes on its own
+        # fresh budget before anything fires.
+        #
+        # **THAT IS TRUE UNDER `real` AND NOT UNDER `ieee`, and the
+        # sentence used to be written flat.**  Under `ieee` `_confirm`
+        # returns on `ieee-executed-float` BEFORE any replay, so nothing
+        # downstream re-reads the assumes -- and it does not need to: the
+        # executed float reading of them IS the reading an `ieee` claim is
+        # about, which is why `assume_seconds` is zero there and why every
+        # `ieee` point with an assume is counted unconfirmed. What guards
+        # the `ieee` return is the OTHER gate above (`run.assumes` short
+        # -> `assume-not-fully-executed`), and `_confirm`'s docstring says
+        # so at the return itself.
         exact_assumes = assumes_over_the_rationals(point)
         if exact_assumes is False:
             skips.add("assume-unsatisfied-over-the-rationals")
@@ -4338,51 +4510,205 @@ def _replay_cost(jaxpr) -> int:
 # `pjit` had been.  Prose asserting that a live check exists is the same
 # defect as a name list nothing checks, moved one level up, and it is
 # recorded here because this is the level a reader audits from.
-_CALL_PRIMITIVES = (
-    "jit",
-    "pjit",
-    "closed_call",
-    "core_call",
-    "xla_call",
-    "remat2",
-    "remat",
-    "checkpoint",
-)
+_CALL_PRIMITIVES = {
+    "jit": "jaxpr",
+    "pjit": "jaxpr",
+    "closed_call": "call_jaxpr",
+    "core_call": "call_jaxpr",
+    "xla_call": "call_jaxpr",
+    "remat2": "jaxpr",
+    "remat": "jaxpr",
+    "checkpoint": "jaxpr",
+}
 
-# EVERY NAME ABOVE IS A BODY THAT RUNS EXACTLY ONCE PER EQUATION, AND ONE
-# READING IN THIS FILE DEPENDS ON THAT AND NOT ON ANYTHING ELSE.
+# **AND MEMBERSHIP OF THAT MAPPING IS A CLAIM: THE BODY AT THAT KEY RUNS
+# EXACTLY ONCE PER EQUATION, WITH THE EQUATION'S OWN OPERANDS AS ITS
+# ARGUMENTS.**  It is one list to keep true rather than two, and this is
+# the second version of that arrangement.  The first was a companion
+# DENY-LIST -- `_REPEATING_OR_CONDITIONAL_BODIES`, a frozenset of names
+# checked at the descent -- and it protected nothing, measured on this
+# jax:
 #
-# `_replay`'s `assumes_only` early stop compares `len(assumes)` -- a count
-# of READINGS -- with `census.assumes_in_program` -- a count of
-# `stelling_assume` EQUATIONS, taken at every depth.  The two are the same
-# number only while each assume equation is read exactly once, which is
-# true only while every descent this walk makes enters its body once.
+# * four of its eight names (`cond_p`, `fori_loop`, `switch`,
+#   `while_loop`) are not primitive names on either supported series at
+#   all, and a fifth (`platform_index`) is a primitive that carries no
+#   jaxpr and so could never be descended.  Only `scan`, `while` and
+#   `cond` were live.  That is exactly the *"a name that matches nothing
+#   costs reach, silently"* failure the commentary below condemns, sitting
+#   INSIDE the guard meant to catch it;
+# * `reduce` and `reduce_window` were NOT in it, are real primitives on
+#   both series, and carry their bodies under the key `jaxpr` -- the first
+#   key `_call_jaxpr_of` used to look for.  So the single-set edit the
+#   guard existed to catch (adding a name to the descent set) descended a
+#   `reduce` body with NO guard, driven: a `stelling_assume` inside a
+#   four-element `lax.reduce` combiner read `[False]` where the body's
+#   four real invocations all satisfy it, and the `assumes_only` early
+#   stop then called that reading COMPLETE;
+# * and the deny-list could only ever have named what someone thought of.
 #
-# `scan`, `while` and the rest below carry a jaxpr in a param, so
-# `_sub_jaxprs` (and therefore `assumes_in_program`) already counts an
-# assume inside one; what stops the replay reading it is that the name is
-# not in `_CALL_PRIMITIVES` and the primitive has no exact reading, so the
-# replay abstains and the point declines.  That is a decline standing in
-# for a guard: descending loop bodies is a plausible reach improvement --
-# `_execute` faces the same wall from the other side -- and adding one
-# name above would silently convert the early stop into *"one iteration's
-# assume, reported as the program's"*.
+# **THE PROPERTY IS THEREFORE DERIVED FROM THE EQUATION RATHER THAN FROM A
+# SECOND NAME LIST** (:func:`_body_runs_once`), and the derivation is two
+# structural facts that hold for every call primitive and fail for every
+# repeating or conditional one on both supported series, traced:
 #
-# So the requirement is a NAMED DENY-LIST checked at the descent, not a
-# property inferred from tuple membership.  A `cond`/`switch` arm is here
-# for the neighbouring reason: its body runs zero or one times depending
-# on a value, so an assume inside one is not read on every execution and a
-# reading of it is not a reading of the program either.
-_REPEATING_OR_CONDITIONAL_BODIES = frozenset({
-    "scan",
-    "while",
-    "while_loop",
-    "fori_loop",
-    "cond",
-    "switch",
-    "cond_p",
-    "platform_index",
-})
+#     primitive        nested jaxprs   body signature vs equation
+#     ---------        -------------   --------------------------
+#     jit / remat2                 1   identical
+#     scan                         1   xs invar loses its leading axis
+#     reduce                       1   operand invar is an ARRAY, body scalar
+#     reduce_window                1   operand and result both differ
+#     while                        2   (cond_jaxpr and body_jaxpr)
+#     cond                       N>=1  index operand has no body invar
+#
+# A body entered once with the equation's own operands must have the
+# equation's own signature, and a primitive that carries a second jaxpr is
+# not a call.  Neither fact is a name, so neither can be a name that
+# matches nothing; both are checked at the descent and both raise
+# :class:`ProbeInvariantViolated` rather than reading one iteration's
+# assume as the program's.
+#
+# What the mapping's VALUE buys is the other half of the same lesson.  The
+# key used to be probed -- `("jaxpr", "call_jaxpr")`, first hit wins -- for
+# any name in the descent set, so a reader adding `reduce` got a body
+# handed to them silently.  Now each name says where its own body lives,
+# and a name whose key is wrong on some series abstains loudly
+# (`_Unreplayable`) instead of finding somebody else's jaxpr.
+
+
+def _body_runs_once(eqn, body):
+    """Is ``body`` entered exactly once per ``eqn``, on ``eqn``'s operands?
+
+    Returns ``(True, None)`` or ``(False, reason)``.  This is the property
+    :data:`_CALL_PRIMITIVES` membership CLAIMS, checked against the
+    equation instead of against a list of names somebody has to keep
+    complete -- see the commentary above for what the list version missed.
+
+    Two structural facts, and a repeating or conditional construct fails
+    at least one of them on both supported jax series:
+
+    * **the equation carries exactly one nested jaxpr.**  `while` carries
+      two (`cond_jaxpr`, `body_jaxpr`) and `cond` carries one per branch;
+      a call carries one body.
+    * **that jaxpr's signature is the equation's.**  `scan` strips the
+      leading axis off every `xs`, `reduce` and `reduce_window` hand their
+      combiner two SCALARS where the equation takes an array, and `cond`
+      consumes a branch index the body never sees.  A body entered once on
+      the equation's own operands cannot do any of that.
+
+    Neither fact proves a body cannot repeat -- a hypothetical primitive
+    with one signature-matching body could iterate it -- so this is a
+    second opinion on the mapping and not a replacement for it.  It is a
+    second opinion that no name list can be behind on, which is the
+    property the deny-list did not have.
+
+    A dtype or shape neither side can be read from compares EQUAL to the
+    same unreadable thing on the other side: refusing an ordinary `jit`
+    over a token operand would cost reach, and reach lost silently is the
+    failure this file is built around.
+    """
+    nested = _sub_jaxprs(eqn)
+    if len(nested) != 1:
+        return False, (
+            f"it carries {len(nested)} nested jaxprs and a call carries one"
+        )
+    if len(body.invars) != len(eqn.invars):
+        return False, (
+            f"its body takes {len(body.invars)} argument(s) for "
+            f"{len(eqn.invars)} operand(s)"
+        )
+    if len(body.outvars) != len(eqn.outvars):
+        return False, (
+            f"its body returns {len(body.outvars)} value(s) for "
+            f"{len(eqn.outvars)} result(s)"
+        )
+    for kind, ours, theirs in (
+        ("operand", eqn.invars, body.invars),
+        ("result", eqn.outvars, body.outvars),
+    ):
+        for i, (a, b) in enumerate(zip(ours, theirs)):
+            if _aval_shape_dtype(a) != _aval_shape_dtype(b):
+                return False, (
+                    f"{kind} {i} is {_aval_shape_dtype(a)} at the equation "
+                    f"and {_aval_shape_dtype(b)} in the body"
+                )
+    return True, None
+
+
+def _aval_shape_dtype(atom):
+    """``(shape, dtype)`` for an atom, with unreadable halves left as-is.
+
+    Unreadable compares equal to unreadable, which is deliberate: see
+    :func:`_body_runs_once`.
+    """
+    aval = getattr(atom, "aval", None)
+    shape = getattr(aval, "shape", "unreadable-shape")
+    dtype = getattr(aval, "dtype", None)
+    try:
+        dtype = np.dtype(dtype).name
+    except (TypeError, ValueError):
+        dtype = "unreadable-dtype"
+    return (tuple(shape) if isinstance(shape, tuple) else shape, dtype)
+
+
+def _assume_sites_reachable(jaxpr, path=()):
+    """Every ``stelling_assume`` OCCURRENCE :func:`_replay`'s descent reaches.
+
+    Returns ``(sites, alive)``: a set of ``(call path, equation)`` keys
+    spelled as tuples of ``id``, and a list holding a reference to every
+    object whose ``id`` is in a key so that none can be recycled while the
+    caller is comparing.
+
+    **THIS IS THE OTHER HALF OF THE GUARD, AND IT REPLACED A COUNT.**  The
+    `assumes_only` early stop used to compare `len(assumes)` -- READINGS --
+    with `census.assumes_in_program` -- EQUATIONS counted by the widest
+    walk there is (:func:`_sub_jaxprs`, every depth, `scan` bodies
+    included).  Two numbers taken by two different rules agree only by an
+    argument, the argument was written in a comment, and a comment cannot
+    fail.  Worse, the comparison was one-directional: one descent into a
+    body that runs N times reads FEWER occurrences than the body has
+    executions, and no count of readings can see that.
+
+    So the stop compares SETS taken by the SAME rule: the occurrences this
+    walk reached against the occurrences this walk can reach.  That is
+    independent of the shape of the descent -- it says nothing about how
+    many primitives are in :data:`_CALL_PRIMITIVES` -- and it catches a
+    walk that read too few (the stop cannot fire) and a walk that read one
+    twice or read one it cannot reach (both raise).
+
+    It does NOT replace the whole-program check.  This set is what the
+    descent rule REACHES; `census.assumes_in_program` is what the program
+    STATES, and the gate in :func:`probe` still requires the reading to
+    account for every one of the latter.  An assume behind a `scan` is in
+    the second and not the first, and a reading that stopped without it is
+    SHORT -- which is what that gate is for and why both survive.
+    """
+    sites: set = set()
+    alive: list = []
+    for eqn in jaxpr.eqns:
+        name = eqn.primitive.name
+        if name == "stelling_assume":
+            sites.add(path + (id(eqn),))
+            alive.append(eqn)
+            continue
+        if name not in _CALL_PRIMITIVES:
+            continue
+        try:
+            body, _ = _call_jaxpr_of(eqn)
+        except _Unreplayable:
+            # the replay will abstain here too, so nothing under it is
+            # reachable and nothing under it will be read
+            continue
+        ok, _why = _body_runs_once(eqn, body)
+        if not ok:
+            # the replay RAISES when it reaches this equation; what is
+            # under it is not reachable and must not be counted as such
+            continue
+        inner, inner_alive = _assume_sites_reachable(body, path + (id(eqn),))
+        sites |= inner
+        alive.append(eqn)
+        alive.extend(inner_alive)
+    return sites, alive
+
 
 
 def _call_jaxpr_of(eqn):
@@ -4424,21 +4750,37 @@ def _call_jaxpr_of(eqn):
     exactly on 0.11.0.  Here it reads exactly on both, 46 violations
     declined `float-rounding-artefact` with no abstention.  The live check
     is `test_the_rematerialisation_primitive_the_live_jax_emits_is_read`.
+
+    **AND THE KEY IS NAMED BY `_CALL_PRIMITIVES` RATHER THAN PROBED.**
+    This function used to try `("jaxpr", "call_jaxpr")` in order for any
+    name in the descent set and take the first hit.  `reduce` and
+    `reduce_window` carry their combiner under `jaxpr`, so a reader adding
+    either to the descent set -- the one edit this file expects a reader
+    to make -- was handed a body immediately and silently.  Each name now
+    says where its own body lives; a name whose key is wrong on some
+    series abstains here, loudly and by name, instead of finding a jaxpr
+    that belongs to a different construct.
     """
-    for key in ("jaxpr", "call_jaxpr"):
-        sub = eqn.params.get(key)
-        if sub is None:
-            continue
+    name = eqn.primitive.name
+    key = _CALL_PRIMITIVES.get(name)
+    if key is None:
+        raise _Unreplayable(
+            f"{name!r} is not a call primitive this replay descends"
+        )
+    sub = eqn.params.get(key)
+    if sub is not None:
         if hasattr(sub, "jaxpr") and hasattr(sub, "consts"):
             return sub.jaxpr, tuple(sub.consts)
         if isinstance(sub, jex_core.Jaxpr):
             if sub.constvars:
                 raise _Unreplayable(
-                    f"{eqn.primitive.name!r} carries a jaxpr with constvars "
+                    f"{name!r} carries a jaxpr with constvars "
                     f"and no constants to bind them to"
                 )
             return sub, ()
-    raise _Unreplayable(f"{eqn.primitive.name!r} carries no jaxpr to replay")
+    raise _Unreplayable(
+        f"{name!r} carries no jaxpr to replay at its param {key!r}"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -4803,20 +5145,29 @@ def _replay(census, point, guard=None, assumes_only=False):
     importantly -- an ABSTENTION after the last assume no longer costs the
     gate a reading it had already completed.
 
-    **AND ITS STOP CONDITION IS A DYNAMIC COUNT COMPARED WITH A STATIC
-    ONE, WHICH IS SAFE FOR A REASON THAT IS NOT IN THIS FUNCTION.**
-    ``len(assumes) >= census.assumes_in_program`` is *readings taken* on
-    the left and *equations written* on the right, and they agree only
-    while this walk reads each assume occurrence exactly once -- which
-    holds because every primitive it descends is in
-    :data:`_CALL_PRIMITIVES` and a call body is entered once per call
-    equation.  Nothing in this module states that as a requirement, and
-    descending a ``scan`` body is a reach improvement someone will
-    reasonably propose.  The requirement is therefore CHECKED at the
-    assume itself, and violating it raises
-    :class:`ProbeInvariantViolated` rather than silently reporting one
-    iteration's assume as the whole program's; the argument is at that
-    check.
+    **AND ITS STOP CONDITION COMPARES TWO SETS TAKEN BY THE SAME RULE,
+    WHICH IS WHAT IT DID NOT USED TO DO.**  It used to compare
+    ``len(assumes) >= census.assumes_in_program`` -- *readings taken* on
+    the left, *equations written at every depth* on the right -- two
+    numbers produced by two different walks, equal only by an argument
+    that lived in a comment.  The stop now fires when the set of assume
+    OCCURRENCES this walk has read equals the set
+    :func:`_assume_sites_reachable` says this walk's own descent rule can
+    reach; a reading that is short cannot fire it, a second reading of one
+    occurrence raises, and a reading of an occurrence the rule cannot
+    reach raises.  Both directions, and neither depends on the shape of
+    the descent -- which is the point, because *"descend a ``scan`` body"*
+    is a reach improvement someone will reasonably propose and the old
+    comparison quietly assumed nobody had.
+
+    That is what this walk read.  What the PROGRAM STATES is
+    ``census.assumes_in_program``, counted by the widest walk there is,
+    and the two are not the same number whenever an assume sits behind a
+    primitive this replay does not descend.  The gate in :func:`probe`
+    still requires the reading to account for every equation the program
+    states before it may say anything, and that check is where a short
+    reading turns into an UNCONFIRMED point rather than a satisfied
+    assume.
 
     THAT IS NOT TRUE UNDER ``jax_enable_x64=0``, and the sentence used to
     claim it unconditionally.  With x64 off, jax truncates a ``float64``
@@ -4824,13 +5175,15 @@ def _replay(census, point, guard=None, assumes_only=False):
     executed run is a float32 run while this replay reads the float64
     array exactly -- two differences, not one, and the replay's answer is
     then about a program the float run did not execute.  Nothing reaches
-    it today: with x64 off, the truncation appears in the jaxpr as
-    ``convert_element_type float64 -> float32``, ``propagate`` refuses it
-    as value-changing and the verdict is UNKNOWN, so no VERIFIED exists
-    for the probe to attack.  Driven, not assumed.  But that is a decline
-    in ANOTHER module -- a fact about the pipeline rather than a property
-    of this function -- so it is written down here rather than relied on
-    silently.
+    it, and the reason is now a decline in THIS module: :func:`probe`
+    refuses a declaration whose dtype does not survive
+    ``jax.numpy.asarray`` under the live config, before a single point is
+    built (``dtype-narrowed-by-jax``).  The old argument was that
+    ``propagate`` refuses the ``convert_element_type float64 -> float32``
+    the truncation puts in the jaxpr, so no VERIFIED exists to probe --
+    true, measured, and a fact about ANOTHER module, which is an invariant
+    one line of that module can remove.  It is kept below as corroboration
+    and no longer relied on.
     """
     cost = census.replay_cost
     if cost > REPLAY_ELEMENT_BUDGET:
@@ -4843,12 +5196,25 @@ def _replay(census, point, guard=None, assumes_only=False):
     asserts: list = []
     # ONE ENTRY PER `stelling_assume` OCCURRENCE THIS WALK HAS READ, keyed
     # by the CALL PATH that reached it and not by the equation alone: a
-    # `jit` body called twice is two occurrences of one equation object,
-    # and `census.assumes_in_program` counts occurrences.  `_alive` holds
-    # a reference to every object whose `id` appears in a key, so no id
-    # can be recycled underneath the set while the walk is running.
+    # `jit` body called twice is two occurrences of one equation object.
+    # `_alive` holds a reference to every object whose `id` appears in a
+    # key, so no id can be recycled underneath the set while the walk is
+    # running.
     assume_sites: set = set()
     _alive: list = []
+    # AND THE SET THIS ONE IS MEASURED AGAINST, taken by the SAME descent
+    # rule off the same equation objects, so the two are comparable
+    # key for key.  Built only when the program states an assume at all:
+    # `assumes_in_program == 0` means the widest walk there is found none,
+    # so there is nothing to reach and nothing to read, and the assume-free
+    # programs this module is measured on pay nothing for this guard.
+    if census.assumes_in_program > 0:
+        reachable_sites, _reach_alive = _assume_sites_reachable(
+            census.closed.jaxpr
+        )
+        _alive.append(_reach_alive)
+    else:
+        reachable_sites = set()
 
     def run(jaxpr, consts, args, decl, path=()):
         env: dict = {}
@@ -4875,29 +5241,6 @@ def _replay(census, point, guard=None, assumes_only=False):
                 a.val if isinstance(a, jex_core.Literal) else None
                 for a in eqn.invars
             ]
-            if name in _REPEATING_OR_CONDITIONAL_BODIES and (
-                name in _CALL_PRIMITIVES
-            ):
-                # See `_REPEATING_OR_CONDITIONAL_BODIES`.  Unreachable
-                # today by construction -- the two tuples are disjoint --
-                # and it is a guard rather than a comment because the one
-                # edit that makes it reachable is the one edit a reader
-                # improving this walk's reach would make.
-                raise ProbeInvariantViolated(
-                    f"the rational replay is about to descend {name!r}, "
-                    f"whose body does not run exactly once per equation. "
-                    f"`census.assumes_in_program` counts assume EQUATIONS "
-                    f"and `_replay` counts assume READINGS; the "
-                    f"`assumes_only` early stop compares the two, so a "
-                    f"body entered more than once (or fewer than once) "
-                    f"would let it stop on a PARTIAL reading and report "
-                    f"one iteration's assume as the program's. The "
-                    f"ASSERT reading has the same problem one level up: "
-                    f"walking such a body once evaluates it at the wrong "
-                    f"arguments, and the replay's answer would then be "
-                    f"about a program that was never executed. Re-derive "
-                    f"both before adding {name!r} to `_CALL_PRIMITIVES`."
-                )
             if name in _CALL_PRIMITIVES:
                 # `jnp` puts most of its work behind `jit` -- `jnp.where`,
                 # `jnp.clip`, `jnp.power` and the rest of the wrappers all
@@ -4906,6 +5249,35 @@ def _replay(census, point, guard=None, assumes_only=False):
                 # real programs.  It DID, until this batch: see the
                 # commentary on `_CALL_PRIMITIVES`.
                 body, body_consts = _call_jaxpr_of(eqn)
+                # AND THE PROPERTY THAT MEMBERSHIP CLAIMS, CHECKED AGAINST
+                # THE EQUATION.  `_CALL_PRIMITIVES` means *"this body runs
+                # exactly once per equation, on the equation's own
+                # operands"*, and everything downstream of this descent --
+                # the assume reading, the assert reading, the early stop --
+                # is only a reading of the PROGRAM while that holds.  It
+                # used to be checked by a companion deny-list of names,
+                # which named four things that are not primitives on this
+                # jax and did not name `reduce`, whose combiner carries a
+                # `jaxpr` param `_call_jaxpr_of` would have handed over
+                # without a word.  It is derived from the equation now;
+                # the derivation and its measurements are at
+                # :func:`_body_runs_once`.
+                once, why = _body_runs_once(eqn, body)
+                if not once:
+                    raise ProbeInvariantViolated(
+                        f"the rational replay is about to descend {name!r}, "
+                        f"which `_CALL_PRIMITIVES` names as a body that runs "
+                        f"exactly once per equation on the equation's own "
+                        f"operands -- and {why}, so it does not. Walking "
+                        f"such a body once evaluates it at the wrong "
+                        f"arguments, and the replay's answer would then be "
+                        f"about a program that was never executed; an "
+                        f"assume inside it would be read once for a body "
+                        f"that runs many times, and the `assumes_only` "
+                        f"early stop would call that reading complete. "
+                        f"Re-derive both before naming {name!r} in "
+                        f"`_CALL_PRIMITIVES`."
+                    )
                 _alive.append(eqn)
                 inner = run(body, body_consts, ins, decl, path + (id(eqn),))
                 if len(inner) != len(eqn.outvars):
@@ -4918,62 +5290,81 @@ def _replay(census, point, guard=None, assumes_only=False):
                 continue
             if name in ("stelling_assume", "stelling_nonvacuity"):
                 if name == "stelling_assume":
-                    # THE EARLY STOP BELOW COMPARES A DYNAMIC COUNT WITH A
-                    # STATIC ONE, AND THAT IS ONLY SOUND WHILE EACH ASSUME
-                    # OCCURRENCE IS READ ONCE.  `census.assumes_in_program`
-                    # counts `stelling_assume` EQUATIONS -- what is written
-                    # in the program -- while `len(assumes)` counts
-                    # READINGS.  Today they cannot diverge, for a reason
-                    # that is not written in this function: every primitive
-                    # this walk descends is in `_CALL_PRIMITIVES`, and a
-                    # call body is entered exactly once per call equation.
-                    # `scan`, `while` and `cond` are not in that tuple, so
-                    # nothing here iterates.
+                    # THE EARLY STOP BELOW COMPARES TWO SETS OF ASSUME
+                    # OCCURRENCES TAKEN BY THE SAME DESCENT RULE, and both
+                    # halves of that sentence are load-bearing.
                     #
-                    # If that ever changes -- and descending loop bodies is
-                    # a plausible reach improvement, since `_execute` faces
-                    # the same wall -- the stop would fire on the FIRST
-                    # iteration's reading of a loop-carried assume, and
-                    # `probe.assumes_over_the_rationals` would then find
-                    # `len(assumes) == census.assumes_in_program`, call the
-                    # reading complete, and admit ONE ITERATION'S assume as
-                    # the whole program's.  That is not a decline; it is a
-                    # wrong exact reading standing behind the sentence
-                    # *"re-read over ℚ and confirmed"*.
+                    # It used to compare `len(assumes)` -- READINGS -- with
+                    # `census.assumes_in_program` -- EQUATIONS, counted by
+                    # the widest walk in this file, `scan` and `cond`
+                    # bodies included.  Two numbers taken by two different
+                    # rules, equal only while every descent this walk makes
+                    # enters its body exactly once, which was an argument
+                    # in a comment.  And the comparison was one-directional:
+                    # one descent into a body that runs N times reads FEWER
+                    # occurrences than the body has executions, and no
+                    # count of readings can see an under-reading.
                     #
-                    # So the precondition is CHECKED rather than argued.
-                    # An occurrence is (call path, equation); a second
-                    # reading of the same occurrence can only come from a
-                    # walk that iterated, and it raises rather than being
-                    # counted.  `ProbeInvariantViolated` is a
-                    # `BaseException` and therefore is NOT absorbed by the
-                    # `except Exception` in `assumes_over_the_rationals`
-                    # that this reading is taken under -- which is the
-                    # whole reason that class stopped being an
-                    # `AssertionError`.
+                    # `_assume_sites_reachable` walks the same program by
+                    # the same rule and returns the occurrences this walk
+                    # CAN reach.  An occurrence is (call path, equation),
+                    # so the two sets are comparable key for key, and:
+                    #
+                    #   * a reading that is SHORT leaves `reachable -
+                    #     assume_sites` non-empty and cannot fire the stop;
+                    #   * a SECOND reading of one occurrence can only come
+                    #     from a walk that iterated, and raises;
+                    #   * a reading of an occurrence the rule cannot reach
+                    #     means this walk and `_assume_sites_reachable`
+                    #     disagree about the descent, and raises.
+                    #
+                    # `ProbeInvariantViolated` is a `BaseException` and
+                    # therefore is NOT absorbed by the `except Exception`
+                    # in `assumes_over_the_rationals` that this reading is
+                    # taken under -- which is the whole reason that class
+                    # stopped being an `AssertionError`.
+                    #
+                    # What the stop does NOT claim is that the reading
+                    # covers the program: `reachable` is what this rule
+                    # reaches and `census.assumes_in_program` is what the
+                    # program states, and an assume behind a `scan` is in
+                    # the second and not the first.  The gate in `probe`
+                    # compares the reading against the second before it may
+                    # say a point was admitted, and that is the check a
+                    # short reading fails.
                     site = path + (id(eqn),)
                     if site in assume_sites:
                         raise ProbeInvariantViolated(
                             f"the rational replay read the same "
-                            f"`stelling_assume` occurrence twice, so its "
-                            f"assume count is a count of READINGS and "
-                            f"`census.assumes_in_program` "
-                            f"({census.assumes_in_program}) is a count of "
-                            f"EQUATIONS. The `assumes_only` early stop "
-                            f"compares the two and would stop on a "
-                            f"PARTIAL reading -- one iteration's assume, "
-                            f"reported as the program's. Some walker in "
-                            f"this module now descends a repeating "
-                            f"construct; the early stop must be re-derived "
-                            f"before this probe reads an assume again."
+                            f"`stelling_assume` occurrence twice, so the "
+                            f"occurrences it has READ are no longer a "
+                            f"subset of the occurrences its descent rule "
+                            f"can REACH ({len(reachable_sites)} of them). "
+                            f"The `assumes_only` early stop compares those "
+                            f"two sets and would stop on a PARTIAL "
+                            f"reading -- one iteration's assume, reported "
+                            f"as the program's. Some walker in this module "
+                            f"now descends a repeating construct; the "
+                            f"early stop must be re-derived before this "
+                            f"probe reads an assume again."
+                        )
+                    if site not in reachable_sites:
+                        raise ProbeInvariantViolated(
+                            f"the rational replay read a "
+                            f"`stelling_assume` occurrence that "
+                            f"`_assume_sites_reachable` says this walk's "
+                            f"own descent rule cannot reach, so the two "
+                            f"disagree about which bodies this replay "
+                            f"enters and neither the `assumes_only` early "
+                            f"stop nor the reading it completes means what "
+                            f"it says. The reachable set holds "
+                            f"{len(reachable_sites)} occurrence(s) and "
+                            f"this is not one of them."
                         )
                     assume_sites.add(site)
                     _alive.append(eqn)
                     assumes.append(all(bool(v) for v in ins[0].reshape(-1)))
-                    if (
-                        assumes_only
-                        and len(assumes) >= census.assumes_in_program
-                    ):
+                    if assumes_only and not (reachable_sites - assume_sites):
                         raise _AssumesComplete
                 env[eqn.outvars[0]] = ins[0]
                 continue

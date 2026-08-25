@@ -3151,34 +3151,117 @@ def test_the_bool_window_intersects_with_the_declaration():
 
 
 @pytest.mark.filterwarnings("ignore:Explicitly requested dtype")
-def test_the_sampled_point_must_survive_conversion_to_jax():
-    """An invariant that holds because of a decline in ANOTHER module.
+@pytest.mark.parametrize(
+    "dtype,box,narrowed",
+    [("float64", (0.0, 9.0), "float32"), ("int64", (0, 9), "int32")],
+)
+def test_a_declaration_jax_would_NARROW_is_declined_and_not_raised(
+    dtype, box, narrowed
+):
+    """A probe that cannot sample says so; it does not kill the verdict.
 
     ``run_one`` hands ``jnp.asarray`` the numpy point and ``_confirm`` and
     ``_replay`` the un-narrowed one. Under ``jax_enable_x64=0`` that
-    conversion NARROWS float64 to float32, and the two halves of the fire
-    condition would then be about different programs. Nothing reaches it
-    today — ``propagate`` refuses the value-changing convert a float64
-    declaration produces with x64 off, so no VERIFIED exists — but that is
-    a fact about another module, and an invariant that rests on one is an
-    invariant one line elsewhere can remove.
-    """
-    from stelling.falsify import ProbeInvariantViolated
+    conversion NARROWS ``float64`` to ``float32`` and ``int64`` to
+    ``int32``, and the two halves of the fire condition would then be
+    about different programs.
 
+    **THIS USED TO RAISE ``ProbeInvariantViolated`` OUT OF ``check()``.**
+    The comment at the assertion said *"nothing reaches it today … an
+    int64 box is admitted only where it provably fits int32"*, which is
+    inverted: fitting int32 is the condition under which the box IS
+    admitted and the probe runs. Driven at ``2bd7bc8`` and at its parent
+    with x64 off, an ``int64`` declaration raised straight out of
+    ``check(..., falsify="sample")`` — and since the class moved to
+    ``BaseException``, a batch caller's ``except Exception`` no longer
+    contains it.
+
+    Neither disposition was right, because nothing about stelling's
+    invariants had broken: the caller turned x64 off and declared a
+    64-bit box, and this probe cannot sample that. That is a sentence
+    this module already says once per report for an unbounded declaration
+    and for a dtype it cannot construct, and it says it here too. The
+    verdict the analysis reached is untouched.
+    """
     def h():
-        x = any_array((), "float64", (0.0, 9.0))
-        return assert_(x * x <= 40.0)
+        x = any_array((), dtype, box)
+        return assert_(x * x <= 100.0)
 
     old = jax.config.jax_enable_x64
     jax.config.update("jax_enable_x64", False)
     try:
-        closed = traced(h)
-        assert str(np.asarray(jnp.asarray(np.asarray(1.5, "float64")).dtype)) \
-            == "float32", "jax no longer narrows here; the test is inert"
-        with pytest.raises(ProbeInvariantViolated, match="did not survive"):
-            probe(closed, statuses=["discharged"])
+        assert str(
+            np.asarray(jnp.asarray(np.zeros((), dtype)).dtype)
+        ) == narrowed, "jax no longer narrows here; the test is inert"
+        report = probe(traced(h), statuses=["discharged"])
     finally:
         jax.config.update("jax_enable_x64", old)
+
+    assert report.declined is not None, report
+    assert "dtype-narrowed-by-jax" in report.declined, report.declined
+    assert f"{dtype} becomes {narrowed}" in report.declined, report.declined
+    assert report.points_built == 0, report
+    line = report.stamp_line()
+    assert "DECLINED" in line and "not evidence" in line, line
+
+
+@pytest.mark.filterwarnings("ignore:Explicitly requested dtype")
+def test_the_public_door_does_not_raise_on_an_int64_box_with_x64_off():
+    """The reach, at the door the auditor drove it out of.
+
+    ``check(h, vacuity_mode="inputs-only", falsify="sample")`` under
+    ``jax_enable_x64=0``: ``float64`` → UNKNOWN (``propagate`` refuses the
+    value-changing convert), ``float32`` → VERIFIED with a probe note, and
+    ``int64`` → ``ProbeInvariantViolated``, at ``2bd7bc8`` and at its
+    parent. The verdict now survives and carries the decline.
+    """
+    from stelling.preconditions import check
+
+    def h():
+        y = any_array((), "int64", (0, 2))
+        return assert_(y + 0 >= 0)
+
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", False)
+    try:
+        verdict = check(h, vacuity_mode="inputs-only", falsify="sample")
+    finally:
+        jax.config.update("jax_enable_x64", old)
+
+    assert verdict.status == "VERIFIED", verdict.status
+    note = "\n".join(verdict.notes)
+    assert "falsification probe: DECLINED" in note, note
+    assert "dtype-narrowed-by-jax" in note, note
+    assert "not evidence about the verdict" in note, note
+
+
+@pytest.mark.filterwarnings("ignore:Explicitly requested dtype")
+def test_the_conversion_assertion_is_still_LIVE_behind_that_decline():
+    """The decline is the policy; the assertion is the last line of defence.
+
+    An invariant that holds only because of a decline is worth what the
+    decline is worth, so the decline is in THIS module — three lines from
+    the assertion — rather than in ``propagate``. What is pinned here is
+    that removing it puts the assertion back on the path: the guard is not
+    dead code kept for its comment.
+    """
+    import stelling.falsify as F
+    from stelling.falsify import ProbeInvariantViolated
+
+    def h():
+        x = any_array((), "float64", (0.0, 9.0))
+        return assert_(x * x <= 100.0)
+
+    old_x64 = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", False)
+    real = F._dtype_after_jax
+    F._dtype_after_jax = lambda name: name   # the decline, removed
+    try:
+        with pytest.raises(ProbeInvariantViolated, match="did not survive"):
+            probe(traced(h), statuses=["discharged"])
+    finally:
+        F._dtype_after_jax = real
+        jax.config.update("jax_enable_x64", old_x64)
 
     assert not issubclass(ProbeInvariantViolated, VerifiedFalsified), (
         "a broken invariant must not be catchable as a firing"
@@ -3586,48 +3669,202 @@ def test_the_admissible_clause_claims_no_confirmation_when_none_was_taken():
     assert "no assume was re-read over ℚ here" in line, line
 
 
-def test_the_replay_refuses_to_descend_a_body_that_does_not_run_once():
-    """``assumes_only``'s early stop compares READINGS with EQUATIONS.
+def _scan_body_assume():
+    """``assume`` inside a ``lax.scan`` body: one equation, three runs."""
+    y = any_array((3,), "float64", (1.0, 2.0))
 
-    ``len(assumes) >= census.assumes_in_program`` is a dynamic count on
-    the left and a static one on the right. They agree only while each
-    assume equation is read exactly once, which holds only because every
-    primitive ``_replay`` descends is in ``_CALL_PRIMITIVES`` and a call
-    body is entered once per call equation.
+    def body(c, x):
+        assume(x >= 0.5)
+        return c + x, x
 
-    Adding ``scan`` to that tuple is the single edit a reader improving
-    this walk's reach would make, and it would make the gate stop on the
-    FIRST iteration's assume and report it as the program's. Driven by
-    making exactly that edit.
+    tot, _ = jax.lax.scan(body, 0.0, y)
+    return assert_(tot >= 0.0)
+
+
+def _reduce_body_assume():
+    """``assume`` inside a ``lax.reduce`` combiner: one equation, four runs.
+
+    The combiner is not a monoid jax recognises, so this traces to the
+    GENERAL ``reduce`` primitive rather than to ``reduce_sum``.
+    """
+    y = any_array((4,), "float64", (1.0, 2.0))
+
+    def comb(a, b):
+        assume(b >= 0.5)
+        return a + b
+
+    return assert_(jax.lax.reduce(y, 0.0, comb, (0,)) >= 0.0)
+
+
+def _while_body_assume():
+    """``assume`` in a ``lax.while_loop`` body: runs until the test fails."""
+    y = any_array((), "float64", (1.0, 2.0))
+
+    def body(c):
+        assume(c >= 0.0)
+        return c + 1.0
+
+    return assert_(jax.lax.while_loop(lambda c: c < 5.0, body, y) >= 0.0)
+
+
+@pytest.mark.parametrize(
+    "harness,name,key,point,runs",
+    [
+        (_reduce_body_assume, "reduce", "jaxpr", np.full((4,), 1.5), 4),
+        (_scan_body_assume, "scan", "jaxpr", np.full((3,), 1.5), 3),
+        (_while_body_assume, "while", "body_jaxpr", np.asarray(1.5), 4),
+    ],
+)
+def test_the_replay_refuses_to_descend_a_body_that_does_not_run_once(
+    harness, name, key, point, runs
+):
+    """The descent set claims a property; the descent CHECKS it.
+
+    ``_CALL_PRIMITIVES`` membership means *"this body runs exactly once
+    per equation, on the equation's own operands"*, and everything
+    downstream of a descent — the assume reading, the assert reading, the
+    ``assumes_only`` early stop — is a reading of the PROGRAM only while
+    that holds. Adding a name to that mapping is the single edit a reader
+    improving this walk's reach makes, so the property is re-derived from
+    the equation at the descent rather than trusted.
+
+    **THE VERSION THIS REPLACED WAS A DENY-LIST OF NAMES AND IT PROTECTED
+    NOTHING.** ``_REPEATING_OR_CONDITIONAL_BODIES`` held eight names, of
+    which ``cond_p``, ``fori_loop``, ``switch`` and ``while_loop`` are not
+    primitive names on either supported jax series and ``platform_index``
+    carries no jaxpr — so only ``scan``, ``while`` and ``cond`` were live.
+    ``reduce`` was NOT among them, is a real primitive on both series, and
+    carries its combiner under ``jaxpr``, the first key ``_call_jaxpr_of``
+    used to look for. Driven at ``2bd7bc8`` with ``reduce`` added to the
+    descent set, ``_replay(..., assumes_only=True)`` on the fixture below
+    returned ``assumes=[False]`` with no guard of any kind: the combiner
+    was entered ONCE with the equation's operands, so it read
+    ``0.0 >= 0.5`` — the initial value — where the body's four real
+    invocations all see 1.5 and all satisfy it. The early stop then called
+    that reading COMPLETE.
+
+    Every case here is driven on ``assumes_only=True``, which is the only
+    path the invariant is stated for: the old test for this passed
+    ``assumes_only=False`` and so never exercised the gate.
     """
     import stelling.falsify as F
     from stelling.falsify import ProbeInvariantViolated
 
-    def scanned():
-        y = any_array((3,), "float64", (1.0, 2.0))
-
-        def body(c, x):
-            assume(x >= 0.5)
-            return c + x, x
-
-        tot, _ = jax.lax.scan(body, 0.0, y)
-        return assert_(tot >= 0.0)
-
-    census = F._read(traced(scanned))
+    census = F._read(traced(harness))
     assert census.assumes_in_program == 1, census.assumes_in_program
 
+    # as shipped the primitive is not in the descent set at all, and the
+    # replay abstains — the decline that has been standing in for a guard
+    with pytest.raises(_Unreplayable):
+        F._replay(census, (point,), assumes_only=True)
+
     old = F._CALL_PRIMITIVES
-    F._CALL_PRIMITIVES = old + ("scan",)
+    F._CALL_PRIMITIVES = dict(old, **{name: key})
     try:
-        with pytest.raises(ProbeInvariantViolated, match="does not run exactly once"):
-            F._replay(census, (np.full((3,), 1.5),), assumes_only=True)
+        with pytest.raises(
+            ProbeInvariantViolated, match="runs exactly once per equation"
+        ) as exc:
+            F._replay(census, (point,), assumes_only=True)
+        assert name in str(exc.value), str(exc.value)
     finally:
         F._CALL_PRIMITIVES = old
 
-    # and with the tuple as shipped the replay abstains instead, which is
-    # the decline that has been standing in for this guard
-    with pytest.raises(_Unreplayable):
-        F._replay(census, (np.full((3,), 1.5),), assumes_only=True)
+    # and the reason is derived from the equation, not from a name: the
+    # body of this primitive does not have the equation's signature (or,
+    # for `while`, the equation carries a second jaxpr as well)
+    eqn = next(
+        e
+        for e in traced(harness).jaxpr.eqns
+        if e.primitive.name == name
+    )
+    body = eqn.params[key]
+    body = getattr(body, "jaxpr", body)
+    once, why = F._body_runs_once(eqn, body)
+    assert once is False and why, (name, once, why)
+    assert runs > 1  # the body really does run more than once
+
+
+def test_body_runs_once_answers_YES_for_every_name_in_the_descent_set():
+    """The other direction, and the one a wrong check would cost reach on.
+
+    A structural guard that refused an ordinary ``jit`` would take this
+    walk's reach back to what it was before ``_CALL_PRIMITIVES`` was
+    corrected — 6% of violations decided, 1,062 abstentions reading
+    ``'jit' has no exact rational reading``. So the live call primitives
+    this jax emits are traced and asserted to PASS.
+    """
+    import stelling.falsify as F
+
+    def wheres():
+        y = any_array((4,), "float64", (0.0, 2.0))
+        return assert_(jnp.where(y >= 0.0, y, 0.0) >= -1.0)
+
+    def remats():
+        y = any_array((), "float64", (0.0, 2.0))
+        z = jax.checkpoint(lambda a: (1e16 + a) - 1e16)(y)
+        return assert_(z <= y + 1.0)
+
+    seen = set()
+    for harness in (wheres, remats):
+        closed = traced(harness)
+
+        def walk(jaxpr):
+            for eqn in jaxpr.eqns:
+                if eqn.primitive.name not in F._CALL_PRIMITIVES:
+                    continue
+                seen.add(eqn.primitive.name)
+                body, _ = F._call_jaxpr_of(eqn)
+                once, why = F._body_runs_once(eqn, body)
+                assert once, (eqn.primitive.name, why)
+                walk(body)
+
+        walk(closed.jaxpr)
+
+    assert {"jit", "remat2"} <= seen, seen
+
+
+def test_the_early_stop_compares_SITES_READ_against_SITES_REACHABLE():
+    """The count comparison is gone; two sets taken by one rule replace it.
+
+    The old stop was ``len(assumes) >= census.assumes_in_program``: a
+    count of READINGS against a count of EQUATIONS taken by the widest
+    walk in the file. Two rules, one comparison, and it could only ever
+    detect an OVER-reading — one descent into a body that runs N times
+    reads fewer occurrences than the body has executions, and no count of
+    readings sees that.
+
+    What is asserted here is the structural property that replaced it:
+    the occurrences ``_replay`` reads are exactly the occurrences
+    ``_assume_sites_reachable`` says its own descent rule reaches, and the
+    reachable set is what the stop is measured against — NOT
+    ``assumes_in_program``, which counts what the program STATES and is
+    the gate's business.
+    """
+    import stelling.falsify as F
+
+    def two_deep():
+        y = any_array((), "float64", (0.0, 2.0))
+        assume(y >= 0.0)
+        j = jax.jit(lambda a: (assume(a <= 4.0), a)[1])(y)
+        return assert_(j >= -1.0)
+
+    closed = traced(two_deep)
+    census = F._read(closed)
+    assert census.assumes_in_program == 2, census.assumes_in_program
+
+    reachable, _alive = F._assume_sites_reachable(closed.jaxpr)
+    assert len(reachable) == 2, reachable
+
+    assumes, _ = F._replay(census, (np.asarray(1.0),), assumes_only=True)
+    assert assumes == [True, True], assumes
+
+    # and where the rule cannot reach an assume, the REACHABLE set is
+    # short while `assumes_in_program` is not — which is the distinction
+    # the old single number could not draw
+    scanned = traced(_scan_body_assume)
+    assert F._read(scanned).assumes_in_program == 1
+    reachable_scan, _a2 = F._assume_sites_reachable(scanned.jaxpr)
+    assert reachable_scan == set(), reachable_scan
 
 
 def test_the_replay_refuses_to_read_one_assume_occurrence_twice():
@@ -3673,6 +3910,52 @@ def test_the_replay_refuses_to_read_one_assume_occurrence_twice():
     # unmodified, the same program replays cleanly and reads its one assume
     assumes, _ = F._replay(census, (np.asarray(1.0),), assumes_only=False)
     assert len(assumes) == census.assumes_in_program == 1
+
+
+def test_the_ADMISSIBLE_and_UNCONFIRMED_columns_move_with_the_CLOCK():
+    """``probe``'s cost table read as five rows of measured constants.
+
+    Its first two columns are openly a clock. Its last two —
+    ``admissible`` and ``unconfirmed`` — are the same clock one step
+    removed, and nothing said so: an UNREAD gate counts its point
+    ADMISSIBLE and UNCONFIRMED, while a gate that was read and said NO
+    does not count the point at all. So a slower machine INFLATES both.
+
+    Measured across machines on the ``(10000,)`` row, the same probe at
+    the default budget reads 14/6, 11/3 and 10/2 — three machines, three
+    pairs, one table. Rather than assert a timing here, the budget is
+    shrunk, which is what a slower machine does, and what is pinned is the
+    DIRECTION: both columns rise as the clock buys fewer confirmations.
+    """
+    import stelling.falsify as F
+
+    def wide():
+        y = any_array((512,), "float64", (0.0, 2.0))
+        assume(jnp.all(y * 0.1 * 10.0 <= y))
+        return assert_(jnp.sum(y) >= -1.0)
+
+    closed = traced(wide)
+    old = F.REPLAY_SECONDS_BUDGET
+    seen = []
+    try:
+        for budget in (5.0, 0.005):
+            F.REPLAY_SECONDS_BUDGET = budget
+            r = probe(closed, statuses=["discharged"], budget=64)
+            seen.append((budget, r.points_admissible,
+                         r.points_admissible_unconfirmed))
+    finally:
+        F.REPLAY_SECONDS_BUDGET = old
+
+    (_b0, adm0, unc0), (_b1, adm1, unc1) = seen
+    assert unc0 == 0, seen
+    assert adm1 > adm0, (
+        f"cutting the confirmation budget did not raise `points_admissible`: "
+        f"{seen}. The cost table in `probe` says both columns are "
+        f"machine-dependent BECAUSE an unread gate counts its point "
+        f"admissible; if that stopped being true the table's note is wrong"
+    )
+    assert unc1 > unc0, seen
+    assert unc1 <= adm1, seen
 
 
 def test_the_shared_assume_budget_can_saturate_and_says_so():

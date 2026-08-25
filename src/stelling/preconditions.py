@@ -197,17 +197,31 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     byte-identical) or ``"sample"`` to try, after a VERIFIED, to FALSIFY
     it by executing the real program at concrete points inside the
     declared set. **SHIPPED AND PROVISIONAL**: audited — the fire
-    condition was checked blind against an independent ``Fraction``
-    oracle sharing no code with this package, 363 gate readings and 363
-    agreements — and its SIGNATURE is not frozen; ``probe()``'s own first
-    parameter changed name and type inside this release cycle.
+    condition's exact reading is checked against an independent
+    ``Fraction`` oracle sharing no code with that module, on every run, by
+    ``tests/test_probe_oracle.py`` (243 gate readings, 216 obligation
+    readings, all 216 point-comparisons agreeing, and the counts asserted
+    there rather than quoted here) — and its SIGNATURE is not frozen;
+    ``probe()``'s own first parameter changed name and type inside this
+    release cycle. This sentence used to cite *"363 gate readings and 363
+    agreements"*, a figure that appeared nowhere in this repository except
+    the two sentences citing it; a number a reader cannot re-derive is the
+    same defect as a check that does not exist, which is a rule this
+    project applies to everything else it ships.
     :mod:`stelling.falsify`'s docstring opens with the list of what
-    "provisional" names, including the one hole that is disclosed and
-    open (the analysis's constrained region is never read) and the
-    measured reach on ordinary ``jnp`` code. It exists because this
-    library is asymmetric about its two answers: a REFUTED's witness is
-    replayed through the real program, and a VERIFIED — a universal claim
-    with no witness — has had nothing downstream at all.
+    "provisional" names, and **three of its six items are a decline
+    standing in for a guard**: the analysis's constrained region is never
+    read (the one this file used to call *"the one hole"*, and it is
+    disclosed and open); an ``ieee`` firing cannot tell a caller's own
+    ``libm_budget`` declaration from an unsound analysis, so the firing
+    message names the declaration instead of guessing; and the rational replay
+    does not descend a loop or branch body, which this release GUARDS —
+    the descent refuses a body that does not run once per equation — and
+    does not close. The same docstring carries the measured reach on
+    ordinary ``jnp`` code. It exists because this library is asymmetric
+    about its two answers: a REFUTED's witness is replayed through the
+    real program, and a VERIFIED — a universal claim with no witness — has
+    had nothing downstream at all.
 
     Two properties of it are not negotiable and are enforced rather than
     described. First, **it can only refute**: finding nothing adds no
@@ -221,6 +235,24 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     the two dispositions that were rejected, the list of what the probe
     is allowed to import and why that set is the independent one, and —
     measured, not assumed — the class of defect it cannot reach.
+
+    **SO THIS FUNCTION CAN RAISE, AND ONE OF THE TWO IS OUTSIDE
+    ``Exception``.** With ``falsify="sample"`` a caller must expect
+    :class:`stelling.falsify.VerifiedFalsified` (an ``AssertionError``:
+    the probe broke a VERIFIED, which is stelling's defect) and
+    :class:`stelling.falsify.ProbeInvariantViolated` (a
+    ``BaseException``: a fact the probe's own readings rest on did not
+    hold, so it has nothing to say about the verdict either way). The
+    second is deliberately outside ``Exception`` AND outside
+    ``AssertionError`` so that neither the ordinary batch idiom nor the
+    catch-a-soundness-event idiom can silently swallow an instrument's
+    alarm — which means **``except Exception:`` will not contain it**, and
+    a batch runner that must survive one has to name it. With
+    ``falsify=None`` neither can be raised at all. A probe that CANNOT
+    run does not raise: an unsampleable declaration, a dtype the sampler
+    cannot construct, or a 64-bit declaration under ``jax_enable_x64=0``
+    all produce a verdict carrying a named decline in its notes. See
+    ``docs/preconditions.md``.
 
     The same keyword is accepted by
     :func:`stelling.contracts.check_contract` and
