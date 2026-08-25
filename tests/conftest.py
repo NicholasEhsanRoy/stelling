@@ -1221,6 +1221,21 @@ def tripwire_plugin_args() -> tuple[str, ...]:
     tripwire in them at all. Measured in an installed environment: **17
     failed**, the same seventeen the entry-point probe was added to fix. The
     environment variable is checked first for that reason.
+
+    AND THE TWO ANSWERS ARE THE SAME CONFIGURATION ONLY IN A FRESH
+    INTERPRETER. ``-p`` marks the named module for assertion rewriting;
+    where this process has ALREADY imported it, that is a config-time
+    ``PytestAssertRewriteWarning`` and the entry-point answer has no such
+    warning, so the two differ. Subprocess sessions are unaffected — nothing
+    is imported there yet. In-process sessions are affected, and one that
+    escalates ``UserWarning`` DIES of it: see
+    :class:`_TripwireAsIfInstalled` below, which is what
+    ``tests/test_tripwire_plugin.py::_run`` uses instead. The remaining
+    in-process callers — the four nested sessions in
+    ``tests/test_narrowing_perimeter.py`` — hand their sessions no ``-W`` at
+    all, so there the warning is printed and no verdict moves. That is a
+    property of THEIR arguments and not of this helper, and it is why they
+    are left alone rather than declared safe.
     """
     import importlib.metadata
     import os
@@ -1231,6 +1246,83 @@ def tripwire_plugin_args() -> tuple[str, ...]:
         if entry.value.split(":")[0] == TRIPWIRE_PLUGIN:
             return ()
     return ("-p", TRIPWIRE_PLUGIN)
+
+
+class _TripwireAsIfInstalled:
+    """The tripwire plugin, handed to an IN-PROCESS nested session as an OBJECT.
+
+    WHAT THIS REPLACES AND WHY. :func:`tripwire_plugin_args` answers *"will the
+    nested session autoload it?"* with one of two ANSWERS, and the two are not
+    the same configuration. Measured, with ``stelling._tripwire.plugin``
+    already in ``sys.modules`` — which is the normal case, because
+    ``tests/test_readme_claims.py`` imports it in the outer process and an
+    installed environment autoloads it into the outer session as well:
+
+    * entry point declared -> ``()`` -> the nested session autoloads the
+      module. Nothing marks it for assertion rewriting. No warning.
+    * entry point absent  -> ``("-p", "stelling._tripwire.plugin")`` ->
+      ``consider_pluginarg`` -> ``import_plugin`` ->
+      ``rewrite_hook.mark_rewrite(...)``, which finds the module ALREADY
+      IMPORTED and issues a config-time ``PytestAssertRewriteWarning``.
+
+    That warning subclasses ``UserWarning``, so the two sessions this suite
+    runs with ``-W error::UserWarning`` died in ``pytest_cmdline_parse`` with
+    ``ExitCode.INTERNAL_ERROR`` and empty stdout — in the venv without the
+    entry point, and only there. The subject of those two tests is the
+    plugin's behaviour under ``-W error``; it is not how the venv was
+    installed, and a check whose verdict moves with the developer's
+    environment is the defect this tree keeps finding.
+
+    So an in-process nested session is given the module as an object instead.
+    ``pytest.main(..., plugins=[obj])`` registers a non-string plugin directly
+    (``_pytest.config._prepareconfig``), which never reaches ``import_plugin``
+    and therefore never marks anything for rewriting — in EVERY environment,
+    declared entry point or not.
+
+    REGISTERED UNDER THE ENTRY POINT'S OWN NAME, which is what makes this one
+    configuration rather than a third one. ``pytest_addoption`` is historic
+    and fires at registration, before ``Config._preparse`` reaches
+    ``load_setuptools_entrypoints``; registering the module under
+    ``ENTRY_POINT_NAME`` means the loader's own ``get_plugin(ep.name)`` check
+    sees it and skips, so a declared entry point cannot register the SAME
+    module object a second time under a different name — the
+    ``ValueError: Plugin already registered under a different name`` that
+    ``stelling/overflow.py`` guards against the same way, and that
+    ``test_naming_the_opt_in_module_is_never_a_DOUBLE_registration`` drives.
+
+    The resulting plugin manager is identical either way: the tripwire module
+    registered exactly once, under ``stelling_overflow``, with the opt-in
+    module ``stelling.overflow`` NOT loaded, so the mode is still ``off``
+    until a flag or that module says otherwise. Autoload itself is still
+    exercised where it belongs — the ``runpytest_subprocess`` sessions in
+    ``tests/test_tripwire_plugin.py``, which start a fresh interpreter and so
+    are what a user's own run actually looks like.
+
+    SUBPROCESS SESSIONS CANNOT USE THIS. ``Pytester.runpytest_subprocess``
+    rejects non-string plugins outright, and it does not need this: a fresh
+    interpreter has nothing in ``sys.modules`` yet, so ``-p`` there marks the
+    module for rewriting without warning. Those keep
+    :func:`tripwire_plugin_args`.
+    """
+
+    @staticmethod
+    def pytest_addoption(parser, pluginmanager) -> None:
+        import importlib
+
+        plugin = importlib.import_module(TRIPWIRE_PLUGIN)
+        if not pluginmanager.is_registered(plugin):
+            pluginmanager.register(plugin, plugin.ENTRY_POINT_NAME)
+
+
+def tripwire_inprocess_plugins() -> tuple[object, ...]:
+    """What an in-process nested session passes as ``plugins=``.
+
+    A FRESH object per session. pluggy caches hook implementations per
+    registered plugin, and these sessions are run back to back inside one
+    outer test process; a shared instance would carry state between plugin
+    managers that are meant to know nothing about each other.
+    """
+    return (_TripwireAsIfInstalled(),)
 
 
 def xdist_plugin_args() -> tuple[str, ...]:

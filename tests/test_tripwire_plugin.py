@@ -28,11 +28,27 @@ pytest_plugins = ["pytester"]
 jax = pytest.importorskip("jax")
 
 from conftest import TRIPWIRE_PLUGIN as PLUGIN
-from conftest import deterministic_order_args, tripwire_plugin_args
+from conftest import (
+    deterministic_order_args,
+    tripwire_inprocess_plugins,
+    tripwire_plugin_args,
+)
 
-# `("-p", PLUGIN)` where the distribution is not installed, `()` where it is
-# and the `pytest11` entry point has already registered the module. Adding
-# both is a hard error -- see `conftest.tripwire_plugin_args`.
+# FOR THE SUBPROCESS SESSIONS ONLY. `("-p", PLUGIN)` where the distribution is
+# not installed, `()` where it is and the `pytest11` entry point has already
+# registered the module; adding both is a hard error -- see
+# `conftest.tripwire_plugin_args`. A fresh interpreter has nothing in
+# `sys.modules`, so `-p` there marks the module for assertion rewriting
+# without complaint.
+#
+# THE IN-PROCESS SESSIONS BELOW DO NOT USE IT, and that is the whole of this
+# file's fix: those two answers are not the same configuration once the module
+# is already imported in THIS process, which it is. `-p` then makes
+# `mark_rewrite` issue a config-time `PytestAssertRewriteWarning` -- a
+# `UserWarning` -- and the two sessions run with `-W error::UserWarning` died
+# in argument parsing with `ExitCode.INTERNAL_ERROR` and empty stdout, in the
+# venv with no entry point declared and nowhere else. `_run` hands the module
+# over as an OBJECT instead; see `conftest._TripwireAsIfInstalled`.
 PLUGIN_ARGS = tripwire_plugin_args()
 #: Every nested session in this file plants tests whose ORDER is the
 #: property. See `deterministic_order_args` in tests/conftest.py.
@@ -96,7 +112,19 @@ def _isolate(pytester, monkeypatch):
 
 
 def _run(pytester, *args):
-    return pytester.runpytest(*PLUGIN_ARGS, *ORDER_ARGS, "-p", "no:cacheprovider", *args)
+    """An in-process nested session with the tripwire plugin registered.
+
+    ``plugins=`` rather than ``-p``, and a fresh registrar each time: see
+    `conftest._TripwireAsIfInstalled` for why the two are not
+    interchangeable here and for what this leaves identical.
+    """
+    return pytester.runpytest(
+        *ORDER_ARGS,
+        "-p",
+        "no:cacheprovider",
+        *args,
+        plugins=tripwire_inprocess_plugins(),
+    )
 
 
 # --- the opt-in -------------------------------------------------------------
@@ -437,12 +465,23 @@ def test_the_report_does_not_depend_on_the_order_the_findings_fired(pytester):
 
 
 def test_the_entry_point_declaration_is_what_makes_any_of_this_reachable():
-    """Everything above runs with ``-p stelling._tripwire.plugin`` spelled out
-    WHERE THE DISTRIBUTION IS NOT INSTALLED, and with nothing extra where it
-    is — this said "a nested pytester session inherits no entry points" and
+    """The SUBPROCESS sessions above run with ``-p
+    stelling._tripwire.plugin`` spelled out where the distribution is not
+    installed, and with nothing extra where it is — this said "a nested
+    pytester session inherits no entry points" and
     ``tests/conftest.py::tripwire_plugin_args`` records the measured opposite,
-    which is the reason that helper exists. Either way none of those runs can
-    see the one declaration the whole adoption story rests on: a
+    which is the reason that helper exists. The in-process ones do not go
+    through either route: they are handed the module as an OBJECT, because
+    ``-p`` on a module this process has already imported issues a config-time
+    ``PytestAssertRewriteWarning`` and the two ``-W error::UserWarning``
+    sessions above died of it — see ``conftest._TripwireAsIfInstalled``.
+
+    NONE OF THOSE ROUTES CAN SEE THE DECLARATION ITSELF, which is what this
+    test is for. Not the subprocess ones, whose ``-p`` spelling is chosen by
+    asking the environment rather than by reading ``pyproject.toml``; and not
+    the in-process ones, which now name ``ENTRY_POINT_NAME`` and would go on
+    working if the ``[project.entry-points.pytest11]`` section were deleted
+    tomorrow. The one declaration the whole adoption story rests on is a
     ``pytest11`` entry point that a rename, a typo or a deleted section would
     silently unregister, leaving `pytest_plugins = ["stelling.overflow"]` a
     line that does nothing at all.
