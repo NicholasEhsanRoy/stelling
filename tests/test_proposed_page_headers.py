@@ -57,6 +57,21 @@ is worse than none:
   makes it. The search WAS over the whole page, so a ``tests/…py``
   mentioned four hundred lines below the header satisfied it; that half is
   fixed, and the remaining half is stated rather than implied.
+* **the commit leg needs the commits, and a shallow checkout does not have
+  them.** Where ``git`` cannot reach a sha a status names,
+  ``test_every_commit_a_status_paragraph_names_is_an_ancestor`` SKIPS, with
+  a ``UserWarning`` naming git's own words and every page and sha that went
+  unverified. It used to hard-``assert`` there instead, which made this file
+  refuse the publish inside ``.github/workflows/release.yml``'s tagged-tree
+  job -- a depth-1 checkout, so every sha older than the tag is out of
+  reach. Skipping is the right answer for an environment; what it costs is
+  real and is stated at the skip: in that run, nothing checks that a status
+  names a commit that exists, that it is a commit rather than a tag, or
+  that it is an ancestor of this tree. **In a FULL checkout an unreachable
+  sha is still a hard failure** -- a shallow/foreign-repository triage runs
+  before the skip, because "this page names a commit that never existed" is
+  the sharpest thing this gate catches and it looks identical to a narrow
+  clone until somebody asks git which one it is.
 
 What the gate buys is the other half -- once somebody corrects a header,
 the correction is load-bearing and cannot rot silently, and a BUILT claim
@@ -69,6 +84,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import warnings
 
 import pytest
 
@@ -334,13 +350,107 @@ def _git(*args: str):
         return None
 
 
-def test_every_commit_a_status_paragraph_names_is_an_ancestor():
-    """"Shipped in ``<sha>``" is checkable, so it is checked.
+#: THE REASON THE OUT-OF-REACH SKIP CARRIES, AND IT IS A CONSTANT for exactly
+#: the reason `tests/test_soundness_routing.py`'s `_GIT_LESS_SKIP` and
+#: `tests/test_soundness_log_reach.py`'s `_TAG_OUT_OF_REACH_SKIP` are constants:
+#: `tests/test_skip_inventory.py` excuses a skip only by an EXACT string typed
+#: on its own disclosure surface, so a reason carrying git's stderr -- or the
+#: sha it failed on -- could never be disclosed there, and its file would exit
+#: 1 on the completeness half no matter what. Git's words and the shas go in
+#: the WARNING beside the skip, which is the channel that can carry them.
+_UNREACHABLE_SKIP = (
+    "git cannot reach a commit a `proposed-*.md` status paragraph names, so "
+    "that header's shipped-in claim cannot be decided here"
+)
 
-    Scope: the **Status:** paragraph only. A sha quoted further down a
-    page is part of the argument -- a measurement's as-of, a commit that
-    broke something -- and may legitimately name history this branch does
-    not contain. The status paragraph is the sentence a reader acts on.
+
+def _anchor() -> str | None:
+    """This project's root commit, READ from the module that already owns it.
+
+    `tests/test_soundness_routing.py` measured and documented `_ANCHOR` --
+    including that an object filter drops blobs and trees but never commits,
+    so a partial clone still holds it -- and a second copy of a sha here
+    would be a second thing to get wrong. `None` when that module cannot be
+    imported, which the one caller reads as "cannot tell", not as "absent".
+    """
+    try:
+        from test_soundness_routing import _ANCHOR
+    except Exception:  # noqa: BLE001 - a triage helper may not raise
+        return None
+    return _ANCHOR
+
+
+def _the_environment_explains_it() -> str | None:
+    """Why this tree could legitimately be missing history, or ``None`` when
+    nothing about the environment explains it.
+
+    **THE DIFFERENCE BETWEEN A NARROW CHECKOUT AND A BROKEN PAGE, AND
+    WITHOUT IT THE FIX FOR THE RELEASE BLOCKER WOULD HAVE BEEN A HOLE.** If
+    every unreachable sha became a skip, then a status paragraph naming a
+    commit THAT NEVER EXISTED -- a typo, a sha copied from a fork, a commit
+    rewritten out of this history -- would have become a warning and a green
+    session in an ordinary full checkout. That is the exact claim this gate
+    is here to hold, so it must still be RED where it can be decided, and
+    the environment has to be asked before the page is excused.
+
+    The triage is `tests/test_soundness_routing.py`'s, one object over, and
+    it asks in this order:
+
+    * `git rev-parse --is-shallow-repository` -- TRUE is the release job's
+      own shape and is answered first, so this leg never depends on an
+      import;
+    * `git cat-file -e <root commit>^{commit}` -- a non-shallow repository
+      holding any commit of this history holds the root too, so its absence
+      says this is a vendored copy somebody ran `git init` in, a fork with
+      rewritten history, or a `GIT_DIR` pointing somewhere else.
+
+    An import failure answers "the environment explains it", which is the
+    SAFE direction and the one the constant's own docstring argues for: a
+    wrong or unreadable anchor turns a FAIL into a SKIP rather than
+    inventing a red inside the one workflow whose mistakes cannot be
+    unpublished.
+    """
+    shallow = _git("rev-parse", "--is-shallow-repository")
+    if shallow is None:  # pragma: no cover - git vanished between two calls
+        return "git stopped answering between two calls"
+    if shallow.returncode != 0:  # pragma: no cover - env-dependent
+        return (
+            f"git cannot say whether this checkout is shallow: "
+            f"{shallow.stderr.strip()[:120]}"
+        )
+    if shallow.stdout.strip() == "true":
+        return "a shallow clone, whose history does not reach that commit"
+    root = _anchor()
+    if root is None:  # pragma: no cover - env-dependent
+        return (
+            "this tree cannot say whether it is this project's checkout at "
+            "all, because tests/test_soundness_routing.py, which owns the "
+            "root commit, did not import"
+        )
+    probe = _git("cat-file", "-e", f"{root}^{{commit}}")
+    if probe is None:  # pragma: no cover - git vanished between two calls
+        return "git stopped answering between two calls"
+    if probe.returncode != 0:
+        return (
+            f"the git repository rooted here is not this project's: it does "
+            f"not have {root[:12]}, this project's root commit, which a "
+            f"non-shallow repository holding any commit of this history "
+            f"holds too -- so this is a vendored copy somebody ran `git init` "
+            f"in, a fork with rewritten history, or a GIT_DIR pointing at "
+            f"something else"
+        )
+    return None
+
+
+def _status_shas() -> list[tuple[str, str]]:
+    """``(page name, sha)`` for every commit a **Status:** paragraph names.
+
+    Hoisted out of the check below so that ``tests/test_skip_inventory.py``'s
+    predicate can ask git about THE SAME SHAS this test asks about, in the
+    same order, rather than retyping a list that would drift the first time a
+    page cited a new commit. The predicate may compute the CONDITION; the
+    REASON is a literal typed in both files, which is the thing a rule over
+    there may not compute.
     """
     named: list[tuple[str, str]] = []
     for path in PAGES:
@@ -350,31 +460,201 @@ def test_every_commit_a_status_paragraph_names_is_an_ancestor():
             continue
         para = text[m.start():].split("\n\n", 1)[0]
         named += [(path.name, sha) for sha in sorted(set(_SHA.findall(para)))]
+    return named
+
+
+def _what_goes_unchecked(pairs: list[tuple[str, str]], said: str) -> str:
+    """The warning that stands beside the skip: git's own words, and the
+    claim that is dropped.
+
+    A skip REASON has to be one exact literal, because that is the only
+    channel ``tests/test_skip_inventory.py`` can excuse; this is where the
+    detail lives instead. It names every page and sha that went unverified,
+    because *a status paragraph naming a sha nobody verified* is precisely
+    the claim this gate exists to hold, and a reader who cannot see WHICH
+    ones cannot act on it.
+    """
+    listed = ", ".join(f"{page}:`{sha}`" for page, sha in pairs)
+    return (
+        f"{len(pairs)} commit(s) named in a `proposed-*.md` **Status:** "
+        f"paragraph are not in this tree's object store, so THE HEADERS "
+        f"THAT NAME THEM GO UNVERIFIED HERE: {listed}. Three checks are "
+        f"dropped for each one, and nothing else in this suite makes them: "
+        f"that the sha RESOLVES at all, so a status cannot name a commit "
+        f"that never existed or one that only ever lived in a fork; that it "
+        f"resolves to a COMMIT and not a tag, a tree or a blob; and that it "
+        f"is an ANCESTOR OF HEAD, so \"shipped in `<sha>`\" cannot describe "
+        f"another branch's tree or a commit that was rewritten away. A page "
+        f"could carry any of those three defects and this run would report "
+        f"nothing -- and `docs/README.md` tells a reader to trust these "
+        f"headers. {said} THE COMMONEST CAUSE IS A SHALLOW CHECKOUT: "
+        f"`actions/checkout@v4` with no `fetch-depth` fetches the triggering "
+        f"ref at depth 1, so a tag build holds exactly one commit and every "
+        f"sha older than the tag is out of reach -- which is the shape "
+        f"`.github/workflows/release.yml`'s job `the suite, on the tagged "
+        f"tree` runs in, and that job is refusal point #1 between a tag and "
+        f"PyPI. `git fetch --unshallow`, or `fetch-depth: 0` on that "
+        f"checkout, restores the check."
+    )
+
+
+def test_every_commit_a_status_paragraph_names_is_an_ancestor():
+    """"Shipped in ``<sha>``" is checkable, so it is checked WHERE IT CAN BE.
+
+    Scope: the **Status:** paragraph only. A sha quoted further down a
+    page is part of the argument -- a measurement's as-of, a commit that
+    broke something -- and may legitimately name history this branch does
+    not contain. The status paragraph is the sentence a reader acts on.
+
+    **UNTIL 2026-08-25 THIS WAS A RELEASE BLOCKER, AND A PRE-EXISTING ONE.**
+    It guarded with exactly two conditions -- is `git` on `PATH`, and does
+    `git rev-parse --verify HEAD` succeed -- and **in a shallow clone BOTH
+    PASS**: git is present and `HEAD` resolves to the one commit that was
+    fetched. Control then reached a hard `assert` on `git cat-file -t <sha>`,
+    which fails for every sha outside a depth-1 history. Driven here, in a
+    sandbox built the way the release job builds its tree (`git init`; one
+    `git fetch --depth=1` of a single ref into a tag ref; `git checkout` of
+    that tag): `1 failed`, on
+    ``proposed-declaration-dtype-check.md's status names `89413c2`, which
+    this tree's git cannot resolve: fatal: Not a valid object name 89413c2``.
+    That is `.github/workflows/release.yml`'s job `the suite, on the tagged
+    tree`, which checks out with `persist-credentials: false` alone -- no
+    `fetch-depth`, no `fetch-tags` -- and is refusal point #1 between a tag
+    and PyPI. A tree nobody can fix after the tag is cut refused the publish
+    over an environment, in the name of an integrity claim it could not have
+    decided either way.
+
+    So the unreachable case is a DISCLOSED SKIP now, with a `UserWarning`
+    beside it carrying git's exit code, git's own words, and the pages and
+    shas that went unverified -- the shape
+    `tests/test_soundness_routing.py` and
+    `tests/test_soundness_log_reach.py` already use one object over. It does
+    not silently pass: see :func:`_what_goes_unchecked` for the words, which
+    say that a page could name a sha that never existed, one that is a tag
+    rather than a commit, or one from another branch, and this run would
+    report none of it.
+
+    **AND THE CONTRADICTED SKIP IS GONE.** With `.git` removed and git still
+    on `PATH` -- an unpacked sdist -- the `HEAD` probe failed and this test
+    skipped as `"needs git"`, blaming a tool that was right there.
+    `tests/test_skip_inventory.py` calls that a CONTRADICTED skip and exits
+    1 on it, which is why the sdist lane read `1 failed` for this file and
+    no other reason. Each of the four states this file can meet now carries
+    the reason that is true in it: git off `PATH`; `.git` absent; a `git
+    init` with no commit at all; and a checkout whose object store does not
+    reach a named sha. The predicate over there asks git the same questions
+    in the same order, so the reasons partition the states.
+
+    **THE DECIDABLE ONES ARE STILL DECIDED.** A shallow tree that happens to
+    hold one of these shas gets it checked, and a page naming a sha that IS
+    here and does not hold up is red here exactly as anywhere; only the
+    undecidable remainder becomes a skip, and the assertion runs FIRST so a
+    real defect can never be reported as an environment.
+
+    **AND AN UNREACHABLE SHA IS NOT AUTOMATICALLY AN ENVIRONMENT.** The
+    obvious fix -- skip whenever `git cat-file` fails -- would have turned
+    the sharpest defect this gate catches into a warning: a status naming a
+    commit THAT NEVER EXISTED, a typo or a sha copied out of a fork, is
+    unreachable in a perfectly ordinary full checkout too. So
+    :func:`_the_environment_explains_it` is asked first, and where nothing
+    about the tree explains the miss this FAILS and says which page. Driven
+    both ways; see that function.
+    """
+    named = _status_shas()
     assert named, (
         "no proposed-*.md status paragraph names a commit, so this gate "
         "measured nothing"
     )
     if shutil.which("git") is None:  # pragma: no cover - env-dependent
+        # Byte-for-byte the reason `tests/test_skip_inventory.py` declares
+        # legitimate for git being off `PATH`, and for nothing else.
         pytest.skip("needs git")
-    probe = _git("rev-parse", "--verify", "HEAD")
-    if probe is None or probe.returncode != 0:  # pragma: no cover
-        pytest.skip("needs git")
+    if not (REPO / ".git").exists():  # pragma: no cover - env-dependent
+        # A worktree's `.git` is a FILE, hence `exists()` and not `is_dir()`.
+        # THIS STATE USED TO SKIP AS "needs git" WITH GIT RIGHT THERE ON
+        # `PATH`: the HEAD probe below failed and the reason blamed the
+        # wrong thing. Same literal as the sibling files' sdist skip.
+        pytest.skip("not a git checkout (an unpacked sdist, say)")
+
+    head = _git("rev-parse", "--verify", "HEAD")
+    if head is None or head.returncode != 0:  # pragma: no cover - env-dependent
+        # `.git` exists and there is no commit in it: a `git init` nobody
+        # has committed in, an sdist somebody ran `git init` inside. Nothing
+        # here is decidable -- there is no HEAD for anything to be an
+        # ancestor OF -- so every named sha is unverified, and it says so.
+        diagnosis = (
+            "git stopped answering between two calls."
+            if head is None else
+            f"`git rev-parse --verify HEAD` exited {head.returncode} and "
+            f"said: "
+            f"{head.stderr.strip() or '(nothing; git printed no diagnostic)'}"
+            f" -- so this tree has no HEAD commit for anything to be an "
+            f"ancestor OF, which is what a `git init` nobody has committed "
+            f"in looks like."
+        )
+        warnings.warn(_what_goes_unchecked(named, diagnosis), stacklevel=2)
+        pytest.skip(_UNREACHABLE_SKIP)
+
+    unreachable: list[tuple[str, str]] = []
+    words: list[str] = []
+    wrong: list[str] = []
     for page, sha in named:
         kind = _git("cat-file", "-t", sha)
-        assert kind is not None and kind.returncode == 0, (
-            f"{page}'s status names `{sha}`, which this tree's git cannot "
-            f"resolve: {'' if kind is None else kind.stderr.strip()}"
-        )
-        assert kind.stdout.strip() == "commit", (
-            f"{page}'s status names `{sha}`, which resolves to a "
-            f"{kind.stdout.strip()}, not a commit"
-        )
+        if kind is None or kind.returncode != 0:
+            unreachable.append((page, sha))
+            words.append(
+                "git stopped answering between two calls."
+                if kind is None else
+                f"`git cat-file -t {sha}` exited {kind.returncode} and said: "
+                f"{kind.stderr.strip() or '(nothing)'}."
+            )
+            continue
+        if kind.stdout.strip() != "commit":
+            wrong.append(
+                f"{page}'s status names `{sha}`, which resolves to a "
+                f"{kind.stdout.strip()}, not a commit"
+            )
+            continue
         anc = _git("merge-base", "--is-ancestor", sha, "HEAD")
-        assert anc is not None and anc.returncode == 0, (
-            f"{page} says its behaviour shipped in `{sha}`, which is NOT an "
-            f"ancestor of HEAD. Either the page is describing another "
-            f"branch's tree, or the commit was rewritten."
+        if anc is None or anc.returncode != 0:
+            wrong.append(
+                f"{page} says its behaviour shipped in `{sha}`, which is NOT "
+                f"an ancestor of HEAD. Either the page is describing another "
+                f"branch's tree, or the commit was rewritten."
+            )
+    assert not wrong, (
+        "these `proposed-*.md` status paragraphs name a commit this tree HAS "
+        "and that does not hold up:\n  " + "\n  ".join(wrong)
+    )
+    if unreachable:  # pragma: no cover - env-dependent
+        # THE ENVIRONMENT IS ASKED BEFORE THE PAGE IS EXCUSED. An
+        # unreachable sha is a skip only where something about this tree
+        # explains it; in a full, non-shallow checkout of this project it is
+        # a page naming a commit that is not there, and that is the whole
+        # claim this gate holds.
+        why = _the_environment_explains_it()
+        if why is None:
+            root = _anchor()
+            pytest.fail(
+                f"these `proposed-*.md` status paragraphs name commits that "
+                f"are NOT IN THIS HISTORY, in a tree that IS a complete "
+                f"checkout of this project -- BOTH conditions asked just now "
+                f"rather than assumed: `git rev-parse "
+                f"--is-shallow-repository` says false, and this repository "
+                f"holds {'' if root is None else root[:12] + ', '}this "
+                f"project's root commit. So this is neither the shallow CI "
+                f"clone nor the unpacked sdist nor the foreign repository "
+                f"this check skips for: what is wrong is the PAGE naming a "
+                f"commit that is not here -- a typo, a sha from a fork, or a "
+                f"commit rewritten out of this history. "
+                + ", ".join(f"{page}:`{sha}`" for page, sha in unreachable)
+                + ". " + " ".join(words)
+            )
+        warnings.warn(
+            _what_goes_unchecked(unreachable, " ".join(words) + f" ({why}.)"),
+            stacklevel=2,
         )
+        pytest.skip(_UNREACHABLE_SKIP)
 
 
 # ------------------------------------------------------- the index sentence

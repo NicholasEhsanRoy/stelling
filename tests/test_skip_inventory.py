@@ -327,6 +327,133 @@ def _git_cannot_resolve_the_release_tag() -> bool:
     return probe.returncode != 0
 
 
+def _the_shell_toolchain_is_incomplete() -> bool:
+    """Whether one of the six programs the release-gate drives shell out to is
+    missing.
+
+    FOUND BY DRIVING `git` OFF `PATH`, which is one of the four states the
+    round that added the rule below measured. Three tests in
+    `tests/test_release_gates.py` -- the ones that extract a step body out of
+    `.github/workflows/release.yml` and RUN it -- share a `skipif` whose
+    reason names no library, so no `importorskip` gate covered it and no rule
+    here named it: an UNDISCLOSED skip, and the only reason this file's
+    completeness half failed in that state on both trees. It never fires in
+    either shipped lane, because every CI runner has a shell, which is exactly
+    how a skip nobody asserted stays invisible.
+
+    `_NEEDED` is READ from the module that carries the marker rather than
+    retyped, for the same reason `_TAG` is: a predicate about a different
+    toolchain from the one the marker tests would excuse a skip nobody made.
+    The REASON is typed here. Answers False if the import cannot run, which is
+    the safe direction -- and also the correct one, since a module that did
+    not import cannot have skipped.
+    """
+    try:
+        from test_release_gates import _NEEDED
+    except Exception:  # noqa: BLE001 - a predicate may not raise
+        return False
+    return any(shutil.which(tool) is None for tool in _NEEDED)
+
+
+def _git_cannot_reach_a_status_commit() -> bool:
+    """Whether git is here, this IS a checkout, and a `proposed-*.md` status
+    paragraph names a commit this tree's object store does not hold.
+
+    THE THIRD INSTANCE OF THE SAME SHAPE, AND IT WAS A HARD RED UNTIL
+    2026-08-25 -- the other half of the release blocker the rule above
+    answers.
+    `tests/test_proposed_page_headers.py::test_every_commit_a_status_paragraph_names_is_an_ancestor`
+    hard-asserted `git cat-file -t <sha>` over every commit a status
+    paragraph names, behind two guards -- git on `PATH`, and `git rev-parse
+    --verify HEAD` -- **and a shallow clone passes both of them**: git is
+    present and HEAD resolves to the single fetched commit. So the assertion
+    fired in `.github/workflows/release.yml`'s job `the suite, on the tagged
+    tree`, which checks out with `actions/checkout@v4` and
+    `persist-credentials: false` alone -- no `fetch-depth`, no `fetch-tags`,
+    i.e. depth 1 on the triggering tag ref -- and is refusal point #1 between
+    a tag and PyPI. Re-derived here in a sandbox built that way (`git init`;
+    one `git fetch --depth=1` of a single ref into a tag ref; `git checkout`
+    of that tag): `1 failed`, `fatal: Not a valid object name 89413c2`.
+
+    THE PREDICATE ASKS GIT THE SAME QUESTIONS THE TEST ASKS, IN THE SAME
+    ORDER: the population first (the test asserts it is non-empty before it
+    consults git at all, so an empty one is a FAILURE over there and never a
+    skip), then git on `PATH`, then `.git`, then `HEAD`, then each named sha.
+    The first two conditions have rules of their own with their own reasons,
+    so this one can only be reached where neither of those holds -- which is
+    what makes the four reason strings a partition of the four states rather
+    than four spellings of one. The SHAS are READ from the module under test
+    rather than retyped, because a predicate about a different set of commits
+    from the ones the test resolves would excuse a skip nobody made; the
+    REASON is still typed in this file, which is the thing a rule may not
+    compute. Answers False if the import or a probe cannot run at all, which
+    is the safe direction: the skip is then reported as contradicted rather
+    than quietly excused.
+
+    BOTH `HEAD` STATES ANSWER TRUE, AND THAT IS DELIBERATE. A `git init` with
+    no commit in it and a depth-1 clone are one condition here -- git holds
+    no object the header names -- exactly as the rule above collapses "no
+    tags" and "shallow" into one reason. What separates them is the WARNING
+    the test emits, which carries git's exit code and git's own words.
+
+    AN UNREACHABLE SHA ON ITS OWN IS NOT ENOUGH, and this predicate would be
+    wrong if it stopped there. The test asks one more question --
+    `_the_environment_explains_it()`, the shallow/foreign-repository triage
+    `tests/test_soundness_routing.py` already owns -- and FAILS rather than
+    skips when nothing about the tree explains the miss, because in a full
+    checkout an unresolvable sha is a page naming a commit that never
+    existed. This asks it too, from the same function, so the rule cannot
+    excuse a skip the test is no longer able to emit.
+    """
+    if shutil.which("git") is None:
+        return False
+    if not (REPO / ".git").exists():
+        return False
+    try:
+        from test_proposed_page_headers import (
+            _status_shas,
+            _the_environment_explains_it,
+        )
+    except Exception:  # noqa: BLE001 - a predicate may not raise
+        return False
+    try:
+        named = _status_shas()
+    except Exception:  # noqa: BLE001 - a predicate may not raise
+        return False
+    if not named:
+        return False
+
+    def _probe(*args: str):
+        try:
+            return subprocess.run(
+                ["git", "-C", str(REPO), *args],
+                capture_output=True, text=True, timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    head = _probe("rev-parse", "--verify", "HEAD")
+    if head is None:
+        return False
+    if head.returncode != 0:
+        return True
+    if all(
+        (kind := _probe("cat-file", "-t", sha)) is not None
+        and kind.returncode == 0
+        for _page, sha in named
+    ):
+        return False
+    # AND THE LAST QUESTION THE TEST ASKS, WHICH IS NOT ABOUT THE SHAS. An
+    # unreachable commit is a skip only where the ENVIRONMENT explains it;
+    # in a full, non-shallow checkout of this project the test FAILS instead,
+    # naming the page. Asking it here is what keeps the two in step: without
+    # it this rule would excuse a skip the test can no longer emit.
+    try:
+        return _the_environment_explains_it() is not None
+    except Exception:  # noqa: BLE001 - a predicate may not raise
+        return False
+
+
 def _jax_x64_is_on() -> bool:
     """Whether this session runs with 64-bit dtypes enabled.
 
@@ -583,6 +710,28 @@ RULES = (
     ),
     Rule(
         when=(
+            "one of `bash`, `git`, `tar`, `comm`, `sort` and `sed` is not on "
+            "PATH, so a `.github/workflows/release.yml` step body cannot be "
+            "extracted and RUN. `tests/test_release_gates.py` marks three "
+            "drives with it; they are the only tests in this suite that "
+            "execute a workflow step rather than reading it, which is why "
+            "they need a toolchain and the rest do not. UNTIL 2026-08-25 THIS "
+            "REASON WAS UNDISCLOSED: it names no library, so no "
+            "`importorskip` gate covered it, and it never fires on a CI "
+            "runner or a developer box -- every one of them has a shell -- so "
+            "the only place it showed up was a deliberately git-less "
+            "environment, where it was this file's whole completeness "
+            "failure. The condition is computable here and BOTH directions "
+            "are asserted; the tool list is read from the module that carries "
+            "the marker rather than retyped"
+        ),
+        reasons=frozenset(
+            {"needs a POSIX shell and coreutils to drive a gate body"}
+        ),
+        legitimate=_the_shell_toolchain_is_incomplete,
+    ),
+    Rule(
+        when=(
             "`JAX_ENABLE_X64` is ON, where jax's own PRNG seed mask does not "
             "narrow. The tripwire's one honest fire across jax's whole test "
             "suite is `4294967295 -> -1 (int32)` from `threefry2x32.py:73`, "
@@ -676,6 +825,49 @@ RULES = (
             "tree can be decided",
         }),
         legitimate=_git_cannot_resolve_the_release_tag,
+    ),
+    Rule(
+        when=(
+            "git is on PATH, this tree IS a git checkout, and its object "
+            "store does not hold a commit that a `docs/proposed-*.md` "
+            "**Status:** paragraph names -- either because there is no HEAD "
+            "at all (a `git init` nobody has committed in) or because the "
+            "sha is outside a shallow history. THE SAME SHAPE AS THE TWO "
+            "RULES ABOVE, ONE FILE OVER, AND THE OTHER HALF OF THE SAME "
+            "RELEASE BLOCKER: "
+            "`tests/test_proposed_page_headers.py::test_every_commit_a_status"
+            "_paragraph_names_is_an_ancestor` guarded on git being on PATH "
+            "and `git rev-parse --verify HEAD` succeeding, and A SHALLOW "
+            "CLONE PASSES BOTH -- git is there and HEAD is the one commit "
+            "that was fetched -- so control reached a hard assert on `git "
+            "cat-file -t <sha>` and it failed for every sha older than the "
+            "tag. That is exactly the tree "
+            "`.github/workflows/release.yml`'s job `the suite, on the tagged "
+            "tree` builds: `actions/checkout@v4` with `persist-credentials: "
+            "false` alone, no `fetch-depth` and no `fetch-tags`, i.e. depth "
+            "1 on the triggering tag ref, and that job is refusal point #1 "
+            "between a tag and PyPI. The SAME file also skipped as `needs "
+            "git` with `.git` removed and git right there on PATH, which "
+            "this file called CONTRADICTED and which is why the "
+            "unpacked-sdist lane read `1 failed`; that reason now names the "
+            "condition that actually holds. The condition IS computable "
+            "here, the predicate asks git the questions the test asks in the "
+            "same order -- git, then `.git`, then HEAD, then each sha, and "
+            "then whether anything about the ENVIRONMENT explains the miss, "
+            "all read out of the module under test -- and the skip carries a "
+            "WARNING naming git's exit code, git's own words, and every page "
+            "and sha that went unverified. THE LAST QUESTION IS WHAT KEEPS "
+            "THE SKIP FROM BEING A HOLE: an unreachable commit is legitimate "
+            "only in a shallow clone or a repository that is not this "
+            "project's, and in a full checkout the test FAILS on it, because "
+            "a status naming a sha that never existed is the claim the gate "
+            "is there to hold"
+        ),
+        reasons=frozenset({
+            "git cannot reach a commit a `proposed-*.md` status paragraph "
+            "names, so that header's shipped-in claim cannot be decided here",
+        }),
+        legitimate=_git_cannot_reach_a_status_commit,
     ),
     Rule(
         when=(
@@ -1274,7 +1466,10 @@ _MUST_MATCH = (
     "needs `uv` to build an sdist",
     "needs git",
     "not a git checkout (an unpacked sdist, say)",
+    "needs a POSIX shell and coreutils to drive a gate body",
     "git cannot resolve `v0.1.0`, so no claim here about the tag's tree can be decided",
+    "git cannot reach a commit a `proposed-*.md` status paragraph names, so "
+    "that header's shipped-in claim cannot be decided here",
     "broadcast+slice+squeeze: XLA did not contract this form on this build",
     "nested jit: XLA did not contract this form on this build",
 )
