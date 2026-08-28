@@ -560,6 +560,24 @@ def test_every_commit_a_status_paragraph_names_is_an_ancestor():
     `proposed-tier-clause.md`'s **Status:** paragraph comes back `1 failed`,
     named as a page defect.
 
+    **THE METHOD IN THAT SENTENCE IS RETRACTED AND THE ANSWER IS NOT.** *"the
+    sandbox above"* is `git init` plus ONE fetch, and `actions/checkout@v4`
+    does not build a release workspace that way: it fetches all refs and then
+    re-fetches `+<github.sha>:refs/tags/<tag>`, force-writing the release
+    commit over that one tag ref. That is this project's L28 -- a correct
+    measurement of the wrong process -- and it is what let `release.yml`'s
+    changelog gate refuse a correctly annotated `v0.2.1` on 2026-08-28.
+    :func:`tests.test_release_gates._checkout_the_way_actions_checkout_does`
+    runs the action's own refspecs.
+
+    What is claimed here is unaffected, MEASURED rather than assumed: the
+    second fetch rewrites the TRIGGERING tag's ref and no other. Driven
+    2026-08-28 with the real two-fetch sequence for `v0.2.1` against a mirror
+    of this repository -- `is-shallow` `false`, the other three tag refs still
+    `tag`, only `refs/tags/v0.2.1` a `commit`, and `v0.1.0` resolving. This
+    check reads history and commit shas, never a tagger date, so the one
+    property the rewrite destroys is not one it asks about.
+
     **THE SKIP STAYS, BECAUSE `fetch-depth: 0` MAKES THE CONDITION
     UNREACHABLE FROM THIS WORKFLOW AND NOT IMPOSSIBLE.** Three environments
     still produce it, and each has its own reason string below: a shallow
