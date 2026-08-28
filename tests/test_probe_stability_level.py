@@ -61,21 +61,27 @@ test_the_constant_this_pin_reads_is_the_one_the_module_exports` closes the
 gap between the text read and the object built.
 
 **WHY THIS IS NOT CALLED `test_falsify_stability_level.py`, WHICH IS THE
-NAME ITS SUBJECT WOULD SUGGEST.** The same reason
-`tests/test_probe_oracle.py` is not called `test_falsify_oracle.py`, and
-its docstring carries the long form. `tests/test_narrowing_perimeter.py` records a measured
+NAME ITS SUBJECT WOULD SUGGEST — AND THE REASON THAT NO LONGER HOLDS.**
+The same reason `tests/test_probe_oracle.py` is not called
+`test_falsify_oracle.py`, and its docstring carries the long form. Both
+used to say that `tests/test_narrowing_perimeter.py` recorded a measured
 COLLECTION RANK — *"this file sorts 72nd of the files `pytest
---collect-only -q -p no:randomly` names in this tree"* — because that rank
-is what sets the size of the exposure its incident describes, and
-`test_this_files_position_in_the_collection_is_the_measured_one` demands
-the phrase verbatim in that file AND in `CHANGELOG.md`. Any new test file
-sorting before `test_n…` moves the rank to 73rd and leaves both artefacts
-one measurement behind; driven, that test failed under
-`test_falsify_stability_level.py` and is green under this name. Correcting
-the two artefacts is the right repair and it is not this branch's to make.
-`probe` is this module's own word for what is under test, and the file
-sits with `test_probe_oracle.py` and `test_probe_witness.py`, which are
-its siblings by subject as well as by sort order.
+--collect-only -q -p no:randomly` names in this tree"* — that
+`test_this_files_position_in_the_collection_is_the_measured_one` demanded
+that phrase VERBATIM in that file AND in `CHANGELOG.md`, and that any new
+file sorting before `test_n…` would move the rank to 73rd and leave both
+artefacts one measurement behind.
+
+**THAT MECHANISM WAS REMOVED AT `ac3038d`, AND INVERTED**: no ordinal is
+written in either artefact now,
+`test_this_file_is_collected_where_the_hazard_requires` pins two RELATIONS
+in its place, and
+`test_neither_artefact_writes_this_checkouts_collection_coordinate` REFUSES
+the spelling the paragraph quoted as required. What survives is the half
+that was never about a rank: `probe` is this module's own word for what is
+under test, and the file sits with `test_probe_oracle.py` and
+`test_probe_witness.py`, which are its siblings by subject as well as by
+sort order.
 
 ────────────────────────────────────────────────────────────────────────────
 BOTH HALVES: THE LEVEL IS STATED, *AND* THE RETIRED WORDS ARE GONE

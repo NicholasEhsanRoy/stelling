@@ -12,8 +12,12 @@ constant operand it raised a raw `IndexError` out of a slicer that catches
 only `_Decline`. Because the interval leg's refusal lands the obligation at
 ⊤ → `unknown` → escalation, the truncating plan is exactly what ran.
 
-Measured on `main` (`dee8bc2`), the query in
-`test_the_from_dict_door_no_longer_yields_a_truncated_verdict`:
+Measured on `main` (`dee8bc2`), on the query that
+`tests/test_dot_general_from_dict_door.py::test_escalation_no_longer_
+discharges_the_truncated_contraction` builds and runs end to end. (The
+citation here named a test no revision of this tree has ever defined; the
+module that actually holds that query, and this measurement, is the one now
+named.)
 
     from_dict ACCEPTED the mismatched query
     ESCALATION assert #0 -> discharged

@@ -536,8 +536,10 @@ def test_the_slicer_closes_the_declaration_lie_ON_ITS_OWN():
     self-descriptions whatever holds the extents, so the re-audit's own
     reproducer (`shape=[4]`, outvar aval `(2,)`) is refused at construction
     and cannot reach a slicer at all —
-    `tests/test_array_emission.py::test_the_declaration_check_reads_the_
-    EXTENTS_not_the_param_type` pins that. That refusal must not be the only
+    `tests/test_array_emission.py::test_the_declaration_check_compares_BOTH_
+    holders_and_refuses_the_rest` pins that. (RENAMED at `321209d`; this
+    citation carried the old spelling from then until 2026-08-28, and
+    nothing in the tree could see it.) That refusal must not be the only
     thing standing here: `SOUNDNESS.md` puts hand-built `ir.ClosedJaxpr` in
     scope, `ir.py` scopes per-primitive shape inference out of the load
     validation in writing, and a slicer that relies on a door check is one

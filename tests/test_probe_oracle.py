@@ -99,20 +99,32 @@ reading of the same predicates agree at every point. Anything a reader
 wants to conclude beyond that is on the list above.
 
 **WHY THIS IS NOT CALLED ``test_falsify_oracle.py``, WHICH IS THE NAME ITS
-SUBJECT WOULD SUGGEST.** ``tests/test_narrowing_perimeter.py`` records a
+SUBJECT WOULD SUGGEST — AND THE REASON THAT NO LONGER HOLDS.** This
+paragraph used to say that ``tests/test_narrowing_perimeter.py`` recorded a
 measured COLLECTION RANK — *"this file sorts 72nd of the files ``pytest
---collect-only -q -p no:randomly`` names in this tree"* — because that rank
-is what sets the size of the exposure its incident describes, and
-``test_this_files_position_in_the_collection_is_the_measured_one`` demands
-the phrase verbatim in that file AND in ``CHANGELOG.md``. A new file
-sorting before ``test_n…`` moves the rank to 73rd and puts both artefacts
-one measurement behind: driven, that test goes red under
-``test_falsify_oracle.py`` and green under this name. Correcting the two
-artefacts is the right repair and it is not this branch's to make — the
-CHANGELOG is held elsewhere — so the file is placed where the measurement
-it would otherwise falsify stays true, and the reason is written here
-rather than left as a naming curiosity. ``probe`` is the module's own word
-for what is under test.
+--collect-only -q -p no:randomly`` names in this tree"* — that
+``test_this_files_position_in_the_collection_is_the_measured_one`` demanded
+that phrase VERBATIM in that file AND in ``CHANGELOG.md``, and that a file
+sorting before ``test_n…`` would therefore move the rank to 73rd and leave
+both artefacts one measurement behind; so the file was placed where the
+measurement it would otherwise falsify stays true.
+
+**THE MECHANISM THAT ARGUMENT RESTS ON WAS REMOVED AT ``ac3038d``, AND
+INVERTED.** A rank is a property of the checkout's FILE SET, so it moved
+whenever anyone added a test file, and no ordinal is written down in either
+artefact now. ``test_this_file_is_collected_where_the_hazard_requires``
+derives the position and pins two RELATIONS instead, and
+``test_neither_artefact_writes_this_checkouts_collection_coordinate``
+REFUSES exactly the spelling this paragraph used to quote as required. The
+hazard the name was chosen to dodge is therefore gone in both directions: a
+file sorting EARLIER only adds to the share of the suite collected after
+``test_narrowing_perimeter.py``, which is the direction that relation wants.
+
+So the name stands on what is left of the argument, which was always its
+better half: ``probe`` is this module's own word for what is under test,
+and the file sorts with ``test_probe_stability_level.py`` and
+``test_probe_witness.py``, its siblings by subject as well as by sort
+order. Nothing here is a claim about a rank any more.
 """
 
 from __future__ import annotations
@@ -343,7 +355,11 @@ CASES = [
      _array_gate_partly_true_oracle, (("float64", (-2.0, 2.0), (4,)),)),
 ]
 
-GRID = 27  # points per fixture; see `test_the_oracle_agreement_COUNT`
+# Points per fixture. The agreement count this grid produces is the figure
+# the prose may cite -- see `test_the_oracle_agreement_COUNT_is_the_figure_
+# the_prose_may_cite`, which was cited here by its first four words until
+# 2026-08-28, a spelling that names no test.
+GRID = 27
 
 
 def _one_declaration_points(dtype, box, shape, offset=0):

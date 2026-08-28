@@ -93,9 +93,10 @@ def smoothness(*u):
     ``WENO5Base.smoothness`` never touches ``self`` (the coefficients are
     literals in its body) and ``WENO5Base`` is abstract, so ``self=None``
     calls the shipped code with nothing standing in for it. Nothing is
-    reimplemented here — see :func:`test_the_target_is_the_library_function`,
-    which reads the source and refuses if the call this row exists for is
-    no longer in it."""
+    reimplemented here — see :func:`test_the_target_is_the_library_function_
+    and_still_uses_jnp_square`, which reads the source and refuses if the
+    call this row exists for is no longer in it. (Cited by a truncation of
+    its name until 2026-08-28, a spelling that names no test.)"""
     return WENO5Base.smoothness(None, *u)
 
 

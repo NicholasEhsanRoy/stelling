@@ -518,9 +518,17 @@ def test_the_ulp_strategy_can_fire():
     refutation rather than suppressing a false alarm. Exact-rational
     replay says so, and the firing records which test admitted it.
 
-    The pair that shows the filter is a filter and not an off switch is
-    now :func:`test_the_real_filter_declines_a_violation_that_is_a_pure_
-    float_artefact`, whose fixture is true over ℚ at every point.
+    The pair that shows the filter is a filter and not an off switch is in
+    `tests/test_falsify_fire_condition.py`, whose module docstring names
+    both halves: `tests/test_falsify_fire_condition.py::test_the_kahan_
+    compensation_shape_is_not_a_soundness_event` and the one-ulp family
+    beside it, whose fixtures are true over ℚ at every point.
+
+    **THIS SENTENCE CITED A TEST NO REVISION OF THIS TREE HAS EVER
+    DEFINED** -- `git log -S` finds no commit that wrote that `def` -- so
+    the reader's route from this claim to the pair that supports it went
+    nowhere, and nothing could say so while `tests/` was outside the
+    citation scan.
     """
     found, _ = run(ulp_only, strategies=("ulp",), semantics="ieee")
     assert found is not None and found.strategy == "ulp", (

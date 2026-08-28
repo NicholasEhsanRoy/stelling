@@ -166,7 +166,16 @@ _SUITE_COUNT = re.compile(r"(?i)\bsuites?\b\s*\**\s*:")
 #: weaker *"at least one thing in here went wrong and was written down"*, and
 #: a narrow vocabulary would fail sections that recorded a red in words this
 #: file did not anticipate. Anti-vacuity for it is
-#: `test_a_verification_section_of_pass_counts_alone_is_refused`.
+#: `test_both_gated_rules_are_driven`, whose VERIFICATION SECTION block
+#: drives this vocabulary in both directions on synthetic documents: a
+#: section whose whole evidence is a pass count IS refused, one that records
+#: a red is NOT, and a pass count under a heading that does not assert
+#: verification is NOT.
+#:
+#: **THAT CITATION NAMED A TEST THIS TREE HAS NEVER HAD**, at any revision:
+#: `git log -S` over `tests/` finds no commit that ever defined it. It was
+#: unreadable by anything until `tests/` entered the citation scan on
+#: 2026-08-28 -- see `tests/test_prose_hygiene.py::_prose_only`.
 _OBSERVED_TO_FAIL = re.compile(
     r"(?i)\b(?:REFUTED|UNSOUND|counterexample|mutation|mutant|raise[sd]|"
     r"caught|failed|fails|failure|violation|divergence|wrong|"
