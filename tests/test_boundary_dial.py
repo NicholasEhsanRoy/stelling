@@ -1167,10 +1167,20 @@ def test_a_branch_body_assume_NEVER_certifies_anything_outside_its_branch():
     strict-sign table, and the obligation must not discharge. The first
     reddens even on a carry that happens not to move this verdict.
 
-    DRIVEN, not asserted: the propagator's `cond` arm was edited to read
-    the branch outvars' signs and write them onto the cond's outvars, and
-    with that edit in place this query is `discharged` — a false VERIFIED
-    — and both assertions below fail. The control
+    DRIVEN, not asserted: the propagator's `cond` arm was edited so that a
+    sign minted on ANY branch's outvar is written onto the corresponding
+    cond outvar — the unconditional out-carry, which needs only ONE branch
+    to have certified anything. With that edit in place this query is
+    `discharged` — a false VERIFIED — and both assertions below fail.
+
+    **THAT SENTENCE READ "edited to read the branch outvars' signs and
+    write them onto the cond's outvars"** (0.3.0 P1 re-audit, F10), and a
+    reader re-deriving the broken build from it could reasonably require
+    EVERY branch to carry a sign before writing. This query's branches are
+    (a certifying body, an identity), so branch 0 certifies nothing, an
+    all-branches build never fires, and the reader would watch this test
+    stay green and read that as confirmation. The build that drives it red
+    is the one described above. The control
     (`::test_an_UNCONDITIONAL_body_may_certify_outside_itself`) is the
     same body under a `jit`, where the carry IS sound and the query IS
     green, so the UNKNOWN here is a fact about the CONSTRUCT and not
@@ -1396,10 +1406,32 @@ def test_the_ieee_STAMP_does_not_claim_a_rule_the_walk_refused():
     REDDENS ON REVERT: restore the site to `assumptions.add(
     BOUNDARY_TRANSPARENT_POSITION)` under a bare `boundary != "opaque"`
     and the second assertion fails on every ieee query.
+
+    **THE SET IT GUARDS GREW A FOURTH MEMBER AND THIS TEST DID NOT**
+    (0.3.0 P1 re-audit, F9). `BOUNDARY_TRANSPARENT_REACH_DISCLOSURE` is
+    stamped from the same `else:` arm as the position line, so its absence
+    under ieee has always been correct — but "correct today because it
+    sits beside a checked line" is not what a guard on an exclusive set is
+    for, and a later hand that moved one write and not the other would
+    have found nothing here. Every line the non-refused arm writes is now
+    named, and the enumeration is derived from the module rather than
+    typed, so a FIFTH line joins this assertion by being defined.
     """
+    import stelling.propagate as P
     from stelling.propagate import (
         BOUNDARY_INERT_UNDER_IEEE, BOUNDARY_TRANSPARENT_POSITION,
     )
+
+    # every stamped boundary sentence this module defines, EXCEPT the one
+    # an ieee run is supposed to write. Derived, so the set cannot go stale.
+    refused_here = {
+        getattr(P, name)
+        for name in dir(P)
+        if name.startswith("BOUNDARY_") and isinstance(getattr(P, name), str)
+    } - {BOUNDARY_INERT_UNDER_IEEE}
+    assert len(refused_here) >= 3, sorted(refused_here)
+    assert BOUNDARY_TRANSPARENT_POSITION in refused_here
+    assert P.BOUNDARY_TRANSPARENT_REACH_DISCLOSURE in refused_here
 
     for build in (
         lambda: wrapped_sumsq_query("jit", assume_inside=False)[0],
@@ -1414,6 +1446,14 @@ def test_the_ieee_STAMP_does_not_claim_a_rule_the_walk_refused():
         assert BOUNDARY_TRANSPARENT_POSITION not in p.assumptions, (
             "an ieee verdict claims the certificate was allowed to cross"
         )
+        for line in refused_here:
+            # the CROSSED line is a template, so it is matched on its
+            # invariant head rather than on the unformatted string
+            head = line.split("{")[0]
+            assert not any(a.startswith(head) for a in p.assumptions), (
+                f"an ieee run stamped a sentence about a carry it refused: "
+                f"{head[:80]!r}"
+            )
     # the sentence has to SAY the two things a reader needs: that nothing
     # crossed, and that the verdict is the boundary-opaque one. Checked as
     # content rather than as an identity, because a rename of the constant

@@ -1498,8 +1498,12 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
         # `propagation.boundary` is a field of a frozen dataclass a caller can
         # construct with any value at all.
         #
-        # Three things make the mismatch safe, and they are stated smallest
-        # first because only the last one is a theorem:
+        # Three things were offered as making the mismatch safe, stated
+        # smallest first because only the last one is a theorem. **THE
+        # SECOND IS NOW WITHDRAWN AS FALSE** (0.3.0 P1 re-audit, F5) and is
+        # kept below with its counterexample rather than deleted; the
+        # sentence that carried the weight was always the third, and it
+        # still does.
         #
         #   1. MEASURED at `5e525ce` on 2026-08-28 over 74 queries — this
         #      module's battery plus the 60 the seeded search generates,
@@ -1507,14 +1511,33 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
         #      status the dial moves, 0 differ in `relational_assumes`, and 0
         #      of the 7 have `coverage.constrained == 0`. A corpus, not a
         #      proof, and named as one.
-        #   2. STRUCTURAL: a certificate can only change a `div` outcome on a
-        #      divisor box that REACHES ZERO, and the only route from a
-        #      declared input's zero-touching box to a certificate is a strict
-        #      `gt`/`lt` assume — the table's other writers are constants,
-        #      whose boxes are POINTS and therefore never straddle. So a
-        #      dial-moved query carries a constraining assume, and
+        #   2. **WITHDRAWN, AND THE COUNTEREXAMPLE IS BELOW.** This argument
+        #      READ: *"STRUCTURAL: a certificate can only change a `div`
+        #      outcome on a divisor box that REACHES ZERO, and the only route
+        #      from a declared input's zero-touching box to a certificate is a
+        #      strict `gt`/`lt` assume — the table's other writers are
+        #      constants, whose boxes are POINTS and therefore never straddle.
+        #      So a dial-moved query carries a constraining assume, and
         #      `CONSTRAINED_ASSUME_REFUSAL` has already emptied the domain
-        #      before this line runs.
+        #      before this line runs."* The constant's box being a POINT is
+        #      beside the point: the divisor is a DERIVED value, and outward
+        #      rounding through underflow makes a derived box one-sided at
+        #      zero out of operands that never touched it. Driven at
+        #      `1b34d25` on 2026-08-28 (0.3.0 P1 re-audit, F5), with no
+        #      `assume` anywhere in the query:
+        #
+        #          W = np.array([-1e-120, -2e-120, -3e-120])
+        #          assert_(1.0 / jax.jit(lambda v: jnp.sum(v ** 3))(W) < 0.0)
+        #          opaque UNKNOWN / 0 crossings ; transparent DISCHARGED / 2
+        #          relational_assumes == ()   coverage.constrained == 0
+        #
+        #      — a dial-moved query with no constraining assume, which is
+        #      exactly what this argument said cannot exist. The certificate
+        #      came from the CONSTVAR writer. What survives is the corpus
+        #      claim: no dial-moved query IN THE MEASURED CORPUS of argument
+        #      1 has `coverage.constrained == 0`, and that is a statement
+        #      about 74 queries and not about the shape of the world.
+        #      Argument 3 is what makes the mismatch safe.
         #   3. AND IF BOTH OF THOSE ARE WRONG, THE RESIDUE STILL FAILS CLOSED,
         #      by the same sentence the paragraph above ends on: a
         #      `relational_assumes` tuple that differs from the escalation's

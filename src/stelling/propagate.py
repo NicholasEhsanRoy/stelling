@@ -8409,10 +8409,17 @@ class _Propagator:
         the declared sets" does not settle the question: the certificate is
         not the conclusion, it is a LICENCE handed to a kernel that mints a
         box about the executable. Nothing here is target-specific —
-        ``(-1.0*1e-200)*1e-200`` is ``-0.0``, and a reduction of two negative
-        zeros is ``+0.0``, in python and numpy as well as in jax. This
-        is a pre-existing soundness defect of the DEFAULT position and of no
-        dial; a reader who turns the boundary dial is told
+        ``(-1.0*1e-200)*1e-200`` is ``-0.0``, and a REDUCTION of two negative
+        zeros is ``+0.0`` under ``numpy.sum``, ``sum()`` and ``math.fsum``
+        as well as under ``jnp.sum`` (the binary ``+`` operator is the one
+        that keeps the sign: ``-0.0 + -0.0`` is ``-0.0``, which is why this
+        sentence says *reduction*). **NOR IS IT ABOUT SMALL DECLARED
+        VALUES**, which the ``1e-200`` chain above invites: the condition is
+        that this analysis's OWN box underflows, and a long enough chain of
+        ordinary ones gets there — ``1.0 / Σ(x**1001) < 0.0`` over ``x``
+        declared ``[-0.4, -0.2]`` is VERIFIED and returns ``+inf`` (0.3.0 P1
+        re-audit, F1). This is a pre-existing soundness defect of the
+        DEFAULT position and of no dial; a reader who turns the boundary dial is told
         (:data:`BOUNDARY_TRANSPARENT_REACH_DISCLOSURE`) and nobody else is
         told yet. The repair — a taint carrying sign-bit faithfulness for a
         negative-certified reduction operand — is a separate change.
@@ -11540,9 +11547,55 @@ BOUNDARY_CROSSED_DISCLOSURE = (
 # every point of the declared box. ``reduce_sum`` and ``dot_general``
 # accumulate FROM A ``+0.0`` SEED, so a value the certificate calls NEGATIVE
 # whose elements have all become ``-0.0`` sums to ``+0.0``. Measured beside
-# it: a reduction of n copies of ``-0.0`` is ``-0.0`` at n = 1 and ``+0.0``
-# at every n >= 2, in jax and in numpy alike — the ``+0`` is the sum's
-# identity element, not one backend's lowering choice.
+# it, and the two backends DISAGREE ON ONE ROW: jax gives ``-0.0`` at n = 1
+# and ``+0.0`` from n = 2 up, while ``numpy.sum`` (2.5.2) gives ``+0.0`` at
+# EVERY n, n = 1 included. **THIS COMMENT READ "in jax and in numpy alike"
+# ACROSS BOTH ROWS AND THAT IS FALSE AT n = 1** (0.3.0 P1 re-audit, F6);
+# n = 1 is exactly the control the pinning test leans on, and that test
+# measures jax and nothing else. From n = 2 the two agree, and that is the
+# row the defect rides: the ``+0`` there is the sum's identity element, not
+# one backend's lowering choice.
+#
+# **AND THE REACHING CONDITION IS NOT ABOUT MAGNITUDES, WHICH THE
+# ``1e-200`` CHAIN ABOVE INVITES A READER TO CONCLUDE** (0.3.0 P1 re-audit,
+# F1 — the first pass of this item searched a cube-and-scale grammar at
+# ordinary magnitudes, found nothing, and read that null as a bound on the
+# reach; it was a bound on the grammar). The condition is only that the
+# PROPAGATOR'S OWN binary64 box underflows onto zero at one boundary, and
+# ANY LONG ENOUGH CHAIN GETS THERE FROM ORDINARY INPUTS. Measured in this
+# tree on jax 0.11.0 and 0.10.2, at the DEFAULT, with a no-assume control
+# returning UNKNOWN and the program contradicting each one — the largest
+# declared magnitude ``m`` (over ``x`` in ``(-m, -m/2)``) from which
+# ``1.0 / Σ(x**k) < 0.0`` still reaches:
+#
+#     k       3          11        51         201       501      1001
+#     m       3.4e-108   8.1e-30   9.2e-07    0.049     0.45     0.95
+#
+# so ``x = any_array((2,), float64, (-0.4, -0.2))`` with ``assume(x < 0)``
+# and ``1.0 / jnp.sum(x ** 1001) < 0.0`` is VERIFIED at the default, with a
+# clean stamp, and returns ``+inf``. Pinned by
+# ``tests/test_boundary_dial_jax.py::test_an_ORDINARY_magnitude_chain_reaches_it_at_the_DEFAULT``.
+#
+# THREE MORE THINGS THE FIRST PASS OF THIS SENTENCE GOT WRONG, each now in
+# the stamped text and each pinned by a test that runs the program:
+#
+#   * IT SAID "a VERIFIED". The same licence mints a false REFUTED: a
+#     half-infinite quotient box decides a comparison feeding a ``cond``
+#     selector, forcing the branch the program does not take, and a
+#     definite violation inside the forced branch is not withheld
+#     (re-audit F2, ``::test_the_same_licence_mints_a_false_REFUTED``).
+#   * IT SAID "behind a wrapper". A ``cond`` BRANCH is a sub-jaxpr boundary
+#     too and is not a wrapper — :data:`BOUNDARY_TRANSPARENT_POSITION`
+#     itself keeps the two apart — and the carry reaches through one, for a
+#     live selector and a forced one alike (re-audit F3,
+#     ``::test_the_carry_reaches_it_through_a_cond_BRANCH_and_not_only_a_wrapper``).
+#   * IT SAID "the assume's own scope". No assume is needed at all: the
+#     CONSTVAR writer mints the certificate from an array constant, and
+#     such a query is dial-moved with ``relational_assumes == ()`` and
+#     ``coverage.constrained == 0`` (re-audit F4,
+#     ``::test_the_reach_needs_no_assume_the_CONSTVAR_writer_is_enough``).
+#     The condition is that the certificate and the reduction share a
+#     scope, with the certificate from any of its three sources.
 #
 # WHY THE LINE HANGS ON THE POSITION AND NOT ON THE ACT, WHICH IS THE
 # OPPOSITE OF THE CONSTANT DIRECTLY ABOVE. :data:`BOUNDARY_CROSSED_DISCLOSURE`
@@ -11582,16 +11635,20 @@ BOUNDARY_CROSSED_DISCLOSURE = (
 BOUNDARY_TRANSPARENT_REACH_DISCLOSURE = (
     "boundary='transparent' EXTENDS THE REACH OF A DEFECT THAT IS NOT "
     "CONFINED TO IT: a strict-sign certificate reaching a div whose divisor "
-    "came out of reduce_sum or dot_general can license a VERIFIED the "
-    "compiled program CONTRADICTS at a point of the declared box. Those "
+    "came out of reduce_sum or dot_general can decide a verdict the "
+    "compiled program CONTRADICTS at a point of the declared box — a "
+    "false VERIFIED, or a false REFUTED through a cond selector. Those "
     "reductions accumulate from a +0.0 seed, so a reduction all of whose "
     "terms have become -0.0 at run time comes out +0.0, and 1.0/(+0.0) is "
-    "+inf — in no arm of the box the certificate licensed. The DEFAULT "
-    "reaches this too, wherever the chain sits in the assume's own scope; "
-    "what this position adds is that the chain may now sit behind a wrapper "
-    "the default DECLINED. NOT REPAIRED IN THIS RELEASE; the repair is a "
-    "taint carrying sign-bit faithfulness for a negative-certified reduction "
-    "operand"
+    "+inf, which is in no arm of the box the certificate licensed. THE "
+    "CONDITION IS ONLY THAT THE ANALYSIS'S OWN BOX UNDERFLOWS ONTO ZERO, "
+    "which a long enough chain reaches from ordinary inputs, and no assume "
+    "is required — an array constant certifies too. The DEFAULT reaches "
+    "it wherever the certificate and the reduction share a scope; what this "
+    "position adds is that they may sit on opposite sides of a sub-jaxpr "
+    "boundary — a wrapper body or a cond branch — the default "
+    "DECLINED. NOT REPAIRED IN THIS RELEASE; the repair is a taint carrying "
+    "sign-bit faithfulness for a negative-certified reduction operand"
 )
 
 # The mechanical guard on the domain dial: quoted verbatim when a

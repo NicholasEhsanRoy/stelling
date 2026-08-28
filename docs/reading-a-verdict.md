@@ -360,7 +360,7 @@ exactly the runs its own condition holds for, and the conditions overlap.
 | `boundary='transparent': the strict-sign certificate …` | the run was at `transparent` and the carry was LIVE — the certificate was allowed to cross the wrappers the walk enters, and to enter a `cond` branch |
 | `boundary='transparent' CARRIED N strict-sign certificate(s) …` | …and it actually crossed, N times. Present only when N > 0; it reports the ACT, not the position, and a run that carried nothing does not carry this line |
 | `boundary='transparent' was requested and is INERT under semantics='ieee'` | the dial was set and the walk refused it. The certificate is a claim about ℝ and is false where a positive subnormal flushes to zero, so nothing crossed and this verdict rests on exactly the rules an `opaque` run would have used |
-| `boundary='transparent' EXTENDS THE REACH OF A DEFECT …` | the same runs as the first line, and what that permission is able to produce: a certificate carried into a chain whose divisor comes out of `reduce_sum` or `dot_general` can license a VERIFIED **the compiled program contradicts** at a point of the declared box. Those reductions accumulate from a `+0.0` seed, so a value certified NEGATIVE whose elements are all `-0.0` at run time reduces to `+0.0`. Not repaired in this release |
+| `boundary='transparent' EXTENDS THE REACH OF A DEFECT …` | the same runs as the first line, and what that permission is able to produce: a certificate carried into a chain whose divisor comes out of `reduce_sum` or `dot_general` can decide a verdict **the compiled program contradicts** at a point of the declared box — a false VERIFIED, or a false REFUTED where the quotient decides a `cond` selector and the analysis walks only the branch the program does not take. Those reductions accumulate from a `+0.0` seed, so a value certified NEGATIVE whose terms are all `-0.0` at run time reduces to `+0.0`. Not repaired in this release |
 
 **NO LINE MEANS `opaque`, AND THAT IS DECIDABLE RATHER THAN CONVENTIONAL.**
 The default adds nothing to the stamp — deliberately, so that a
@@ -378,14 +378,34 @@ stamp's own first rendered line — `stelling <version>` — separates them:
   the `opaque` position and not a gap in the record.
 
 **AND THE ABSENCE OF THE FOURTH LINE IS NOT A STATEMENT THAT THE DEFECT IT
-NAMES IS ABSENT.** The default reaches it too, wherever the certifying
-`assume` and the reduction sit in the same scope — measured, and pinned by
+NAMES IS ABSENT.** The default reaches it too, wherever the certificate and
+the reduction sit in the same scope — measured, and pinned by
 `tests/test_boundary_dial_jax.py::test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts`,
 whose first row is an `opaque` VERIFIED the program contradicts with no
 boundary crossed at all. The line is withheld from `opaque` runs only
 because that position is asserted byte-for-byte identical to every previous
-release; what `transparent` adds is REACH — the chain may now sit behind a
-wrapper the default declined — and that is what the line says.
+release; what `transparent` adds is REACH — the certificate and the
+reduction may now sit on opposite sides of a sub-jaxpr boundary, a wrapper
+body *or* a `cond` branch, that the default declined — and that is what the
+line says.
+
+**Two things this paragraph said in its first form, corrected here rather
+than deleted.** It said *"wherever the certifying `assume` and the reduction
+sit in the same scope"*: **no `assume` is required at all**. The strict-sign
+table has three sources and only one of them is an assume — an array
+constant is certified from its own box, and a query with no `assume`
+anywhere is VERIFIED at the default and contradicted by the program
+(`::test_the_reach_needs_no_assume_the_CONSTVAR_writer_is_enough`). And it
+said *"behind a wrapper"*, which in this codebase names only the
+unconditional four; the `cond` route is measured in
+`::test_the_carry_reaches_it_through_a_cond_BRANCH_and_not_only_a_wrapper`.
+
+**Nor is the reach a story about small numbers.** The condition is that the
+*analysis's own* binary64 box underflows onto zero at one boundary, and any
+long enough chain gets there from ordinary declared values: `x` declared
+`[-0.4, -0.2]` with `assume(x < 0)` and `1.0 / jnp.sum(x ** 1001) < 0.0` is
+VERIFIED at the default, with no boundary line in its stamp, and returns
+`+inf` (`::test_an_ORDINARY_magnitude_chain_reaches_it_at_the_DEFAULT`).
 
 That is the whole of what a verdict-reader gets, and it is deliberate that
 there is no more: `Stamp` has no `boundary` field. A **programmatic**

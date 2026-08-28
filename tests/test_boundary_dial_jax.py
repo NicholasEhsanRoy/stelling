@@ -47,8 +47,11 @@ import pytest
 
 pytest.importorskip("jax")
 
+import math  # noqa: E402
+
 import jax  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
+import numpy as np  # noqa: E402
 from jax import lax  # noqa: E402
 
 from stelling.coverage import DEFAULT_TRANSPARENT  # noqa: E402
@@ -420,8 +423,6 @@ def test_the_reduction_seed_is_the_mechanism_and_it_is_measured():
     THIS is the test that would redden — and the disclosure would need
     re-reading, because the mechanism it names would have changed.
     """
-    import math
-
     def sign_bit(x):
         return math.copysign(1.0, float(x)) < 0.0
 
@@ -440,12 +441,298 @@ def test_the_reduction_seed_is_the_mechanism_and_it_is_measured():
             f"seed the reach disclosure names is not what this target does"
         )
 
+    # NUMPY DISAGREES ON THE n = 1 ROW AND AGREES ON EVERY OTHER, and both
+    # halves are measured because the shipped comment used to say the two
+    # were alike across the whole table (0.3.0 P1 re-audit, F6). n = 1 is
+    # the control above, and it is a JAX fact; from n = 2 the two agree, and
+    # that is the row the defect rides.
+    assert math.copysign(1.0, float(np.sum(np.full((1,), -0.0)))) > 0.0, (
+        "numpy kept the sign at n=1; the n=1 control above is documented as "
+        "a jax-only fact and that documentation has gone stale"
+    )
+    for n in (2, 3, 8, 64):
+        assert math.copysign(1.0, float(np.sum(np.full((n,), -0.0)))) > 0.0, n
+
     # and the whole chain, end to end, on the query the table uses
     x = jnp.array((-1.0, -0.25), dtype=jnp.float64)
     product = x * _UNDERFLOWING * _UNDERFLOWING
     assert all(sign_bit(e) and float(e) == 0.0 for e in product), product
     assert not sign_bit(jnp.sum(product)), jnp.sum(product)
     assert float(_reaching_chain(x)) == math.inf, _reaching_chain(x)
+
+
+def _power_harness(k, lo, hi, *, assumed=True, wrapped=False):
+    """``1 / Σ(x**k) < 0`` over ``x`` declared ``[lo, hi]``.
+
+    No exotic constant anywhere: the only thing that grows is the exponent,
+    and what underflows is the ANALYSIS'S OWN box.
+    """
+    def h():
+        x = any_array((2,), "float64", (lo, hi))
+        if assumed:
+            assume(x < 0.0)
+        g = lambda v: 1.0 / jnp.sum(v ** k)  # noqa: E731
+        f = jax.jit(g) if wrapped else g
+        return assert_(f(x) < 0.0)
+
+    return h
+
+
+def _power_runs(k, at):
+    x = jnp.full((2,), at, dtype=jnp.float64)
+    return float(1.0 / jnp.sum(x ** k))
+
+
+def test_an_ORDINARY_magnitude_chain_reaches_it_at_the_DEFAULT():
+    """**THE REACHING CONDITION IS NOT ABOUT MAGNITUDES, AND THE FIRST PASS
+    OF THIS ITEM CONCLUDED THAT IT WAS.**
+
+    That pass searched a cube-and-scale grammar at ordinary magnitudes,
+    found 0 contradicted in 10,164 queries, and read the null as a bound on
+    the reach. It was a bound on the GRAMMAR. The condition is only that
+    the analysis's own binary64 box underflows onto zero at one boundary,
+    and any long enough chain gets there from ordinary declared values —
+    `1e-200` is a way to reach it in two multiplications, not a
+    prerequisite (0.3.0 P1 re-audit, F1).
+
+    `x` declared `[-0.4, -0.2]` — nothing unusual about either endpoint —
+    with `assume(x < 0)` and `1.0 / jnp.sum(x ** 1001) < 0.0`:
+
+        default             VERIFIED, 0 boundary crossings, clean stamp
+        no-assume control   UNKNOWN  (the certificate is load-bearing)
+        the same in a jit   opaque UNKNOWN -> transparent VERIFIED
+        the program         +inf, eager and jitted
+
+    Bisected at `1b34d25` on 2026-08-28 over `x` in `(-m, -m/2)`, largest
+    reaching `m`: k=3 → 3.4e-108, k=11 → 8.1e-30, k=51 → 9.2e-07,
+    k=201 → 0.049, k=501 → 0.45, k=1001 → 0.95. The frontier is a function
+    of the CHAIN, not of the inputs.
+
+    THE ANTI-VACUITY HALF is the small exponent: at k = 3 the same envelope
+    is VERIFIED *without* any certificate and the program AGREES, so this
+    test is about the chain length and not about the envelope being
+    somehow special.
+    """
+    v = check(_power_harness(1001, -0.4, -0.2), vacuity_mode="all",
+              semantics="real")
+    assert v.status == "VERIFIED", v.render()
+    assert not any("boundary=" in a for a in v.stamp.assumptions), (
+        "the DEFAULT grew a boundary line; this row is supposed to show the "
+        "defect arriving with NOTHING in the stamp about it"
+    )
+    bare = check(_power_harness(1001, -0.4, -0.2, assumed=False),
+                 vacuity_mode="all", semantics="real")
+    assert bare.status == "UNKNOWN", (
+        f"the ordinary-magnitude row discharged with no `assume` anywhere, "
+        f"so no strict-sign certificate was needed and it is not about the "
+        f"certificate at all: {bare.render()}"
+    )
+    assert _power_runs(1001, -0.2) > 0.0, _power_runs(1001, -0.2)
+
+    cj = trace(_power_harness(1001, -0.4, -0.2, wrapped=True))
+    assert propagate(cj, semantics="real").obligations[0].status != "discharged"
+    moved = propagate(cj, semantics="real", boundary="transparent")
+    assert moved.obligations[0].status == "discharged", (
+        moved.obligations[0].detail
+    )
+    assert moved.boundary_crossings > 0
+
+    # the anti-vacuity half: a SHORT chain on the same envelope
+    small = check(_power_harness(3, -0.4, -0.2), vacuity_mode="all",
+                  semantics="real")
+    small_bare = check(_power_harness(3, -0.4, -0.2, assumed=False),
+                       vacuity_mode="all", semantics="real")
+    assert small.status == "VERIFIED" and small_bare.status == "VERIFIED", (
+        f"k=3 on this envelope needs the certificate, so the envelope is "
+        f"doing the work and not the chain length: "
+        f"{small.status}/{small_bare.status}"
+    )
+    assert _power_runs(3, -0.2) < 0.0, (
+        f"the program contradicts the SHORT chain too, so this control does "
+        f"not separate chain length from envelope: {_power_runs(3, -0.2)}"
+    )
+
+
+_REFUTING_CONST = np.array([-0.3, -0.35])
+
+
+def _refuting_harness(*, keep_sign=True):
+    """A false REFUTED out of the same licence.
+
+    `q = 1 / Σ(W**1001)` boxes to `[-inf, -1.79e308]` and RUNS to `+inf`, so
+    the analysis decides `q > 0.0` FALSE, takes only the `v + 10` branch,
+    and finds a definite violation there. The program takes the other one.
+    """
+    def h():
+        x = any_array((), "float64", (0.0, 1.0))
+        w = jnp.asarray(_REFUTING_CONST) ** 1001
+        if not keep_sign:
+            # `sub` is not a strict-sign rule, so the certificate is dropped
+            # and the identical query goes UNKNOWN
+            w = w - jnp.zeros((2,), dtype=jnp.float64)
+        q = 1.0 / jnp.sum(w)
+        return assert_(
+            lax.cond(q > 0.0, lambda v: v - 10.0, lambda v: v + 10.0, x) < 0.0
+        )
+
+    return h
+
+
+def test_the_same_licence_mints_a_false_REFUTED():
+    """**THE STAMPED SENTENCE SAID "a VERIFIED", AND THE DEFECT IS NOT
+    DIRECTIONAL** (0.3.0 P1 re-audit, F2).
+
+    `boundary_div`'s half-infinite box can decide a COMPARISON that feeds a
+    `cond` selector. The analysis then walks only the branch the program
+    does not take, and a definite violation inside that forced branch is
+    not withheld: the verdict is REFUTED and the obligation is TRUE at
+    every point of the declared box.
+
+    Driven at the DEFAULT — no dial involved, no `assume` involved — with a
+    control that drops the certificate through a `sub` and returns UNKNOWN,
+    so the REFUTED is attributable to the certificate and not to the shape.
+    """
+    v = check(_refuting_harness(), vacuity_mode="all", semantics="real")
+    assert v.status == "REFUTED", v.render()
+
+    q = float(1.0 / jnp.sum(jnp.asarray(_REFUTING_CONST) ** 1001))
+    assert q > 0.0, f"the analysis and the program agree about q: {q}"
+    for at in (0.0, 0.5, 1.0):
+        x = jnp.array(at, dtype=jnp.float64)
+        r = lax.cond(jnp.asarray(q) > 0.0,
+                     lambda v: v - 10.0, lambda v: v + 10.0, x)
+        assert float(r) < 0.0, (
+            f"the obligation is FALSE at x={at} in the executed program, so "
+            f"this REFUTED is not false and this test has nothing to say: "
+            f"{float(r)}"
+        )
+
+    control = check(_refuting_harness(keep_sign=False), vacuity_mode="all",
+                    semantics="real")
+    assert control.status == "UNKNOWN", (
+        f"the control REFUTED too, with the certificate dropped by a `sub` — "
+        f"so the certificate is not what minted it: {control.render()}"
+    )
+
+
+def _all_primitives(jaxpr):
+    """Every primitive in a jaxpr AND in every sub-jaxpr it carries, at any
+    depth.
+
+    A top-level `{e.primitive for e in jaxpr.eqns}` census answers a
+    question about the OUTERMOST equation list, and "does this query
+    contain a wrapper" is not that question — a wrapper nested inside a
+    `cond` branch is invisible to it and is exactly what would spoil the
+    separation the caller is measuring.
+    """
+    seen = set()
+
+    def walk(jx):
+        for e in jx.eqns:
+            seen.add(e.primitive)
+            for _, val in e.params:
+                for sub in (val if isinstance(val, (list, tuple)) else (val,)):
+                    inner = getattr(sub, "jaxpr", None)
+                    if inner is not None and hasattr(inner, "eqns"):
+                        walk(inner)
+
+    walk(jaxpr)
+    return seen
+
+
+def _cond_harness(*, forced):
+    """The reaching chain inside a `lax.cond` BRANCH and nowhere else."""
+    def h():
+        x = any_array((2,), "float64", (-1.0, -0.25))
+        s = any_array((), "float64", (0.0, 1.0))
+        assume(x < 0.0)
+        pred = jnp.asarray(True) if forced else (s > 0.5)
+        return assert_(lax.cond(pred, _reaching_chain, _reaching_chain, x)
+                       < 0.0)
+
+    return h
+
+
+@pytest.mark.parametrize("forced", [False, True])
+def test_the_carry_reaches_it_through_a_cond_BRANCH_and_not_only_a_wrapper(
+    forced
+):
+    """**THE STAMPED SENTENCE SAID "behind a wrapper", AND "wrapper" IS A
+    TERM OF ART HERE THAT EXCLUDES THIS ROUTE** (0.3.0 P1 re-audit, F3).
+
+    `stelling.propagate.BOUNDARY_TRANSPARENT_POSITION` itself separates
+    *"the unconditional wrappers (jit/remat2/custom_jvp_call/
+    custom_vjp_call)"* from *"a cond branch"*, so a sentence saying
+    "wrapper" names half the boundaries the dial opens. A `cond` branch is
+    the other half and the carry reaches through it, for a live selector
+    and for a forced one alike.
+
+    The query is checked to contain a `cond` and NO member of
+    `stelling.coverage.DEFAULT_TRANSPARENT`, so "not a wrapper" is measured
+    off the traced IR rather than asserted about the source — and the
+    census is RECURSIVE. **A top-level-only census passed a query with a
+    `jax.jit` inside each cond branch**, which is exactly the query this
+    assertion has to reject: the carry would then have a wrapper boundary
+    available to it and the row would prove nothing about `cond`. Found by
+    driving this test against that build while it was being written.
+    """
+    cj = trace(_cond_harness(forced=forced))
+    prims = _all_primitives(cj.jaxpr)
+    assert "cond" in prims, sorted(prims)
+    assert not (prims & set(DEFAULT_TRANSPARENT)), (
+        f"the traced query carries a wrapper as well as the cond, at some "
+        f"depth, so it cannot separate the two routes: {sorted(prims)}"
+    )
+    assert propagate(cj, semantics="real").obligations[0].status != "discharged"
+    moved = propagate(cj, semantics="real", boundary="transparent")
+    assert moved.obligations[0].status == "discharged", (
+        moved.obligations[0].detail
+    )
+    assert moved.boundary_crossings > 0
+    assert _the_program_says(_reaching_chain) is not None
+
+
+_CONSTVAR_W = np.array([-1e-120, -2e-120, -3e-120])
+
+
+def _constvar_harness(*, wrapped=False):
+    """The reaching chain with NO `assume` anywhere: the certificate comes
+    from the CONSTVAR writer, off an array constant's own box."""
+    def h():
+        g = lambda v: 1.0 / jnp.sum(v ** 3)  # noqa: E731
+        f = jax.jit(g) if wrapped else g
+        return assert_(f(jnp.asarray(_CONSTVAR_W)) < 0.0)
+
+    return h
+
+
+def test_the_reach_needs_no_assume_the_CONSTVAR_writer_is_enough():
+    """**THE STAMPED SENTENCE SAID "the assume's own scope", AND NO ASSUME
+    IS REQUIRED** (0.3.0 P1 re-audit, F4).
+
+    The strict-sign table has three sources and only one of them is a
+    strict `assume`; an array CONSTANT is certified from its own box by the
+    constvar writer in `_Propagator.run`. A query with no `assume` anywhere
+    is VERIFIED at the default and contradicted by the program, and the
+    same query behind a `jit` is dial-moved — with `relational_assumes` and
+    `coverage.constrained` both EMPTY, which is the fact
+    `stelling.verdict`'s bar-scope argument 2 said could not exist.
+    """
+    v = check(_constvar_harness(), vacuity_mode="all", semantics="real")
+    assert v.status == "VERIFIED", v.render()
+    assert float(1.0 / jnp.sum(jnp.asarray(_CONSTVAR_W) ** 3)) > 0.0
+
+    cj = trace(_constvar_harness(wrapped=True))
+    opaque = propagate(cj, semantics="real")
+    assert opaque.obligations[0].status != "discharged"
+    assert opaque.boundary_crossings == 0
+    moved = propagate(cj, semantics="real", boundary="transparent")
+    assert moved.obligations[0].status == "discharged", (
+        moved.obligations[0].detail
+    )
+    assert moved.boundary_crossings > 0
+    assert moved.relational_assumes == (), moved.relational_assumes
+    assert moved.coverage.constrained == 0, moved.coverage.constrained
 
 
 def _dot_harness(n, *, wrapped=False, assumed=True):
@@ -487,20 +774,34 @@ def test_dot_general_reaches_it_too_and_the_CONTRACTION_LENGTH_decides():
     `-0.0`:
 
         n ≤ 32   a·b = -0.0   1/(a·b) = -inf   the VERIFIED holds
-        n ≥ 64   a·b = +0.0   1/(a·b) = +inf   the VERIFIED is FALSE
+        n ≥ 33   a·b = +0.0   1/(a·b) = +inf   the VERIFIED is FALSE
 
     **and the verdict is the same at every n.** The analysis sees no
     contraction length; the contraction length is what decides whether its
-    VERIFIED is true. At n = 8 the verdict is right BY ACCIDENT of a
+    VERIFIED is true. At n = 32 the verdict is right BY ACCIDENT of a
     lowering — a fused chain that happens to keep the sign — and that half
     is asserted too, because "the analysis is merely conservative here"
-    would be the comfortable reading and it is false.
+    would be the comfortable reading and it is false. The boundary is
+    asserted at 32/33, ADJACENT, rather than at two comfortable distances
+    from it: a pin two octaves away would survive the threshold moving,
+    which is the one event this test exists to report. (**THE FIRST PASS
+    WROTE "n ≤ 32 / n ≥ 64" AND ASSERTED 8 AND 64** — the table was right
+    about the threshold and the assertions did not touch it. 0.3.0 P1
+    re-audit, F8; re-derived here over n = 1..129.)
+
+    Swept independently at `1b34d25` on 2026-08-28, n = 1..129: the sign is
+    kept 1..32 and lost from 33, on jax 0.11.0 and jax 0.10.2, eager and
+    jitted, float32 identical, and 2-D `A @ B` identical. **`numpy.dot`
+    loses it from n = 2**, so unlike the `reduce_sum` seed — where numpy
+    agrees with jax from n = 2 and the `+0` is the sum's identity element —
+    THIS half really is one backend's lowering choice, and the assertion
+    below says so by measuring numpy beside jax.
 
     A jax whose blocking threshold moves reddens this with the numbers
     above; that is a request to re-measure the table, not a defect in the
     dial.
     """
-    small, large = 8, 64
+    small, large = 32, 33
     for n in (small, large):
         assert check(_dot_harness(n), vacuity_mode="all",
                      semantics="real").status == "VERIFIED", n
@@ -513,12 +814,27 @@ def test_dot_general_reaches_it_too_and_the_CONTRACTION_LENGTH_decides():
 
     eager_small, jit_small = _dot_runs(small)
     eager_large, jit_large = _dot_runs(large)
-    assert eager_small < 0.0 and jit_small < 0.0, (eager_small, jit_small)
+    assert eager_small < 0.0 and jit_small < 0.0, (
+        f"n={small}: the compiled dot already seeded +0 at this contraction "
+        f"length, so the verdict is not right-by-accident anywhere and the "
+        f"measured threshold has moved: {eager_small}, {jit_small}"
+    )
     assert eager_large > 0.0 and jit_large > 0.0, (
         f"n={large}: the compiled dot kept the sign of its terms, so the "
         f"+0.0 accumulation seed did not appear at this contraction "
         f"length and the measured table above has moved: "
         f"{eager_large}, {jit_large}"
+    )
+
+    # NUMPY, BESIDE IT, because the contrast is the finding: numpy's dot
+    # loses the sign at n = 2, so the threshold above is a lowering choice
+    # and not an identity of the operation (unlike the `reduce_sum` seed,
+    # where the two backends agree from n = 2 — measured in
+    # `::test_the_reduction_seed_is_the_mechanism_and_it_is_measured`).
+    np_two = np.dot(np.full((2,), -1e-210), np.full((2,), 1e-200))
+    assert math.copysign(1.0, float(np_two)) > 0.0, (
+        f"numpy kept the sign at n=2, so it now agrees with jax's 1..32 "
+        f"band and this contrast no longer holds: {np_two!r}"
     )
 
     # ...and the dial moves it exactly as it moves the `reduce_sum` chain
