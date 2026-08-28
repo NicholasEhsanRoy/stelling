@@ -2263,3 +2263,283 @@ jobs:
               sys.exit(1)
           print("the depth-1 clone lost exactly what _lanes.SHALLOW_CLONE_LOSES declares")
           PY
+
+  # ── THE SUITE THE SDIST SHIPS, RUN INSIDE THE UNPACKED SDIST ────────────────
+  #
+  # APPENDED AT THE END, for the reason the two jobs above were: the diff
+  # against a concurrently edited `ci.yml` is an append, and nothing above this
+  # line is touched.
+  #
+  # THE DEFECT THIS ANSWERS, and it is the missing job rather than the failures
+  # it finds. `stelling-0.2.0` is on PyPI carrying a `/tests` tree that exits 1
+  # when a packager runs it. Measured 2026-08-28 at 17ef918 — `uv build
+  # --sdist`, `tar xzf` into a directory outside any git repository, then the
+  # whole suite inside the unpacked tree:
+  #
+  #     jax + both solvers    4 failed, 4760 passed,   30 skipped   exit 1
+  #     solvers, no jax       4 failed, 2362 passed,  199 skipped   exit 1
+  #
+  # THE SAME FOUR IN BOTH, which is the reading that decided this job's
+  # package set. It is also where `CHANGELOG.md`'s 0.2.0 disclosure figure
+  # comes from: it says *"four failures against roughly 2350 passes"*, which
+  # is the SECOND row and not the first, and it does not say so. A pass count
+  # with no configuration beside it is not a figure anybody can re-derive.
+  #
+  # Four failures, three causes, and every one of them the same shape: A CHECK
+  # WHOSE MODEL IS A GIT CHECKOUT, RUNNING IN A DISTRIBUTION. None of them
+  # touches a verdict, the public API or the wheel. They stood because NO JOB
+  # IN EITHER WORKFLOW EVER UNPACKED THE BUILT SDIST AND RAN ITS SUITE — the
+  # three repairs are 0.2.1's, and this job is why anybody can be shown their
+  # failure. An sdist on PyPI cannot be unpublished, which is the sentence
+  # `tests/test_sdist_contents.py` repeats and the reason a red here is not a
+  # bookkeeping red.
+  #
+  # WHY THE OTHER JOBS IN THIS FILE CANNOT SEE IT. Every one of them runs the
+  # suite in `$GITHUB_WORKSPACE`, which is a git checkout that carries
+  # `scratchpad/` and has no `PKG-INFO`. The three causes are exactly the
+  # differences between that tree and a distribution, so no install line and no
+  # package set reaches them. `test_sdist_contents.py` BUILDS sdists and
+  # inspects them from the outside; what nothing did was RUN the suite from the
+  # inside.
+  #
+  # THE PACKAGE SET IS `test-no-jax`'s — solvers, no jax — which is the
+  # cheapest whole-suite environment in this file, chosen for the same reason
+  # `shallow-clone` above chose it: the subject is the TREE and not the
+  # provisioning, and no cause here traces a jaxpr. That choice is a
+  # measurement rather than a guess: the two readings above are the same four
+  # failures in both configurations, taken before this job existed.
+  #
+  # AND THE CONTROL FOR IT ALREADY EXISTS IN THIS FILE, WHICH IS WHY THIS JOB
+  # RUNS THE SUITE ONCE. The two jobs above compare two runs of one commit
+  # because their subject is invisible in one exit code — a shallow clone is
+  # green, a stray `.venv` is green. This one is not: the distribution's suite
+  # EXITS 1, and `test-no-jax` runs the identical suite, in the identical
+  # package set, on the checkout, and is required. So the comparison is between
+  # two JOBS of one commit rather than between two runs inside one, and it
+  # costs one whole-suite run instead of two. WHAT THAT GIVES UP is stated
+  # rather than left to be found: nothing here machine-compares this job's
+  # report against `test-no-jax`'s, so a divergence that does NOT change the
+  # exit code or the skip-inventory verdict — a test that passes in both trees
+  # for different reasons — is invisible to both jobs.
+  #
+  # IT MUST NOT BE INSIDE A GIT REPOSITORY, and that is the point rather than
+  # hygiene. `tests/test_skip_inventory.py` discloses three separate reasons
+  # that begin *"git cannot …"*, `tests/test_sdist_contents.py`'s scan asks
+  # `git ls-files` what is tracked, and `tests/_repo_files.tracked_paths`
+  # answers `None` where git cannot say. Unpack inside the workspace and every
+  # one of those questions is answered by the CHECKOUT's `.git`, which is the
+  # whole class this job exists to exercise. So the tree is unpacked into
+  # `${RUNNER_TEMP}` and the step below asks git itself, in git's words,
+  # whether it is in a work tree.
+  #
+  # IT MUST TEST THE SDIST'S OWN `src`, AND THAT IS ASSERTED AND NOT ASSUMED.
+  # A job that installed `-e .` from the workspace and then ran the unpacked
+  # tree's tests would be green while measuring the checkout — the exact "gate
+  # that has stopped looking" shape this repository keeps finding. So the
+  # editable install is made FROM the unpacked tree, and a step reads
+  # `stelling.__file__` back and refuses it unless it resolves under that tree
+  # AND does not resolve under `$GITHUB_WORKSPACE`. Both halves: the first
+  # alone would pass if the two paths were ever nested, and the second alone
+  # would pass for a `stelling` that came from somewhere else entirely.
+  #
+  # `fetch-depth` IS LEFT AT THE DEFAULT, DELIBERATELY, AND THIS IS NOT THE
+  # PARAGRAPH THE OTHER CHECKOUTS CARRY. Every `fetch-depth: 0` above is there
+  # because a check reads `CHANGELOG.md` AT A COMMIT and a depth-1 clone cannot
+  # reach it. That reason does not apply here twice over: this checkout is used
+  # for exactly one thing, `uv build --sdist`, whose output is decided by
+  # `[tool.hatch.build.targets.sdist].include` and not by history —
+  # `tests/test_sdist_contents.py::test_an_arbitrary_new_file_does_not_ship`
+  # builds a real sdist from a copy with no `.git` in it at all — and the tree
+  # the suite then runs in has no `.git` either, so the git-gated set skips
+  # there for a reason no clone depth can change. Copying the paragraph would
+  # have been prose asserting a mechanism that is not operating.
+  #
+  # A REQUIRED CHECK, and here is the argument, in the same terms this file
+  # uses for the four jobs it has already decided. What excludes
+  # `acceptance-any-pytree` and `acceptance-reproducer` is a third-party
+  # library's bad day; what excludes `shallow-clone` is a `git fetch
+  # --unshallow` from GitHub in the middle of the run. NEITHER APPLIES HERE:
+  # this job installs what `test-no-jax` installs, from the same index, and
+  # fetches nothing else — `uv build` resolves the same `hatchling>=1.27` that
+  # every `uv pip install -e .` in this file already resolves, so its exposure
+  # is not one required lane's exposure more than zero. And what a red here
+  # means is that the artefact this project would publish carries a suite that
+  # fails, which is a thing that cannot be unpublished. It belongs in the
+  # required list. (Branch protection is a repo setting; this file neither
+  # grants nor withholds it, so this is policy, like every other such sentence
+  # here.)
+  #
+  # WHAT IT DOES NOT REACH.
+  #   * The WHEEL. Nothing here installs or inspects one; that is
+  #     `tests/test_sdist_contents.py`'s three wheel-member checks and
+  #     `release.yml`'s job.
+  #   * A jax-only distribution defect. The package set is solvers-and-no-jax,
+  #     so a check that reads the distribution AND needs jax is not covered.
+  #     The two readings at the top of this block say the four causes are not
+  #     of that kind; they do not say none exists.
+  #   * The sdist ON PyPI. This builds the sdist of the commit under test. A
+  #     released artefact is `release.yml`'s subject, and a suite that passes
+  #     here says nothing about one already published.
+  #   * A PYTHON FLOOR difference, and this one is not hypothetical. This job
+  #     runs `uv venv` with no `--python`, exactly as every other whole-suite
+  #     lane in this file does, so its interpreter is whatever the runner
+  #     image ships while `requires-python` declares `>=3.10`. Measured
+  #     2026-08-28 at 17ef918 on CPython 3.11.15, on the CHECKOUT and on the
+  #     unpacked sdist alike: FOUR tests fail that pass on 3.12.3 —
+  #     `test_MRO_FORGERY_is_possible_for_most_stored_types_and_buys_NOTHING`,
+  #     `test_the_one_forgery_CPython_permits_is_stored_as_the_int_it_carries`
+  #     and `test_a_metaclass_that_FORGES_the_mro_cannot_forge_a_payload`,
+  #     where 3.11 raises `TypeError: mro() returned base with unsuitable
+  #     layout ('bool')` on a forgery 3.12 permits, and
+  #     `test_the_doc_keys_heading_is_SCOPED_to_the_sweep_it_measured`, which
+  #     hits a `RecursionError` inside `json.encoder` there. That is a
+  #     property of the SUITE and not of the distribution — the same four fail
+  #     in the checkout — so it is not this job's finding to fix, and it is
+  #     recorded here because this job's red would look like a packaging red.
+  #     The 3.10-only collection failure `tests/test_sdist_contents.py`'s
+  #     header records is the same class one version further down, and is not
+  #     seen here either.
+  sdist-suite:
+    name: the suite the sdist ships, run inside the unpacked sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # THE ARTEFACT, built from this checkout. `--out-dir` outside the tree:
+      # `dist` is a `WITHHELD` root, and writing one into the workspace would
+      # put a root entry in the checkout that
+      # `test_every_root_entry_is_a_decision` reads, in a job whose whole
+      # subject is what a tree carries.
+      - name: build the sdist this commit would publish
+        run: uv build --sdist --out-dir "${RUNNER_TEMP}/dist" .
+      # OUTSIDE `$GITHUB_WORKSPACE`, which is the precondition for everything
+      # below: `${RUNNER_TEMP}` is not under the checkout, so no `.git` of this
+      # repository is reachable by walking up from the unpacked tree.
+      #
+      # `--strip-components=1` so the tree lands at a FIXED path. The
+      # alternative is a directory named for the version, which every step
+      # below would then have to glob for, and a glob that matched two
+      # directories would silently pick one.
+      - name: unpack it outside the workspace
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          built=("${RUNNER_TEMP}"/dist/*.tar.gz)
+          if [ "${#built[@]}" -ne 1 ]; then
+            echo "::error title=expected exactly one sdist::${RUNNER_TEMP}/dist holds ${#built[@]} tarballs, so which one the suite below would run is decided by a glob."
+            exit 1
+          fi
+          tar tzf "${built[0]}" | sed 's#/.*##' | sort -u
+          mkdir -p "${RUNNER_TEMP}/unpacked"
+          tar xzf "${built[0]}" -C "${RUNNER_TEMP}/unpacked" --strip-components=1
+          for required in pyproject.toml src/stelling/__init__.py tests/conftest.py; do
+            if [ ! -f "${RUNNER_TEMP}/unpacked/${required}" ]; then
+              echo "::error title=the unpacked sdist is not a source tree::${required} is missing from it, so whatever runs below is not the suite this project ships."
+              exit 1
+            fi
+          done
+      # THE PRECONDITION, ASKED OF GIT RATHER THAN OF A PATH. `git
+      # rev-parse --is-inside-work-tree` walks up exactly as every check in the
+      # suite does, so this is the same question they ask; comparing directory
+      # strings would be a second model of it.
+      - name: the unpacked tree is not inside a git repository
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/unpacked"
+          if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            echo "::error title=the unpacked sdist is inside a git work tree::git can answer questions about history from here, so the checks whose subject is a tree WITHOUT git would run in the shape this job exists to leave behind. Unpack somewhere outside the workspace."
+            exit 1
+          fi
+          echo "git says: $(git rev-parse --is-inside-work-tree 2>&1 || true)"
+      # OUTSIDE THE CHECKOUT, and outside the unpacked tree too. A venv in the
+      # unpacked tree would be a root entry the suite running in it would then
+      # read — the defect `venv-in-the-working-tree` above is about — inside
+      # the one job that must not have it.
+      - run: uv venv "${RUNNER_TEMP}/venv"
+      # `-e` FROM THE UNPACKED TREE. Not `-e .` from the workspace, which would
+      # make `import stelling` resolve into the checkout and leave this job
+      # testing the thing it is supposed to be comparing against; and not a
+      # non-editable install, which would resolve into site-packages and make
+      # the assertion below unable to distinguish the two.
+      - name: install the UNPACKED SDIST, so its own src is what imports
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/unpacked"
+          uv pip install --python "${RUNNER_TEMP}/venv/bin/python" -e ".[solvers]" pytest
+      # So that the `pytest` line below is the same command `tests/_lanes.py`
+      # reads out of every other lane. Same device, same reason, as
+      # `venv-in-the-working-tree`.
+      - run: echo "${RUNNER_TEMP}/venv/bin" >> "$GITHUB_PATH"
+      - run: uv pip list --python "${RUNNER_TEMP}/venv/bin/python"
+      - name: what `import stelling` resolves to, and where it must NOT be
+        # THE ASSERTION THAT THIS JOB IS MEASURING THE ARTEFACT. Both halves:
+        # under the unpacked tree, and not under the checkout. A job that
+        # silently tested `$GITHUB_WORKSPACE` would be green here for the whole
+        # of the class this job exists to close.
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/unpacked"
+          python - <<'PY'
+          import os
+          import pathlib
+          import sys
+
+          import stelling
+
+          resolved = pathlib.Path(stelling.__file__).resolve()
+          unpacked = pathlib.Path(os.environ["RUNNER_TEMP"], "unpacked").resolve()
+          workspace = pathlib.Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          print("stelling.__file__ =", resolved)
+          print("the unpacked sdist =", unpacked)
+          print("the checkout       =", workspace)
+          if not resolved.is_relative_to(unpacked):
+              print(
+                  "::error title=this job is not testing the sdist::"
+                  f"`import stelling` resolved to {resolved}, which is not "
+                  f"under the unpacked sdist at {unpacked}. Whatever the suite "
+                  "below measures, it is not the code this project would "
+                  "publish."
+              )
+              sys.exit(1)
+          if resolved.is_relative_to(workspace):
+              print(
+                  "::error title=this job is testing the checkout::"
+                  f"`import stelling` resolved to {resolved}, which is under "
+                  f"the checkout at {workspace}. The whole point of this job "
+                  "is that the tree it runs in is a distribution and not a git "
+                  "checkout."
+              )
+              sys.exit(1)
+          PY
+      - name: the suite the sdist ships, with the verdict asserted
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/verdict-sdist.txt
+          # `PY_COLORS: 0` from the start; see the same line two jobs above.
+          PY_COLORS: 0
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/unpacked"
+          rm -f "${RUNNER_TEMP}/verdict-sdist.txt"
+          python -m pytest -q -ra
+          verdict="${RUNNER_TEMP}/verdict-sdist.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it."
+            exit 1
+          fi
+          cat "${verdict}"
+          # A distribution IS entitled to make the completeness claim: every
+          # skip its shape causes is disclosed in `tests/test_skip_inventory.py`
+          # — three `git cannot …` rules, `not a git checkout (an unpacked
+          # sdist, say)`, and the solver-battery transcripts that `/scratchpad`
+          # is not in the allowlist to carry. Until 0.2.1 the last of those was
+          # NOT disclosed and this verdict read `failed` in every sdist session,
+          # which is one of the four failures this job was built to show.
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::An unpacked sdist's skips are all disclosed, so this verdict should be 'made' here as it is in every other lane. A 'failed' verdict means the distribution's shape causes a skip nobody wrote down."
+            exit 1
+          fi
+      - name: and the distribution's CLI runs from inside it
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/unpacked"
+          python -m stelling

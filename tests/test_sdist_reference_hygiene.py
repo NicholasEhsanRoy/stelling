@@ -490,6 +490,20 @@ DECLARED: dict[str, Declaration] = {
         "against; the harnesses they scored are in this file",
         ("scratchpad/PREREG_MECHC.md", "scratchpad/PREREG_REF1.md"),
     ),
+    "tests/test_skip_inventory.py": Declaration(
+        DISCLOSED,
+        "the DISCLOSURE SURFACE naming the thing it discloses. 0.2.1 "
+        "registered the solver battery's transcript skip, and that file's "
+        "bound is that a rule may only excuse a reason written out as a "
+        "literal where a reviewer reads it — so the reason string is here, "
+        "and the reason string says which directory is missing. It is a "
+        "citation of an absence rather than a pointer at evidence: the "
+        "sentence exists to tell a reader of the tarball why a test skipped "
+        "in it, and what ships instead is `tools/solver_battery.py`, which "
+        "re-drives the battery, and `tests/test_solver_battery.py`, which "
+        "holds every quoted figure to a transcript wherever one is",
+        ("scratchpad/D7-solver-battery",),
+    ),
     # ------------------------------------------------------------ from D7
     #
     # D7 landed after this gate was written and its citations are the same

@@ -260,9 +260,10 @@ def test_the_lane_reader_reads_ONE_FILE_however_its_lines_end():
     of those in place of every newline and THE SAME blocks and THE SAME lanes
     come back — which is the claim, and it is why the assertion below compares
     each rendering against the clean read rather than against a number. (This
-    sentence said *"the same eleven blocks and eight lanes"*; re-measured
-    2026-08-28 it is 13 and 10, and it will be something else the next time a
-    lane is added. The equality is the property; the size is not.)
+    sentence said *"the same eleven blocks and eight lanes"*, then *"13 and
+    10"*; re-measured 2026-08-28 at the commit that added the sdist lane it is
+    14 and 11, and it will be something else the next time a lane is added.
+    The equality is the property; the size is not.)
     ``split("\\n")`` would pass every other test in this file and fail this
     one.
     """

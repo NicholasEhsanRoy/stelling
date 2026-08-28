@@ -69,8 +69,19 @@ import re
 import subprocess
 import sys
 import textwrap
+import warnings
 
 from stelling import obligation, propagate
+
+# The same idiom `tests/_repo_files.py` and
+# `tests/test_sdist_reference_hygiene.py` use to reach each other: `tests/` is
+# not a package, so a module here is importable by bare name once its own
+# directory is on the path. Done here rather than left to the importer so this
+# module is self-sufficient — the zero-dep probe below re-executes this file
+# from a path, not from an import, and has to be able to.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+from test_sdist_reference_hygiene import _CONTENT_ROOTS  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 STATE = REPO / "docs" / "state-0.1.0.md"
@@ -401,6 +412,17 @@ _SHORTHAND_ROOTS = (
 # instruments. Each is a decision, made here in the open, and each says which
 # of the two legitimate cases it is. A name that is neither is a defect: it
 # reads to a reader as a file they can open, and it is not one.
+#
+# **AND THERE IS A THIRD CASE THIS DICT IS NOT, WHICH IS WHY IT DID NOT GROW BY
+# THREE ENTRIES IN 0.2.1.** A path this repository TRACKS and deliberately does
+# not DISTRIBUTE — every `scratchpad/` citation in `docs/` — resolves perfectly
+# well for the reader the prose is written for, and resolves nowhere in an
+# unpacked sdist. Putting one here would switch the existence check off in the
+# checkout, where it is the only thing that decides the path, in order to
+# quieten a tree where it cannot decide it at all: a repair that makes a check
+# pass by narrowing what it looks at. :func:`_placement` is the repair instead,
+# and it narrows nothing — see its docstring for the three entries this dict
+# would otherwise have gained.
 NOT_IN_THIS_TREE = {
     # (1) files the reader is instructed to CREATE. The page is telling them
     # what to name it, so "not in this tree" is the point of the sentence.
@@ -414,6 +436,90 @@ NOT_IN_THIS_TREE = {
         "jax/_src/random/prng.py",
     },
 }
+
+
+#: :func:`_placement`'s three answers, named rather than spelled at each use.
+#: ``UNDECIDED`` is the one that is neither a pass nor a fail: it is the
+#: scanner saying, in the only tree where it can be true, that the question
+#: was not answerable here.
+PLACED = "placed"
+UNPLACED = "unplaced"
+UNDECIDED = "undecided-here"
+
+
+def _placement(ref: str, *, root: pathlib.Path, beside: pathlib.Path) -> str:
+    """Where a reference points, as one of :data:`PLACED`, :data:`UNPLACED`
+    and :data:`UNDECIDED`.
+
+    **THE THIRD ANSWER IS THE 0.2.1 REPAIR AND HERE IS WHAT IT COST TO GET
+    IT.** This was one existence test, and an existence test decides the
+    question in a git checkout and cannot decide it in a distribution.
+    Measured 2026-08-28 at 17ef918 — `uv build --sdist`, `tar xzf`, the whole
+    suite inside the unpacked tree — the gate below reported THREE references
+    across TWO pages as *"files that are not in this tree and are not marked
+    as living elsewhere"*: two on `docs/choosing-a-solver-backend.md` and one
+    on `docs/harness-api.md`. The paths are not re-typed here, because they
+    are already written down once, with a reason each, as the ``paths`` of
+    those two pages' entries in
+    ``tests/test_sdist_reference_hygiene.py``'s ``DECLARED`` — and a second
+    copy of a path list is a second thing to keep in step.
+
+    All three are TRACKED in this repository, all three are outside
+    `[tool.hatch.build.targets.sdist].include`, and the paragraph beside each
+    already tells the reader so — `docs/harness-api.md` says *"Both are in the
+    git checkout; neither is in the sdist."* No shipped sentence was false.
+    What was false was this scanner's model of the tree it was running in.
+
+    **THE THREE RESOLUTIONS THE FAILURE MESSAGE OFFERS ARE THE RIGHT MENU FOR
+    A NAME THAT RESOLVES NOWHERE, AND NONE OF THEM FITS THIS.** *Commit them*
+    — done, years of transcripts ago; it is why the checkout is green.
+    *Write them as* ``stelling-sweeps/<name>`` — a lie about which repository
+    holds them, and :data:`EXTERNAL_PREFIX` means the campaign repo. *Add them
+    to* :data:`NOT_IN_THIS_TREE` — which reads the exemption BEFORE the
+    existence test, so the three paths would stop being checked in the one
+    tree that can check them, and a transcript deleted from `scratchpad/`
+    would then leave `docs/` pointing at nothing with this gate green. The
+    menu has three entries because the check had never been run anywhere but a
+    checkout; the fourth case is *tracked here, deliberately not distributed*,
+    and it is answered by asking which tree this is rather than by an
+    exemption.
+
+    So: a reference into a root this repository DECLARES it has and does not
+    ship (``tests/test_sdist_reference_hygiene._CONTENT_ROOTS``, held to
+    ``test_sdist_contents.WITHHELD`` in both directions by
+    ``test_the_content_roots_are_withheld_roots_and_not_a_second_list`` and
+    ``test_every_withheld_root_that_holds_content_is_a_content_root``) is
+    :data:`UNDECIDED` **when this tree does not carry that root, and only
+    then.** In a checkout `scratchpad/` is there, the branch never fires, and
+    every one of the three paths is decided by exactly the existence test it
+    was decided by before — this narrows nothing, which is the property
+    ``test_a_reference_into_an_unshipped_root_is_decided_by_whether_the_root_is_HERE``
+    drives on trees it builds rather than on whichever tree the suite happens
+    to be in.
+
+    **WHAT :data:`UNDECIDED` DOES NOT REACH, and it is the reason the caller
+    WARNS rather than passing in silence.** In an unpacked sdist nothing here
+    can tell a live transcript path from one that was deleted, renamed or
+    typed wrong: the directory is not there to ask. The check that does not
+    lose its grip in a distribution is
+    ``tests/test_sdist_reference_hygiene.py::test_no_shipped_file_names_a_path_the_sdist_does_not_carry``,
+    which requires every unshipped citation in a shipped file to be DECLARED
+    with a reason and a kind, reads `pyproject.toml` rather than the disk, and
+    already carries all three of these paths. Between the two, the checkout
+    decides existence and every tree decides disclosure.
+
+    ``beside`` is the page's own directory, for the relative-link case; it is
+    a parameter rather than ``page.parent`` inside the loop so that the
+    control can drive this on a tree of its own making.
+    """
+    if (root / ref).exists() or (beside / ref).exists() or any(
+        (root / (shorthand + ref)).exists() for shorthand in _SHORTHAND_ROOTS
+    ):
+        return PLACED
+    first = ref.split("/", 1)[0]
+    if first in _CONTENT_ROOTS and not (root / first).exists():
+        return UNDECIDED
+    return UNPLACED
 
 
 def test_every_file_the_docs_name_is_placed():
@@ -434,13 +540,43 @@ def test_every_file_the_docs_name_is_placed():
     with this test green, because it was not looking. Widened to every page
     under ``docs/``.
 
+    **AND IT IS STILL ONE DIRECTORY, WHICH IS NOW A MEASURED DECISION RATHER
+    THAN AN UNEXAMINED NARROWNESS.** ``design/`` ships too, and 0.2.1 ran
+    this exact scan over it before deciding not to widen. Measured
+    2026-08-28 at 17ef918 in this checkout — 69 pages, 333 references —
+    it reports **51 unplaced references across 20 of those pages**, of which
+    exactly **two** are the class this gate is about, a citation into the
+    unshipped evidence root. The other 49 are bare basenames belonging to
+    OTHER repositories: source files of packages this project traces (a
+    ``_src`` module, an ``nnx`` module, a ``_norm``), the campaign corpus's
+    own program names, and the decoy paths this repository's own drives plant
+    and must never create. So widening the scan here would ship a 51-row
+    exemption table on its first green, with the two real findings inside it,
+    and an exemption table that size is where a real one hides.
+
+    **AND THE TWO THAT MATTER ARE ALREADY HELD, WHICH IS THE HALF THAT
+    DECIDES IT.** ``design/ieee-reexamination.md`` and
+    ``design/solver-integration-build.md`` are both entries of
+    ``tests/test_sdist_reference_hygiene.py``'s ``DECLARED``, whose scan is
+    over EVERY shipped file rather than over one directory. What widening
+    this gate would add on top of that is the bare-basename half — the half
+    that produces the 49. It is not widened. What that costs is stated
+    plainly: a `design/` page that names a file of THIS repository which does
+    not exist is checked by nothing, and the 51 above are the measurement of
+    how large a table it would take to change that.
+
     *Scope:* bare ``name.ext`` references in backticks, and markdown links.
     A reference written with a line number (``gnn.py:312``) is outside it,
     and so is a symbol reference with no extension (``frontier.warm()``) —
-    the second is a real hole and is stated here rather than implied."""
+    the second is a real hole and is stated here rather than implied. And
+    since 0.2.1 a reference into a declared-but-unshipped root, in a tree
+    that does not carry that root, is UNDECIDED rather than placed or
+    unplaced; see :func:`_placement` for why, and for what the warning below
+    is disclosing."""
     seen_external = False
     seen_intree = False
     unplaced: dict[str, list[str]] = {}
+    undecided: dict[str, list[str]] = {}
     pages = sorted((REPO / "docs").glob("*.md"))
     assert len(pages) >= 20, f"the docs glob found only {len(pages)} pages"
     for page in pages:
@@ -455,12 +591,13 @@ def test_every_file_the_docs_name_is_placed():
                 continue
             if ref in allowed:
                 continue
-            if (REPO / ref).exists() or (page.parent / ref).exists() or any(
-                (REPO / (root + ref)).exists() for root in _SHORTHAND_ROOTS
-            ):
+            where = _placement(ref, root=REPO, beside=page.parent)
+            if where == PLACED:
                 seen_intree = True
-                continue
-            unplaced.setdefault(page.name, []).append(ref)
+            elif where == UNDECIDED:
+                undecided.setdefault(page.name, []).append(ref)
+            else:
+                unplaced.setdefault(page.name, []).append(ref)
     # both branches must be reachable, or the check cannot fail
     assert seen_external, (
         "the scanner found no external reference at all; it has stopped "
@@ -471,8 +608,86 @@ def test_every_file_the_docs_name_is_placed():
         f"docs/ names files that are not in this tree and are not marked as "
         f"living elsewhere: {unplaced}\nEither commit them, write them as "
         f"{EXTERNAL_PREFIX}<name> with the sha they were read at, or add "
-        f"them to NOT_IN_THIS_TREE with which case they are."
+        f"them to NOT_IN_THIS_TREE with which case they are. (A path this "
+        f"repository TRACKS and does not DISTRIBUTE is a fourth case and "
+        f"none of those three: it is decided by `_placement`, and it does "
+        f"not appear here in a tree that carries the root it names.)"
     )
+    # THE SCOPE, SAID OUT LOUD IN THE TREE WHERE IT BITES. An instrument that
+    # does not declare what it could not decide reports absence of evidence as
+    # evidence of absence, and this is the one place this scanner has any:
+    # in a distribution the directory is not there to ask, so a transcript
+    # deleted from `scratchpad/` reads exactly like one that is still there.
+    # Empty in a checkout, which is where the existence test decides all three.
+    if undecided:
+        warnings.warn(
+            "this tree does not carry "
+            + ", ".join(sorted(_CONTENT_ROOTS))
+            + ", so the placement of these docs/ references could not be "
+            "decided here — they name a root this repository declares it has "
+            "and deliberately does not distribute, and whether the file is "
+            "still at that path is a question only a checkout can answer: "
+            f"{undecided}. That they are DISCLOSED is decided in every tree, "
+            "by tests/test_sdist_reference_hygiene.py::"
+            "test_no_shipped_file_names_a_path_the_sdist_does_not_carry.",
+            stacklevel=2,
+        )
+
+
+def test_a_reference_into_an_unshipped_root_is_decided_by_whether_the_root_is_HERE(
+    tmp_path,
+):
+    """All three of :func:`_placement`'s answers, driven on trees built here.
+
+    **WHY NOT ON THE TREE THE SUITE IS RUNNING IN.** The branch this exists to
+    hold is reachable in a distribution and unreachable in a checkout, so a
+    control that read ``REPO`` would assert one of the two directions in one
+    environment and the other in the other — which is a check whose answer
+    depends on where it is run, in a repair whose whole subject is a check
+    whose answer depended on where it was run. Both trees are made here, one
+    ``mkdir`` apart, and both directions are asserted in every environment.
+
+    The rows, in the order they matter:
+
+    * the root is HERE and the file is not — ``UNPLACED``. This is the
+      direction a `NOT_IN_THIS_TREE` exemption would have destroyed, and it is
+      the whole reason the repair is a third answer rather than three
+      exemptions;
+    * the root is NOT here — ``UNDECIDED``, and the caller warns;
+    * a root nothing declares — ``UNPLACED`` in both trees, so the new branch
+      is a licence for the declared roots and not for absence in general;
+    * the file is really there — ``PLACED``, so the trees are not so
+      degenerate that everything reads the same.
+    """
+    unshipped = sorted(_CONTENT_ROOTS)
+    assert len(unshipped) == 1, (
+        f"this control drives ONE declared unshipped root and there are now "
+        f"{len(unshipped)}: {unshipped}. Widen it deliberately — a control "
+        f"that silently drove the first of several would be exactly the "
+        f"narrowing this repair exists against."
+    )
+    # DERIVED, never typed. A literal here would be a second spelling of the
+    # declaration this whole branch reads, and `tools/solver_battery.py`'s own
+    # declaration records what a path split across two literals cost: the scan
+    # saw a truncated token and a reader saw a whole path.
+    ref = f"{unshipped[0]}/zz_no_such_transcript.py"
+
+    carrying = tmp_path / "carrying-the-root"
+    (carrying / unshipped[0]).mkdir(parents=True)
+    (carrying / "docs").mkdir()
+    without = tmp_path / "not-carrying-it"
+    (without / "docs").mkdir(parents=True)
+
+    assert _placement(ref, root=carrying, beside=carrying / "docs") == UNPLACED
+    assert _placement(ref, root=without, beside=without / "docs") == UNDECIDED
+    # a root NOTHING declares: absent is not a licence, it is unplaced
+    undeclared = "zz_not_a_declared_root/anything.py"
+    assert undeclared.split("/", 1)[0] not in _CONTENT_ROOTS
+    for root in (carrying, without):
+        assert _placement(undeclared, root=root, beside=root / "docs") == UNPLACED
+    # …and a file that is really there is still placed, in the tree that has it
+    (carrying / ref).write_text("")
+    assert _placement(ref, root=carrying, beside=carrying / "docs") == PLACED
 
 
 def test_the_placement_exemptions_are_all_still_needed():
