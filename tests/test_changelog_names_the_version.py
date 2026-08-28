@@ -469,10 +469,28 @@ def test_the_routed_date_check_is_in_this_workflow():
     """
     body = _step_body(ROUTED_STEP)
 
+    # CODE LINES, NOT THE WHOLE BODY, AND THE REASON IS A DEFECT THIS CHECK
+    # ACTUALLY HAD. These four needles were matched against the extracted
+    # `run:` block including its comments, and `release.yml` is a heavily
+    # commented file whose step comments quote the constructs beside them. At
+    # `a90862b` `%(taggerdate:short)` appeared on exactly one line of that
+    # block and it was CODE, so the needle was live; at `fd03c02` a new
+    # comment inside the same block spelled it too, and the needle stopped
+    # being able to fail. Measured on both blobs — 0/1 and 1/1 comment/code
+    # hits — and driven at `fd03c02`: rewriting the CODE line's
+    # `%(taggerdate:short)` to `%(creatordate:short)` left this module green.
+    # `tests/test_release_gates.py` carries the same needle and was repaired
+    # the same way in the same commit; the two readers of this one literal are
+    # written twice and nothing holds them to each other, which is declared
+    # here rather than left for a release to discover.
+    code = "\n".join(
+        line for line in body.splitlines()
+        if not line.lstrip().startswith("#")
+    )
     missing = [
         needle for needle in ("CHANGELOG.md", "GITHUB_REF_NAME",
                               "%(taggerdate:short)", "exit 1")
-        if needle not in body
+        if needle not in code
     ]
     assert not missing, (
         f"the step {ROUTED_STEP!r} in `.github/workflows/release.yml` no "
