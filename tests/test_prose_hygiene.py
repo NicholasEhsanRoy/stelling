@@ -14,13 +14,23 @@ fail here, named file:line.
 The pre-commit hook ``library-identifier-hygiene`` in
 .pre-commit-config.yaml enforces the same rule as a grep; the two are
 deliberately logically identical — a divergence between them is a bug.
-``tests/`` and ``corpus/`` are out of scope by design: census-binding
-tests and campaign exhibits name their contacts as provenance by nature.
+``tests/`` and ``corpus/`` are out of scope FOR THAT RULE, and the scope
+belongs to the rule rather than to this file: census-binding tests and
+campaign exhibits name their contacts as provenance by nature, so Rule 2
+has nothing to say about their prose. Every other check here makes its own
+scope decision, and they do not all come out the same way — the block above
+:func:`_prose_only` states one per check with its argument. (This sentence
+read "out of scope by design" with no check named, which is how one
+check's scope was read as the file's for as long as `tests/` was outside
+the citation scan.)
 """
 
 from __future__ import annotations
 
+import ast
+import io
 import re
+import tokenize
 from pathlib import Path
 
 # The runner's own conftest, for the one thing it knows and nothing else
@@ -90,9 +100,14 @@ def test_core_lines_naming_libraries_carry_provenance_markers():
 #: is the count of everything the plain spelling does not resolve. Staged by
 #: how each one actually resolves, `SOUNDNESS.md`'s eighteen are **9 plain /
 #: 8 mid-name wrap / 1 supersession / 0 dangling**: the ninth non-plain one
-#: is `tests/test_verified_bar.py::test_the_pairing_gate_binds_the_ESCALATION
-#: _and_not_the_propagation`, which is not wrapped and resolves through the
-#: annotation beside it. A numeral that counts two mechanisms as one is how
+#: is `SOUNDNESS.md`'s citation, in `tests/test_verified_bar.py`, of
+#: `test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`,
+#: which is not wrapped THERE and resolves through the annotation beside it.
+#: (Written here as a bare name rather than as the `path::name` citation
+#: `SOUNDNESS.md` writes, because that test no longer exists under that name
+#: and this file is now INSIDE its own scan: the bare form is the one
+#: :data:`_NAMES_DECLARED_ABSENT` can carry a reason for, and the path form
+#: has no such table.) A numeral that counts two mechanisms as one is how
 #: a residue gets bounded at the wrong width — which is what happened to
 #: :data:`_SUPERSEDED_BY`'s below.
 _TEST_REF_WRAPPED = re.compile(
@@ -126,9 +141,13 @@ _TEST_REF_WRAPPED = re.compile(
 #:
 #: So an annotation licenses the citation it FOLLOWS, with no other
 #: `path::name` citation in between — which is the shape both real ones have
-#: (*"…`tests/test_verified_bar.py::test_x`. **[CLOSED …; that test is now
+#: (*"…`…test_verified_bar.py::test_x`. **[CLOSED …; that test is now
 #: `::test_y`.]**"*) and is what "the citation it annotates" means when the
-#: only thing a checker can read is position.
+#: only thing a checker can read is position. (The path in that illustration
+#: is elided at its head on purpose: `test_x` is a placeholder, and spelled
+#: in full this line would be a live dangling citation in a file the scan
+#: now reads. Same device, same reason, as the `stelling/contracts.py`
+#: entry in the reach note above `_LINE_CITATION`.)
 #:
 #: **THE RESIDUE THAT REMAINS, AT THE SUPERSESSION THAT IS ACTUALLY
 #: CONSULTED.** This sentence read *"307 characters of that same paragraph,
@@ -168,28 +187,241 @@ _TEST_REF_WRAPPED = re.compile(
 #: related to the name it replaces.
 _SUPERSEDED_BY = re.compile(r"(?<!\w)::(test_[A-Za-z0-9_]+)")
 
-#: Where a `path::name` citation is checked. Shipped prose and the scripts
-#: CI runs — everything a reader can follow a citation from.
+#: Where a citation is checked. Shipped prose and the scripts CI runs —
+#: everything a reader can follow a citation from — and, since 2026-08-28,
+#: `tests/`.
 #:
-#: **`tests/` IS DELIBERATELY OUT**, and it is not an oversight: three test
-#: modules write citation-shaped SOURCE STRINGS as plants
-#: (`tests/test_x.py::test_y` in `tests/test_state_guard.py`,
-#: `tests/test_some_other_module.py::test_x` in `tests/test_skip_inventory.py`)
-#: and those files are supposed to name tests that do not exist. So is
-#: `scratchpad/`, which is tracked evidence rather than shipped prose.
+#: **THE EXCLUSION THAT USED TO STAND HERE WAS ARGUED ABOUT CITATIONS AND
+#: SPELLED AS A DIRECTORY.** This comment read, in full:
+#:
+#:     **`tests/` IS DELIBERATELY OUT**, and it is not an oversight: three
+#:     test modules write citation-shaped SOURCE STRINGS as plants
+#:     (a `path`-then-`::`-then-`name` string in `tests/test_state_guard.py`,
+#:     another in `tests/test_skip_inventory.py`) and those files are
+#:     supposed to name tests that do not exist.
+#:
+#: Every word of that is TRUE, and it is still the whole reason the rule
+#: below has to tell a plant from a claim — which is why it is quoted here
+#: rather than deleted. (The two examples it gave were spelled out as live
+#: citations of files this tree does not have; they are described here
+#: instead, for the reason the reach note above `_LINE_CITATION` gives about
+#: its own third entry — spelled out, they would be dangling citations in
+#: the scan's own scope, and the scan now reaches this file.)
+#:
+#: **WHAT IT DOES NOT LICENSE IS THE RULE IT PRODUCED.** A tuple of path
+#: prefixes excludes a DIRECTORY. The argument was about a KIND OF STRING.
+#: So the exclusion also took out every SENTENCE in `tests/` that makes a
+#: claim about this tree — **181 of the 539 files `git ls-files` names, and
+#: 181 of the sdist's 379 members**, both re-derived at `9b5b496` on
+#: 2026-08-28: `git ls-files | wc -l` gives 539 and its `tests/` prefix 181;
+#: the same list under :func:`_shipped_roots`'s allowlist gives 378, and the
+#: 379th member is the `PKG-INFO` the backend writes, which
+#: `tests/test_sdist_contents.py` records as the one member in neither the
+#: allowlist nor WITHHELD. (Not `_shipped_text_files`, which is 363 here
+#: because it keeps only text suffixes — a different question.)
+#:
+#: The rule to apply generally: put the reason and the rule side by side and
+#: see whether they have the same SHAPE. These did not.
+#:
+#: That gap is not hypothetical: it is how a false present-tense claim
+#: shipped in 0.2.0. `tests/test_changelog_names_the_version.py`'s docstring
+#: illustrated its own subject in the present tense, the version bump on
+#: another branch moved the state it described, and nothing in the tree
+#: could see it, because this tuple scoped `tests/` out of the only checker
+#: that reads a citation.
+#:
+#: **SO THE EXCLUSION IS CITATION-SHAPED NOW**, and it lives in
+#: :func:`_prose_only` rather than here: in a `.py` file a citation counts
+#: when it is in a COMMENT or a DOCSTRING and does not count when it is in
+#: a VALUE. The plants are values — test data handed to a function,
+#: elements of a fixture tuple, `monkeypatch.setitem` keys — and Python
+#: says so structurally. `scratchpad/` stays out, and by an argument about
+#: what it IS rather than where it sits: it is tracked EVIDENCE, a record of
+#: what a session did, not prose this project ships or maintains.
 #:
 #: IT WAS `src/stelling` ALONE UNTIL 2026-08-22, which is 32 of the 70
-#: citations in the shipped set. The one it could not see:
+#: citations in the shipped set as it then stood. The one it could not see:
 #: `.github/scripts/tripwire_canary.py` cited
-#: `tests/test_tripwire_record.py::test_the_nightly_workflow_still_runs_the_canary`,
-#: renamed away, in the paragraph explaining why `--no-sweep` is safe.
-_CITATION_ROOTS = ("src/", "docs/", "design/", ".github/")
+#: …test_tripwire_record.py::test_the_nightly_workflow_still_runs_the_canary,
+#: renamed away, in the paragraph explaining why `--no-sweep` is safe. (That
+#: name is written here without its leading `tests/` for the same reason the
+#: two plant examples above are described rather than spelled: the sentence's
+#: subject is that the name is GONE, and the scan now reads this file.)
+_CITATION_ROOTS = ("src/", "docs/", "design/", ".github/", "tests/")
+
+#: The suffixes a citation is looked for in. Named rather than spelled twice:
+#: `test_the_citation_sweep_covers_the_whole_allowlist_and_the_resolver_works`
+#: derives the `tests/` half of the scan from this and from `git ls-files`,
+#: and two copies of a literal tuple is how that check would go quiet.
+_CITATION_SUFFIXES = (".py", ".md", ".yml", ".txt")
+
 _TESTS = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS.parent
+
+# --------------------------------------------------------------------------
+# WHICH CHECK IN THIS MODULE SEES `tests/`, AND THE ARGUMENT FOR EACH — one
+# decision per check, made by asking what the check is ABOUT rather than
+# which directory it happens to have been pointed at. That is the same cut
+# the exclusion above failed to make.
+#
+# `test_core_lines_naming_libraries_carry_provenance_markers`   NOT WIDENED.
+#   Its subject is ARCHITECTURE.md Rule 2, which governs the LIBRARY-
+#   NEUTRALITY OF THE CORE. A census-binding test names its contact as
+#   provenance by nature — naming the library is what the test is for — so
+#   the rule has nothing to say about that prose. This is a scope the RULE
+#   sets, not a directory the check declines to walk, and the module
+#   docstring has said so since before this pass.
+#
+# `test_every_test_cited_in_core_prose_still_exists`            WIDENED.
+# `test_every_bare_test_name_in_shipped_prose_resolves`         WIDENED.
+#   Both read `_citation_sources`, both ask "does this citation name a live
+#   test", and that question is exactly as meaningful about a sentence in
+#   `tests/` as about one in `docs/`. The plants that motivated the old
+#   exclusion are values, and `_prose_only` drops values.
+#
+# `test_no_shipped_page_cites_a_line_its_own_tree_does_not_have`
+#   ALREADY THERE, AND DELIBERATELY UNMASKED. It sweeps
+#   `_shipped_text_files`, derived from the sdist allowlist, which has
+#   carried `/tests` since that scope was fixed —
+#   `test_the_citation_sweep_covers_the_whole_allowlist_and_the_resolver_works`
+#   asserts it. It is NOT given the prose mask, and the asymmetry is
+#   argued rather than inherited: a `file.py:N` token in a value literal is
+#   still a claim that this tree has that line, checkable by the same means
+#   as one in a comment, and no plant of that shape exists — this module's
+#   own line-citation probes are built around a `colon` variable precisely
+#   so they are not live citations. Masking there would be a pure
+#   narrowing with nothing bought.
+#
+# `test_the_shipped_root_count_in_prose_matches_the_allowlist`  NO SCOPE.
+#   It reads two files it names by path and compares a parsed figure with a
+#   parsed allowlist. There is no sweep to widen.
+#
+# `test_the_declared_absences_are_still_absent`                 NO SCOPE.
+#   It reads `_NAMES_DECLARED_ABSENT` against `_resolvable_test_names`,
+#   which has always read all of `tests/`. Widening the citation scan grew
+#   the table it guards; it did not change what it looks at.
+# --------------------------------------------------------------------------
+
+
+def _prose_only(text: str) -> str:
+    """A `.py` source with everything that is not PROSE blanked out.
+
+    Same length, same line numbers, same paragraph structure: a masked
+    character becomes a space and a newline stays a newline, so every offset
+    a caller computes is still an offset into the real file.
+
+    **WHAT COUNTS AS PROSE, AND WHY IT IS DECIDED STRUCTURALLY.** Two things
+    in a `.py` file hold text that is not a value, and Python distinguishes
+    both without anybody having to name a file:
+
+    * a COMMENT, which never reaches the AST at all and is read from the
+      token stream;
+    * a BARE STRING STATEMENT — an `ast.Expr` whose value is a string
+      constant — which covers every docstring, module, class and function
+      alike, a docstring being only ever the first such statement in a body.
+
+    Everything else is masked, and that is an ALLOW-LIST of two shapes
+    rather than a deny-list of the ways a string can be data. The same rule,
+    from the same reading of the same grammar, is what
+    `tests/test_state_guard.py`'s `state_guard_references` uses to keep a
+    guard from firing on its own explanation; it is written here in the
+    opposite direction because that scan wants the values and this one wants
+    the remarks.
+
+    **WHAT IT COST TO ADOPT, MEASURED BEFORE IT WAS ADOPTED AND NOT AFTER.**
+    Applying this uniformly NARROWS the scan in `src/`, `docs/` and
+    `.github/` as well as widening it into `tests/`, so it is a coverage
+    LOSS wherever a real citation lives in a value literal. Every citation
+    the scan checked at `9b5b496` (2026-08-28), the commit before `tests/`
+    was added, staged by what it structurally IS — both forms together,
+    `path::name` and bare:
+
+        in a non-`.py` file (all prose, rule does not apply)   238
+        in a `.py` COMMENT                                      29
+        in a `.py` DOCSTRING                                    44
+        in a `.py` VALUE literal                                 0
+        in a `.py` and in none of those                          0
+                                                               ---
+                                                               311
+
+    **The value bucket is EMPTY, so the uniform rule loses nothing**, and
+    that is a measurement rather than the expectation it happened to
+    confirm — the defect being repaired here is an exclusion adopted on an
+    argument nobody measured against the rule it produced.
+
+    **AND IT IS LOAD-BEARING, DRIVEN RATHER THAN ARGUED.** Turning this
+    function off — `_citation_sources` yielding the raw text for a `.py`
+    file — and running the widened scan on this tree (2026-08-28) gives
+    **27** dangling `path::name` citations, in three files and no others:
+    14 in `tests/test_state_guard.py`, 2 in `tests/test_skip_inventory.py`
+    and 11 in this module's own probes. Those are exactly the plants the
+    old exclusion was written to protect, and they are exactly what a
+    value is. With the mask on, the same scan finds none of them.
+
+    **WHAT THIS CANNOT SEE**, which is the half a mask is always tempted not
+    to state:
+
+    * **a citation inside a value literal that really IS a claim.** A nodeid
+      sitting in a `Control(...)` tuple is a claim about this tree whose
+      staleness matters, and nothing structural distinguishes it from a
+      plant. Zero of the 311 above were of this shape;
+      `tests/property/positive_controls.py` is where the shape does live,
+      and what checks those nodeids is the harness that RUNS them, not this
+      scan. (Written without a sample literal: spelled out here it would
+      itself be a dangling citation, in a file this scan now reads.)
+    * **a citation in an f-string.** An `ast.JoinedStr` is a value and is
+      masked whole, so a citation assembled in a failure message is invisible
+      — including the ones this very module writes into its own assertions.
+    * **a citation assembled from pieces**, in prose or out of it:
+      `"tests/" + name`, a `%`-format, a `.join`, or the deliberate device
+      this file already uses to keep its own probes from being live
+      citations (`test_the_citation_sweep_covers_the_whole_allowlist_and_the_
+      resolver_works` builds its samples around a `colon` variable). A scan
+      that reads text cannot follow any of them.
+    * **a `.py` file that does not PARSE.** The mask degrades to the whole
+      text, so every string in it is read as prose. That is the loud
+      direction on purpose: a mask that silently returned "no prose here"
+      would report absence of evidence as evidence of absence, which is the
+      failure this module exists to refuse.
+    """
+    try:
+        keep = [
+            (tok.start, tok.end)
+            for tok in tokenize.generate_tokens(io.StringIO(text).readline)
+            if tok.type == tokenize.COMMENT
+        ]
+        tree = ast.parse(text)
+    except (SyntaxError, tokenize.TokenError, IndentationError, ValueError):
+        return text
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            v = node.value
+            keep.append(
+                ((v.lineno, v.col_offset), (v.end_lineno, v.end_col_offset))
+            )
+    starts, pos = [0], 0
+    for line in text.splitlines(keepends=True):
+        pos += len(line)
+        starts.append(pos)
+    out = ["\n" if ch == "\n" else " " for ch in text]
+    for (sl, sc), (el, ec) in keep:
+        lo, hi = starts[sl - 1] + sc, starts[el - 1] + ec
+        out[lo:hi] = text[lo:hi]
+    return "".join(out)
 
 
 def _citation_sources():
     """`(relative path, text)` for every file a citation is checked in.
+
+    **A `.py` FILE ARRIVES MASKED**, its values blanked and its comments and
+    docstrings intact — :func:`_prose_only`, which is where the exclusion
+    that used to be spelled as `_CITATION_ROOTS` minus `tests/` now lives.
+    A `.md`, `.yml` or `.txt` file has no such grammar and arrives whole:
+    all of it is prose, and nothing about those changed.
 
     **TRACKED FILES ONLY — 0.2.0 D14, the same repair as
     :func:`_shipped_text_files`.** The walk is repo-wide and then narrowed by
@@ -212,7 +444,7 @@ def _citation_sources():
     tracked = tracked_paths(_REPO_ROOT)
     index = None if tracked is None else set(tracked)
     for path in sorted(_REPO_ROOT.rglob("*")):
-        if not path.is_file() or path.suffix not in (".py", ".md", ".yml", ".txt"):
+        if not path.is_file() or path.suffix not in _CITATION_SUFFIXES:
             continue
         rel = path.relative_to(_REPO_ROOT).as_posix()
         if index is not None and rel not in index:
@@ -221,9 +453,33 @@ def _citation_sources():
             "/" not in rel and rel.endswith(".md")
         ):
             try:
-                yield rel, path.read_text(encoding="utf-8")
+                text = path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):  # pragma: no cover
                 continue
+            yield rel, (_prose_only(text) if rel.endswith(".py") else text)
+
+
+#: A blank line, WHITESPACE INCLUDED. This was a literal ``"\n\n"`` and had
+#: to stop being one when `.py` sources started arriving here MASKED — see
+#: :func:`_prose_only`. Masking replaces a non-prose character with a space
+#: and keeps the newline, so a line of code between two comment blocks
+#: becomes a line of spaces rather than an empty line, and a literal
+#: ``"\n\n"`` would have run the two blocks together into one paragraph and
+#: widened every supersession licence in the file to match.
+#:
+#: **IT IS A STRICT NARROWING, WHICH IS THE DIRECTION THAT COSTS NOTHING.**
+#: `[ \t]*` may be empty, so every boundary the literal found is still a
+#: boundary and there are more of them: the paragraph this returns is always
+#: a SUBRANGE of the one the literal returned, and a shorter paragraph is a
+#: shorter licence. Measured over the roots this scanned BEFORE `tests/`
+#: was added, at `9b5b496` on 2026-08-28: of the 311 citations there, **8
+#: get a different paragraph and 0 get a different verdict** — the eight are
+#: in `_optional.py`, `falsify.py` (four), `interval.py` and `propagate.py`
+#: (two), and none of them was relying on a supersession licence, so
+#: narrowing the window changed nothing they resolved by. THIS COMMENT SAID
+#: THE TWO SPELLINGS AGREED ON ALL 311, WHICH IS FALSE AND WAS WRITTEN
+#: BEFORE IT WAS RUN; the eight are what running it said.
+_BLANK_LINE = re.compile(r"\n[ \t]*\n")
 
 
 def _enclosing_paragraph(text: str, index: int) -> tuple[int, str]:
@@ -232,11 +488,16 @@ def _enclosing_paragraph(text: str, index: int) -> tuple[int, str]:
     The offset is returned because the supersession licence is keyed to a
     POSITION inside the paragraph and not to the paragraph — see
     :data:`_SUPERSEDED_BY`.
+
+    Bounded by :data:`_BLANK_LINE` rather than by a literal ``"\n\n"``,
+    because a masked `.py` source separates two comment blocks with a line
+    of SPACES and not with an empty one.
     """
-    start = text.rfind("\n\n", 0, index)
-    start = 0 if start < 0 else start + 2
-    end = text.find("\n\n", index)
-    return start, text[start:len(text) if end < 0 else end]
+    start = 0
+    for m in _BLANK_LINE.finditer(text, 0, index):
+        start = m.end()
+    end = _BLANK_LINE.search(text, index)
+    return start, text[start:end.start() if end else len(text)]
 
 
 def _defined_test_names(text):
@@ -312,10 +573,12 @@ def test_every_test_cited_in_core_prose_still_exists():
     It read `src/stelling` only — 32 of the 70 citations a reader can follow
     — so a citation in `SOUNDNESS.md`, in `docs/`, in `design/` or in a
     script CI runs was unchecked. Driven: `.github/scripts/tripwire_canary.py`
-    cited `tests/test_tripwire_record.py::test_the_nightly_workflow_still_
-    runs_the_canary`, renamed away, in the paragraph that explains why
-    `--no-sweep` is safe on that script. It was the ONLY dangling one in the
-    widened set, and the widening is what found it.
+    cited …test_tripwire_record.py::test_the_nightly_workflow_still_runs_the_
+    canary, renamed away, in the paragraph that explains why `--no-sweep` is
+    safe on that script. It was the ONLY dangling one in the widened set, and
+    the widening is what found it. (Quoted without its leading `tests/`: the
+    sentence's subject is that the name is GONE, and this file is now inside
+    the scan — see the device note above `_CITATION_ROOTS`.)
 
     Two shapes had to be handled for the wider scan to mean anything, and
     both are enumerated beside their patterns: a citation WRAPPED mid-name,
@@ -324,10 +587,27 @@ def test_every_test_cited_in_core_prose_still_exists():
     rewriting the sentence it closed. Staged by mechanism, `SOUNDNESS.md`'s
     eighteen citations are **9 plain / 8 mid-name wrap / 1 supersession / 0
     dangling**; this said *"nine of eighteen"* wrap, which counted the
-    supersession as a wrap. `tests/` and `scratchpad/` stay out, and `tests/`
-    for a reason rather than by omission: three test modules write
-    citation-shaped source strings as PLANTS, and are supposed to name tests
-    that do not exist.
+    supersession as a wrap.
+
+    **`tests/` IS IN, FROM 2026-08-28.** This paragraph read *"`tests/` and
+    `scratchpad/` stay out, and `tests/` for a reason rather than by
+    omission: three test modules write citation-shaped source strings as
+    PLANTS, and are supposed to name tests that do not exist."* The reason
+    was sound and the rule was not the same shape as it — see the record
+    above :data:`_CITATION_ROOTS`. The plants are VALUES, values are
+    dropped by :func:`_prose_only`, and the sentences around them are
+    read. `scratchpad/` still stays out, as tracked evidence rather than
+    maintained prose.
+
+    WHAT THE WIDENING FOUND, run blind against `9b5b496` on 2026-08-28:
+    **eight** dangling `path::name` citations, every one of them in
+    `tests/`, against **zero** in the roots the scan already had. **Six of
+    the eight were in THIS FILE** — its illustrations of the citation form
+    and its record of the renamed canary citation, written by a checker
+    that had never had to hold itself to its own rule. Of the other two,
+    one followed a test renamed at `321209d`
+    (`tests/test_aval_lie_both_faces.py`) and one was a template nodeid in
+    `tests/property/README.md` spelled as a real one.
 
     `src/stelling` cites tests by `path::name` in nineteen places. Those
     citations are how a reader checks that a guard is pinned rather than
@@ -406,9 +686,18 @@ def test_every_test_cited_in_core_prose_still_exists():
         "it, or drop the claim it was supporting."
     )
     # ... and it is not vacuous: the citations really are there to check.
-    # Measured at 70 across the shipped set on 2026-08-22, of which 32 are in
-    # `src/stelling` — the whole of what this used to read.
-    assert seen >= 40, (
+    # Measured on this tree on 2026-08-28, with `tests/` inside the scan:
+    # 112 `path::name` citations across 33 files, of which 97 across 21
+    # files are outside `tests/`.
+    #
+    # BOTH FLOORS BELOW ARE ANTI-VACUITY AND NOTHING MORE, which is worth
+    # saying because a floor beside a widening reads like a check of the
+    # widening. `tests/` contributes 15 of the 112 here — inside ordinary
+    # churn — so no floor can tell "the scan lost `tests/`" from "somebody
+    # deleted a few citations". That question is decided EXACTLY instead,
+    # by the derived reach assertion in
+    # `test_the_citation_sweep_covers_the_whole_allowlist_and_the_resolver_works`.
+    assert seen >= 90, (
         f"only {seen} test citation(s) found across {list(_CITATION_ROOTS)} "
         f"and the root pages; the pattern has stopped matching how they are "
         f"written, or the scan has stopped reaching them"
@@ -416,7 +705,7 @@ def test_every_test_cited_in_core_prose_still_exists():
     assert len({
         source for source, text in _citation_sources()
         if _TEST_REF_WRAPPED.search(text)
-    }) >= 10, "the citations have collapsed into one or two files"
+    }) >= 25, "the citations have collapsed into one or two files"
     # ... and the RESOLVER is not satisfied by text that only LOOKS like a
     # definition. These are the three rows that were green at `faefc48`,
     # written out rather than described, plus the honest shape it must accept
@@ -655,9 +944,16 @@ def _shipped_text_files():
     RECORDED.** It is the only one of the six sites this batch touched that
     is false-RED and false-GREEN at once:
 
-    * loud — `test_every_line_citation_in_shipped_prose_resolves` sweeps
-      this list, so a generated page carrying a `file.py:123` token reds a
-      gate about THIS project's prose;
+    * loud — `test_no_shipped_page_cites_a_line_its_own_tree_does_not_have`
+      sweeps this list, so a generated page carrying a `file.py:123` token
+      reds a gate about THIS project's prose. **THIS BULLET NAMED A TEST
+      THIS TREE HAS NEVER HAD**, at any revision — `git log -S` over
+      `tests/` finds no commit that ever defined it — so the one sentence
+      saying which gate consumes this list sent the reader nowhere. It
+      arrived at `ec69818` and shipped in `v0.2.0` (`git merge-base
+      --is-ancestor ec69818 v0.2.0` succeeds), and could not be seen:
+      `tests/` was outside the citation scan, which is the exclusion this
+      commit replaced;
     * quiet — `_resolve_citation`'s second rule accepts a bare basename
       *"only when exactly one file in the tree carries it"*, and a generated
       copy of a page is a SECOND bearer. `docs/norms.md` and
@@ -903,6 +1199,93 @@ def test_the_citation_sweep_covers_the_whole_allowlist_and_the_resolver_works():
     ]
     assert _LINE_CITATION.findall("no citation here") == []
 
+    # ------------------------------------------------------------------
+    # THE SCAN REACHES `tests/`, DERIVED — the exact instrument for the
+    # widening, and the one the anti-vacuity floors in the two citation
+    # gates explicitly are not. It is not a count: it is the whole set,
+    # compared with what `git ls-files` says the repository keeps under
+    # `tests/` at the suffixes a citation is looked for in. A scan that
+    # quietly stopped walking `tests/`, or a suffix dropped from
+    # :data:`_CITATION_SUFFIXES`, fails here by name rather than by a
+    # number that could be argued about.
+    tracked = tracked_paths(_REPO_ROOT)
+    if tracked is not None:  # pragma: no branch - git answers in this tree
+        expected = {
+            p for p in tracked
+            if p.startswith("tests/") and p.endswith(_CITATION_SUFFIXES)
+        }
+        got = {
+            rel for rel, _ in _citation_sources() if rel.startswith("tests/")
+        }
+        assert got == expected, (
+            f"the citation scan and `git ls-files` disagree about what "
+            f"`tests/` holds. Missing from the scan: "
+            f"{sorted(expected - got)[:5]}; in the scan and not tracked: "
+            f"{sorted(got - expected)[:5]}. `tests/` is 181 of this "
+            f"repository's 539 tracked files (`9b5b496`, 2026-08-28), and "
+            f"an exclusion that took it out is the defect `_prose_only` "
+            f"exists to have replaced."
+        )
+
+    # ------------------------------------------------------------------
+    # THE PROSE MASK, DRIVEN IN BOTH DIRECTIONS.
+    #
+    # Every sample below spells a citation of a test this tree does not
+    # have, AS A VALUE in this file. Writing them here is safe only while
+    # :func:`_prose_only` drops values — which makes this block the mask's
+    # own absence half, and a live one rather than a written one: if the
+    # mask ever stopped masking, these literals become dangling citations
+    # in a file the scan reads, and
+    # `test_every_test_cited_in_core_prose_still_exists` reds on them by
+    # name. A mask whose failure mode is a green suite is the failure mode
+    # this module exists to refuse.
+    for label, source, survives in (
+        ("a comment", "# see tests/x.py::test_gone\n", True),
+        ("a module docstring", '"""cites tests/x.py::test_gone."""\n', True),
+        ("a function docstring",
+         'def f():\n    """cites tests/x.py::test_gone."""\n', True),
+        # ... and every OTHER bare string statement, not only the first in
+        # a body. The mask is deliberately wider than "docstring" here:
+        # the rule is what the string IS, and a bare string statement is
+        # text wherever it sits.
+        ("a bare string statement that is not a docstring",
+         'def f():\n    x = 1\n    "cites tests/x.py::test_gone"\n', True),
+        ("an assignment value", 'X = "tests/x.py::test_gone"\n', False),
+        ("a tuple element", 'X = ("tests/x.py::test_gone",)\n', False),
+        ("a call argument", 'f("tests/x.py::test_gone")\n', False),
+        ("a dict value", 'X = {"k": "tests/x.py::test_gone"}\n', False),
+        ("a monkeypatch.setitem key",
+         'm.setitem(d, "tests/x.py::test_gone", 1)\n', False),
+        # ... and an f-string, which is a value and is masked WHOLE. The
+        # allow-list shape is what buys this: nothing had to name
+        # `JoinedStr` for it to be dropped.
+        ("an f-string", 'X = f"tests/x.py::test_gone {y}"\n', False),
+    ):
+        masked = _prose_only(source)
+        assert bool(_TEST_REF_WRAPPED.search(masked)) is survives, (
+            f"the prose mask disagrees about {label}: a citation there is "
+            f"{'dropped' if survives else 'kept'} and should be "
+            f"{'kept' if survives else 'dropped'}. Prose is a COMMENT or a "
+            f"bare string statement; everything else is a value, and the "
+            f"plants this widening had to survive are values."
+        )
+        assert (
+            len(masked) == len(source)
+            and masked.count("\n") == source.count("\n")
+        ), (
+            f"the mask changed the shape of {label}, so every line number "
+            f"and paragraph boundary computed from it is wrong"
+        )
+    # ... and a file that does not PARSE degrades to the whole text, loudly
+    # rather than quietly: a mask that answered "no prose here" would report
+    # absence of evidence as evidence of absence.
+    broken = 'X = "tests/x.py::test_gone"\ndef broken(:\n'
+    assert _prose_only(broken) == broken, (
+        "an unparseable `.py` file is being masked rather than read whole; "
+        "the degrade must be toward reading MORE, never toward reading "
+        "nothing"
+    )
+
 
 # ---------------------------------------------------------------------------
 # BARE test names — the citation form no checker in this tree could see.
@@ -1015,6 +1398,91 @@ _NAMES_DECLARED_ABSENT: dict[str, str] = {
     "test_this_page_s_numbered_sections_each_name_a_live_pinning_test":
         "`docs/proposed-decline-messages.md` quotes it as a citation of a "
         "test THAT DOES NOT EXIST, which is the sentence's whole subject",
+    "test_the_declared_limits_are_still_limits":
+        "THE FIRST ENTRY THIS TABLE EARNED ON A MERGE RATHER THAN ON A "
+        "BRANCH, and the only reason it is here is that both halves landed "
+        "in one release. It pinned the two routes the old syntactic scan in "
+        "`tests/test_state_guard.py` declared unreachable; that scan and its "
+        "pin were both deleted in this release when the question stopped "
+        "being decided by reading source and started being decided by "
+        "running the nested session. The history block that survives it "
+        "names it as the thing whose own failure message said what to do "
+        "when a limit is outgrown -- so the sentence's SUBJECT is that the "
+        "name is gone, which is exactly what this table is for. Neither "
+        "branch could see it: on the branch that deleted the test, `tests/` "
+        "was still scoped out of this check, and on the branch that widened "
+        "the check, the test still existed",
+    # --- and thirteen that arrived with `tests/`, 2026-08-28 -------------
+    # Every one was ALREADY in the tree and already unresolvable; what
+    # changed is that something can now read them. Eleven are rename or
+    # supersession records in a docstring whose subject IS the old name --
+    # the same shape as the eleven above, written by the same convention --
+    # and two are placeholders in prose about the SHAPE of a nodeid rather
+    # than about any test.
+    "test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation":
+        "superseded by `test_the_two_pairing_gates_bind_the_ESCALATION_AND_"
+        "the_propagation`; quoted in this file's own `_TEST_REF_WRAPPED` and "
+        "`_SUPERSEDED_BY` comments as the name `SOUNDNESS.md` cites and its "
+        "annotation repoints -- the live supersession they are measuring",
+    "test_a_ONE_SHOT_records_cannot_silence_the_bar":
+        "renamed at `218f969` to `test_a_ONE_SHOT_records_behaves_EXACTLY_"
+        "LIKE_THE_TUPLE_it_yields`; quoted as the ORIGINAL in this file's "
+        "own note recording that rename, which is the incident that made "
+        "`test_every_test_cited_in_core_prose_still_exists` exist",
+    "test_a_name_this_tree_has_never_had":
+        "a SYNTHETIC plant in `_resolvable_test_names`'s driven block -- the "
+        "name written into `SOUNDNESS.md` to drive the pruning repair red; "
+        "never a test, and the paragraph says so in the line it appears in",
+    "test_x":
+        "a PLACEHOLDER nodeid, not a test: `tests/_state_guard.py` uses it "
+        "to say how wide a licence keyed to a nodeid is, and this file's "
+        "`_SUPERSEDED_BY` comment uses it to draw the shape of an annotated "
+        "citation. Held absent so that writing a real `test_x` reds here",
+    "test_one":
+        "a PLACEHOLDER for the plant in the nested-session measurements of "
+        "`tests/_state_guard.py` and `tests/test_state_guard.py` -- the "
+        "name given to the generated test that runs `pytest.main` inside "
+        "the outer session. It is written into a SOURCE STRING, so no file "
+        "defines it and `_defined_test_names` correctly does not see one",
+    "test_withholding_is_forward_scoped":
+        "superseded by `test_withholding_is_QUERY_scoped`, which pins the "
+        "OPPOSITE ruling; `tests/test_assume_constrain.py` names the old one "
+        "in the comment recording that the defect was the old scoping",
+    "test_the_module_docstring_states_a_scope_and_the_counter_examples_hold":
+        "replaced by the four endpoint-discipline tests of "
+        "`tests/test_interval.py`; that file's `WHAT THIS REPLACES` block "
+        "quotes the old name and the docstring sentence that was wrong",
+    "test_the_shipped_page_still_discloses_what_this_files_fixture_did":
+        "renamed to `test_the_disclosures_phrases_are_still_PRESENT_and_"
+        "nothing_more` because the old NAME asserted more than the test "
+        "held; the docstring quotes the retired name as part of the "
+        "retraction, which is the whole point of that paragraph",
+    "test_a_region_is_lexically_bounded":
+        "renamed to `test_a_region_ends_where_the_block_ends_in_straight_"
+        "line_code`; `tests/test_tripwire_eager.py` quotes the old name in "
+        "the sentence recording that a region is NOT lexically bounded",
+    "test_every_deferred_route_is_caught_by_the_transfer_instead":
+        "renamed to `test_every_deferred_route_is_declined_by_the_mechanism_"
+        "it_declares`; the docstring quotes the old name as a claim that "
+        "went stale with the assertion it described",
+    "test_the_attribution_fail_safe_refuses_a_misaligned_verdict":
+        "replaced by `test_a_conjunct_s_verdict_cannot_land_on_another_"
+        "conjunct_s_reason`, whose docstring opens by naming it and says "
+        "its subject no longer exists",
+    "test_the_discriminant_refuses_a_non_bool_operand":
+        "replaced by `test_a_non_bool_and_is_refused_as_a_conjunction_and_"
+        "says_so`, whose docstring opens by naming it and records that the "
+        "test it replaces could not fail",
+    "test_this_files_position_in_the_collection_is_the_measured_one":
+        "removed at `ac3038d`, which took the typed collection rank off "
+        "`CHANGELOG.md`; `tests/test_probe_oracle.py` and "
+        "`tests/test_probe_stability_level.py` both quote it in the "
+        "paragraph recording that the mechanism their naming argument "
+        "rested on is gone. Its successors are named beside it in both",
+    "test_the_LIMIT_of_this_bar_when_the_decided_slice_is_genuinely_the_same":
+        "replaced by `test_the_pairing_gate_refuses_the_mispairing_the_bar_"
+        "only_narrows`, whose docstring quotes the old name and records "
+        "that it asserted the PERMISSIVE outcome",
 }
 
 
@@ -1239,9 +1707,32 @@ def test_every_bare_test_name_in_shipped_prose_resolves():
       has a stem beginning `test`. Driven by planting a `tests/_helperzz.py`
       holding one `test_…` def — the citation resolves (`7 passed`) while a
       `--collect-only` over `tests/` reports nothing from that file.
-    * **`tests/` and `scratchpad/` stay out**, for the same reasons the
-      `path::name` scan gives: three test modules write citation-shaped
-      strings as plants, and `scratchpad/` is tracked evidence.
+    * **`tests/` IS IN, from 2026-08-28, and this bullet used to be the
+      reason it was not.** It read *"`tests/` and `scratchpad/` stay out,
+      for the same reasons the `path::name` scan gives: three test modules
+      write citation-shaped strings as plants, and `scratchpad/` is tracked
+      evidence."* The plants are values and :func:`_prose_only` drops
+      them; the record is above :data:`_CITATION_ROOTS`. `scratchpad/`
+      stays out on the second half of that sentence, which was never about
+      a directory being awkward — it is evidence, not maintained prose.
+      **This gate is where the widening cost the most and bought the
+      most**: run blind against `9b5b496` on 2026-08-28 it named **24**
+      dangling bare mentions in `tests/`, against **zero** outside it,
+      staged as:
+
+          17 mentions of 14 names whose sentence's SUBJECT is that the
+             name is gone -- now in :data:`_NAMES_DECLARED_ABSENT`, which
+             is why that table is 29 entries and not fifteen
+           5 citations of names NO REVISION of this tree has ever
+             defined (`git log -S` finds no commit that wrote the `def`),
+             each repointed at the test its sentence means
+           2 live names written SHORT -- a citation abbreviated to its
+             first few words, which names nothing
+
+      Two of the 17 are in `tests/test_state_guard.py`, a file another
+      branch is in; they are covered without editing it, because the
+      declaration is keyed to a NAME and not to a site — the residue
+      stated three bullets up, here doing the useful half of its work.
     """
     resolvable = _resolvable_test_names()
     dangling, seen, files = [], 0, set()
@@ -1283,15 +1774,24 @@ def test_every_bare_test_name_in_shipped_prose_resolves():
         "SUBJECT is that the name is gone -- declare it in "
         "`_NAMES_DECLARED_ABSENT` with the reason."
     )
-    # ... and it is not vacuous. Driven at `5ad906f`: 162 mentions across 30
-    # files, against 74 `path::name` citations in the same set.
-    assert seen >= 100, (
+    # ... and it is not vacuous. Measured on this tree on 2026-08-28: 788
+    # backticked bare mentions across 110 files, of which 214 across 32
+    # files are outside `tests/` — this is the form the widening moved
+    # most, by more than three to one.
+    #
+    # UNLIKE THE `path::name` FLOORS, THESE TWO DO BRACKET THE WIDENING:
+    # losing `tests/` from the scan takes 788 to 214 and 110 files to 32,
+    # so both would red on it. They are still not the instrument for it —
+    # that is the derived reach assertion named beside the other pair —
+    # and they are set between the two measurements rather than at some
+    # fraction of one, so what they mean can be stated.
+    assert seen >= 500, (
         f"only {seen} bare test-name mention(s) found across "
         f"{list(_CITATION_ROOTS)} and the root pages; the pattern has stopped "
         f"matching how they are written, or the scan has stopped reaching "
         f"them"
     )
-    assert len(files) >= 10, (
+    assert len(files) >= 60, (
         f"bare test names were found in {len(files)} file(s); they have "
         f"collapsed into one or two, or the scan has narrowed"
     )

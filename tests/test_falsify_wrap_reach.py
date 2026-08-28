@@ -55,9 +55,11 @@ different shape: ``stelling._tripwire``, the trace-time integer-narrowing
 gate armed by ``pytest -p stelling.overflow``, which watches the constant
 being destroyed as it happens rather than looking for consequences
 downstream of it.
-:func:`test_the_instrument_that_DOES_reach_this_axis_still_does` drives it
-on the same fence, so that the pair of facts — this probe cannot, that
-gate can — is a measurement in one file rather than a claim in a report.
+:func:`test_the_trace_gate_reaches_the_inline_door_where_the_probe_does_not`
+drives it on the same fence, so that the pair of facts — this probe cannot,
+that gate can — is a measurement in one file rather than a claim in a
+report. (This named a test no revision of this tree has ever defined, in
+the sentence whose whole job is to hand the reader that measurement.)
 
 **BOTH DOORS, BOTH CELLS.** ``SOUNDNESS.md`` prices two doors (the
 ``jnp.full`` constant and the inline ``x + 256``) at two separate jax

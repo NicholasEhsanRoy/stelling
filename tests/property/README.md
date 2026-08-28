@@ -276,12 +276,14 @@ way to run it there. It is what separates *"this property found nothing"* from
 *"this property's strategy generated nothing"*, which otherwise print the same
 green line.
 
-Add an entry to `positive_controls.py`:
+Add an entry to `positive_controls.py`. Every field below is a placeholder,
+the nodeid included — which is why it is spelled as one rather than as a
+real-looking nodeid naming a test that does not exist:
 
 ```
 Control(
     name="my-property",
-    nodeid="tests/property/test_metamorphic.py::test_my_property",
+    nodeid="tests/property/test_<your_module>.py::test_<your_property>",
     kind="commit",            # or "mutant"
     at="fb34e0d",             # the last commit that still had the defect
     why="one sentence naming the defect, and the commit that fixed it",
