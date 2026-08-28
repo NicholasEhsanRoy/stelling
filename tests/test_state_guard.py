@@ -1043,20 +1043,47 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
 #   * **the reach is per PROCESS, and it is not the same on both sides of that
 #     line.** In the process the observer is loaded in, every REGISTRATION is
 #     reported — that is the wrap, and it does not care how the session was
-#     configured. A CHILD process is reached only if it inherits this
-#     process's environment, because that is how the module gets there at all:
-#     a child spawned with an explicit `env=` that drops `PYTEST_PLUGINS`
-#     loads the subject unseen. Pinned by
-#     `test_a_CHILD_PROCESS_THAT_SCRUBS_THE_ENVIRONMENT_loads_it_UNSEEN`,
-#     which asserts the ROUTE first — the guard fires inside that child and
-#     names the planted test — and only then that this instrument is blind to
-#     it. **A LIMIT PINNED ONLY BY "THE INSTRUMENT CANNOT SEE IT" IS THE
-#     MISTAKE THE `pytest_configure(c)` FIXTURE MADE**, one layer out.
+#     configured. **A CHILD process is reached only if THIS PROCESS'S OWN
+#     ENTRY IN `PYTEST_PLUGINS` ARRIVES IN IT**, because that entry is the
+#     whole of how the observer gets there. Joined by other names it still
+#     arrives and the child is SEEN — measured 2026-08-28 both ways round,
+#     `"_sg_observer,_state_guard"` and `"_state_guard,_sg_observer"`, and the
+#     second of those is the historic hook earning its keep: pytest imports
+#     the names in order, so there the subject is registered before the wrap
+#     exists and only the replay reports it. DROPPED or REPLACED, the entry
+#     does not arrive and the child is not seen.
+#
+#     **THIS BULLET SAID "only if it inherits this process's ENVIRONMENT"
+#     UNTIL 2026-08-28, AND THAT WAS ONE SPELLING TOO WIDE.** A second
+#     blinded audit spawned a child with `{**os.environ, "PYTEST_PLUGINS":
+#     "_state_guard"}` — which inherits the environment, is the most
+#     idiomatic way there is to put a pytest plugin into a child from an
+#     environment, and is unseen here. The variable is the reach; the
+#     environment is not. The correction is narrower than the sentence it
+#     replaces, which is the direction a limit is allowed to move only when
+#     something drives it.
+#
+#     ONE LIMIT, TWO FIXTURES, AND THEY ARE NOT TWO LIMITS. Dropping the
+#     variable and replacing its value are the same act — the entry does not
+#     arrive — so they are two drives of one predicate rather than a set of
+#     idioms to keep adding to.
+#     `test_a_CHILD_PROCESS_THAT_SCRUBS_THE_ENVIRONMENT_loads_it_UNSEEN`
+#     drives the dropped half and
+#     `test_a_CHILD_WHOSE_PYTEST_PLUGINS_IS_REPLACED_loads_it_UNSEEN` drives
+#     the replaced half; each asserts the ROUTE first — the guard fires
+#     inside that child and names the planted test — and only then that this
+#     instrument is blind to it, and the second carries the POSITIVE CONTROL
+#     that makes the boundary exact rather than a vague blindness: a second
+#     child differing in nothing but that value, seen. **A LIMIT PINNED ONLY
+#     BY "THE INSTRUMENT CANNOT SEE IT" IS THE MISTAKE THE
+#     `pytest_configure(c)` FIXTURE MADE**, one layer out.
 #     NOT LIVE UNDER TODAY'S SUBJECT, and that is a dated reading of another
-#     file rather than anything held here: measured 2026-08-28 at `8dae8cb`,
-#     `tests/test_tripwire_plugin.py` imports no `subprocess` and passes no
-#     `env=` anywhere; every child it spawns goes through `Pytester.popen`,
-#     which does `env = os.environ.copy()` and therefore inherits. A file that
+#     file rather than anything held here: measured 2026-08-28 at `2e4b780`,
+#     `tests/test_tripwire_plugin.py` has no `import subprocess`, no `env=`
+#     and no mention of `PYTEST_PLUGINS`; its ten `subprocess` occurrences
+#     are all `pytester.runpytest_subprocess` or prose, and every child it
+#     spawns goes through `Pytester.popen`, which does
+#     `env = os.environ.copy()` and therefore carries the entry. A file that
 #     grew one would be outside this reach, and nothing here would say so —
 #     which is why the limit is written down rather than reasoned away;
 #   * **it watches REGISTRATION, not activation.** A conftest that does
@@ -1130,13 +1157,17 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
 # scan's last one made, and which the scan's own history is a record of. What
 # is true, and is all that is claimed now: within one process the enumeration
 # is gone, because `pluggy.PluginManager.register` is one door rather than a
-# set of names; across a process boundary the reach is exactly inheritance of
-# an environment, and the two ways past that are declared above and pinned by
-# fixtures that assert the route reaches before they assert this cannot see
-# it. **AND THE AUDITOR'S DEEPER POINT IS CONCEDED AND ANSWERED RATHER THAN
-# ARGUED WITH:** an enumeration of spawn idioms would have been the same
-# defect one layer out, so there is no enumeration of spawn idioms here. There
-# is one wrap, and beyond it, declared blindness.
+# set of names; across a process boundary the reach is exactly this process's
+# own entry in `PYTEST_PLUGINS` arriving in the child — **NOT "inheritance of
+# an environment", which is what this sentence said until a second audit
+# spawned a child that inherited the environment and replaced that one value**
+# — and the ways past it are declared above and pinned by fixtures that assert
+# the route reaches before they assert this cannot see it, one of them with
+# the positive control beside it. **AND THE AUDITOR'S DEEPER POINT IS
+# CONCEDED AND ANSWERED RATHER THAN ARGUED WITH:** an enumeration of spawn
+# idioms would have been the same defect one layer out, so there is no
+# enumeration of spawn idioms here. There is one wrap, and beyond it, declared
+# blindness — of one variable's entry, named and held at its boundary.
 
 
 #: The observer, written into a temporary directory by :func:`_observe`.
@@ -1562,18 +1593,34 @@ def test_a_nested_session_that_only_MENTIONS_this_module_is_not_named(tmp_path):
     )
 
 
-# ── the reach, at the two boundaries an audit found it at ───────────────────
+# ── the reach, at the boundaries two audits found it at ─────────────────────
 #
-# THREE PLANTS, AND EACH OF THEM ASSERTS THE ROUTE BEFORE ANYTHING ASSERTS THE
+# FOUR PLANTS, AND EACH OF THEM ASSERTS THE ROUTE BEFORE ANYTHING ASSERTS THE
 # INSTRUMENT. The first shows the wrap holding where the wiring does not: a
 # nested session created after `PYTEST_PLUGINS` has been taken out of
 # `os.environ` is still named, so environment-scrubbing is not a way past this
-# in one process. The other two are declared LIMITS, and they are pinned in
+# in one process. The other three are declared LIMITS, and they are pinned in
 # the shape the `pytest_configure(c)` fixture failed to be — the subject
-# first, the blindness second. Each of the three drives the guard itself into
+# first, the blindness second. Two of them are one limit driven twice: a child
+# that never receives this process's entry in `PYTEST_PLUGINS`, dropped in the
+# one and replaced in the other. Each of the four drives the guard itself into
 # the inner session and reads its report, because "the module is loaded there"
 # is a claim about what the module DOES, and this file decides those by
 # running it.
+#
+# **EVERY LIMIT FIXTURE HERE ALSO CARRIES A POSITIVE CONTROL, AND ONE OF THEM
+# ONLY DOES BECAUSE WRITING THIS PARAGRAPH FOUND IT MISSING.** A limit fixture
+# asserts that something is NOT reported, and an instrument that reports
+# nothing at all satisfies that as well as a working one does — the same
+# absence-read-as-evidence this file exists to refuse. So: the re-export
+# fixture asserts `seen.here`, the nested session it plants having been seen;
+# the env-scrubbed child fixture had NO such half until 2026-08-28 and now
+# plants an ordinary `pytester` session beside the invisible child for it; and
+# `_ONE_VARIABLE_TWO_CHILDREN` is the strongest of the three — two children
+# differing in one environment value, both shown loading the guard, EXACTLY
+# ONE row required, so it fails if the blindness widens and equally if it
+# narrows. That last shape arrived only after a second audit found the
+# sentence above it one spelling too wide.
 
 
 #: An IN-PROCESS nested session created after the observer's own wiring has
@@ -1604,9 +1651,23 @@ def test_middle(tmp_path):
 #: report, and `tests/` is derived from the path the observer was pointed at
 #: rather than typed, so the child cannot resolve a different module than the
 #: one being watched.
-_SCRUBBED_CHILD = r'''import os
+_SCRUBBED_CHILD = r'''pytest_plugins = ["pytester"]
+
+import os
 import subprocess
 import sys
+
+
+def test_the_observer_is_awake(pytester):
+    """An ordinary nested session, which this instrument DOES see.
+
+    The positive control. Without it, `not seen.loaded` below is satisfied
+    just as well by an observer that saw nothing at all -- and an instrument
+    reporting its own absence as an absence of defect is the shape this whole
+    file is a record of refusing.
+    """
+    pytester.makepyfile(test_inner="def test_inner():\n    assert True\n")
+    pytester.runpytest().assert_outcomes(passed=1)
 
 
 def test_middle(tmp_path):
@@ -1733,6 +1794,10 @@ def test_a_CHILD_PROCESS_THAT_SCRUBS_THE_ENVIRONMENT_loads_it_UNSEEN(tmp_path):
         "Say what changed, with the measurement. A limit whose route has "
         "quietly stopped reaching is a limit nobody is checking."
     )
+    assert seen.here, (
+        "the plant's ordinary nested session was not seen either, so this "
+        f"report is an instrument saying nothing rather than a boundary:\n{seen}"
+    )
     assert not seen.loaded, (
         f"the env-scrubbed child IS visible now:\n{seen}\n"
         "That is good news, not a bug. Strike the matching bullet from the "
@@ -1767,6 +1832,99 @@ def test_a_conftest_that_IMPORTS_THE_FIXTURES_makes_them_live_UNSEEN(tmp_path):
         f"a conftest that only IMPORTS the fixtures is reported now:\n{seen}\n"
         "That is good news. Strike the matching bullet from the WHAT IT DOES "
         "NOT REACH list above and delete this fixture."
+    )
+
+
+#: TWO CHILDREN DIFFERING IN ONE VALUE, and that is the whole design. Both are
+#: spawned with `dict(os.environ)` — the environment IS inherited — and both
+#: really load `tests/_state_guard.py`; the only difference between them is
+#: whether this process's own entry in `PYTEST_PLUGINS` survived into the
+#: child. One is seen and one is not, so the report itself draws the boundary
+#: rather than a sentence claiming where it is.
+#:
+#: The appended child is the POSITIVE CONTROL and it is not decoration: without
+#: it, "the replaced child is unseen" is satisfied just as well by an
+#: instrument that sees no child at all, which is exactly how the reach came to
+#: be declared wider than it was.
+_ONE_VARIABLE_TWO_CHILDREN = r'''import os
+import subprocess
+import sys
+
+#: Leaks a watched key, so the guard — if it is loaded there — fails the test
+#: at its own teardown and says so. That report is the only acceptable
+#: evidence that the route reached: a limit pinned on the instrument's
+#: silence alone can be satisfied by a route that never arrived.
+LEAKS = "import os\n\n\ndef test_leaks():\n    os.environ['STELLING_X'] = '1'\n"
+
+
+def _child(tmp_path, name, plugins):
+    path = tmp_path / name
+    path.write_text(LEAKS, encoding="utf-8")
+    env = dict(os.environ)
+    env["PYTEST_PLUGINS"] = plugins
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         "-p", "no:randomly", str(path)],
+        capture_output=True, text=True, cwd=str(tmp_path), env=env,
+    )
+    assert proc.returncode == 1, name + "\n" + proc.stdout + proc.stderr
+    assert "changed process-global state" in proc.stdout, name + "\n" + proc.stdout
+
+
+def test_middle(tmp_path):
+    mine = os.environ["PYTEST_PLUGINS"]
+    # REPLACED: the idiomatic spelling, and the one the audit drove.
+    _child(tmp_path, "test_child_replaced.py", "_state_guard")
+    # APPENDED: the same act of loading a plugin through the same variable,
+    # with this process's entry left in front of it.
+    _child(tmp_path, "test_child_appended.py", mine + ",_state_guard")
+'''
+
+
+def test_a_CHILD_WHOSE_PYTEST_PLUGINS_IS_REPLACED_loads_it_UNSEEN(tmp_path):
+    """The child-process limit at its exact boundary: one variable, two children.
+
+    **WHAT THIS REPLACED A WIDER SENTENCE WITH.** The limits list above used to
+    say a child is reached "only if it inherits this process's ENVIRONMENT". A
+    second blinded audit spawned `{**os.environ, "PYTEST_PLUGINS":
+    "_state_guard"}`, which inherits the environment and is unseen — and which
+    is the most ordinary way there is to load a pytest plugin into a child from
+    an environment, in a file whose subject is a pytest plugin. The reach is
+    the entry, not the environment, and this is what holds that sentence to its
+    width.
+
+    Both children are spawned from `dict(os.environ)` and both are shown to
+    load the guard by the guard's own report. Exactly one is seen. If the
+    replaced child ever becomes visible the limit has been outgrown and the
+    bullet should be struck; if the appended child ever stops being visible,
+    the instrument has narrowed and the limit is being satisfied by blindness
+    rather than by a boundary — which is the failure the positive control is
+    here to refuse.
+    """
+    proc, seen = _observe_plant(tmp_path, _ONE_VARIABLE_TWO_CHILDREN)
+    assert proc.returncode == 0, (
+        "one of the two children did not load the guard, so this compares "
+        f"nothing\n{proc.stdout}\n{proc.stderr}\n"
+        "A limit whose route has quietly stopped reaching is a limit nobody "
+        "is checking."
+    )
+    reported = {(row["pid"], row["session"]) for row in seen.loaded}
+    named = [
+        row
+        for row in seen.rows
+        if row["kind"] == "session" and (row["pid"], row["session"]) in reported
+    ]
+    assert len(seen.loaded) == 1, (
+        "the two children differ in one environment value and should differ "
+        f"in exactly one row of this report:\n{seen}\n"
+        "Both seen means the replaced value no longer hides a child — strike "
+        "the bullet above and this fixture. Neither seen means the positive "
+        "control has stopped working, and the limit beside it is then held up "
+        "by an instrument that sees nothing."
+    )
+    assert named and "test_child_appended.py" in " ".join(named[0]["args"]), (
+        "the child that was seen is not the one whose PYTEST_PLUGINS kept "
+        f"this process's entry:\n{seen}"
     )
 
 
