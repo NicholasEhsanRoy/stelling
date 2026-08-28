@@ -696,3 +696,258 @@ null into a conclusion.** The four:
    `registration-rules-and-capacity.md`. This is the spelling that
    travels furthest from its evidence, because the sentence that results
    is short, quotable, and carries no scope.
+
+## L24 — A branch is measured against its parent; the tree that ships is the merge
+
+**(a)** A branch measured green against its own parent has made a
+statement about that parent. **The tree that gets tagged is the merge, and
+no branch is that tree.** A defect can be *true on every branch
+separately and false on the merge*, and when it is, **no branch can fix
+it**: the guard arrives on one side, the sentence it refutes on the other,
+and each side is green alone. Textual cleanliness is not evidence — the
+merges that carried these were clean, and several involved a file that
+exists on one side only, so there was no conflict to notice. The merge is
+therefore its own object of study: it must be built first, measured
+whole, and audited by a context that authored none of its branches.
+
+**(b)** Four in the 0.2.0 release campaign, from four different
+mechanisms — §1.4's responsibility table, where two branches each rewrote
+a different pair of rows correctly and the union was a hand edit neither
+could make; §2.6's caveat, which wrote a field-and-value pair *while
+denying that the pair exists*, with the gate that refuses that
+construction arriving on the other branch; `tests/test_skip_inventory.py`,
+where two new predicates whose names differ by one word made a union look
+like a replacement; and
+`tests/test_changelog_names_the_version.py`, which illustrated its own
+subject in the present tense and had the version bump on the other line
+move it to the other of the two states that file checks.
+
+**AND A FIFTH, IN 0.2.1, WHICH IS THE ONE WORTH READING** because it was
+produced by two branches whose own subjects are L25 and L28, in the
+release that lands this entry. One branch replaced the state guard's
+syntactic scan with a behavioural check and **deleted**
+`test_the_declared_limits_are_still_limits`, leaving the history block
+that names it. The other widened `tests/test_prose_hygiene.py`'s bare-name
+check **into `tests/`**. Each was green alone and neither could have seen
+it: on the first branch `tests/` was still scoped out of that check, and
+on the second the test still existed. The merge is red, by name and by
+line. Closed by a hand edit in the merge commit — the first entry
+`_NAMES_DECLARED_ABSENT` has ever earned on a merge rather than on a
+branch.
+
+**(c)** **Convention, promoted to structural where it can be.** The
+integration tree is built before anything is tagged, measured across the
+whole matrix *on the merge*, and handed to a blinded auditor at a stated
+sha with the merge's own hand edits named as things to verify. The
+structural half is that every hand edit is recorded in the merge commit
+message, so a later reader sees what was decided rather than inferring it
+from a diff.
+
+**(d)** Every release. Every campaign that fans out to more than one
+branch and lands them together — which is every campaign this project has
+run since 0.1.0. Aim the audit at *the merge*, and give the auditor the
+tree rather than a transcript.
+
+## L25 — An exclusion argued for one construction must not be spelled as a directory
+
+**(a)** A scope exclusion earns its place by an argument, and **the
+argument licenses exactly what it covers and no more**. Spelled as a path
+prefix, it silently excludes every *other* kind of claim in those files
+too. The gap is invisible precisely because the exclusion is justified:
+a reader checks that the reason is good, finds that it is, and does not
+ask whether the reason is as wide as the rule. **The test is to state the
+reason and the rule side by side and see whether they have the same
+shape.**
+
+**(b)** `tests/` was excluded from `tests/test_prose_hygiene.py`'s
+citation checks, and the exclusion was argued in the file: test modules
+write citation-shaped SOURCE STRINGS as plants and **are supposed to name
+tests that do not exist**. That argument is sound and it is about a KIND
+OF STRING. The rule it produced excluded the whole directory, so it also
+excluded every *sentence* in `tests/` that makes a claim about the tree —
+and that is what let L24's fourth instance ship undetected. Measured at
+`9b5b496`: **181 of 539 tracked files**, and 181 of the sdist's 379
+members, so the excluded region was neither small nor private.
+
+**(c)** **STRUCTURAL, and landed in 0.2.1.** *This entry read "watch …
+until that lands, the exclusion is disclosed rather than assumed narrow";
+it landed in the same release, and the sentence is corrected rather than
+left standing.* The rule is citation-shaped: in a `.py` file a citation
+counts in a comment or a docstring and not in a value, decided off the
+same grammar rather than off a list of the ways a string can be data.
+**Measured before adopting rather than after** — which is the discipline
+the original defect lacked — the uniform rule loses nothing: of the 311
+citations the old scan checked, **zero** were in a value literal. The
+widening found 8 dangling `path::name` citations and 24 dangling bare
+mentions, all of them in `tests/`, five naming tests **no revision of this
+tree has ever defined**.
+
+**(d)** Every scope decision in this repository expressed as a path
+prefix, and there are several. For each, ask what the *argument* excludes
+and whether the *rule* excludes more.
+
+## L26 — A claim in prose that nothing holds will go false, and the tense is part of the claim
+
+**(a)** Prose beside code carries assertions, and **nothing reads prose**.
+Three faces, one mechanism — a claim with no mechanical hold on it rots at
+the speed of the tree around it:
+
+1. **A figure.** A number a reader cannot re-derive is the same defect as
+   a check that does not exist. Either derive it, or say precisely what it
+   counts and how to re-take it.
+2. **A coordinate.** A line number, a call-site count, a collection rank,
+   a section index — these are properties **of a checkout**, not of the
+   tree, and they are falsified by the next edit anywhere above them.
+3. **A tense.** A present-tense sentence about another file is a standing
+   claim about code nobody has undertaken to keep true. A once-taken
+   measurement written in the present tense is the commonest way a true
+   thing becomes a false thing without anyone editing it.
+
+The three have three different repairs, and picking the wrong one is how
+the defect returns: a figure gets **derived**, a coordinate gets
+**deleted** unless a test can derive it, and a tense gets **dated** — a
+record of what was measured, when, rather than a claim about now.
+
+**(b)** All three, in one campaign. *A figure:* the count of what
+`tests/test_documented_names_exist.py` finds RED on `main` at `115d771`,
+in the file whose entire subject is a name asserted in prose that the code
+does not have. Re-run against that commit it is **eight findings over
+seven distinct file:line pairs**, and the gate's two declared exclusions —
+a fenced block and an unchecked checkbox — are why a count of *sentences*
+comes out higher. **This entry twice carried a larger figure with an
+explanation of the gap, and the explanation was wrong both times**; the
+figure now stands alone with the sha and the command that re-takes it,
+which is this entry's own prescription and should have been the first
+repair rather than the third. *A coordinate:* a `_run` helper cited by
+line and by call-site count, both already stale when written, and a
+collection rank pinned on a shipped page that was a property of the
+checkout. *A tense:* `tests/test_propagation_identity.py` diagnosed a real
+bug through one importer, deleted that importer, and wrote the consequence
+as a standing property of a file it does not own — a second importer then
+reintroduced it, in a third file.
+
+**(c)** **Structural, per face.** The figures that survive say what they
+count and hand the reader the re-derivation. The coordinates are gone,
+replaced by assertions. The tenses are dated records with the original
+measurement kept. **And 0.2.1 added the face this entry did not have: a
+name.** Nine cross-references in `src/` named three things the tree has
+never had — two of them never renames, established by `git log --all -S`
+finding no commit that ever defined either.
+`tests/test_referenced_names_resolve.py` resolves every Sphinx role in a
+`src/` docstring against the parsed package, which is the derived form of
+a claim that had been carried by habit.
+
+**(d)** Every docstring and comment that carries a number, a location, a
+name, or a present-tense verb about code in another file.
+
+## L27 — A refusal never observed is not known to be a refusal
+
+**(a)** A guard on a rare path is **a program that has never been run**.
+Its author reasoned about it; nothing executed it. The whole point of a
+release gate is that it fires on the day everything else has gone wrong,
+which is the one day nobody wants to discover it was never exercised —
+and the failure mode is not that it refuses wrongly but that it **passes
+silently**, because the condition it checks was never reachable in the
+shape the job actually runs. So: drive every refusal, in both directions,
+in the *shape of the real invocation* rather than in a unit test of its
+body.
+
+**(b)** `.github/workflows/release.yml` is the only thing between a
+hand-typed tag and PyPI, and an sdist on PyPI **cannot be unpublished,
+only yanked — and a yanked file still resolves for anyone who pins it**.
+Both its `actions/checkout@v4` steps ran at **depth 1**, so the job
+skipped checks it exists to run; restoring `fetch-depth: 0` moved ten
+nodes from skipped to passed and turned a planted bad commit from
+*skipped* back into a *failure*. And the pre-bump refusal had never been
+observed at all: building the tree one commit before the version bump and
+driving the tag step is what turned *"it would refuse"* into `rc=1`.
+
+**AND THE SHARPEST CASE IS THE ONE 0.2.1 FOUND, WHICH IS NOT A REFUSAL
+THAT WENT UNOBSERVED BUT ONE THAT WAS NEVER WRITTEN.**
+`tests/test_changelog_names_the_version.py` declined to gate the changelog
+heading's date — correctly — and routed the check to `release.yml` by name
+and with a command. That workflow did not carry it, and nothing in the
+tree read the sentence. Measured: **47 commits** between the routing
+paragraph's arrival and the release tag. A routed claim with no instrument
+on it cannot go red, only stale — which makes routing prose a third
+category beside a refusal that fires and one that does not: **a refusal
+that does not exist and is believed to.**
+
+**(c)** **Structural.** The tag forms, the sdist step, the manifest step,
+the pre-bump refusal and now the changelog-heading gate are driven on real
+artefacts inside the suite; the shallow-clone shape is reproduced with
+`git init` and `git fetch --depth=1`; the header's refusal count is
+derived from the file rather than typed beside it; and the routing
+paragraph is held by a test that reads the workflow.
+
+**(d)** Every workflow whose trigger is rare and whose consequence is
+irreversible. Also every `if:` guard added "for safety" that no test has
+ever entered — **and nothing in this repository reads `if:` in any
+workflow**, which is the largest hole this entry knows about and does not
+close: a step-level or job-level `if:` would switch off any refusal point
+silently.
+
+## L28 — A check that MODELS a behaviour is always one indirection behind it; measure the behaviour
+
+**(a)** A check written by enumerating the *syntactic forms* a behaviour can
+take will be defeated by one more indirection, and the next one, and the
+one after — because the set of spellings is open and the behaviour is not.
+Each round of enumeration looks like progress and is not: the check gets
+longer, the class stays open, and the docstring quietly claims a
+completeness the code has never had. **The tell is that every gap found is
+one step further out than the last.** When that pattern shows up, the
+repair is not another form. It is to stop modelling and **assert on the
+outcome**: what the system actually did, which is decidable and immune to
+every indirection at once.
+
+**(b)** A guard asserting that no nested in-process session in one test
+module loads `tests/_state_guard.py`. Five rounds, five fixes, five
+audits, and each audit found a route live in the very file being scanned:
+direct `Call` arguments missed a module-level tuple spread as `*ARGS`;
+whole-string matching missed a generated conftest; four `make*` wrapper
+names missed `makefile`, the primitive all four delegate to; and naming
+`makefile` still missed a source constant handed in through a variable and
+a generated conftest that imports and registers. Two of the five gaps were
+the scanned file's own prevailing idiom.
+
+**AND THE LAST ROUND IS THE ARGUMENT, BECAUSE THE SCAN COULD NOT TELL A
+ROUTE FROM A CRASH.** *This entry recorded both remaining routes as
+"Measured to load the plugin". That was false of one of them.* The
+import-and-register route was pinned as source spelled
+`pytest_configure(c)`; pluggy refuses that hookimpl's argument name against
+the hookspec, the inner session dies during conftest loading, and nothing
+registers anything. The route reaches only when spelled `config`. Nothing
+noticed, because the pin only ever asked whether the SCAN COULD SEE THE
+SOURCE — a guard that checks a claim is well-formed and never that it is
+true. A syntactic scan cannot distinguish a spelling that loads the plugin
+from one that kills the session before it could, because it runs neither.
+
+**(c)** **STRUCTURAL, and landed in 0.2.1.** *This entry read "Convention,
+with the instance resolved by declaration rather than by a sixth patch",
+and recorded the behavioural replacement as work rather than done. It is
+done, in the same release, and the sentence is corrected rather than left
+standing.* The question is decided by running the program: a plugin named
+to every session in the observed process tree reports what its plugin
+manager registered, matching on the registered object's resolved
+`__file__` rather than on the name it was registered under. Both routes
+the scan declared unreachable are driven as firing tests — the second in
+its corrected spelling — and the declared limits and their fixture are
+struck, which is what that fixture's own failure message said to do when a
+limit is outgrown. The by-construction argument that made the deferral
+defensible was re-verified rather than re-read: `tests/_state_guard.py`
+binds no mutable container at module scope at all, so a nested session
+building a fresh `Config` is separated whether or not the plugin loads.
+
+**(d)** Every check in this repository that reads SOURCE to decide a
+question about BEHAVIOUR, and there are several: the workflow readers in
+`tests/_lanes.py` and `tests/test_release_gates.py`, the citation and
+construction scans in `tests/test_prose_hygiene.py` and
+`tests/test_documented_names_exist.py`, the Sphinx-role resolver in
+`tests/test_referenced_names_resolve.py`, and the tripwire record's reader
+over the nightly canary — the one that already learned this expensively,
+having gone past nine legal spellings of one `env:` mapping. For each: ask
+whether the question is really about the text, and if it is about what the
+program does, whether it can be decided by running it instead. Where it
+cannot, the limits go in the docstring **and get a fixture** — and the
+fixture must assert the limit's SUBJECT, not merely that the scan cannot
+see it.
