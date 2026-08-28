@@ -120,7 +120,7 @@ against ~60 s and is still green against a mutant a three-line probe catches.
 
 What the per-push job does buy, and it is worth having: the strategies still
 draw their boundary classes, the registered mutations still apply, every
-property still has a control, nine controls still fire, and the suite still
+property still has a control, ten controls still fire, and the suite still
 runs at all. **That is rot, caught on the push that causes it — not a soundness
 argument.**
 

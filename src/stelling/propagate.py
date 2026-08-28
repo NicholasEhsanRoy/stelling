@@ -3965,6 +3965,289 @@ def _integer_pow_budget(box, y: int) -> None:
         )
 
 
+# -- the strict-sign census over the TRANSFER sites ---------------------------
+#
+# 0.2.0 shipped and DISCLOSED the certificate as "dropped by every primitive
+# without an explicit rule, and by every `sub`". That is sound — a dropped
+# fact can only widen a box — but it is not a DECISION: the primitives that
+# dropped it dropped it BY ABSENCE, and no reader could tell one that
+# genuinely cannot carry a sign from one nobody had reached. Measured on
+# 2026-08-28 at `2e4b780`, before this census existed:
+#
+#     env PYTHONPATH=src python -c "import stelling.propagate as P; \
+#         print(len(P.TRANSFERS), len(P._STRICT_SIGN_PRIMITIVES))"
+#     -> 50 10
+#
+# So the classification is mechanised, exactly as the integer-semantics
+# census after :data:`TRANSFERS` is. Every registered transfer lands in
+# exactly one of the four sets below; :func:`_assert_sign_census_is_total`,
+# called at import once ``TRANSFERS`` exists, makes the census TOTAL and its
+# classes disjoint; and :data:`_STRICT_SIGN_PRIMITIVES` — the set
+# :meth:`_Propagator._strict_sign_out` gates on — is DERIVED from it rather
+# than typed a second time, so a primitive cannot be classified as
+# rule-carrying and then be silently missing at the gate. Registering a
+# transfer without classifying it raises at import.
+#
+# The census is an inventory of DECISIONS, not of rules: a member of
+# :data:`_SIGN_BOOLEAN` or :data:`_SIGN_NO_RULE` still drops the
+# certificate, exactly as it did before. What changes is that its drop is
+# now recorded with an argument instead of happening because nobody wrote
+# anything.
+#
+# WHAT A CLASSIFICATION CLAIMS, AND IN WHICH DIRECTION IT CAN BE WRONG.
+# The certificate is real-mode only and is quantified over EVERY element of
+# a value at EVERY point of the assumed region. It reaches exactly one
+# consumer, `div`'s boundary gate — and that gate reaches BOTH verdict
+# directions, because :func:`stelling.interval.boundary_div` returns a
+# HALF-INFINITE box. MEASURED at `8dae8cb` by a sibling branch, with no
+# dial and no wrapper involved:
+#
+#     x in [0,2],  assert_(1/x < 0.4)   without assume(x>0):  unknown
+#                                       with    assume(x>0):  violated-over-set
+#
+# — and RE-DERIVED on this branch before any rule below was written, because
+# a figure taken from a brief is a figure nobody in this file measured:
+#
+#     env PYTHONPATH=src python -c "...propagate(trace(h), semantics='real')"
+#     no assume -> unknown ; assume -> violated-over-set
+#
+# **THE SENTENCE THAT STOOD IN THE BRIEF FOR THIS WORK SAID THE OPPOSITE**:
+# *"its effect is UNKNOWN -> VERIFIED and never UNKNOWN -> REFUTED. Every
+# rule you add can therefore only ever create a false VERIFIED, never a
+# false REFUTED. That is the entire risk surface."* The second half of that
+# is FALSE, and it is recorded here rather than deleted because it is the
+# assumption a reader of these rules would otherwise make unaided: a wrong
+# certificate can mint a false REFUTED on an UPPER-bound obligation
+# downstream of a division. The first half stands — *dropping* a
+# certificate can only widen. So every entry below was argued in both
+# directions, and the question asked of each was specifically "what does an
+# upper-bound obligation below a division do with this".
+
+# ROUTING — every element of every output IS an element of a VALUE operand.
+# The primitive moves, copies, selects or joins values and introduces none
+# of its own, so the certificate rides the value operands and the rule is
+# their agreement. This is the ONLY class whose claim is already quantified
+# over every output of the equation, which is what lets `split` and
+# `unstack` carry the fact through their several outvars
+# (:meth:`_Propagator._strict_sign_out` permits multi-output here and
+# nowhere else).
+#
+# Each member was checked against its transfer's own code, not against its
+# name — several names in this shape can introduce a value no operand held
+# (a fill on an out-of-bounds gather, the padding of a scatter, a clamp),
+# and one that can is not in this class:
+#
+#   reshape / squeeze / transpose / slice / broadcast_in_dim / concatenate
+#   / stack — the `interval.py` routing kernels read `a.los[i]` / `a.his[i]`
+#     and write nothing else; each declines a malformed param rather than
+#     filling.
+#   copy / stop_gradient — the identity, `[ins[0]]`.
+#   split / unstack — every output element is an input element at a static
+#     index; both are built on :func:`stelling.interval.slice_`.
+#   select_n — `out[i] = cases[which[i]][i]`. Where `which` straddles, the
+#     kernel HULLS the possible cases, but at any one point of the assumed
+#     region the value IS one case's element, and the certificate is a
+#     statement about points. The SELECTOR is an index, not a value operand
+#     (:func:`_sign_value_operands`).
+#   max / min — the output is one of the two operands' values. These two
+#     carry a rule STRICTER than the class default and are named
+#     individually at the gate: `max(a,b) >= a`, so ONE certified `+1`
+#     operand certifies the max, where the class default needs both.
+#   gather — the one admitted row form reads whole rows of the DATA operand
+#     at indices PROVED in range; an out-of-range index is a decline or an
+#     out-of-bounds FINDING raised before any value is computed, so there is
+#     no fill and no clamp here to introduce a value. Indices are not value
+#     operands.
+#   scatter — the one admitted form is `x.at[k].set(v)` at a static, in-range
+#     k: the operand's box is copied and position k overwritten with the
+#     update. Every output element is an operand element or the update
+#     element, so BOTH are value operands.
+#   dynamic_slice — computes a value only where jax's clamp is provably the
+#     identity (out-of-window starts decline); the hull is over candidate
+#     SOURCE POSITIONS of the data operand, never over a fill.
+#   dynamic_update_slice — the same start discipline, plus the half that
+#     matters here: positions no admitted start writes are COPIED from the
+#     operand, not filled. Operand and update are both value operands.
+#
+# The two harness IDENTITIES are not here even though `[ins[0]]` satisfies
+# the class contract exactly; see `_SIGN_NO_RULE` for why a sound rule was
+# still not written for them.
+_SIGN_ROUTING = frozenset({
+    "reshape", "transpose", "broadcast_in_dim", "slice", "squeeze",
+    "copy", "stop_gradient", "concatenate", "stack", "split", "unstack",
+    "select_n", "dynamic_slice", "dynamic_update_slice", "gather",
+    "scatter", "max", "min",
+})
+
+# ARITHMETIC — the primitive COMPUTES a value its operands need not have
+# contained, and each member carries a per-primitive theorem of the ordered
+# field R, stated and argued at :meth:`_Propagator._strict_sign_out`. None
+# of those rules reads a box endpoint, so outward rounding cannot defeat
+# one. Single-output by construction; the gate refuses a multi-output
+# equation for every member of this class.
+#
+# `sub`, `sqrt` and `scatter-add` are the 0.3.0 additions. `sub`'s previous
+# exclusion is corrected in place at the gate, with what it used to say.
+_SIGN_ARITHMETIC = frozenset({
+    "add", "add_any", "sub", "mul", "div", "neg", "abs", "square",
+    "integer_pow", "reduce_sum", "dot_general", "scatter-add", "sqrt",
+})
+
+# CANNOT CARRY ONE — said once, as a class, rather than eleven times. Every
+# member's output is a BOOLEAN, and a bool's `False` IS the number zero
+# (`interval.py` models the two values as the points 0.0 and 1.0), so no
+# boolean value is ever "certainly nonzero of a fixed sign". This is not a
+# rule that was skipped: there is no rule to write. A hypothetical rule
+# minting `+1` for a comparison would be false at the first `False` element,
+# and `_box_strict_sign` answers 0 for every one of these boxes anyway.
+_SIGN_BOOLEAN = frozenset({
+    "and", "or", "not", "eq", "ne", "lt", "le", "gt", "ge",
+    "is_finite", "reduce_or",
+})
+
+# DELIBERATELY NO RULE — looked at, and decided against, with the reason.
+# The reason is the value here, so this class is a mapping and not a set:
+# a member without a sentence is a member nobody decided about, which is
+# the defect the whole census exists to remove.
+#
+# Every reason below is MEASURED. The commands are in the strings.
+_SIGN_NO_RULE: dict[str, str] = {
+    # A SOURCE rather than a preserver (exp(x) > 0 for every real x, with no
+    # premise on the operand), so admitting it would change the rule's
+    # contract from "compose the operands' certificates" to "mint one" — and
+    # it is the worst member to change that contract for. Real-vs-float
+    # divergence here is not a corner: MEASURED, `math.exp(-800) == 0.0` and
+    # `float(jax.lax.exp(jnp.float64(-800.0))) == 0.0` on jax 0.11.0 — the
+    # certificate would be false of the executable over a whole half-line,
+    # not at one underflow corner the way the `mul` chain is. Feeding that
+    # into the one consumer, whose boundary gate now reaches REFUTED, is a
+    # trade this row declines.
+    "exp": "a SOURCE, and exp underflows to exactly 0.0 over a half-line "
+           "(measured: math.exp(-800) == 0.0, lax.exp(-800.) == 0.0)",
+    # Same shape as `exp`, one step worse. `interval.pow_` admits only a
+    # strictly positive base, so the rule would be "always +1 on the success
+    # path" — a source with no premise at all — and it inherits exp's
+    # underflow: MEASURED, `math.pow(1e-300, 3.0) == 0.0`. A rule whose
+    # premise is "the transfer did not decline" is a rule conditioned on
+    # another function's internal domain guard, which is the modelling
+    # indirection this project keeps re-finding.
+    "pow": "a SOURCE gated on interval.pow_'s own domain guard, and pow "
+           "underflows (measured: math.pow(1e-300, 3.0) == 0.0)",
+    # THE ONE THAT LOOKS LIKE IT BELONGS AND DOES NOT. Over R, `sign` is
+    # sign-preserving by definition. But `_t_sign`'s box deliberately admits
+    # 0 across the open band (-MIN_NORMAL, MIN_NORMAL) because the measured
+    # target flushes subnormals — `lax.sign(1e-320) == 0.0` on jax 0.11.0
+    # CPU binary64, eager and under jit — and it takes that reading in BOTH
+    # semantics modes on purpose ("the answer that is sound under either
+    # reading"). A certificate here would contradict its own transfer's box
+    # inside one mode, and would do it in exactly the shape that unlocks
+    # `boundary_div`: a box straddling zero plus a certificate saying it
+    # cannot. That is the highest-risk combination in this whole item, and
+    # it is the one place where the certificate and the transfer disagree
+    # about the same value rather than merely about its width.
+    "sign": "_t_sign's own box admits 0 across the subnormal band on the "
+            "reading it takes in both modes (measured: lax.sign(1e-320) "
+            "== 0.0); a certificate would contradict it at the div gate",
+    # Truncated remainder is exactly zero on a lattice of nonzero operand
+    # pairs: MEASURED, `lax.rem(6.0, 3.0) == 0.0` with both operands
+    # certifiable `+1`. There is no side condition on the SIGNS that rescues
+    # it — the zeros come from the magnitudes.
+    "rem": "rem is 0 on nonzero operands (measured: lax.rem(6.0, 3.0) "
+           "== 0.0), and no condition on the signs excludes that",
+    # A CONDITIONAL rule, and per HOUSE-RULES a primitive that needs one is
+    # not a primitive that gets a blanket one. `_t_convert` admits five
+    # branches: four are value-exact (the identity, `_EXACT_CONVERSIONS`,
+    # the in-range int64->int32 narrowing, the in-range int64->float64
+    # point) and would preserve the sign; the fifth is the float->int
+    # TRUNCATION, which destroys it — MEASURED, `math.trunc(0.5) == 0` and
+    # `int(jnp.float64(0.5).astype(jnp.int32)) == 0` on jax 0.11.0. Telling
+    # the five apart inside the gate means re-deriving `_t_convert`'s
+    # dispatch, i.e. a second copy of a five-way branch that must be kept in
+    # step with the first — "a check that models a behaviour is one
+    # indirection behind it". The certificate is dropped instead.
+    "convert_element_type":
+        "float->int truncation kills positivity (measured: "
+        "float64(0.5).astype(int32) == 0) and telling it from the four "
+        "exact branches means re-deriving _t_convert's dispatch",
+    # A DECLARATION IS A RANGE, NOT A VALUE. `stelling_any` binds the
+    # user's declared box, and a box is a closed over-approximation whose
+    # sign is not the value's — this is the same premise
+    # :func:`_box_strict_sign` refuses for a var, and it is the reason the
+    # certificate's source for a declared input is a strict `assume` and
+    # never the declaration. `any_array(..., (1.0, 2.0))` looks certifiable
+    # and is not: nothing in the query says the value is not 1.0's box's
+    # lower neighbour, and `assume(x > 0)` is exactly how a user says it.
+    "stelling_any": "a declaration is a RANGE, not a value; the certificate's "
+                    "source for a declared input is a strict assume",
+    # THE TWO WHERE A SOUND RULE EXISTS AND IS STILL NOT WRITTEN, which is
+    # a different sentence from every other entry here and is why they are
+    # not folded into the routing class. Both transfers are the identity,
+    # `[ins[0]]`, so routing's contract holds of them verbatim and the rule
+    # would be sound. What it would buy is nothing: their outputs are the
+    # assert / nonvacuity tokens, the obligation faces read those as BOXES
+    # (`_UNEXAMINABLE_OBLIGATIONS`), and no chain reaching a `div` divisor
+    # passes through one. A certificate nothing reads is surface without a
+    # consumer, and it would also put two harness names into the carrier
+    # list `DIV_BOUNDARY_ZERO_DECLINE` prints at a user who is looking at
+    # their own arithmetic.
+    "stelling_assert": "the identity on an obligation token; sound to carry, "
+                       "read by nothing — the obligation faces read the box",
+    "stelling_nonvacuity": "the identity on a membership token; sound to "
+                           "carry, read by nothing",
+}
+
+# The set the gate consults, DERIVED. It used to be a hand-written
+# by-NAME frozenset sitting here with the comment "a by-NAME census, kept
+# beside the rules it guards so a reader sees the closed set: anything
+# absent DROPS the certificate, which is the conservative direction (a
+# dropped fact can only turn a VERIFIED into an UNKNOWN)". Both halves of
+# that comment needed replacing: the set was not a census (it recorded the
+# ten that had rules and said nothing about the forty that did not), and
+# "can only turn a VERIFIED into an UNKNOWN" is true of a DROP and false of
+# a WRONG RULE, which the paragraph at the head of this census measures.
+_STRICT_SIGN_PRIMITIVES = _SIGN_ROUTING | _SIGN_ARITHMETIC
+
+
+def _sign_value_operands(prim: str, sgn: list[int]) -> tuple[int, ...]:
+    """The per-operand certificates of the operands whose VALUES a ROUTING
+    primitive's output is built from — index operands dropped.
+
+    **PRECISION ONLY, NEVER SOUNDNESS, and that is worth being precise
+    about.** The routing rule demands that every operand it is given agree
+    on one nonzero sign, so naming FEWER operands here can only make it
+    mint where the full list would not — that direction IS soundness, and
+    every entry below was checked against its transfer's operand order.
+    Naming MORE operands can only make it decline. The fallthrough is
+    therefore the safe one: a primitive this function has never heard of
+    gets its whole operand list, which for an index-carrying primitive
+    means the index has to be certified too and the rule almost always
+    drops. A new routing transfer is over-conservative here, never wrong.
+
+    The three shapes, from the transfers' own signatures:
+
+    * `select_n(which, *cases)` — the selector is an index.
+    * `gather(operand, indices)` / `dynamic_slice(operand, *starts)` — the
+      output is built from the data operand alone.
+    * `scatter(operand, indices, updates)`,
+      `scatter-add(operand, indices, updates)`,
+      `dynamic_update_slice(operand, update, *starts)` — the output is
+      built from the data operand AND the updates, so both are required.
+
+    An arity that does not match the shape returns ``()``, which the caller
+    reads as "certify nothing" — a hand-built or deserialized equation with
+    the wrong operand count must not be routed by index position.
+    """
+    if prim == "select_n":
+        return tuple(sgn[1:])
+    if prim in ("gather", "dynamic_slice"):
+        return tuple(sgn[:1])
+    if prim in ("scatter", "scatter-add"):
+        return (sgn[0], sgn[2]) if len(sgn) == 3 else ()
+    if prim == "dynamic_update_slice":
+        return (sgn[0], sgn[1]) if len(sgn) >= 2 else ()
+    return tuple(sgn)
+
+
 DIV_STRADDLE_DECLINE = (
     "div: the divisor interval {divisor} straddles zero — real division is "
     "undefined at 0 and the quotient's image is unbounded over this box. "
@@ -3972,29 +4255,42 @@ DIV_STRADDLE_DECLINE = (
     "add assume(divisor > 0) / assume(divisor < 0) before the division"
 )
 
+# The chain this message describes is DERIVED from the census above, and
+# that is a repair, not a tidy-up. The sentence used to enumerate the
+# carrying primitives by hand — "built from by * / neg abs square x**n sum
+# dot" — and the enumeration was ALREADY WRONG when it was read for this
+# census: `add` and `add_any` had rules and were not in it, so the message
+# told a user that a sum of certified-positive terms breaks the chain when
+# it does not. It also said "a subtraction breaks it ... and so does any
+# other operation, sqrt and exp included", and `sub` and `sqrt` now carry
+# it. An enumeration of spellings beside a set that grows is the shape this
+# project keeps re-finding; both lists are read off the sets instead, so a
+# new classification cannot leave this sentence lying.
+#
+# WHAT IT STILL DOES NOT SAY: the per-rule SIDE CONDITIONS, beyond the two
+# spelled out. `select_n` needs every case certified, `max` needs only one
+# operand, `integer_pow` needs a decodable exponent. A reader who has the
+# primitive in the carrier list and still gets this decline is looking at a
+# side condition, and this message will not tell them which.
 DIV_BOUNDARY_ZERO_DECLINE = (
     "div: the divisor interval {divisor} REACHES zero at a boundary, and "
     "nothing in this query excludes that point — real division is undefined "
     "at 0, so no bound on the quotient holds over the whole box. The "
     "boundary-aware tightening applies only when a strict assume certifies "
     "the divisor is nonzero: `assume(d > 0)` / `assume(d < 0)` on the "
-    "divisor itself, or on a value the divisor is built from by * / neg abs "
-    "square x**n sum dot, with nonzero finite constants allowed anywhere in "
-    "that chain (a subtraction breaks it — two positives can differ by "
-    "zero — and so does any other operation, sqrt and exp included). "
-    "Remedies: narrow the divisor's declared envelope to exclude zero, or "
-    "add that assume"
+    "divisor itself, or on a value the divisor is built from by a primitive "
+    "that carries the certificate — "
+    + " ".join(sorted(_STRICT_SIGN_PRIMITIVES))
+    + " — with nonzero finite constants allowed anywhere in that chain. Two "
+    "of those carry it only under a side condition on the operands' signs: "
+    "`add` needs both certified the SAME sign, `sub` needs them OPPOSITE, "
+    "so `sum(x*x) - c` still breaks the chain (two positives can differ by "
+    "zero). These DROP it: "
+    + " ".join(sorted(_SIGN_NO_RULE))
+    + "; so does any primitive with no interval transfer at all. Remedies: "
+    "narrow the divisor's declared envelope to exclude zero, or add that "
+    "assume"
 )
-
-# The primitives :meth:`_Propagator._strict_sign_out` has a rule for. A
-# by-NAME census, kept beside the rules it guards so a reader sees the
-# closed set: anything absent DROPS the certificate, which is the
-# conservative direction (a dropped fact can only turn a VERIFIED into an
-# UNKNOWN).
-_STRICT_SIGN_PRIMITIVES = frozenset({
-    "mul", "div", "add", "add_any", "neg", "abs", "square", "integer_pow",
-    "reduce_sum", "dot_general",
-})
 
 # Real-mode transfers that READ the strict-sign certificate, and therefore
 # take it as a fourth positional argument. The dispatcher passes
@@ -4498,6 +4794,57 @@ if _INT_COMPUTING & _INT_NON_COMPUTING:
         "a primitive cannot both compute and not compute an integer "
         f"value: {sorted(_INT_COMPUTING & _INT_NON_COMPUTING)}"
     )
+
+
+def _assert_sign_census_is_total() -> None:
+    """The strict-sign census must stay TOTAL and DISJOINT over
+    :data:`TRANSFERS`, and it is checked here rather than asserted in a
+    comment — the same mechanism, for the same reason, as the
+    integer-semantics census immediately above.
+
+    Called once at import, below. Registering a transfer without
+    classifying it raises here, so an unclassified primitive can never be a
+    SILENT drop again: that silence is the whole defect this census was
+    built to remove.
+
+    **WHAT THIS DOES NOT REACH.** It checks that every registered primitive
+    has been PUT somewhere, never that it was put in the RIGHT place. A
+    `rem` moved into :data:`_SIGN_ARITHMETIC` would pass this function and
+    then mint a false certificate; what catches that is
+    ``tests/test_strict_sign_census.py``, which probes every rule-carrying
+    primitive for the sign it mints and every no-rule primitive for the
+    absence of one, and ``tests/test_assume_bump_boundary_div.py``'s
+    exact-rational semantic check, which evaluates the certified values at
+    points of the assumed region. Nor does it reach a primitive with no
+    transfer at all: an unregistered primitive is ⊤ at the walk and never
+    reaches a sign rule, so the census is deliberately scoped to
+    ``TRANSFERS`` and says nothing about the rest of jax.
+    """
+    classes = {
+        "_SIGN_ROUTING": set(_SIGN_ROUTING),
+        "_SIGN_ARITHMETIC": set(_SIGN_ARITHMETIC),
+        "_SIGN_BOOLEAN": set(_SIGN_BOOLEAN),
+        "_SIGN_NO_RULE": set(_SIGN_NO_RULE),
+    }
+    union: set[str] = set()
+    for name, members in classes.items():
+        overlap = union & members
+        if overlap:
+            raise RuntimeError(
+                "the strict-sign census classes must be disjoint — a "
+                "primitive in two classes is two decisions about one "
+                f"value: {name} repeats {sorted(overlap)}"
+            )
+        union |= members
+    if union != set(TRANSFERS):
+        raise RuntimeError(
+            "the strict-sign census must stay total over TRANSFERS: "
+            f"unclassified {sorted(set(TRANSFERS) - union)}, "
+            f"stale {sorted(union - set(TRANSFERS))}"
+        )
+
+
+_assert_sign_census_is_total()
 
 # -- the probe-or-exempt census over the CLASSIFICATION itself ----------------
 #
@@ -7861,18 +8208,33 @@ class _Propagator:
         # Absent id = 0 = "unknown", the conservative reading. This TABLE
         # is keyed by var id, propagated by exactly one rule set
         # (:meth:`_strict_sign_out`), and reaches exactly one consumer
-        # (the `div` transfer's boundary gate). Every other primitive
-        # drops the fact, which is sound in the only direction that
-        # matters.
+        # (the `div` transfer's boundary gate).
         #
-        # TWO WRITERS, both real-mode only, and each writes a fact it can
-        # actually establish:
+        # **THE SENTENCE THAT FOLLOWED READ "Every other primitive drops
+        # the fact, which is sound in the only direction that matters",
+        # AND BOTH HALVES OF IT ARE NOW WRONG.** "Every other primitive"
+        # was true of a ten-name set and is replaced by the census beside
+        # :data:`_STRICT_SIGN_PRIMITIVES`, where every one of the fifty
+        # registered transfers is classified with an argument. "The only
+        # direction that matters" asserted that a mistake here can only
+        # cost a VERIFIED — measured false at `8dae8cb`, where the
+        # half-infinite box `interval.boundary_div` returns turns an
+        # upper-bound obligation REFUTED. Dropping is one-directional;
+        # a wrong RULE is not.
+        #
+        # ONE WRITE PATH, :meth:`_record_strict_sign`, and it is the only
+        # place the empty-value rule is stated. THREE CALLERS, all
+        # real-mode only, each recording a fact it can actually establish:
         #
         #   1. a strict `gt`/`lt` assume in
         #      :meth:`_classify_assumed_pred` — the half-space the closed
         #      meet could not represent;
         #   2. a CONSTVAR bound in :meth:`run` — whose decoded box IS its
-        #      value, so its sign needs no assume at all.
+        #      value, so its sign needs no assume at all;
+        #   3. the PROPAGATION of an equation's operands' signs through
+        #      :meth:`_strict_sign_out`, at the one call site in
+        #      :meth:`eqn`. Not a source: it derives, it does not
+        #      establish.
         #
         # A LITERAL is in neither: it has no var id, and its sign is
         # recomputed from its value on each read
@@ -8105,6 +8467,41 @@ class _Propagator:
             return False
         return self.taint.get(atom.id, False)
 
+    def _record_strict_sign(self, var_id: int, size: int, sgn: int) -> None:
+        """THE ONE WRITE PATH into ``self.strict_sign``, and the one place
+        the EMPTY-VALUE rule is stated.
+
+        **"Every element of this value is > 0" is VACUOUSLY TRUE of a value
+        with no elements**, and a vacuous certificate is a fact the `div`
+        boundary gate cannot tell from an earned one. Refusing it is not
+        new — :func:`_box_strict_sign` returns 0 on ``size == 0`` and the
+        ``reduce_sum`` rule guards on ``ins[0].size > 0`` — but it WAS
+        stated twice and enforced nowhere in general, and the 0.3.0 routing
+        rules are what made that a live hole: `slice(x, [0], [0])` over a
+        certified `x` has a size-0 output, and so does a
+        `broadcast_in_dim` onto an extent of 0. Half the routing class
+        would have minted one. It is stated here, once, and every writer
+        goes through it.
+
+        The size is the produced BOX's, not a declared aval's: at the
+        propagation call site the transfer has already run and
+        ``val.size`` is what it built, which decides the question by
+        running the program rather than by trusting a shape param that
+        ``ClosedJaxpr.from_dict`` can lie about.
+
+        **WHAT THIS DOES NOT REACH.** It is an OUTPUT-side rule and it does
+        not replace the two OPERAND-side ones: ``reduce_sum`` and
+        ``dot_general`` over a size-0 operand produce a size-1 output whose
+        value is the additive IDENTITY, 0 — a non-empty output that must
+        still drop the fact — so those rules keep their own
+        ``ins[...].size`` guards. Nor does it delete a stale entry: the
+        table is keyed by var id and nothing here removes one, which is
+        sound only because ids are unique within a jaxpr and the table is
+        swapped per scope in :meth:`run`.
+        """
+        if sgn and size:
+            self.strict_sign[var_id] = sgn
+
     def read_strict_sign(self, atom: ir.Atom) -> int:
         """``+1``/``-1`` when every element of this atom's value is
         certainly positive / certainly negative over the assumed region;
@@ -8124,31 +8521,77 @@ class _Propagator:
         return self.strict_sign.get(atom.id, 0)
 
     def _strict_sign_out(self, eqn: ir.JaxprEqn, params, ins) -> int:
-        """The strict sign of this equation's output, from its operands'.
+        """The strict sign this equation's output(s) carry, from its
+        operands'.
 
         Every rule below is a statement about REAL values under the
         premise that each named operand is certainly nonzero of the given
         sign; none of them reads a box endpoint, so none of them can be
-        defeated by outward rounding. Any primitive not listed answers 0
-        — the fact is dropped, never guessed.
+        defeated by outward rounding. A primitive outside
+        :data:`_STRICT_SIGN_PRIMITIVES` answers 0 — the fact is dropped,
+        never guessed — and which primitives those are is now a CENSUS with
+        an argument per class rather than an absence (see the block above
+        that constant, and the four `_SIGN_*` sets it derives from).
 
         An operand's premise comes from :meth:`read_strict_sign`, and
         has exactly two shapes: a VAR reads ``self.strict_sign``, a
         LITERAL reads its own decoded value
-        (:func:`_literal_strict_sign`). The table itself has two writers
-        — a strict assume in :meth:`_classify_assumed_pred`, and a
-        CONSTVAR bound in :meth:`run` — and both are real-mode only. The
-        constant sources, literal and constvar, are why a coefficient no
-        longer zeroes the chain it sits in.
+        (:func:`_literal_strict_sign`). The table itself has one write
+        path, :meth:`_record_strict_sign`, with three callers — a strict
+        assume in :meth:`_classify_assumed_pred`, a CONSTVAR bind in
+        :meth:`run`, and this function's result at the one call site in
+        :meth:`eqn` — and all three are real-mode only. The constant
+        sources, literal and constvar, are why a coefficient no longer
+        zeroes the chain it sits in.
+
+        **THE CONTRACT IS PER-EQUATION, NOT PER-OUTVAR, AND THAT IS A
+        CHANGE.** This function used to short-circuit on
+        ``len(eqn.outvars) != 1``, so ``split`` and ``unstack`` dropped the
+        certificate even where the sign was obvious. The answer to the
+        objection recorded there — a multi-output rule must say WHICH
+        output it speaks about — is the ROUTING class: its claim is
+        already quantified over every element of every output, so one sign
+        speaks about all of them. Multi-output is permitted for
+        :data:`_SIGN_ROUTING` and refused for every other class, which are
+        single-output by construction.
+
+        **THE EMPTY-OUTPUT RULE IS NOT HERE.** "Every element is > 0" is
+        vacuously true of a size-0 value, and half the routing class would
+        mint one — `slice(x, [0], [0])` over a certified `x`, a
+        `broadcast_in_dim` onto an extent of 0. It is refused once, at
+        :meth:`_record_strict_sign`, where the transfer has already run and
+        the produced box's own size is in hand. The two OPERAND-side empty
+        guards below (``reduce_sum``, ``dot_general``) are a different rule
+        and stay: an empty sum has a size-1 output whose value is 0.
+
+        THE RULES.
 
         * ``mul``/``div``: ``sign(a·b) = sign(a)·sign(b)`` and a product or
           quotient of nonzeros is nonzero. Broadcasting is irrelevant
           because the fact is quantified over ALL elements of each operand.
         * ``add``/``add_any``: two same-signed nonzeros sum to that sign.
-          (``sub`` is absent on purpose — ``a − b`` with both positive can
-          be anything, and that is exactly the `Σx² − c` shape whose
-          missing decline was the false VERIFIED.)
+        * ``sub``: **THIS PARENTHESIS USED TO READ "(``sub`` is absent on
+          purpose — ``a − b`` with both positive can be anything, and that
+          is exactly the `Σx² − c` shape whose missing decline was the
+          false VERIFIED.)"** The reason was right and the conclusion was
+          too strong: ``a − b`` with both positive can be anything, and
+          that case still mints nothing. What it forbids is the SAME-sign
+          rule, not every rule. ``a > 0`` and ``b < 0`` gives ``a − b > 0``
+          in any ordered field, and the mirror gives ``a < 0``, ``b > 0``
+          ⇒ ``a − b < 0``. So ``sub`` carries the OPPOSITE-sign rule and
+          only that one; `Σx² − c` is a same-sign subtraction and is
+          dropped exactly as before
+          (``tests/test_assume_bump_boundary_div.py::
+          test_sub_still_breaks_the_chain_with_a_literal_present``).
         * ``neg`` flips it; ``abs`` and ``square`` make it ``+1``.
+        * ``sqrt``: ``x > 0`` gives ``√x > 0`` over ℝ. ONE-SIDED on
+          purpose — a ``-1`` operand answers 0 here rather than relying on
+          :func:`stelling.interval.sqrt` to have declined it, because a
+          rule whose soundness rests on another function's domain guard is
+          a rule that moves when that guard does. Unlike ``exp`` and
+          ``pow``, which are in :data:`_SIGN_NO_RULE` for it, ``sqrt``
+          cannot underflow a nonzero to zero in binary64: ``√x == 0`` iff
+          ``x == 0`` for ``x >= 0``, even at the smallest subnormal.
         * ``integer_pow``: ``x ≠ 0`` gives ``x**y ≠ 0`` for every integer
           ``y`` including negative ones, with sign ``+1`` for even ``y``
           (``y = 0`` included: ``x**0 = 1``) and ``sign(x)`` for odd.
@@ -8160,22 +8603,45 @@ class _Propagator:
         * ``dot_general``: each output element is a sum of products of one
           lhs and one rhs element, so it is the two rules above composed;
           the same size guard covers an empty contraction.
+        * ``scatter-add``: the admitted row forms compute
+          ``operand[i] + Σ updates[j]`` at the written positions and COPY
+          the operand elsewhere. Both arms are then ``add``'s rule: a
+          same-signed operand and update give that sign at a written
+          position, and the operand's own sign at an unwritten one. It
+          needs BOTH certified, which is why it is arithmetic and not
+          routing; the indices are not a value operand
+          (:func:`_sign_value_operands`).
+        * ``max``/``min``, the asymmetry worth having: ``max(a,b) >= a``
+          and ``max(a,b) >= b``, so ONE certified ``+1`` operand certifies
+          the max whatever the other is — where ``add`` needs two. Both
+          ``-1`` is the other arm (the max of two negatives is one of
+          them). ``min`` is the mirror. This is strictly stronger than the
+          routing class's agreement rule, which is why the two are named
+          before it.
+        * every other member of :data:`_SIGN_ROUTING`: the output
+          introduces no value the VALUE operands did not contain, so if
+          they all agree on one nonzero sign, every output element has it.
+          The value operands are the operands minus the INDEX ones
+          (:func:`_sign_value_operands`).
 
         **WHY THE ALGEBRA IS VALID, AND EXACTLY WHAT IT IS VALID ABOUT** —
         the B5 follow-up's first item, recorded here beside the rules it is
         about rather than in a log.
 
-        Every rule above is a theorem of the ORDERED FIELD ℝ, and of nothing
-        narrower. ℝ's nonzero elements are closed under multiplication and
-        under division, and its positive cone is closed under addition, so
-        "a product of nonzeros is nonzero" and "two same-signed nonzeros sum
-        to that sign" hold with no side condition at all — no magnitude
-        enters any of them, which is why none of these rules reads a box
-        endpoint and why outward rounding cannot defeat one. The two rules
-        that DO carry a side condition carry it for a reason that is also
-        algebraic and not numeric: ``reduce_sum`` and ``dot_general`` are
-        empty-sum IDENTITIES at size 0, and the identity of ``+`` is 0,
-        which is the one element the certificate excludes.
+        Every arithmetic rule above is a theorem of the ORDERED FIELD ℝ,
+        and of nothing narrower. ℝ's nonzero elements are closed under
+        multiplication and under division, and its positive cone is closed
+        under addition, so "a product of nonzeros is nonzero" and "two
+        same-signed nonzeros sum to that sign" hold with no side condition
+        at all — no magnitude enters any of them, which is why none of
+        these rules reads a box endpoint and why outward rounding cannot
+        defeat one. The rules that DO carry a side condition carry it for a
+        reason that is also algebraic and not numeric: ``reduce_sum`` and
+        ``dot_general`` are empty-sum IDENTITIES at size 0, and the
+        identity of ``+`` is 0, which is the one element the certificate
+        excludes. The ROUTING rules are not theorems of ℝ at all — they are
+        statements about WHICH VALUE an output element holds, read off each
+        transfer's own code and recorded member by member in the census.
 
         **THE FLOAT DOUBLE OF THAT FIELD IS NOT CLOSED UNDER
         MULTIPLICATION, AND THAT IS NOT A GAP HERE — IT IS THE REASON THE
@@ -8202,22 +8668,37 @@ class _Propagator:
         boundary between "a theorem of ℝ" and "a claim about the program's
         floats", and this paragraph is the argument for why the boundary is
         where it is.
+
+        **AND WHY THAT TOLERANCE IS NOT EXTENDED TO EVERY ROW.** The
+        divergence above is a corner: it needs an operand near the
+        underflow boundary. ``exp`` and ``pow`` diverge over a half-line
+        (``math.exp(-800) == 0.0``), and ``sign``'s own transfer refuses
+        the definite answer inside the subnormal band on purpose. Those
+        three are in :data:`_SIGN_NO_RULE` with the measurement, not
+        forgotten.
         """
         prim = eqn.primitive
-        if prim not in _STRICT_SIGN_PRIMITIVES or len(eqn.outvars) != 1:
-            # every member is single-output; a multi-output member would
-            # have to say WHICH output its rule speaks about before the
-            # caller could write the fact anywhere
+        if prim not in _STRICT_SIGN_PRIMITIVES:
+            return 0
+        if len(eqn.outvars) != 1 and prim not in _SIGN_ROUTING:
             return 0
         sgn = [self.read_strict_sign(a) for a in eqn.invars]
         if prim in ("mul", "div"):
             return sgn[0] * sgn[1] if len(sgn) == 2 else 0
         if prim in ("add", "add_any"):
             return sgn[0] if len(sgn) == 2 and sgn[0] == sgn[1] else 0
+        if prim == "sub":
+            # OPPOSITE signs only: a>0, b<0 -> a-b>0; a<0, b>0 -> a-b<0.
+            # Same-signed operands answer 0, which is the `Σx² − c` case.
+            if len(sgn) != 2 or not sgn[0] or sgn[0] != -sgn[1]:
+                return 0
+            return sgn[0]
         if prim == "neg":
             return -sgn[0]
         if prim in ("abs", "square"):
             return 1 if sgn[0] else 0
+        if prim == "sqrt":
+            return 1 if len(sgn) == 1 and sgn[0] == 1 else 0
         if prim == "integer_pow":
             y = _integer_exponent(params)
             if y is None or not sgn[0]:
@@ -8231,6 +8712,28 @@ class _Propagator:
             if len(ins) != 2 or not (ins[0].size and ins[1].size):
                 return 0
             return sgn[0] * sgn[1]
+        if prim == "scatter-add":
+            vals = _sign_value_operands(prim, sgn)
+            if len(vals) != 2 or not vals[0] or vals[0] != vals[1]:
+                return 0
+            return vals[0]
+        if prim == "max":
+            if len(sgn) != 2:
+                return 0
+            if 1 in sgn:
+                return 1
+            return -1 if sgn == [-1, -1] else 0
+        if prim == "min":
+            if len(sgn) != 2:
+                return 0
+            if -1 in sgn:
+                return -1
+            return 1 if sgn == [1, 1] else 0
+        if prim in _SIGN_ROUTING:
+            vals = _sign_value_operands(prim, sgn)
+            if not vals or any(v != vals[0] for v in vals):
+                return 0
+            return vals[0]
         return 0  # pragma: no cover - the membership test above precedes it
 
     def top_out(
@@ -9907,10 +10410,17 @@ class _Propagator:
             # question, decided by the machinery above and disclosed
             # separately; it is not this fact's job and folding it in here
             # would answer it twice, inconsistently.
+            #
+            # THROUGH `_record_strict_sign`, which is what refuses the
+            # SIZE-0 case here: `ks` is the per-element bound list, so on
+            # an empty target both `all(...)` quantifiers below are
+            # vacuously true and this arm used to write a certificate for
+            # a value with no elements. Nothing downstream could tell it
+            # from an earned one.
             if cmp == "gt" and all(k >= 0.0 for k in ks):
-                self.strict_sign[target_atom.id] = 1
+                self._record_strict_sign(target_atom.id, new.size, 1)
             elif cmp == "lt" and all(k <= 0.0 for k in ks):
-                self.strict_sign[target_atom.id] = -1
+                self._record_strict_sign(target_atom.id, new.size, -1)
         if self.semantics == "ieee" and self.nan.get(target_atom.id):
             # an assumed-true comparison excludes NaN (NaN would falsify
             # it), so the narrowed target's maybe-NaN flag is soundly
@@ -10027,9 +10537,13 @@ class _Propagator:
                 # pre-boxed IntervalArray branch above, which `continue`s
                 # before this: that box is of unknown provenance and is
                 # NOT a value.
-                sgn = _box_strict_sign(box)
-                if sgn:
-                    self.strict_sign[var.id] = sgn
+                # `_box_strict_sign` already answers 0 on an empty box;
+                # routing through the one writer anyway is what makes the
+                # empty rule uniform rather than a coincidence of three
+                # agreeing implementations.
+                self._record_strict_sign(
+                    var.id, box.size, _box_strict_sign(box)
+                )
         for i, (var, a) in enumerate(zip(jaxpr.invars, args)):
             self.env[var.id] = a
             if ieee and arg_flags is not None and arg_flags[i]:
@@ -10983,12 +11497,17 @@ class _Propagator:
         out_sign = 0 if ieee else self._strict_sign_out(eqn, params, ins)
         for i, (out, val) in enumerate(zip(eqn.outvars, outs)):
             self.env[out.id] = val
-            if out_sign:
-                # single-output primitives only, in practice: every member
-                # of _STRICT_SIGN_PRIMITIVES has one outvar, and a rule for
-                # a multi-output primitive would have to say which output
-                # it speaks about before it could be added here
-                self.strict_sign[out.id] = out_sign
+            # THE COMMENT HERE READ "single-output primitives only, in
+            # practice: every member of _STRICT_SIGN_PRIMITIVES has one
+            # outvar, and a rule for a multi-output primitive would have to
+            # say WHICH output it speaks about before it could be added
+            # here." The census answered that objection rather than
+            # removing it: `_SIGN_ROUTING`'s claim is quantified over every
+            # element of every output, so one sign speaks about all of
+            # them, and `split`/`unstack` stopped being dropped by an
+            # accident of arity. `_strict_sign_out` still refuses a
+            # multi-output equation for every other class.
+            self._record_strict_sign(out.id, val.size, out_sign)
             if ieee:
                 self.nan[out.id] = out_flags[i]
                 # IEEE_PRODUCT_SOURCES are the taint SOURCES; everything

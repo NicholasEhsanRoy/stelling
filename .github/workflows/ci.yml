@@ -1644,7 +1644,7 @@ jobs:
   #     outside this appended block, and this file is being edited concurrently.
   #     The command is in `tests/property/README.md`; until a trigger is added,
   #     nobody is running it, and that is the honest state.
-  #   * three of the TWELVE positive controls — `cvc5-stateful` (20x budget),
+  #   * three of the thirteen positive controls — `cvc5-stateful` (20x budget),
   #     `cross-series` (two interpreters), and `oracle-wrap` (its property is
   #     the xfail above, which the step below already asserts fired).
   property:
@@ -1706,7 +1706,7 @@ jobs:
 
           What this job DOES buy, and it is worth having: the strategies still
           draw their boundary classes, the registered mutations still apply,
-          every property still has a control, nine controls still fire, and
+          every property still has a control, ten controls still fire, and
           the suite still runs at all. That is rot, caught on the push that
           causes it. It is not a soundness argument.
 
@@ -1727,10 +1727,12 @@ jobs:
             * the cvc5 record protocol, flat and stateful: a definite answer
               requires exit 0, no truncation, and a harvested model equal to the
               value records in the bytes actually read
+            * no strict-sign certificate is false at a point of the assumed
+              region, over generated programs and generated declared boxes
             * the strategies still draw their boundary classes (generator floor)
             * every property is registered with a positive control, every
               control names a property that exists, every mutation still applies
-            * NINE of the twelve positive controls FIRE where they are supposed
+            * TEN of the thirteen positive controls FIRE where they are supposed
               to, one of them for each of the cvc5 oracle's three clauses
 
           NOT RUN HERE AT ALL:
@@ -1876,7 +1878,8 @@ jobs:
             --control widen \
             --control cvc5-flat \
             --control cvc5-exit-tell \
-            --control cvc5-phantom-model
+            --control cvc5-phantom-model \
+            --control strict-sign-sub-same-sign
 
   # ── TWO SHAPES OF WORKING TREE THAT WERE CHECKED BY HAND AND BY NOTHING ELSE ─
   #
