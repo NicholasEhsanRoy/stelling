@@ -338,20 +338,29 @@ not, the budget is an extrapolation you are making. See
 and `stelling.propagate.LIBM_MEASURED`, which carries every figure beside
 the population it came from.
 
-### Three `assumes:` lines say which BOUNDARY RULE ran — and their absence says one too
+### Four `assumes:` lines carry the BOUNDARY RULE — and their absence says one too
 
 `boundary="opaque"` (the default) and `boundary="transparent"` decide
 whether the strict-sign certificate — the fact that lets a division tighten
 a divisor box whose endpoint is exactly zero — crosses a sub-jaxpr
 boundary. The dial can move a verdict, in both directions, so the stamp has
-to say which position ran. It says it in **at most one** of three lines,
-and which one is decided by what the walk actually did:
+to say which position ran. Four lines carry it, and which of them are
+written is decided by what the walk actually did:
+
+**THAT SENTENCE READ "It says it in *at most one* of three lines", AND IT
+WAS ALREADY FALSE WHEN IT WAS WRITTEN.** Two of the lines co-occur: a
+`transparent` run whose carry crossed stamps the position line *and* the
+`CARRIED` line, and
+`tests/test_boundary_dial.py::test_the_stamped_lines_reach_the_verdict`
+asserts them together. They are not alternatives. Each line is written on
+exactly the runs its own condition holds for, and the conditions overlap.
 
 | the line begins | it means |
 |---|---|
 | `boundary='transparent': the strict-sign certificate …` | the run was at `transparent` and the carry was LIVE — the certificate was allowed to cross the wrappers the walk enters, and to enter a `cond` branch |
 | `boundary='transparent' CARRIED N strict-sign certificate(s) …` | …and it actually crossed, N times. Present only when N > 0; it reports the ACT, not the position, and a run that carried nothing does not carry this line |
 | `boundary='transparent' was requested and is INERT under semantics='ieee'` | the dial was set and the walk refused it. The certificate is a claim about ℝ and is false where a positive subnormal flushes to zero, so nothing crossed and this verdict rests on exactly the rules an `opaque` run would have used |
+| `boundary='transparent' EXTENDS THE REACH OF A DEFECT …` | the same runs as the first line, and what that permission is able to produce: a certificate carried into a chain whose divisor comes out of `reduce_sum` or `dot_general` can license a VERIFIED **the compiled program contradicts** at a point of the declared box. Those reductions accumulate from a `+0.0` seed, so a value certified NEGATIVE whose elements are all `-0.0` at run time reduces to `+0.0`. Not repaired in this release |
 
 **NO LINE MEANS `opaque`, AND THAT IS DECIDABLE RATHER THAN CONVENTIONAL.**
 The default adds nothing to the stamp — deliberately, so that a
@@ -364,9 +373,19 @@ stamp's own first rendered line — `stelling <version>` — separates them:
 * the version is **below** the release that ships the dial: no dial
   existed, and the run is boundary-opaque because nothing else was
   possible;
-* the version is **at or above** it: one of the three lines above is
+* the version is **at or above** it: one of the four lines above is
   written on *every* run that is not boundary-opaque, so their absence is
   the `opaque` position and not a gap in the record.
+
+**AND THE ABSENCE OF THE FOURTH LINE IS NOT A STATEMENT THAT THE DEFECT IT
+NAMES IS ABSENT.** The default reaches it too, wherever the certifying
+`assume` and the reduction sit in the same scope — measured, and pinned by
+`tests/test_boundary_dial_jax.py::test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts`,
+whose first row is an `opaque` VERIFIED the program contradicts with no
+boundary crossed at all. The line is withheld from `opaque` runs only
+because that position is asserted byte-for-byte identical to every previous
+release; what `transparent` adds is REACH — the chain may now sit behind a
+wrapper the default declined — and that is what the line says.
 
 That is the whole of what a verdict-reader gets, and it is deliberate that
 there is no more: `Stamp` has no `boundary` field. A **programmatic**
@@ -375,7 +394,7 @@ reader of a *propagation* — not of a verdict — can read
 directly; `check()` returns a `Verdict` and those fields are not on it.
 
 **The `ieee` line is the one to read twice.** It is the only one of the
-three that reports a request the analysis *declined*, and it exists
+four that reports a request the analysis *declined*, and it exists
 because the alternative was worse: before it, an `ieee` run at
 `boundary="transparent"` stamped the first line in the table — *"the
 certificate … was allowed to cross"* — on a walk that had refused the carry

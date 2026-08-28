@@ -25,6 +25,20 @@ base tree; the byte-for-byte baseline is the hand-built one next door,
 because a traced query's content hash depends on the host's jax and x64
 state and a baseline built on those would report a different truth to
 different people.
+
+**AND IT IS THE ONLY HALF THAT CAN DECIDE WHAT THE PROGRAM DOES**, which is
+why the disclosure's own measurement lives here rather than next door.
+Three tests, one per clause of the stamped sentence:
+`::test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts`
+executes the `reduce_sum` query and finds a point of the declared box at
+which the verdict is false;
+`::test_the_reduction_seed_is_the_mechanism_and_it_is_measured` measures the
+`+0.0` seed that makes it false; and
+`::test_dot_general_reaches_it_too_and_the_CONTRACTION_LENGTH_decides`
+measures the OTHER reduction the sentence names, which is not assumed to
+behave like the first. All three are skipped on the zero-dep lane, so on
+that lane NOTHING in this repository checks that the stamped reach
+disclosure is TRUE — only that it is stamped.
 """
 
 from __future__ import annotations
@@ -211,6 +225,308 @@ def test_a_real_cond_carries_IN_but_a_real_branch_assume_stays_INSIDE():
             f"boundary={boundary!r}: a branch-local assume discharged a "
             f"division OUTSIDE its branch — {r.obligations[0].detail}"
         )
+
+
+# ---------------------------------------------------------------------------
+# what the carry reaches
+# ---------------------------------------------------------------------------
+
+_UNDERFLOWING = 1e-200
+
+
+def _reaching_chain(v):
+    """``1 / Σ(v · 1e-200 · 1e-200)``.
+
+    The two multiplications underflow, so the propagated box of the product
+    is ``[-5e-324, -0.0]`` — zero at ONE boundary rather than merely small —
+    which is the shape `stelling.interval.boundary_div` is consulted for and
+    the shape a strict-sign certificate licenses it to tighten.
+    """
+    return 1.0 / jnp.sum(v * _UNDERFLOWING * _UNDERFLOWING)
+
+
+def _plain_chain(v):
+    """``1 / Σv``: the SAME division, with no underflow anywhere."""
+    return 1.0 / jnp.sum(v)
+
+
+def _reaching_harness(chain, *, wrapped, assumed=True):
+    def h():
+        x = any_array((2,), "float64", (-1.0, -0.25))
+        if assumed:
+            assume(x < 0.0)
+        f = jax.jit(chain) if wrapped else chain
+        return assert_(f(x) < 0.0)
+
+    return h
+
+
+_DECLARED_POINTS = ((-1.0, -1.0), (-0.25, -0.25), (-1.0, -0.25),
+                    (-0.6, -0.4), (-0.9, -0.3))
+
+
+def _the_program_says(chain):
+    """Does the COMPILED program satisfy ``chain(x) < 0`` at every point of
+    the declared box we try — eager and under `jax.jit`?
+
+    Returns the first point where it does not, or ``None``. Deciding this
+    by running jax rather than by modelling it is the point: the question
+    is what the executable does, and a model of that is one indirection
+    behind the answer.
+    """
+    for pt in _DECLARED_POINTS:
+        x = jnp.array(pt, dtype=jnp.float64)
+        for f in (chain, jax.jit(chain)):
+            out = f(x)
+            if not bool(out < 0.0):
+                return pt, float(out)
+    return None
+
+
+def test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts():
+    """**THE DISCLOSURE'S OWN MEASUREMENT, TAKEN BY RUNNING THE PROGRAM.**
+
+    `stelling.propagate.BOUNDARY_TRANSPARENT_REACH_DISCLOSURE` is stamped on
+    every live-carry `transparent` run and says that a certificate reaching
+    `reduce_sum` or `dot_general` can license a VERIFIED the compiled
+    program contradicts. This is the run of that claim, three rows, at
+    `vacuity_mode="all"`, `semantics="real"`, `jax_enable_x64=True`:
+
+        query                                    opaque      transparent
+        1/Σ(x·1e-200·1e-200) < 0, no wrapper     VERIFIED    VERIFIED
+        ...the same chain inside a `jax.jit`     UNKNOWN     VERIFIED
+        1/Σx < 0 inside a `jax.jit`              VERIFIED    VERIFIED
+
+    and the three readings, each asserted below rather than described:
+
+    1. ROW 1 IS VERIFIED AT THE DEFAULT, with zero crossings. The defect is
+       NOT an artifact of the dial and is not confined to `transparent`;
+       `opaque` reaches it wherever the chain sits in the assume's own
+       scope. This is why the stamped sentence says so in its own words and
+       why the absence of that sentence at `"opaque"` is not a claim that
+       `"opaque"` is safe.
+    2. ROW 2 MOVES UNKNOWN → VERIFIED. What the opt-in adds is REACH: a
+       chain the default DECLINED, because the reduction sits behind a
+       wrapper, now gets a verdict — and the program contradicts it.
+    3. ROW 3 IS NOT A DISCRIMINATOR, and the reason is CHECKED and not
+       assumed: the same query with the `assume` DELETED — so that no
+       strict-sign certificate exists anywhere in the walk — is still
+       VERIFIED at `opaque`. `Σx` over `[-1, -0.25]²` has interval
+       `[-2, -0.5]`, which excludes zero with no certificate involved. Row
+       3 is in the table so that nobody later reads it as evidence of a
+       carry.
+
+    **IF THIS TEST REDDENS BECAUSE THE REPAIR LANDED, THE DISCLOSURE HAS
+    GONE FALSE WITH IT** — the taint that carries sign-bit faithfulness for
+    a negative-certified reduction operand is a separate change, and the
+    day it lands `BOUNDARY_TRANSPARENT_REACH_DISCLOSURE` stops being true
+    and must go out with the same commit. That coupling is the reason this
+    test asserts the defect rather than describing it.
+    """
+    from stelling.propagate import BOUNDARY_TRANSPARENT_REACH_DISCLOSURE
+
+    rows = {
+        "1 no wrapper": (_reaching_chain, False),
+        "2 in a jit": (_reaching_chain, True),
+        "3 plain sum in a jit": (_plain_chain, True),
+    }
+    table = {}
+    for name, (chain, wrapped) in rows.items():
+        for boundary in ("opaque", "transparent"):
+            table[name, boundary] = check(
+                _reaching_harness(chain, wrapped=wrapped),
+                vacuity_mode="all", semantics="real", boundary=boundary,
+            ).status
+    assert table == {
+        ("1 no wrapper", "opaque"): "VERIFIED",
+        ("1 no wrapper", "transparent"): "VERIFIED",
+        ("2 in a jit", "opaque"): "UNKNOWN",
+        ("2 in a jit", "transparent"): "VERIFIED",
+        ("3 plain sum in a jit", "opaque"): "VERIFIED",
+        ("3 plain sum in a jit", "transparent"): "VERIFIED",
+    }, table
+
+    # READING 1: row 1 is the DEFAULT's own reach, and no boundary carried.
+    p1 = propagate(
+        trace(_reaching_harness(_reaching_chain, wrapped=False)),
+        semantics="real",
+    )
+    assert p1.obligations[0].status == "discharged"
+    assert p1.boundary_crossings == 0
+
+    # READING 2: the carry is what moved row 2, and it is COUNTED.
+    p2 = propagate(
+        trace(_reaching_harness(_reaching_chain, wrapped=True)),
+        semantics="real", boundary="transparent",
+    )
+    assert p2.obligations[0].status == "discharged"
+    assert p2.boundary_crossings > 0, (
+        "row 2 discharged under the dial with nothing crossing, so this "
+        "row measures something other than the carry"
+    )
+
+    # READING 3: row 3's mechanism, CHECKED. With the assume deleted there
+    # is no certificate anywhere and the verdict does not move, so nothing
+    # a carry could have supplied is what decided it.
+    bare = check(
+        _reaching_harness(_plain_chain, wrapped=True, assumed=False),
+        vacuity_mode="all", semantics="real", boundary="opaque",
+    )
+    assert bare.status == "VERIFIED", (
+        f"row 3 stopped being VERIFIED once the certificate was removed, so "
+        f"it IS a discriminator after all and the table's third row means "
+        f"something this docstring denies: {bare.render()}"
+    )
+
+    # AND WHAT THE PROGRAM DOES. Rows 1 and 2 are the same chain, so one
+    # execution answers for both.
+    contradiction = _the_program_says(_reaching_chain)
+    assert contradiction is not None, (
+        "the compiled program satisfies the obligation at every point "
+        "tried, so rows 1 and 2 are not false VERIFIEDs and the stamped "
+        "reach disclosure is claiming something this tree cannot show"
+    )
+    pt, out = contradiction
+    assert out > 0.0, (pt, out)
+
+    # ...and the ANTI-VACUITY half: the same executor on row 3's chain
+    # AGREES with the verdict, so the check above is discriminating and not
+    # a probe that fails on everything.
+    assert _the_program_says(_plain_chain) is None, _the_program_says(_plain_chain)
+
+    # the verdict a caller actually reads carries the disclosure
+    moved = check(
+        _reaching_harness(_reaching_chain, wrapped=True),
+        vacuity_mode="all", semantics="real", boundary="transparent",
+    )
+    assert BOUNDARY_TRANSPARENT_REACH_DISCLOSURE in moved.stamp.assumptions, (
+        moved.render()
+    )
+
+
+def test_the_reduction_seed_is_the_mechanism_and_it_is_measured():
+    """WHY the reach exists, decided by running jax rather than by citing
+    a lowering.
+
+    `reduce_sum` accumulates from a `+0.0` seed, so `(+0) + (-0) = +0`: a
+    value the strict-sign certificate calls NEGATIVE, all of whose elements
+    are `-0.0` at run time, reduces to `+0.0`. `+0.0` is outside every arm
+    of the box `stelling.interval.boundary_div` returns from a negative
+    certificate, and `1.0 / (+0.0)` is `+inf`.
+
+    The n = 1 case is the control: with no addition performed there is no
+    seed to see, and the reduction is `-0.0`. Everything from n = 2 up is
+    `+0.0`. If a future jax lowered the reduction so that the sign survived,
+    THIS is the test that would redden — and the disclosure would need
+    re-reading, because the mechanism it names would have changed.
+    """
+    import math
+
+    def sign_bit(x):
+        return math.copysign(1.0, float(x)) < 0.0
+
+    minus_zero_sum = {
+        n: jnp.sum(jnp.full((n,), -0.0, dtype=jnp.float64))
+        for n in (1, 2, 3, 8, 64)
+    }
+    assert sign_bit(minus_zero_sum[1]), (
+        f"n=1 lost the sign with no addition performed: "
+        f"{minus_zero_sum[1]!r}"
+    )
+    for n in (2, 3, 8, 64):
+        assert float(minus_zero_sum[n]) == 0.0, minus_zero_sum[n]
+        assert not sign_bit(minus_zero_sum[n]), (
+            f"a reduction of {n} copies of -0.0 kept the sign bit; the +0.0 "
+            f"seed the reach disclosure names is not what this target does"
+        )
+
+    # and the whole chain, end to end, on the query the table uses
+    x = jnp.array((-1.0, -0.25), dtype=jnp.float64)
+    product = x * _UNDERFLOWING * _UNDERFLOWING
+    assert all(sign_bit(e) and float(e) == 0.0 for e in product), product
+    assert not sign_bit(jnp.sum(product)), jnp.sum(product)
+    assert float(_reaching_chain(x)) == math.inf, _reaching_chain(x)
+
+
+def _dot_harness(n, *, wrapped=False, assumed=True):
+    """``1 / (a·b) < 0`` with `a` certified −1 and `b` certified +1, every
+    product underflowing to ``-0.0``. `dot_general` is the OTHER reduction
+    the disclosure names, so it is measured and not assumed to behave like
+    `reduce_sum`."""
+    def h():
+        a = any_array((n,), "float64", (-1e-200, -1e-210))
+        b = any_array((n,), "float64", (1e-200, 1e-190))
+        if assumed:
+            assume(a < 0.0)
+            assume(b > 0.0)
+        f = jax.jit(jnp.dot) if wrapped else jnp.dot
+        return assert_(1.0 / f(a, b) < 0.0)
+
+    return h
+
+
+def _dot_runs(n):
+    """``1 / (a·b)`` at a point of the declared box, eager and jitted."""
+    a = jnp.full((n,), -1e-210, dtype=jnp.float64)
+    b = jnp.full((n,), 1e-200, dtype=jnp.float64)
+    return float(1.0 / jnp.dot(a, b)), float(1.0 / jax.jit(jnp.dot)(a, b))
+
+
+def test_dot_general_reaches_it_too_and_the_CONTRACTION_LENGTH_decides():
+    """**THE SECOND REDUCTION THE DISCLOSURE NAMES, AND THE SHARPEST FORM
+    OF THE DEFECT THIS TREE HAS.**
+
+    :data:`stelling.propagate.BOUNDARY_TRANSPARENT_REACH_DISCLOSURE` names
+    `reduce_sum` AND `dot_general`. A sentence naming a primitive nothing
+    measures is the defect class this project keeps finding, so the second
+    one is measured here.
+
+    MEASURED on jax 0.11.0 and on jax 0.10.2, CPU, ``jax_enable_x64=True``,
+    over `a` declared `[-1e-200, -1e-210]` (certified −1) and `b` declared
+    `[1e-200, 1e-190]` (certified +1), so that every product underflows to
+    `-0.0`:
+
+        n ≤ 32   a·b = -0.0   1/(a·b) = -inf   the VERIFIED holds
+        n ≥ 64   a·b = +0.0   1/(a·b) = +inf   the VERIFIED is FALSE
+
+    **and the verdict is the same at every n.** The analysis sees no
+    contraction length; the contraction length is what decides whether its
+    VERIFIED is true. At n = 8 the verdict is right BY ACCIDENT of a
+    lowering — a fused chain that happens to keep the sign — and that half
+    is asserted too, because "the analysis is merely conservative here"
+    would be the comfortable reading and it is false.
+
+    A jax whose blocking threshold moves reddens this with the numbers
+    above; that is a request to re-measure the table, not a defect in the
+    dial.
+    """
+    small, large = 8, 64
+    for n in (small, large):
+        assert check(_dot_harness(n), vacuity_mode="all",
+                     semantics="real").status == "VERIFIED", n
+        assert check(_dot_harness(n, assumed=False), vacuity_mode="all",
+                     semantics="real").status == "UNKNOWN", (
+            f"n={n}: the query discharged with no `assume` anywhere, so no "
+            f"strict-sign certificate was needed and this row is not about "
+            f"the certificate at all"
+        )
+
+    eager_small, jit_small = _dot_runs(small)
+    eager_large, jit_large = _dot_runs(large)
+    assert eager_small < 0.0 and jit_small < 0.0, (eager_small, jit_small)
+    assert eager_large > 0.0 and jit_large > 0.0, (
+        f"n={large}: the compiled dot kept the sign of its terms, so the "
+        f"+0.0 accumulation seed did not appear at this contraction "
+        f"length and the measured table above has moved: "
+        f"{eager_large}, {jit_large}"
+    )
+
+    # ...and the dial moves it exactly as it moves the `reduce_sum` chain
+    cj = trace(_dot_harness(large, wrapped=True))
+    assert propagate(cj, semantics="real").obligations[0].status != "discharged"
+    moved = propagate(cj, semantics="real", boundary="transparent")
+    assert moved.obligations[0].status == "discharged", moved.obligations[0].detail
+    assert moved.boundary_crossings > 0
 
 
 # ---------------------------------------------------------------------------

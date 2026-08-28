@@ -8365,8 +8365,10 @@ class _Propagator:
         which is the one element the certificate excludes.
 
         **THE FLOAT DOUBLE OF THAT FIELD IS NOT CLOSED UNDER
-        MULTIPLICATION, AND THAT IS NOT A GAP HERE — IT IS THE REASON THE
-        IEEE FACE DOES NOT CALL THIS FUNCTION AT ALL.** binary64's nonzero
+        MULTIPLICATION. THIS HEADING WENT ON "AND THAT IS NOT A GAP HERE —
+        IT IS THE REASON THE IEEE FACE DOES NOT CALL THIS FUNCTION AT
+        ALL", AND IT IS A GAP HERE; the measurement that changed the
+        answer is below, under the withdrawal.** binary64's nonzero
         values are NOT closed under ``*``: a product of two nonzeros can
         underflow to zero, and the certificate would then be a false claim
         about the executable. MEASURED, so a lowering change reddens the
@@ -8379,16 +8381,49 @@ class _Propagator:
 
         — in python's binary64 and in ``jnp.float64`` alike, both faces of
         the ``mul`` chain certified nonzero and the third exactly ``-0.0``.
-        The real-mode verdict built on that certificate is not wrong: real
-        mode's whole posture is that obligations are judged *in exact real
-        arithmetic over the declared sets*, and its stamp says so in the
-        sentence a reader meets first. What would be wrong is the same
+        **AND THE NEXT SENTENCE USED TO READ:** *"The real-mode verdict
+        built on that certificate is not wrong: real mode's whole posture
+        is that obligations are judged in exact real arithmetic over the
+        declared sets, and its stamp says so in the sentence a reader meets
+        first."* **THAT DEFENCE IS WITHDRAWN, BY MEASUREMENT.** It survives
+        the ``mul`` chain above — ``-0.0`` divides to ``-inf``, which is on
+        the certified side — and it fails one primitive later. ``reduce_sum``
+        and ``dot_general`` accumulate FROM A ``+0.0`` SEED, so a value this
+        table calls NEGATIVE whose elements have all become ``-0.0`` reduces
+        to ``+0.0``; ``1.0 / (+0.0)`` is ``+inf``, which is in NO arm of the
+        box :func:`stelling.interval.boundary_div` returns from a negative
+        certificate — and that certificate is the only reason the kernel was
+        allowed to run at all. MEASURED at `80c5213` on 2026-08-28 (jax
+        0.11.0, CPU, ``jax_enable_x64=True``), with the boxes read back
+        through :func:`interval_env`:
+
+            x declared [-1, -0.25] shape (2,), assume(x < 0)
+            mul        [-5e-324, -0.0]      the product underflows
+            reduce_sum [-1e-323,  0.0]      zero at ONE boundary
+            div        [-inf, -1.798e308]   `boundary_div`'s negative arm
+            1.0 / Σ(x·1e-200·1e-200) < 0.0  VERIFIED at the DEFAULT
+            the same expression, EXECUTED   +inf
+
+        The certificate is TRUE in ℝ at every point of that box and the
+        verdict is contradicted at every point of it, so "judged in ℝ over
+        the declared sets" does not settle the question: the certificate is
+        not the conclusion, it is a LICENCE handed to a kernel that mints a
+        box about the executable. Nothing here is target-specific —
+        ``(-1.0*1e-200)*1e-200`` is ``-0.0``, and a reduction of two negative
+        zeros is ``+0.0``, in python and numpy as well as in jax. This
+        is a pre-existing soundness defect of the DEFAULT position and of no
+        dial; a reader who turns the boundary dial is told
+        (:data:`BOUNDARY_TRANSPARENT_REACH_DISCLOSURE`) and nobody else is
+        told yet. The repair — a taint carrying sign-bit faithfulness for a
+        negative-certified reduction operand — is a separate change.
+
+        What was ALSO wrong, and this paragraph always said so, is the same
         certificate under ieee semantics, where the value IS ``fl(x*y)``,
         and that is exactly what ``0 if ieee else self._strict_sign_out(...)``
         at this function's one call site refuses — the short-circuit is the
         boundary between "a theorem of ℝ" and "a claim about the program's
-        floats", and this paragraph is the argument for why the boundary is
-        where it is.
+        floats". The measurement above is why that boundary is not in the
+        right place under ``real`` either.
         """
         prim = eqn.primitive
         if prim not in _STRICT_SIGN_PRIMITIVES or len(eqn.outvars) != 1:
@@ -11474,6 +11509,91 @@ BOUNDARY_CROSSED_DISCLOSURE = (
     "counted once)"
 )
 
+# WHAT THE CARRY CAN REACH — the disclosure that says what the position a
+# caller opted into is able to produce, stamped wherever that position is
+# live.
+#
+# **THIS IS A SOUNDNESS DISCLOSURE ON AN OPT-IN, AND THE ℝ POSTURE IS NOT
+# OFFERED AS COVER FOR IT.** Every rule in :meth:`_Propagator._strict_sign_out`
+# is a theorem of ℝ and the certificate is true in ℝ; that argument is
+# withdrawn here, because a VERIFIED the COMPILED PROGRAM CONTRADICTS at a
+# point of the DECLARED box is wrong whatever arithmetic licensed it, and
+# the certificate is exactly what licenses `boundary_div` to run at all.
+#
+# THE MECHANISM, MEASURED IN THIS TREE at `80c5213` on 2026-08-28 (jax
+# 0.11.0, CPU, ``jax_enable_x64=True``) over
+# ``x = any_array((2,), float64, (-1.0, -0.25))`` with ``assume(x < 0)`` and
+# the chain ``1.0 / jnp.sum(x * 1e-200 * 1e-200) < 0.0``. Every box below is
+# the propagator's own, read back through :func:`interval_env`:
+#
+#     mul         [-5e-324, -0.0]      the product underflows, and the
+#                                      outward rounding leaves zero at ONE
+#                                      boundary rather than at both
+#     reduce_sum  [-1e-323,  0.0]      still one-sided at zero
+#     div         [-inf, -1.798e308]   :func:`stelling.interval.boundary_div`'s
+#                                      negative arm, which ONLY the strict-sign
+#                                      certificate licenses — without it the
+#                                      transfer declines
+#                                      (:data:`DIV_BOUNDARY_ZERO_DECLINE`)
+#
+# and the compiled program returns ``+inf`` — in no arm of that box — at
+# every point of the declared box. ``reduce_sum`` and ``dot_general``
+# accumulate FROM A ``+0.0`` SEED, so a value the certificate calls NEGATIVE
+# whose elements have all become ``-0.0`` sums to ``+0.0``. Measured beside
+# it: a reduction of n copies of ``-0.0`` is ``-0.0`` at n = 1 and ``+0.0``
+# at every n >= 2, in jax and in numpy alike — the ``+0`` is the sum's
+# identity element, not one backend's lowering choice.
+#
+# WHY THE LINE HANGS ON THE POSITION AND NOT ON THE ACT, WHICH IS THE
+# OPPOSITE OF THE CONSTANT DIRECTLY ABOVE. :data:`BOUNDARY_CROSSED_DISCLOSURE`
+# reports an ACT and is conditioned on the act, because a run in which
+# nothing crossed did not cross. This line reports a PROPERTY OF THE RULE
+# the run was judged under, and that property holds at this position whether
+# or not anything crossed on this particular query. Three placements were
+# rejected, and the reasons are the argument for the one taken:
+#
+#   * CONDITIONED ON ``boundary_crossings`` — it would be withheld from
+#     exactly the reader who most needs it, the one whose query carried
+#     nothing this time and who is about to widen it;
+#   * APPENDED TO :data:`BOUNDARY_TRANSPARENT_POSITION` — that sentence is
+#     quoted verbatim, as the sentence an ieee run must NOT stamp, by
+#     ``tests/test_boundary_dial.py::test_the_ieee_STAMP_does_not_claim_a_rule_the_walk_refused``.
+#     Welding a second claim onto it gives one string two truth conditions
+#     and one gate, which is the shape :meth:`_Propagator._carry_refusal`
+#     was built to undo;
+#   * A ``note`` INSTEAD OF, OR AS WELL AS, AN ASSUMPTION —
+#     :attr:`stelling.verdict.Verdict.notes` are where and why something
+#     DEGRADED on this run, and nothing degraded on this run. What is at
+#     stake is what the verdict RESTS ON, which is what the ``assumes:``
+#     lines are. "As well as" would put one sentence in two places with two
+#     truth conditions and let them drift.
+#
+# AND IT IS ABSENT AT ``"opaque"``, WHICH IS NOT A CLAIM THAT ``"opaque"``
+# IS SAFE — the sentence says so in its own words, because it is not. The
+# same chain with no wrapper at all is VERIFIED at the DEFAULT, with zero
+# crossings: measured in this tree and pinned by
+# ``tests/test_boundary_dial_jax.py::test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts``,
+# whose first row is that default. The line is withheld at ``"opaque"``
+# only because that position is asserted byte-for-byte identical to every
+# previous release
+# (``tests/test_boundary_dial.py::test_the_DEFAULT_battery_is_byte_for_byte_the_base_tree``),
+# so a line there is a change to the default; the default's own disclosure
+# belongs with the repair, which is a separate change.
+BOUNDARY_TRANSPARENT_REACH_DISCLOSURE = (
+    "boundary='transparent' EXTENDS THE REACH OF A DEFECT THAT IS NOT "
+    "CONFINED TO IT: a strict-sign certificate reaching a div whose divisor "
+    "came out of reduce_sum or dot_general can license a VERIFIED the "
+    "compiled program CONTRADICTS at a point of the declared box. Those "
+    "reductions accumulate from a +0.0 seed, so a reduction all of whose "
+    "terms have become -0.0 at run time comes out +0.0, and 1.0/(+0.0) is "
+    "+inf — in no arm of the box the certificate licensed. The DEFAULT "
+    "reaches this too, wherever the chain sits in the assume's own scope; "
+    "what this position adds is that the chain may now sit behind a wrapper "
+    "the default DECLINED. NOT REPAIRED IN THIS RELEASE; the repair is a "
+    "taint carrying sign-bit faithfulness for a negative-certified reduction "
+    "operand"
+)
+
 # The mechanical guard on the domain dial: quoted verbatim when a
 # tightened (non-interval) domain is requested under semantics="real".
 TIGHTENED_DOMAIN_REAL_REFUSAL = (
@@ -12803,6 +12923,13 @@ def propagate(
             # verdict-reader gets, and this comment used to send that
             # reader somewhere they cannot go.
             assumptions.add(BOUNDARY_TRANSPARENT_POSITION)
+            # ...AND WHAT THAT PERMISSION CAN PRODUCE, on the same
+            # condition and for the same reason: it is a fact about the
+            # rule this walk was judged under, not about anything this
+            # walk did. The constant carries the measurement, the three
+            # rejected placements, and why the sentence is absent at
+            # `"opaque"` without claiming `"opaque"` is safe.
+            assumptions.add(BOUNDARY_TRANSPARENT_REACH_DISCLOSURE)
             if p.boundary_crossings:
                 # THE ACT, reported only where it happened. A disclosure
                 # that rode on the position rather than on the crossing

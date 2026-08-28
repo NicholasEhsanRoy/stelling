@@ -21,11 +21,31 @@ THE THREE CLAIMS, in the order an auditor should read them:
 1. **The default did not move.** `test_the_DEFAULT_battery_is_byte_for_byte_
    the_base_tree` compares a battery of queries, artifact by artifact,
    against values MEASURED ON THE TREE THIS BRANCH IS BASED ON.
-2. **A carried certificate is TRUE.** The exact-`Fraction` oracle in
+2. **A carried certificate is TRUE IN ℝ — WHICH IS NOT THE SAME AS TRUE
+   OF THE PROGRAM.** The exact-`Fraction` oracle in
    `tests/test_assume_bump_boundary_div.py` — `_exact_eval`, extended here
    to descend a wrapper body — evaluates the query at points of the assumed
    region and checks every certificate the table holds, including the ones
    that got there across a boundary.
+
+   **THIS ITEM READ "A carried certificate is TRUE." FLAT, AND THE FLAT
+   SENTENCE IS FALSE ABOUT THE THING A VERDICT'S READER CARES ABOUT.** The
+   oracle is exact rational arithmetic; what it establishes is truth in ℝ,
+   and the certificate is what licenses `interval.boundary_div` to mint a
+   box about the COMPILED program. MEASURED at `80c5213` on 2026-08-28
+   (jax 0.11.0, CPU, `jax_enable_x64=True`): a certificate carried across
+   a `jit` boundary into a chain ending in `reduce_sum` discharges
+   `1.0 / jnp.sum(x*1e-200*1e-200) < 0.0` over `x ∈ [-1, -0.25]²`, and the
+   program returns `+inf` at every point of that box — the reduction
+   accumulates from a `+0.0` seed, so a value certified NEGATIVE whose
+   elements are all `-0.0` sums to `+0.0`. The certificate is true in ℝ at
+   every one of those points and the verdict is still contradicted. The
+   stamped disclosure is
+   `stelling.propagate.BOUNDARY_TRANSPARENT_REACH_DISCLOSURE`; the
+   measurement is
+   `tests/test_boundary_dial_jax.py::test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts`,
+   which is on the jax lane because deciding what a program does means
+   running it.
 3. **A `cond` never carries one out.** The false-VERIFIED case, driven
    against a deliberately broken build.
 
@@ -38,6 +58,15 @@ THE THREE CLAIMS, in the order an auditor should read them:
 * The exact-`Fraction` oracle has no `cond` arm (see `_exact_eval`), so the
   certificate carried INTO a cond branch is checked at the VERDICT level
   here and not against exact rationals.
+* **Nothing in this module runs a program.** The oracle is exact rational
+  arithmetic and the IR is hand-built, so no assertion here can see the gap
+  between a certificate that is true in ℝ and a verdict the compiled
+  program contradicts — the gap claim 2 above now records. A check that
+  MODELS what jax does would be one indirection behind the question; the
+  one measurement that decides it by executing the query is
+  `tests/test_boundary_dial_jax.py::test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts`,
+  and it is skipped on the zero-dep lane with everything else that needs
+  jax.
 * It checks the strict-sign certificate and nothing else. The other tables
   swapped at a descent — `exact`, the maybe-NaN flags, the product-taints —
   are outside the dial's reach by construction, and no assertion here would
@@ -862,6 +891,69 @@ def test_the_stamped_lines_reach_the_verdict():
         "the DEFAULT grew a stamp line; every verdict in the archive was "
         "taken without one"
     )
+
+
+def test_the_REACH_disclosure_rides_the_POSITION_and_never_the_DEFAULT():
+    """The soundness disclosure on the opt-in: where it is stamped, and
+    where it must not be.
+
+    :data:`stelling.propagate.BOUNDARY_TRANSPARENT_REACH_DISCLOSURE` says
+    what the position a caller turned the dial to is ABLE to produce. So
+    it hangs on the position and not on the crossing count, and the
+    ZERO-CARRY run is the discriminating case: it carries this line and
+    NOT the `CARRIED` one, which is exactly the difference between a
+    disclosure about the RULE and a disclosure about the ACT.
+
+    **WHETHER THE SENTENCE IS TRUE IS NOT DECIDED HERE AND CANNOT BE.**
+    This module builds IR by hand and runs no program, so an assertion
+    here about what the compiled program does would model a behaviour
+    instead of measuring it. It is decided in
+    `tests/test_boundary_dial_jax.py::test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts`,
+    by executing the query.
+    """
+    from stelling.propagate import (
+        BOUNDARY_CROSSED_DISCLOSURE, BOUNDARY_TRANSPARENT_REACH_DISCLOSURE,
+    )
+    from stelling.verdict import make_verdict
+
+    nothing_to_carry = _no_certificate_query()
+    carries, _ = wrapped_sumsq_query("jit", assume_inside=False)
+
+    for q in (nothing_to_carry, carries):
+        assert BOUNDARY_TRANSPARENT_REACH_DISCLOSURE not in propagate(
+            q, boundary="opaque"
+        ).assumptions, (
+            "the DEFAULT grew the reach disclosure. The `opaque` position "
+            "is asserted byte-for-byte the base tree's, so a line there is "
+            "a change to every verdict in the archive"
+        )
+        p = propagate(q, boundary="transparent")
+        assert BOUNDARY_TRANSPARENT_REACH_DISCLOSURE in p.assumptions, (
+            f"a live `transparent` walk did not disclose what its carry can "
+            f"reach: {p.assumptions}"
+        )
+
+    quiet = propagate(nothing_to_carry, boundary="transparent")
+    assert quiet.boundary_crossings == 0
+    assert not any(
+        a.startswith(BOUNDARY_CROSSED_DISCLOSURE.split("{")[0])
+        for a in quiet.assumptions
+    ), (
+        f"the zero-carry run stamped an ACT; this case exists to separate "
+        f"the two disclosures: {quiet.assumptions}"
+    )
+
+    # ...and it reaches a VERDICT, not only a `Propagation`. A line that
+    # stops at the propagation is a line no reader of a verdict ever sees.
+    v = make_verdict(
+        carries,
+        propagate(carries, boundary="transparent"),
+        stelling_version="test",
+        jax_version="none",
+        precision_config="jax_enable_x64=True",
+    )
+    assert BOUNDARY_TRANSPARENT_REACH_DISCLOSURE in v.stamp.assumptions
+    assert BOUNDARY_TRANSPARENT_REACH_DISCLOSURE in v.stamp.render()
 
 
 # ---------------------------------------------------------------------------
