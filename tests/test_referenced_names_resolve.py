@@ -38,17 +38,23 @@ whose subject is a soundness certificate. Per name: `_classify_cmp` eight,
   `src/stelling/propagate.py`, a fifth occurrence in a plain backticked
   comment there, a sixth in `tests/test_strict_sign_algebra.py`, and TWO IN
   `SOUNDNESS.md`, both plain backticks and both present-tense claims about
-  the propagator. **`git log --all -S "def _classify_cmp" -- src/` returns
-  nothing**: the name has never been defined in this repository. The method
-  those eight sentences describe is `_Propagator._classify_assumed_pred`,
-  added in `8106a55` (2026-08-07); the first of the eight landed the same
-  day, in `f116890`. The `SOUNDNESS.md` two were repaired one release later,
-  in 0.2.1's fix round, and that page's entry carries the record.
+  the propagator. **`git log --all --oneline -G '^[[:space:]]*def
+  _classify_cmp' -- src/` returns nothing**: the name has never been defined
+  in this repository. (That instruction read `-S "def _classify_cmp"` until
+  the 0.2.1 re-audit, and the commit that wrote the sentence falsified it —
+  :func:`definition_search` carries the mechanism and the repair.) The
+  method those eight sentences describe is
+  `_Propagator._classify_assumed_pred`, added in `8106a55` (2026-08-07);
+  the first of the eight landed the same day, in `f116890`. The
+  `SOUNDNESS.md` two were repaired one release later, in 0.2.1's fix round,
+  and that page's entry carries the record.
 * ``:meth:`_Walker._conjunct_certainly_true` `` in `propagate.py`, and
-  `_Walker` again in a plain comment in `src/stelling/obligation.py`. **`git
-  log --all -S "class _Walker" -- src/` also returns nothing.** The class is
-  `_Propagator` and has been since the MVP commit `4f25390` (2026-07-17);
-  `_Walker` first appears in prose in `0874dd1` (2026-08-14).
+  `_Walker` again in a plain comment in `src/stelling/obligation.py`. **The
+  same anchored search on `class _Walker` also returns nothing**, while on
+  `class _Propagator` it returns `4f25390` — the control that makes the
+  zero a reading. The class is `_Propagator` and has been since that MVP
+  commit (2026-07-17); `_Walker` first appears in prose in `0874dd1`
+  (2026-08-14).
 * ``:meth:`ir.JaxprEqn.from_dict` `` in `src/stelling/coverage.py`, carrying
   an argument about what is reachable from a real query. The only `from_dict`
   in the library is `ir.ClosedJaxpr.from_dict`.
@@ -161,16 +167,44 @@ for that name, and this branch is what put it there.
 measurement rather than on a preference.** The strengthening would be to
 resolve an asserted name as a SYMBOL — this file already builds that table,
 and the 0.2.1 audit checked it against the imported runtime package. Run
-over the sibling's own corpus on this tree, that swap turns **39 of its 62
-asserted-name rows** into findings — 28 distinct document-and-name pairs,
-**25 distinct names across 14 documents** — and the names are `real`,
-`ieee`, `int8`, `float32`, `bool`, `UNCHECKED`, `vacuity_mode`,
-`fill_value`, `precision`, `arithmetic`, `stability`: verdict VALUES and
-record KEYS, which are strings in this project and symbols in no tree. That
-is exactly the false-positive rate the sibling's docstring says kills a
-lint, now re-derived instead of believed. A derived rule — *"in the source
-text, not a symbol, and asserted by a document"* — selects the same 39 rows
-and fails for the same reason.
+over the sibling's own corpus on this tree with :func:`resolves_as_a_symbol`,
+which is what :func:`resolve` grants a bare target:
+
+    asserted-name rows            64,  2 of them PERMITTED,  62 checked
+    findings after the swap       39   (28 pairs, 25 names, 14 documents)
+
+and the names are `real`, `ieee`, `int8`, `float32`, `bool`, `UNCHECKED`,
+`vacuity_mode`, `fill_value`, `precision`, `arithmetic`, `stability`:
+verdict VALUES and record KEYS, which are strings in this project and
+symbols in no tree. **Sixty-three per cent of the rows, and a lint that
+reports two in three is a lint that is switched off** — which is exactly
+the false-positive rate the sibling's docstring predicts, now re-derived
+instead of believed. A derived rule — *"in the source text, not a symbol,
+and asserted by a document"* — selects the same 39 rows and fails the same
+way.
+
+**THREE NUMBERS WERE CITED FOR THAT ONE MEASUREMENT AND THE 0.2.1 RE-AUDIT
+WAS RIGHT TO SAY SO.** This paragraph read *"39 … 28 distinct pairs"* while
+:func:`test_the_sibling_gates_presence_test_is_satisfied_by_a_record_of_absence`
+read *"28 of 62 rows"* — the PAIRS figure quoted as a row count — and the
+re-audit re-measured **40**. All three are arithmetic on the same corpus and
+the spread had two separate causes, both worth more than the numeral:
+
+* 39 against 40 is **one row**, `design/portability-pass.md`'s `_jax_compat`,
+  and it is a disagreement about the QUESTION rather than about the tree.
+  The narrow reading — bound in a module, or a member of a class in one —
+  calls it absent; `_jax_compat` is a MODULE of this package, which
+  :func:`resolve` grants a bare target and the narrow reading does not.
+  This file was measuring with one notion and resolving with the other.
+  There is now one predicate, :func:`resolves_as_a_symbol`, and both read
+  it; the narrow reading still gives 40 and the difference is that row.
+* 28 for 39 was a pairs figure read as a row count, and it survived
+  because the two sentences were written in different places at different
+  times with no derivation between them.
+
+**Both are the shape this file exists to catch**, in the file itself: a
+figure that moves with the tree, stated twice, in two spellings, with
+nothing deriving either.
 
 **So the limit is declared and DRIVEN instead**, by
 :func:`test_the_sibling_gates_presence_test_is_satisfied_by_a_record_of_absence`,
@@ -252,24 +286,81 @@ NON_PYTHON_ROLES = {
            "root and never against any Python module",
 }
 
+@dataclasses.dataclass(frozen=True)
+class Absent:
+    """One name this repository records as never having been defined."""
+
+    #: `def` or `class` — what the archaeology anchors on, and what makes
+    #: the search a question about DEFINITIONS rather than about a string.
+    declarator: str
+    #: The name the sentences were reaching for. Its own search is the
+    #: CONTROL: the same instrument, and it must find something.
+    instead: str
+    why: str
+
+
 #: The names this repository has RECORDED AS NEVER DEFINED, and which its own
 #: records therefore keep present in `src/` as text. Two, and the table is
-#: prunable in three directions rather than being a list nobody revisits —
+#: prunable rather than a list nobody revisits —
 #: :func:`test_the_sibling_gates_presence_test_is_satisfied_by_a_record_of_absence`
 #: fails if a name here becomes a symbol, if the record that mentions it is
 #: deleted, or if a document in the sibling gate's corpus starts asserting
-#: it. It is not an allowlist: nothing here is excused, and the entries exist
-#: so that the blindness they describe is measured on every run.
+#: it, and
+#: :func:`test_the_archaeology_this_file_hands_a_reader_is_still_anchored`
+#: fails if this tree ever grows a real definition of one. It is not an
+#: allowlist: nothing here is excused, and the entries exist so that the
+#: blindness they describe is measured on every run.
 NEVER_DEFINED = {
-    "_classify_cmp": "the name eight sentences gave "
-        "`_Propagator._classify_assumed_pred`; `git log --all -S \"def "
-        "_classify_cmp\" -- src/` returns no commit at any revision, and the "
-        "correction record above `class _Propagator` is what keeps the string "
-        "in `src/`",
-    "_Walker": "the name two sentences gave `_Propagator`; `git log --all -S "
-        "\"class _Walker\" -- src/` likewise returns no commit, and the same "
-        "correction record quotes it",
+    "_classify_cmp": Absent(
+        "def", "_classify_assumed_pred",
+        "the name eight sentences gave `_Propagator._classify_assumed_pred`; "
+        "the correction record above `class _Propagator` is what keeps the "
+        "string in `src/`, and is why the search has to be anchored",
+    ),
+    "_Walker": Absent(
+        "class", "_Propagator",
+        "the name two sentences gave `_Propagator`; the same correction "
+        "record quotes it, and the same anchoring applies",
+    ),
 }
+
+
+def definition_search(declaration: str) -> tuple[list[str], str]:
+    """The archaeology — as argv, and as a reader would type it, from ONE source.
+
+    **THIS FILE HANDED A READER `-S` AND THE COMMIT THAT WROTE THE SENTENCE
+    FALSIFIED IT.** `git log --all -S "def _classify_cmp" -- src/` counts
+    occurrences of a STRING, and 0.2.1's correction record quotes the name
+    inside `src/stelling/propagate.py`, so from that commit onward the
+    command returns `6985594` — the record itself — while four documents
+    said it returned nothing. The finding was never in doubt (what `-S`
+    reports is a record, not a definition); the INSTRUCTION was.
+
+    That is this repository's recurring shape — *an instrument whose corpus
+    includes the prose about the instrument* — arriving in the archaeology
+    the whole never-a-rename argument rests on, one release after the same
+    shape was disclosed here about the sibling gate's substring test.
+
+    `-G` matches the regex against the diff's own lines, so anchoring at
+    line start asks about a DEFINITION. Every mention this repository has is
+    inside a comment or a quoted command and cannot match. **What it does
+    not survive**: a fenced example that writes `def _classify_cmp(` at
+    column zero. Nothing here would catch that in history — which is why
+    :func:`test_the_archaeology_this_file_hands_a_reader_is_still_anchored`
+    checks the tree it can see, at every revision the suite runs on.
+    """
+    argv = [
+        "git", "log", "--all", "--oneline",
+        "-G", f"^[[:space:]]*{declaration}", "--", "src/",
+    ]
+    shown = " ".join(f"'{part}'" if part.startswith("^") else part for part in argv)
+    return argv, shown
+
+
+#: The same anchor as :func:`definition_search`'s, for Python's engine rather
+#: than git's. `[[:space:]]` and `[ \t]` are the same class at the start of a
+#: Python source line, which is the only place either is applied.
+_DECLARED_HERE = r"^[ \t]*{}\b"
 
 #: A dotted path of Python identifiers, which is the only target shape this
 #: file can decide. Anything else — a space, an angle bracket, a slash, a
@@ -450,18 +541,64 @@ def namespace() -> dict[str, Module]:
     return {module_name(path): _read_module(path) for _rel, path in source_files()}
 
 
-@functools.lru_cache(maxsize=1)
-def short_names() -> dict[str, tuple[str, ...]]:
-    """Final component -> the module(s) that spell it that way.
+def short_names_of(table: dict[str, Module]) -> dict[str, tuple[str, ...]]:
+    """Final component -> the module(s) that spell it that way, for `table`.
 
     A tuple of modules and not one module: `test_module_short_names_are_unique`
     is what licenses route 2 of the construction, and it fails rather than
     picking one if this tree ever grows two modules with the same short name.
+
+    Table-driven rather than reading :func:`namespace` itself, because
+    :func:`resolve` is handed a table and a cached view of a DIFFERENT table
+    is two answers to one question — which is the defect the three predicates
+    below exist to prevent.
     """
     out: dict[str, list[str]] = collections.defaultdict(list)
-    for dotted in namespace():
+    for dotted in table:
         out[dotted.rpartition(".")[-1]].append(dotted)
     return {short: tuple(sorted(mods)) for short, mods in out.items()}
+
+
+@functools.lru_cache(maxsize=1)
+def short_names() -> dict[str, tuple[str, ...]]:
+    """:func:`short_names_of` over this tree, cached."""
+    return short_names_of(namespace())
+
+
+def binds(module: Module, name: str) -> bool:
+    """Does this module introduce `name` — as a binding, or as a class member?
+
+    One of THREE PREDICATES THAT ARE THE FILE'S ONLY SPELLINGS OF "resolves
+    as a symbol", and they are separate functions because they were not.
+    The 0.2.1 re-audit found this file measuring its own refused
+    strengthening with `binds`-plus-attributes while :func:`resolve` also
+    grants a bare name on module-hood — one row apart on this tree
+    (`_jax_compat`, a module of this package), and two answers to one
+    question in one file. :func:`resolve` and
+    :func:`test_the_sibling_gates_presence_test_is_satisfied_by_a_record_of_absence`
+    now read the same three.
+    """
+    return name in module.bound or any(
+        path.rpartition(".")[-1] == name for path in module.attributes
+    )
+
+
+def names_a_module(name: str, table: dict[str, Module]) -> bool:
+    """Is `name` a module of this package — full dotted path, or short name?"""
+    return name in table or len(short_names_of(table).get(name, ())) == 1
+
+
+def resolves_as_a_symbol(name: str, table: dict[str, Module]) -> bool:
+    """Is `name` reachable in this package AT ALL, from anywhere?
+
+    The union of the two above, and the WIDE reading deliberately: it is
+    what :func:`resolve` grants a bare target, minus the builtin escape and
+    minus the own-module-first rule that :func:`resolve` adds on top. A
+    question about a name and the tree, never about a name and a place.
+    """
+    return any(binds(module, name) for module in table.values()) or names_a_module(
+        name, table
+    )
 
 
 def references(text: str, path: str) -> list[Reference]:
@@ -489,7 +626,7 @@ def resolve(ref: Reference, here: str, table: dict[str, Module]) -> str | None:
         return None
     if not _DOTTED.match(ref.target):
         return None
-    short = short_names()
+    short = short_names_of(table)
     module = table[here]
     parts = ref.target.split(".")
 
@@ -498,16 +635,11 @@ def resolve(ref: Reference, here: str, table: dict[str, Module]) -> str | None:
             return None
         return f"`{dotted}` has no `{rest}`"
 
-    def binds(mod: Module, name: str) -> bool:
-        return name in mod.bound or any(
-            path.rpartition(".")[-1] == name for path in mod.attributes
-        )
-
     if len(parts) == 1:
         name = parts[0]
         if binds(module, name):
             return None
-        if name in table or len(short.get(name, ())) == 1:
+        if names_a_module(name, table):
             return None
         # Before the search below, not after: a builtin is resolvable from
         # every module, so reporting one as "it is in `stelling.obligation`"
@@ -785,6 +917,75 @@ def test_every_role_in_src_is_classified():
         )
 
 
+def test_the_archaeology_this_file_hands_a_reader_is_still_anchored():
+    """The instruction four documents give, checked against the tree it reads.
+
+    **THE PROSE USED TO HAND A READER `-S` AND THE COMMIT THAT WROTE THE
+    PROSE FALSIFIED IT** — see :func:`definition_search` for the mechanism
+    and for why the finding survived it. The repair is an anchored `-G`, and
+    an anchor is only worth what the tree does not defeat, so this checks
+    the tree rather than asserting the anchor.
+
+    **NO GIT AND NO HISTORY**, deliberately, and that is the whole design.
+    History is immutable and already measured; what moves is this tree's
+    text, and this tree's text is what defeated the old instruction. A
+    check that shelled out to `git log` would answer the settled half and
+    would skip in the two places the suite most needs it to run — an
+    unpacked sdist and a shallow clone — where a skip reads as a pass.
+    Every assertion below is a scan of `src/` and holds in all three.
+
+    Three things, and each can go red on its own:
+
+    1. the anchored pattern matches NO line of `src/`, so the command still
+       returns nothing for a reason this tree controls. A fenced example
+       writing `def _classify_cmp(` at column zero is the one way the
+       repaired instruction can be defeated, and it fails here;
+    2. the CONTROL — the same pattern built from the name each was mistaken
+       for — DOES match, so a zero above is a reading and not a pattern
+       that matches nothing anywhere;
+    3. the unanchored string IS in `src/`, which is what falsified `-S`.
+       If that stops being true the correction record has been deleted, and
+       both this test and the limit paragraph in the module docstring are
+       describing a tree that no longer exists.
+    """
+    source = "\n".join(
+        path.read_text(encoding="utf-8") for _rel, path in source_files()
+    )
+    for name, entry in NEVER_DEFINED.items():
+        declaration = f"{entry.declarator} {name}"
+        _argv, shown = definition_search(declaration)
+        assert not re.search(
+            _DECLARED_HERE.format(re.escape(declaration)), source, re.M
+        ), (
+            f"`src/` now declares `{declaration}` at the start of a line, so "
+            f"`{shown}` — the command this file, `src/stelling/propagate.py` "
+            f"and `SOUNDNESS.md` all hand a reader — returns a commit, and "
+            f"every one of those documents says it returns none. Either the "
+            f"name has been implemented (delete its `NEVER_DEFINED` entry and "
+            f"re-derive the census), or prose has written a declaration at "
+            f"column zero and the anchor no longer separates a definition "
+            f"from a mention."
+        )
+        control = f"{entry.declarator} {entry.instead}"
+        assert re.search(
+            _DECLARED_HERE.format(re.escape(control)), source, re.M
+        ), (
+            f"the control failed: `src/` does not declare `{control}`, the "
+            f"name `{name}` was mistaken for. The anchored search cannot be "
+            f"read as evidence of absence while it finds nothing when the "
+            f"thing IS there — re-derive the archaeology before trusting any "
+            f"sentence that cites it."
+        )
+        # 3. and the reason the anchor was needed at all.
+        assert name in source, (
+            f"{name!r} is no longer anywhere in `src/`. The correction record "
+            f"that quotes it is what made the unanchored `-S` search return "
+            f"the record itself; with it gone, this test and the module "
+            f"docstring's limit paragraph both describe a tree that is not "
+            f"here any more."
+        )
+
+
 def test_the_sibling_gates_presence_test_is_satisfied_by_a_record_of_absence():
     """The limit this branch opened in `tests/test_documented_names_exist.py`.
 
@@ -803,25 +1004,24 @@ def test_the_sibling_gates_presence_test_is_satisfied_by_a_record_of_absence():
     limit every run.
 
     The module docstring carries why the obvious repair — resolving an
-    asserted name as a symbol — is refused: 28 of 62 rows, on a measurement
-    rather than on a preference.
+    asserted name as a symbol — is refused: **39 of the 62 checked rows**
+    become findings, on a measurement rather than on a preference. This
+    said *"28 of 62 rows"*, which was that measurement's distinct-PAIRS
+    figure quoted as a row count (0.2.1 re-audit).
     """
     sibling = importlib.import_module("test_documented_names_exist")
     table = namespace()
     source = sibling._in_source()
     absent = "a_name_that_is_definitely_not_in_this_package"
 
-    for name, why in NEVER_DEFINED.items():
-        assert len(why.split()) >= 12, (
+    for name, entry in NEVER_DEFINED.items():
+        assert len(entry.why.split()) >= 12, (
             f"the entry for {name!r} carries no reason a reader can check"
         )
-        # 1. still not a symbol. If it becomes one, the entry is dead.
-        resolved = any(
-            name in module.bound
-            or any(p.rpartition(".")[-1] == name for p in module.attributes)
-            for module in table.values()
-        )
-        assert not resolved, (
+        # 1. still not a symbol, by the file's ONE predicate for that. This
+        #    read its own inline `bound`/`attributes` test until the 0.2.1
+        #    re-audit; see :func:`binds` for the row that separated them.
+        assert not resolves_as_a_symbol(name, table), (
             f"{name!r} is a symbol of this package now, so nothing about it "
             f"is a record of absence any more. Delete its `NEVER_DEFINED` "
             f"entry and the paragraph that describes this limit."

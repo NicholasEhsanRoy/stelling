@@ -118,10 +118,13 @@ guard.
   gate can SEE — `src/`, and roles — read back as a count of the tree: the
   same shape as the defect the gate exists for, one level up.* The names are
   `_classify_cmp` and `_Walker`, neither of which has ever been defined here
-  (`git log -S "def _classify_cmp" 9b5b496 -- src/` and its `class _Walker`
-  twin find no commit, so neither was a rename — **pinned to the tag on
-  purpose**: run unpinned, both now return the very commit that removed the
-  names, because it put both search strings into `src/` as the record),
+  (`git log --all --oneline -G '^[[:space:]]*def _classify_cmp' -- src/`
+  finds no commit, and the same command on `def _classify_assumed_pred`
+  returns `8106a55` — so neither was a rename. **`-G` and the anchor are the
+  point**: `-S "def _classify_cmp"` matches the string anywhere, so it now
+  returns the commits that removed the name, having written it into `src/` as
+  the record. An earlier draft of this bullet pinned the `-S` form to a sha
+  instead; asking about a DECLARATION beats freezing a revision),
   and `ir.JaxprEqn.from_dict`, which was carrying `coverage.py::sub_jaxprs`'s
   argument that a `list` sub-jaxpr container is unreachable from a real query.
   **That argument is re-derived over all nine `ir.JaxprEqn` construction sites
