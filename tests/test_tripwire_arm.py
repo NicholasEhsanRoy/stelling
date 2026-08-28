@@ -349,15 +349,38 @@ def test_attached_but_never_invoked_is_caught_which_a_presence_check_misses(disa
     version bump actually produces: the wrapper is installed, something else
     is the live entry, and jax never calls us.
 
-    The positive control for this test is the run above it — the same
-    ``arm()`` on the same registry returns ``armed`` — so a failure here is
-    the detachment and not the environment.
+    THE POSITIVE CONTROL USED TO BE A DIFFERENT TEST. This docstring said it
+    was *"the run above it -- the same ``arm()`` on the same registry returns
+    ``armed``"*, which is a control this test cannot see and a run in another
+    order does not have. Both readings here are ABSENCES -- ``not-invoked``
+    and ``invocations == 0`` -- and an absence is exactly what a process in
+    which the probe cannot trace AT ALL also produces. Measured, with a plant
+    that makes ``selfcheck``'s ``make_jaxpr`` a no-op so that no trace in the
+    process reaches the const-fold site: every other test in this file that
+    drives the self-check went red and this one stayed GREEN, still claiming
+    to have measured a detachment. So the control is now in the test, on the
+    same recorder and the same registry, one line down.
+
+    ``selfcheck() == "armed"`` is the strongest positive signal available
+    here, because it is returned only when the probe reached the site in BOTH
+    directions with the expected value, dtype, file and line. That it leaves
+    ``rec.invocations`` at 0 is not an oversight: ``selfcheck`` saves and
+    restores the recorder's counters so that a probe never lands in a user's
+    denominator, so the verdict is the reading and the counter cannot be.
     """
     rec = record.Recorder()
     assert adapter.install(rec) == "installed"
     assert adapter.detach("bypass") == "detached"
     assert adapter.selfcheck() == "not-invoked"
     assert rec.invocations == 0
+
+    assert adapter.reattach() == "reattached"
+    assert adapter.selfcheck() == "armed", (
+        "the live positive control did not fire: with the bypass undone, the "
+        "same probe on the same registry and the same recorder still did not "
+        "reach the const-fold site, so `not-invoked` above is a fact about "
+        "this process and not about the detachment this test is named for"
+    )
 
 
 def test_ARM_ITSELF_refuses_on_a_blind_hook_and_does_not_leave_it_installed(disarmed):
@@ -484,6 +507,20 @@ def test_version_parsing_survives_nightlies_and_never_crashes(text, expected):
 
 
 def test_below_the_floor_refuses_without_probing(disarmed, monkeypatch):
+    """The refusal, and WITHOUT PROBING measured rather than inferred.
+
+    ``not is_armed()`` is an absence, and it is also what a process that
+    cannot probe at all produces: under the plant described in
+    ``test_attached_but_never_invoked_is_caught_which_a_presence_check_misses``
+    -- every trace in the process turned into a no-op -- this test stayed
+    green. It was a weak reading of its own name besides, since a probe that
+    RAN and failed leaves ``is_armed()`` false too. So the second half of the
+    name is now read off ``_adapter_jax._probe_seq``, the counter
+    ``selfcheck`` bumps once per run to get itself a fresh shape: it may not
+    move across a refused ``arm()``, and the control right after it is an
+    ``arm()`` that is not refused, where it must.
+    """
+    probes = adapter._probe_seq
     monkeypatch.setattr(adapter, "jax_version", lambda: "0.4.7")
     code, disclosure = adapter.version_check()
     assert code == "below-floor"
@@ -491,6 +528,23 @@ def test_below_the_floor_refuses_without_probing(disarmed, monkeypatch):
     status, _ = _tripwire.arm()
     assert status.code == "below-floor"
     assert not _tripwire.is_armed(), "it probed a version it refused"
+    assert adapter._probe_seq == probes, (
+        f"arm() ran the self-check {adapter._probe_seq - probes} time(s) on a "
+        "version it refused below the floor. The refusal is supposed to "
+        "happen before any probing, and probing a jax this package does not "
+        "support is the thing the floor exists to avoid."
+    )
+    # THE LIVE POSITIVE CONTROL. `monkeypatch.undo()` puts the real
+    # `jax_version` back, so this is the same `arm()` on the same process with
+    # the one forced input removed: it must probe, or the zero above says
+    # nothing about the floor and everything about the environment.
+    monkeypatch.undo()
+    status, _ = _tripwire.arm()
+    assert status.armed and adapter._probe_seq > probes, (
+        "the live positive control did not fire: with the version restored, "
+        f"arm() reported {status.code!r} and the probe counter moved "
+        f"{adapter._probe_seq - probes} time(s)"
+    )
 
 
 def test_above_the_tested_range_it_arms_anyway_and_discloses(disarmed, monkeypatch):
@@ -900,11 +954,107 @@ def test_jax_s_own_prng_mask_is_suppressed_and_named_not_blamed_on_the_caller(ar
 
     Skipped where x64 is on, because the fire does not happen there and a test
     that passed by measuring nothing is the shape this file exists to avoid.
+
+    **THE EVICTION IS THIS TEST'S PRECONDITION. 0.2.0 SHIPPED WITHOUT IT, AND
+    WITH THE WRONG EXPLANATION OF WHY.** That release disclosed this test as
+    order-dependent -- red under a shuffled whole-suite run at seed
+    ``20260825``, green in file order, green in isolation -- and said the
+    shape *"points at a warning already having been emitted by an earlier
+    test"*, i.e. a primed ``__warningregistry__``. That sentence is wrong, and
+    it is written out here rather than quietly deleted because a wrong
+    diagnosis carried into a fix is how a fix ends up correct for a case that
+    never happens: no warning is involved anywhere in this, and a fix that
+    reset a warning registry would have left the test exactly as
+    order-dependent as it found it.
+
+    MEASURED 2026-08-28 at ``9b5b496`` on ``/home/nick/venvs/stelling-jax``
+    (jax 0.11.0). ONE prior ``jax.random.key(0)`` ANYWHERE in the process is
+    sufficient, and is the whole of it. Planted as its own test module ahead
+    of this one, this test failed with ``invocations=0`` -- the recorder saw
+    nothing at all, which is neither a fire attributed elsewhere nor a
+    suppression it missed. ``jax.random.key`` is jitted and jax's trace cache
+    is process-wide, so a warm cache replays it and the second call performs
+    no conversion for the const-fold hook to observe. The same plant with
+    ``jax.clear_caches()`` appended is green. Without the eviction below,
+    then, what this test measured was "is this the first time in this process
+    that anybody built a PRNG key" -- which coincides with its real subject in
+    file order and comes apart under every other order.
+
+    **EMPTYING THOSE CACHES IS NOT A DECLARED-STATE EVENT**, answered from
+    ``tests/_state_guard.py`` rather than assumed: jax's trace and compilation
+    caches are named in that module's own list of what it does NOT watch
+    ("Not watchable as a fingerprint, and eviction is a real operation with
+    real cost, so this stays a subprocess-isolation problem"), so no
+    ``PINNED_EXEMPTIONS`` entry is owed for this line and none is added.
+    ``tests/test_tripwire_eager.py`` already evicts at many sites against an
+    exemption list that is empty, which is the same answer measured rather
+    than read.
+
+    ``evict_trace_caches()`` IS THE SHIPPED INSTRUMENT FOR THIS and not a
+    local trick: ``stelling.preconditions.check``'s gate calls it immediately
+    before the trace it watches, for this reason exactly;
+    ``_adapter_jax.evict_trace_caches`` prices it and states what it does not
+    cover; and
+    ``test_tripwire_eager.py::test_the_origin_filter_keeps_JAX_S_OWN_constants_out_of_the_alarm``
+    already evicts before driving these same ``jax.random`` entry points, with
+    the comment *"B15's finding applied to a test"*. Its RETURN CODE is
+    asserted rather than dropped, because a jax with no ``clear_caches``
+    answers ``no-clear-caches``, and a caller that ignored that would be back
+    to measuring the process's history in silence.
+
+    NARROWER INSTRUMENTS WERE LOOKED FOR AND EACH ONE LOST. Measured the same
+    day, each in a fresh interpreter with a warming ``jax.random.key(0)``
+    ahead of it and the tripwire armed after it:
+
+    * A SEED WHOSE AVAL NOTHING ELSE USES. ``np.int8(0)`` and ``np.int16(0)``
+      do re-fire -- a fresh aval misses the cache -- but ``np.uint16``,
+      ``np.uint32``, ``np.uint64`` and ``jnp.asarray(0, jnp.uint32)`` reach
+      the site ZERO times even on a cold cache, so half that spelling space
+      silently measures nothing; and the half that works rests on "no other
+      test in this tree writes this spelling", which is a claim about every
+      file at once and stops being true the day somebody writes one line.
+    * ``with jax.default_matmul_precision("float32"):``, which re-fires
+      because the trace context is part of jax's jit cache key. That is a
+      check modelling jax's cache-key algebra rather than emptying the cache:
+      one indirection behind the question.
+    * ``jax.make_jaxpr(jax.random.key)(0)`` -- ``invocations=0``. The inner
+      jaxpr is cached too, so tracing it ourselves buys nothing.
+    * A FRESH INTERPRETER, which is what ``_CANARY_PROCESS_TABLE`` below does
+      and is unarguably correct, at about 0.7 s a cell by that comment's own
+      measurement against 2-25 ms for the eviction (jax 0.11.0 and 0.10.2,
+      warm process) -- and it would have to carry the four attributed fields
+      below back out through a pipe.
+
+    WHAT THIS DOES NOT REACH. The eviction empties JAX's caches and nothing
+    else, so it makes this test independent of ONE thing an earlier test can
+    do to it rather than of everything: ``jax_enable_x64`` is read and skipped
+    on rather than evicted, and the registry state arming depends on is
+    ``tests/_state_guard.py``'s subject and not this line's. It is
+    process-global, and the window between it and the call below is not
+    atomic -- a competing thread could re-warm the cache inside it, the same
+    qualifier ``_adapter_jax.evict_trace_caches`` carries, which is why this
+    measurement means what it says under a single-threaded runner and not
+    under ``-n``. And the control below says the site was REACHED, nothing
+    more: that the one suppression is jax's, and the only one, is what the
+    assertions after it are for.
     """
     if jax.config.read("jax_enable_x64"):
         pytest.skip("the threefry mask fires only at x64=0")
     _, rec = armed
+    before = rec.invocations
+    assert _tripwire.evict_trace_caches() == "evicted", (
+        "jax's trace cache was not emptied, so `jax.random.key(0)` below may "
+        "be replayed out of it and reach the const-fold site zero times. "
+        "Every assertion under this line would then be about an event that "
+        "did not happen."
+    )
     jax.random.key(0)
+    assert rec.invocations > before, (
+        "the const-fold site was not reached at all -- the live positive "
+        "control did not fire. That is what a warm trace cache produces and "
+        "it is NOT what a misattributed fire produces: the assertions below "
+        "would be measuring nothing rather than measuring the wrong thing."
+    )
     assert rec.suppressed_jax == 1
     assert rec.count == 0, "jax's own constant was blamed on the caller"
     suppressed = rec.sorted_suppressed()[0]
