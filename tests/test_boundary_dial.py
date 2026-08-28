@@ -585,7 +585,16 @@ def baseline_rows():
 #: **THE BASELINE IS THE TREE WITHOUT THE DIAL, AND THE COMMIT IT NAMES
 #: MOVED AT A MERGE.** It was produced at `8dae8cb` — the commit
 #: `wip/0.3.0-p1-boundary` starts from, and the last commit before the
-#: boundary dial existed. It is produced at **`e698abb`** now, and the
+#: boundary dial existed. It is produced at **`46c077e`** now — and it has
+#: moved TWICE, which is worth more than either move: first to `e698abb`
+#: when the strict-sign census landed beside the dial, then to `46c077e`
+#: when that census's own audit changed a decline message (a count of
+#: side-conditioned carriers that said two where the probe table says
+#: thirteen). That message is an obligation DETAIL, so it is a field this
+#: battery compares. **Neither move was a defect in the dial, and both were
+#: EXPLAINED before they were re-pinned** — a fixture red twice in one
+#: integration and silenced twice would be worth nothing; one red twice and
+#: explained twice is live. The
 #: reason is the whole point of this fixture.
 #:
 #: The strict-sign CENSUS landed on a sibling branch and ships **default-on**:
@@ -597,7 +606,7 @@ def baseline_rows():
 #: automatically a defect in the boundary dial … it is a red that has to be
 #: EXPLAINED"*, and this paragraph is the explanation.
 #:
-#: So the baseline is re-taken at `e698abb` — **the census WITHOUT the dial**
+#: So the baseline is re-taken at `46c077e` — **the census WITHOUT the dial**
 #: — and the question the fixture asks is unchanged and now exact: *does
 #: adding the boundary dial move any default answer?* Re-pinning it to the
 #: merge itself would have made it tautological; re-pinning it to the census
@@ -606,7 +615,7 @@ def baseline_rows():
 #: Produced on 2026-08-28 by running THIS MODULE's own `baseline_rows()`
 #: against that tree's `src/`:
 #:
-#:     git archive e698abb src | tar -x -C $T
+#:     git archive 46c077e src | tar -x -C $T
 #:     env PYTHONPATH=$T/src:$PWD/tests python -c \
 #:         "import test_boundary_dial as B, pprint; pprint.pprint(B.baseline_rows())"
 #:
@@ -637,13 +646,13 @@ BASELINE_WITHOUT_THE_DIAL = {'cond-certifying-branch': (('unknown',),
                             '(div ×1); 1 assume(s) CONSTRAINED '
                             '(stelling_assume ×1)',
                             '925bf64fda32df7d7175f3c3744983291f7924169c3099c69b287ad5e460bd6f',
-                            'b2af7379ac369b85afc12bab2744e6a804d3d80d99871ddf28a3a11e1ed4b7f3'),
+                            '8c535cbfc711f064291c135d7e831b2afd11497c04e80fe1ffb164e02ca24cf3'),
  'cond-in-jit': (('unknown', 'unknown', 'unknown'),
                  '15 eqns: 11 known (73%); 1 transparent; 2 ⊤ across 1 '
                  'primitives (div ×2); 1 assume(s) CONSTRAINED '
                  '(stelling_assume ×1)',
                  '58bbbb06db544350fcd17773e7b4f7763b7b19d2ba1fbe2307d51cf196c43711',
-                 '27e0d5afd2c1299fe257ca8cfaa981ab603e8a4bc4dfe38d6ad2b2330b7c1868'),
+                 '2c5333bda33248f561546e4f6a43781d43f2da5855fa46eea9c9359fbb484c32'),
  'ieee-jit-assume-outside': (('unknown',),
                              '9 eqns: 5 known (56%); 1 transparent; 2 ⊤ '
                              'across 2 primitives (div ×1, reduce_sum ×1); 1 '
@@ -659,31 +668,31 @@ BASELINE_WITHOUT_THE_DIAL = {'cond-certifying-branch': (('unknown',),
                        'primitives (div ×1); 1 assume(s) CONSTRAINED '
                        '(stelling_assume ×1)',
                        '69b670aa6724004bdb9365e39d8fb574545d7c1fb703a1373b4f089e21022df8',
-                       'dcdf1cde24be8d16de40473bf5cd1f0e7fed910ba70fe06e02e40fc30fec24e1'),
+                       '7258fa0bbcc71ee5589fd190d5801a73a36a291486baac6045739ab79c428d23'),
  'jit-assume-outside': (('unknown',),
                         '9 eqns: 6 known (67%); 1 transparent; 1 ⊤ across 1 '
                         'primitives (div ×1); 1 assume(s) CONSTRAINED '
                         '(stelling_assume ×1)',
                         '90d760d2a936e53e8339aa6f630729f485c90a90592e3e2b74bbd6d27c02533f',
-                        'e78d511a7cec2b2ac2a6e6f73077c9ba1aa2ca6053e52df00673026deba31015'),
+                        '91290621a0296f52c622171a13b0fa6747a7c3cc907ee371e4eacc770f1f1ca4'),
  'jit-certifying-body': (('unknown',),
                          '7 eqns: 4 known (57%); 1 transparent; 1 ⊤ across 1 '
                          'primitives (div ×1); 1 assume(s) CONSTRAINED '
                          '(stelling_assume ×1)',
                          '194ff15a11f91372146b28e877975ae08e7d00fc4f31f464c65b042a3e17eed5',
-                         'c8fabcb7b0963bcd1cf999073dd20fc13598e7279392e5947815b976129421c6'),
+                         '0432a907a99763870c87bbb7d636af20a992c095f59e493ed51819b1c999bcef'),
  'jit-in-cond': (('unknown', 'unknown', 'unknown'),
                  '16 eqns: 11 known (69%); 2 transparent; 2 ⊤ across 1 '
                  'primitives (div ×2); 1 assume(s) CONSTRAINED '
                  '(stelling_assume ×1)',
                  '0dff25bef3a7dfad48a4a5820b3b922901bfa45e26e39710655564ac0b7a07c8',
-                 '8ab56ee8138ac3d800eb202e9555b073f6abe3b493bae380c9b1563b24077636'),
+                 '65b14aa9e821ee2e067d22169a7add6a31c0b8d21eeb58436165b1e6175300d9'),
  'jit-in-jit': (('unknown',),
                 '10 eqns: 6 known (60%); 2 transparent; 1 ⊤ across 1 '
                 'primitives (div ×1); 1 assume(s) CONSTRAINED '
                 '(stelling_assume ×1)',
                 'd916a9b89913abbf12e4c4948a3487dca91160a89076b4b99ee5d788a960ed99',
-                '8e7aac25468d17b0a3ef1d33ff6f3e45aa92bac40cccddb09bdcf9b82c03fd32'),
+                '9d6e772758ac09f47567bff5df64d3976b7070f1d5508e61ea8e1a9960e6378f'),
  'no-certificate': (('discharged',),
                     '4 eqns: 4 known (100%)',
                     'd87a7c672ee8c8036d8cda218fc4c0bc0e7f4d24ba95bf75a94936304e831530',
@@ -697,7 +706,7 @@ BASELINE_WITHOUT_THE_DIAL = {'cond-certifying-branch': (('unknown',),
                            '1 primitives (div ×1); 1 assume(s) CONSTRAINED '
                            '(stelling_assume ×1)',
                            '4320f343fe28825c555148f1dd984c6cb8a0dcc9ba7bcb320f2204be8403cde6',
-                           'de3b1ebe1703f4c1c7443696fd72ad9b0318d1bb948a71271e1365f638e349b9'),
+                           '4acc410ef789cb7a8cb386effe87ac644d655ac9c845901343f385eef1f2055e'),
  'straddle': (('unknown',),
               '4 eqns: 3 known (75%); 1 ⊤ across 1 primitives (div ×1)',
               '45505bedf73c29b7edd3b1cabf97e8cda9baeeb4a857b5d1223b960a83724aa0',

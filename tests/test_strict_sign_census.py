@@ -35,6 +35,8 @@ are ⊤ at the walk and never see a sign rule.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from stelling import interval as iv
@@ -717,10 +719,24 @@ def _assume_query(shape, *, tail=()):
 
 
 def test_a_strict_assume_on_a_SIZE_0_declaration_certifies_nothing():
-    """WRITER 1's empty case, and it was a live hole: `ks` is the
-    per-element bound list, so on an empty target `all(k >= 0.0 for k in
-    ks)` is vacuously true and the arm used to write `+1` for a value with
-    no elements."""
+    """WRITER 1's empty case — **and this docstring used to call it "a live
+    hole", which the 0.3.0 audit measured false.**
+
+    It read: "`ks` is the per-element bound list, so on an empty target
+    `all(k >= 0.0 for k in ks)` is vacuously true and the arm used to write
+    `+1` for a value with no elements." The first clause is true; the
+    conclusion was inferred and never driven. MEASURED, by replacing
+    `_record_strict_sign` with an unguarded writer and running this very
+    query: the table comes back EMPTY either way, because an assume over a
+    size-0 predicate is dropped inert before the writer is reached.
+
+    **SO THIS TEST HAS NO ABSENCE HALF AND CANNOT GO RED ON THE GUARD** —
+    the shape this project's rules name as a defect, disclosed rather than
+    dressed up. It pins the shipped ANSWER, which is worth pinning because
+    a future change to the inert-drop ordering would make the writer
+    reachable. The guard's actual control is
+    `test_a_ROUTING_rule_that_produces_an_EMPTY_output_certifies_nothing`
+    below, which does go red without it."""
     p, x, _ = _assume_query((0,))
     assert p.strict_sign == {}, (
         f"a size-0 declaration minted {p.strict_sign}; 'every element is "
@@ -733,9 +749,15 @@ def test_a_strict_assume_on_a_SIZE_0_declaration_certifies_nothing():
 
 
 def test_a_ROUTING_rule_that_produces_an_EMPTY_output_certifies_nothing():
-    """WRITER 3's empty case. `slice(x, [0], [0])` over a certified `x` has
-    a size-0 output, and the routing rule's operand agreement holds — the
-    only thing refusing the vacuous certificate is the output-side rule."""
+    """WRITER 3's empty case, and THE control for the whole empty-value
+    rule. `slice(x, [0], [0])` over a certified `x` has a size-0 output and
+    the routing rule's operand agreement holds, so the only thing refusing
+    the vacuous certificate is the output-side guard.
+
+    DRIVEN, not asserted: with `_record_strict_sign` replaced by an
+    unguarded writer this query mints `{0: 1, 10: 1}` — the size-0 slice
+    certified `+1` — and shipped it mints only `{0: 1}`. The audit
+    reproduced the same for `broadcast_to(x, (0,))`."""
     def tail(x):
         out = ir.Var(id=10, aval=_aval((0,)))
         return [ir.JaxprEqn(
@@ -762,3 +784,404 @@ def test_a_ROUTING_rule_that_produces_an_EMPTY_output_certifies_nothing():
 
     q, _x, extra2 = _assume_query((3,), tail=tail2)
     assert q.strict_sign.get(extra2[0].outvars[0].id) == 1
+
+
+# --- the audit repairs: the three claims that were false, pinned ------------
+#
+# A blinded audit of `e698abb` built an independent oracle (`trace_with_jaxpr`
+# gives the stelling IR and jax's own ClosedJaxpr from ONE trace, so the same
+# program can be propagated and then EXECUTED at points filtered to the assumed
+# region). It found no wrong verdict — 500 traced programs, 168 verdict-level
+# checks, 0 false VERIFIED, 0 false REFUTED — and three ARGUMENTS that were
+# false. On a change whose whole premise is "absence is not a decision, here is
+# an argument per row", a false argument is the defect it was written to remove,
+# so each is repaired in place and pinned here.
+
+
+def _f64_lax():
+    import jax
+    import jax.numpy as jnp
+    from jax import lax
+
+    return jax, jnp, lax
+
+
+def _at_x64(fn):
+    import jax
+
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        return fn()
+    finally:
+        jax.config.update("jax_enable_x64", old)
+
+
+def test_the_target_flushes_a_subnormal_SQRT_OPERAND_to_zero():
+    """F1. The `sqrt` row was admitted on the sentence "`sqrt` cannot
+    underflow a nonzero to zero in binary64 … even at the smallest
+    subnormal". That is true of `math.sqrt` — which is what it was measured
+    against — and FALSE of `lax.sqrt`, which is the program stelling is
+    pointed at, because the target flushes subnormal INPUTS.
+
+    REDDENS ON A LOWERING CHANGE, which is the point: the row's honest
+    argument now rests on this measurement rather than on its denial."""
+    pytest.importorskip("jax")
+    jax, jnp, lax = _f64_lax()
+    assert iv.target_flushes_subnormals("float64") is True
+
+    jit_sqrt = jax.jit(lax.sqrt)
+
+    def go():
+        out = []
+        for x in (5e-324, math.nextafter(iv.MIN_NORMAL, 0.0), 1e-320, 1e-310):
+            out.append((
+                x,
+                math.sqrt(x),
+                float(lax.sqrt(jnp.float64(x))),
+                float(jit_sqrt(jnp.float64(x))),
+            ))
+        normal = float(lax.sqrt(jnp.float64(iv.MIN_NORMAL)))
+        return out, normal
+
+    rows, normal = _at_x64(go)
+    for x, real_root, eager, jitted in rows:
+        assert real_root > 0.0, x
+        assert eager == 0.0 and jitted == 0.0, (
+            f"lax.sqrt({x!r}) = {eager!r}/{jitted!r}; the `sqrt` row's "
+            f"argument is that this IS zero on the target and that the band "
+            f"it happens on is smaller than `mul`'s"
+        )
+    assert normal == math.sqrt(iv.MIN_NORMAL) > 0.0, (
+        "at MIN_NORMAL the flush stops — without this the test would pass "
+        "on a target that returned 0 for everything"
+    )
+
+
+def test_sqrt_diverges_on_a_STRICTLY_SMALLER_set_than_the_mul_this_table_admits():
+    """F1's replacement argument, measured rather than asserted.
+
+    `sqrt` is admitted while `exp` and `pow` are refused, and the honest
+    reason is not that `sqrt` has no real-vs-executable gap — it has one —
+    but that its gap is contained in the gap of `mul`, which this table has
+    carried since 0.2.0. If that containment ever stops holding, the row's
+    argument stops holding with it."""
+    pytest.importorskip("jax")
+    jax, jnp, lax = _f64_lax()
+
+    def smallest_nonzero(f, lo, hi):
+        def go():
+            a, b = lo, hi
+            for _ in range(400):
+                mid = math.sqrt(a * b)
+                if not (a < mid < b):
+                    break
+                if f(mid) != 0.0:
+                    b = mid
+                else:
+                    a = mid
+            return b
+
+        return _at_x64(go)
+
+    s = smallest_nonzero(
+        lambda v: float(lax.sqrt(jnp.float64(v))), 1e-324, 1e-300
+    )
+    m = smallest_nonzero(
+        lambda v: float(lax.mul(jnp.float64(v), jnp.float64(v))),
+        1e-324, 1e-100,
+    )
+    assert s < m, (
+        f"sqrt first computes nonzero at {s:.6e} and mul(x,x) at {m:.6e}; "
+        f"the `sqrt` row's argument is that sqrt's divergence set is the "
+        f"SMALLER of the two"
+    )
+    # ...and by a wide margin, so the claim is not resting on one ulp
+    assert m / s > 1e100, (m, s)
+
+
+def test_sign_is_refused_because_ITS_TRANSFER_adds_a_zero_and_sqrt_does_not():
+    """F1's consistency half. `sign` and `sqrt` sit on the same DAZ band and
+    the census answers them differently; this is the fact that makes that
+    consistent rather than arbitrary.
+
+    A box that EXCLUDES zero goes into both transfers. `_t_sign` returns one
+    that CONTAINS zero — it models the flush, in both semantics modes, on
+    purpose — so a certificate there would contradict its own transfer in
+    exactly the shape that unlocks `boundary_div`. `interval.sqrt` returns
+    one that does not."""
+    from stelling.propagate import _t_sign, _t_sqrt
+
+    box = iv.IntervalArray(shape=(), los=(1e-320,), his=(1e-310,))
+    assert not iv.straddles_zero(box), "the operand box must exclude zero"
+
+    def one(prim, fn):
+        v = ir.Var(id=1, aval=F64)
+        e = ir.JaxprEqn(
+            primitive=prim, invars=(v,),
+            outvars=(ir.Var(id=2, aval=F64),), params=(),
+        )
+        return fn(e, {}, [box])[0]
+
+    signed = one("sign", _t_sign)
+    rooted = one("sqrt", _t_sqrt)
+    assert (signed.los[0], signed.his[0]) == (0.0, 1.0)
+    assert iv.straddles_zero(signed), (
+        "`sign`'s refusal rests on its transfer ADDING a zero here"
+    )
+    assert not iv.straddles_zero(rooted), (
+        f"`sqrt` returned {(rooted.los[0], rooted.his[0])}, which straddles "
+        f"zero — the distinction the two census rows rest on is gone"
+    )
+    assert rooted.los[0] > 0.0
+    assert "sign" in P._SIGN_NO_RULE and "sqrt" in P._SIGN_ARITHMETIC
+
+
+def test_max_and_min_are_the_two_ROUTING_members_that_are_not_a_bit_copy():
+    """F2. The ROUTING class comment claimed, unqualified, that every output
+    element IS an element of a value operand and that the class "introduces
+    none of its own". True over ℝ, which is all the rule needs; false of the
+    EXECUTABLE for exactly two members, because DAZ destroys a subnormal
+    operand before the comparison. The comment now says "over ℝ" and names
+    them; this is the measurement behind that."""
+    pytest.importorskip("jax")
+    jax, jnp, lax = _f64_lax()
+    tiny = 5e-324
+
+    def go():
+        return (
+            float(lax.max(jnp.float64(tiny), jnp.float64(-1.0))),
+            float(lax.min(jnp.float64(-tiny), jnp.float64(1.0))),
+            float(jnp.reshape(jnp.float64(tiny), ())),
+            float(jnp.array(jnp.float64(tiny))),
+        )
+
+    mx, mn, reshaped, copied = _at_x64(go)
+    assert mx == 0.0 and mx not in (tiny, -1.0), (
+        f"lax.max(5e-324, -1.0) = {mx!r}: the class comment's exception"
+    )
+    assert mn == 0.0 and math.copysign(1.0, mn) == -1.0, (
+        f"lax.min(-5e-324, 1.0) = {mn!r} with sign bit "
+        f"{math.copysign(1.0, mn)}: it must be the NEGATIVE zero, which is "
+        f"what keeps it out of the wrong-signed-zero class (see _t_div)"
+    )
+    # the control: every other routing member really is a bit copy
+    assert reshaped == tiny and copied == tiny, (
+        "reshape/copy of a subnormal must be exact, or the class comment's "
+        "'exactly two members' is wrong in the other direction"
+    )
+
+
+# --- F4: the sign bit of an executed zero ------------------------------------
+
+
+def test_boundary_div_tolerates_only_a_MATCHING_signed_zero():
+    """F4, the structural half, and it is the reason no false certificate the
+    audit could build produced a wrong verdict.
+
+    `boundary_div` drops only the divisor's zero ENDPOINT; at that point IEEE
+    division yields ±inf, and each arm returns a box whose infinite end is
+    exactly the one a MATCHING-signed zero produces. An opposite-signed zero
+    falls OUTSIDE in all four arms — a false VERIFIED on a lower bound and a
+    false REFUTED on an upper one. Nothing enforces the matching; this pins
+    the asymmetry so that a change to `boundary_div`'s arms cannot quietly
+    move which zero is tolerated."""
+    def box(lo, hi):
+        return iv.IntervalArray(shape=(), los=(lo,), his=(hi,))
+
+    def ieee_div(a, zero):
+        return math.copysign(math.inf, a) * math.copysign(1.0, zero)
+
+    arms = [
+        ((1.0, 2.0), (0.0, 4.0), +1),
+        ((1.0, 2.0), (-4.0, 0.0), -1),
+        ((-2.0, -1.0), (0.0, 4.0), +1),
+        ((-2.0, -1.0), (-4.0, 0.0), -1),
+    ]
+    for (alo, ahi), (blo, bhi), cert in arms:
+        out = iv.boundary_div(box(alo, ahi), box(blo, bhi))
+        lo, hi = out.los[0], out.his[0]
+        matching = ieee_div(alo, 0.0 if cert > 0 else -0.0)
+        opposite = ieee_div(alo, -0.0 if cert > 0 else 0.0)
+        assert lo <= matching <= hi, (
+            f"divisor [{blo},{bhi}] under certificate {cert:+d}: the box "
+            f"[{lo}, {hi}] excludes {matching}, which is what a "
+            f"matching-signed zero divisor produces — the gap the census "
+            f"tolerates is no longer free"
+        )
+        assert not (lo <= opposite <= hi), (
+            f"divisor [{blo},{bhi}] under certificate {cert:+d}: the box "
+            f"[{lo}, {hi}] CONTAINS {opposite}, which is what an "
+            f"opposite-signed zero produces. That is the one route from a "
+            f"false certificate to a wrong verdict, and this assertion is "
+            f"the record that it was closed by asymmetry rather than by a "
+            f"check"
+        )
+
+
+# The rows the census admits whose ℝ value is nonzero where the target's is
+# zero, each with the sign bit the certificate claims. Not hypothetical: these
+# are the three DAZ-band rows named in `_t_div`'s standing-constraint
+# paragraph, driven end to end.
+ZERO_UNDER_CERTIFICATE = {
+    "mul (the cube that underflows)": (
+        lambda jnp: (lambda x: x * x * x), (-1e-100, -1e-200), "lt", -1,
+    ),
+    "sqrt (a flushed subnormal operand)": (
+        lambda jnp: (lambda x: jnp.sqrt(x)), (0.0, 1e-310), "gt", 1,
+    ),
+    "max (a flushed subnormal operand)": (
+        lambda jnp: (lambda x: jnp.maximum(x, -1.0)), (0.0, 1e-310), "gt", 1,
+    ),
+    "min (a flushed subnormal operand)": (
+        lambda jnp: (lambda x: jnp.minimum(x, 1.0)), (-1e-310, 0.0), "lt", -1,
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(ZERO_UNDER_CERTIFICATE))
+def test_an_executed_zero_under_a_certificate_carries_the_CERTIFIED_sign_bit(name):
+    """F4, the driven half, and the probe the audit asked for.
+
+    Each row here is a chain the census certifies whose executed value on the
+    target is ZERO. That is disclosed and costs no verdict — but only while
+    the zero's SIGN BIT agrees with the certificate (see `_t_div`). This is
+    the check that would tell the author of a future rule that theirs does
+    not.
+
+    NOT VACUOUS BY CONSTRUCTION: the test asserts both that a certificate was
+    minted AND that the executed value really is zero, so a row that stopped
+    producing a zero — or stopped being certified — reds here instead of
+    passing quietly."""
+    pytest.importorskip("jax")
+    jax, jnp, lax = _f64_lax()
+    from stelling.harness import any_array, assert_, assume, trace
+
+    build, bounds, cmp_, want = ZERO_UNDER_CERTIFICATE[name]
+    fn = build(jnp)
+
+    def h():
+        x = any_array((), jnp.float64, bounds)
+        if cmp_ == "gt":
+            assume(x > 0)
+        else:
+            assume(x < 0)
+        d = fn(x)
+        return assert_(d > 0 if want > 0 else d < 0)
+
+    cj = _at_x64(lambda: trace(h))
+    p = _Propagator("constrain")
+    p.run(cj.jaxpr, list(cj.consts), [])
+
+    asserts = [e for e in cj.jaxpr.eqns if e.primitive == "stelling_assert"]
+    pred = asserts[0].invars[0]
+    cmp_eqn = next(
+        e for e in cj.jaxpr.eqns if e.outvars and e.outvars[0].id == pred.id
+    )
+    value = cmp_eqn.invars[0]
+    sign = p.strict_sign.get(value.id, 0)
+    assert sign == want, (
+        f"{name}: certified {sign}, expected {want} — this row no longer "
+        f"exercises the constraint it is here to guard"
+    )
+
+    lo, hi = bounds
+    pts = [p_ for p_ in (lo, hi, (lo + hi) / 2.0) if (p_ > 0 if want > 0 else p_ < 0)]
+    assert pts, bounds
+    zeros = 0
+    for pt in pts:
+        v = _at_x64(lambda pt=pt: float(fn(jnp.float64(pt))))
+        if v == 0.0:
+            zeros += 1
+            assert math.copysign(1.0, v) == float(want), (
+                f"{name}: the certificate says {want:+d} and the target "
+                f"computes {v!r} at x={pt!r}, whose sign bit is "
+                f"{math.copysign(1.0, v)}. An opposite-signed zero falls "
+                f"outside every arm of boundary_div and is the one route "
+                f"from this gap to a wrong verdict"
+            )
+        else:
+            assert (v > 0) if want > 0 else (v < 0), (v, pt)
+    assert zeros, (
+        f"{name}: no sampled point executed as zero, so this row did not "
+        f"exercise the sign-bit constraint at all"
+    )
+
+
+# --- F3: the decline message may not claim a COUNT it cannot keep -----------
+
+
+def _conditioned_carriers() -> set[str]:
+    """Carriers that DROP with every value operand certified nonzero, derived
+    from the probe table above rather than typed."""
+    out = set()
+    for prim, cases in PROBES.items():
+        for c in cases:
+            vals = P._sign_value_operands(prim, list(c.signs))
+            if vals and all(v for v in vals) and c.want == 0:
+                out.add(prim)
+                break
+    return out
+
+
+_NUMBER_WORDS = (
+    "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    "thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty"
+)
+
+
+def test_the_decline_message_makes_no_COUNT_claim_about_the_conditioned_rules():
+    """F3. The message used to read "**Two of those** carry it only under a
+    side condition on the operands' signs" — in the very sentence whose
+    hand-written carrier list this change had just replaced with a derived
+    one. Derived from `PROBES`, the count is thirteen.
+
+    A number in that string would be a THIRD place the same fact lives, after
+    the rules and the probe table, and the two conditions are not even of one
+    kind. So the count is gone rather than corrected, and this refuses its
+    return."""
+    import re
+
+    msg = P.DIV_BOUNDARY_ZERO_DECLINE
+    hit = re.search(rf"\b({_NUMBER_WORDS})\b\s+of\s+those", msg, re.I)
+    assert hit is None, (
+        f"the decline message counts the conditioned carriers again "
+        f"({hit.group(0)!r}); derived from PROBES the count is "
+        f"{len(_conditioned_carriers())}, and it is not a number this "
+        f"string can keep true"
+    )
+    assert "SEVERAL of those" in msg, (
+        "the message must still say that SOME carriers are conditioned — "
+        "dropping the count must not drop the warning"
+    )
+
+
+def test_every_rule_the_message_names_as_conditioned_really_is():
+    """The absence half of the test above. Saying "several" is only honest if
+    the examples given are examples of the thing."""
+    conditioned = _conditioned_carriers()
+    assert len(conditioned) > 2, (
+        f"only {sorted(conditioned)} are conditioned; the count the message "
+        f"used to give would not have been false, and this repair would be "
+        f"about nothing"
+    )
+    msg = P.DIV_BOUNDARY_ZERO_DECLINE
+    for named in ("add", "sub"):
+        assert f"`{named}` needs" in msg, named
+        assert named in conditioned, (
+            f"the message offers `{named}` as an example of a conditioned "
+            f"carrier and the probe table says it is not one"
+        )
+
+
+def test_the_message_names_every_transfer_in_one_of_its_three_lists():
+    """F3's other half: the closing clause used to read as if the carrier and
+    no-rule lists were exhaustive over `TRANSFERS`, while 9 of the 11
+    boolean-valued transfers appeared nowhere in the string. The three lists
+    are now jointly total, derived, and checked here."""
+    msg = P.DIV_BOUNDARY_ZERO_DECLINE
+    missing = [t for t in sorted(P.TRANSFERS) if t not in msg]
+    assert not missing, (
+        f"{missing} appear in no list the decline message prints, so a user "
+        f"reading it cannot tell whether they carry the certificate"
+    )
