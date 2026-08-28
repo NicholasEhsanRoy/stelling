@@ -728,6 +728,14 @@ def test_the_same_licence_mints_a_false_REFUTED():
     Driven at the DEFAULT — no dial involved, no `assume` involved — with a
     control that drops the certificate through a `sub` and returns UNKNOWN,
     so the REFUTED is attributable to the certificate and not to the shape.
+
+    **A COND IS NOT NECESSARY FOR A FALSE REFUTED**, and the stamped
+    sentence used to imply it was: the half-infinite box decides an
+    ordinary bound obligation false with no cond anywhere
+    (`::test_a_false_REFUTED_needs_no_cond_at_all`). This route is worth
+    its own test because it reaches the REFUTED through a FORCED BRANCH —
+    the analysis walks only the arm the program does not take — which is a
+    different mechanism from the direct one.
     """
     v = check(_refuting_harness(), vacuity_mode="all", semantics="real")
     assert v.status == "REFUTED", v.render()
@@ -1104,6 +1112,193 @@ def test_the_cond_IN_carry_POLARITY_is_a_soundness_invariant():
         f"{control.obligations[0].detail}"
     )
     assert control.boundary_crossings > 0
+
+
+_REGION_W = np.array([-1e-120, -2e-120, -3e-120])
+
+
+def _region_harness():
+    """The shape that observes `_region_witness`'s `boundary` argument.
+
+    THREE ingredients, and two of them are not enough:
+
+    * a CONSTVAR-sourced certificate — a pinned probe DROPS assumes on
+      declared inputs, so writer 1 never mints one inside a probe and an
+      `assume`-sourced certificate cannot be the subject;
+    * a separate narrowing `assume` on a DERIVED value, which is what holds
+      `narrowing_uncertified` True and therefore keeps the refutation
+      withheld unless a witness lifts it;
+    * an `assume` DOWNSTREAM of the crossed division — the one the pinned
+      probe cannot satisfy, because satisfying it needs the certificate
+      that only the carry puts there.
+    """
+    def h():
+        x = any_array((3,), "float64", (1.0, 2.0))
+        q = jax.jit(lambda v: 1.0 / jnp.sum(v ** 3))(jnp.asarray(_REGION_W))
+        total = jnp.sum(x)
+        assume(total > 3.5)
+        assume(q < 0.0)
+        return assert_(total < 0.0)
+
+    return h
+
+
+def test_the_region_probe_runs_at_the_SAME_dial_position():
+    """`_region_witness` searches for one point of the declared set at which
+    every `assume` holds; finding one lifts the query-wide withholding of
+    definite violations. It takes `boundary=` so the probe walks under the
+    same rule as the run it certifies.
+
+    **THIS LINE WAS RECORDED AS "the auditor's measurement, not mine" AFTER
+    A SIX-SHAPE SEARCH HERE FAILED TO REPRODUCE IT** (0.3.0 P1 closing
+    audit, F4). The search was one ingredient short — see
+    `_region_harness` for the three it needs. Measured at `f1c35f4` on
+    2026-08-28, both lanes:
+
+        boundary="opaque"       unknown            region_inhabited=False
+        boundary="transparent"  violated-over-set  region_inhabited=True
+        ...with the probe pinned to "opaque":
+        boundary="transparent"  unknown            region_inhabited=False
+
+    So the argument is load-bearing, and dropping it costs a REFUTED.
+    """
+    cj = trace(_region_harness())
+    opaque = propagate(cj, semantics="real")
+    assert opaque.obligations[0].status == "unknown", opaque.obligations[0].detail
+    assert opaque.region_inhabited is False
+
+    moved = propagate(cj, semantics="real", boundary="transparent")
+    assert moved.boundary_crossings > 0, "nothing crossed; this row is not about the carry"
+    assert moved.narrowing_uncertified is True, (
+        "the narrowing is certified, so nothing was being withheld and the "
+        "region witness had no work to do — the shape has lost ingredient 2"
+    )
+    assert moved.region_inhabited is True, (
+        "the probe found no point of the declared set satisfying every "
+        "assume. If it ran at `opaque` while the walk ran at "
+        "`transparent`, the downstream assume is unsatisfiable to it and "
+        "this REFUTED is withheld"
+    )
+    assert moved.obligations[0].status == "violated-over-set", (
+        moved.obligations[0].detail
+    )
+
+
+def _unsat_harness():
+    """`assume` DOWNSTREAM of a crossed division, on a query the executable
+    satisfies everywhere."""
+    def h():
+        x = any_array((2,), "float64", (-1.0, -0.25))
+        assume(x < 0.0)
+        q = jax.jit(_reaching_chain)(x)
+        assume(q > 0.0)
+        return assert_(q > -1e400)
+
+    return h
+
+
+def test_the_UNSATISFIABLE_channel_carries_the_dial_because_no_stamp_can():
+    """**A THIRD DIRECTION, ON THE ONE CHANNEL NO STAMP REACHES** (0.3.0 P1
+    closing audit, F3).
+
+    `boundary_div`'s half-infinite quotient box can make a DOWNSTREAM
+    `assume` definitely false, and the walk then RAISES instead of
+    returning. The caller is told their harness is defective — while `q` is
+    `+inf` at every declared point of the compiled program, so the
+    precondition holds there. An exception carries no `Stamp`, so none of
+    the four boundary lines reach that caller.
+
+    Measured on both lanes: `boundary="opaque"` returns VERIFIED,
+    `boundary="transparent"` raises. The refusal message now says the dial
+    was on and why that can be the cause — the ieee-stamp repair's shape,
+    one channel over. The DEFAULT message is unchanged, which is the
+    absence half asserted below.
+    """
+    from stelling.propagate import (
+        BOUNDARY_UNSATISFIABLE_SUFFIX, UnsatisfiableAssumptionError,
+    )
+
+    quiet = check(_unsat_harness(), vacuity_mode="all", semantics="real")
+    assert quiet.status == "VERIFIED", quiet.render()
+
+    with pytest.raises(UnsatisfiableAssumptionError) as e:
+        check(_unsat_harness(), vacuity_mode="all", semantics="real",
+              boundary="transparent")
+    assert BOUNDARY_UNSATISFIABLE_SUFFIX in str(e.value), str(e.value)
+
+    # the executable satisfies the precondition the analysis called empty
+    for pt in _DECLARED_POINTS:
+        q = _reaching_chain(jnp.array(pt, dtype=jnp.float64))
+        assert bool(q > 0.0), (
+            f"the precondition is FALSE at {pt} in the compiled program, so "
+            f"the refusal is not a false harness-defect claim and this test "
+            f"is about nothing: {float(q)!r}"
+        )
+
+    # ABSENCE HALF: a genuinely unsatisfiable assume at the DEFAULT must
+    # carry the message it always carried, with nothing appended.
+    def honest():
+        x = any_array((2,), "float64", (1.0, 2.0))
+        assume(x < 0.0)
+        return assert_(jnp.sum(x) > 0.0)
+
+    with pytest.raises(UnsatisfiableAssumptionError) as e2:
+        check(honest, vacuity_mode="all", semantics="real")
+    assert BOUNDARY_UNSATISFIABLE_SUFFIX not in str(e2.value), str(e2.value)
+    # ...and an ieee run that ASKED for the carry and was refused is not
+    # told the carry might be why, because it did not get one
+    with pytest.raises(UnsatisfiableAssumptionError) as e3:
+        check(honest, vacuity_mode="all", semantics="ieee",
+              boundary="transparent")
+    assert BOUNDARY_UNSATISFIABLE_SUFFIX not in str(e3.value), str(e3.value)
+
+
+def test_a_false_REFUTED_needs_no_cond_at_all():
+    """**THE STAMPED SENTENCE SAID "a false REFUTED *through a cond
+    selector*", AND THE QUALIFIER IS WRONG** (0.3.0 P1 closing audit, F2).
+
+    `boundary_div`'s half-infinite box decides an ordinary lower-bound
+    obligation false directly. Measured on both lanes over `x` declared
+    `[-1, -0.25]` with `assume(x < 0)` and
+    `q = 1/Σ(x·1e-200·1e-200)`:
+
+        assert_(q > 0.0), chain in a jit   opaque UNKNOWN -> transparent REFUTED
+        the same with no wrapper at all    REFUTED already at the DEFAULT
+        the program                        q = +inf at all five points,
+                                           so `q > 0` is TRUE everywhere
+
+    No `cond` is traced in either. `::test_the_same_licence_mints_a_false_
+    REFUTED` uses one because that route reaches a REFUTED through a
+    *forced branch* and is worth pinning too — not because a cond is
+    needed.
+    """
+    def h(wrapped):
+        def g():
+            x = any_array((2,), "float64", (-1.0, -0.25))
+            assume(x < 0.0)
+            f = jax.jit(_reaching_chain) if wrapped else _reaching_chain
+            return assert_(f(x) > 0.0)
+        return g
+
+    for wrapped in (True, False):
+        assert "cond" not in _all_primitives(trace(h(wrapped)).jaxpr), wrapped
+
+    assert check(h(True), vacuity_mode="all", semantics="real").status == (
+        "UNKNOWN"
+    )
+    moved = check(h(True), vacuity_mode="all", semantics="real",
+                  boundary="transparent")
+    assert moved.status == "REFUTED", moved.render()
+    assert check(h(False), vacuity_mode="all", semantics="real").status == (
+        "REFUTED"
+    ), "the no-wrapper row is not REFUTED at the default, so the direction is the dial's after all"
+
+    for pt in _DECLARED_POINTS:
+        q = _reaching_chain(jnp.array(pt, dtype=jnp.float64))
+        assert bool(q > 0.0), (
+            f"the obligation is FALSE at {pt} in the compiled program, so "
+            f"this REFUTED is not false: {float(q)!r}"
+        )
 
 
 def test_the_widen_recheck_runs_at_the_SAME_dial_position():

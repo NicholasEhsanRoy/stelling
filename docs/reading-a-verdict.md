@@ -360,7 +360,7 @@ exactly the runs its own condition holds for, and the conditions overlap.
 | `boundary='transparent': the strict-sign certificate …` | the run was at `transparent` and the carry was LIVE — the certificate was allowed to cross the wrappers the walk enters, and to enter a `cond` branch |
 | `boundary='transparent' CARRIED N strict-sign certificate(s) …` | …and it actually crossed, N times. Present only when N > 0; it reports the ACT, not the position, and a run that carried nothing does not carry this line |
 | `boundary='transparent' was requested and is INERT under semantics='ieee'` | the dial was set and the walk refused it. The certificate is a claim about ℝ and is false where a positive subnormal flushes to zero, so nothing crossed and this verdict rests on exactly the rules an `opaque` run would have used |
-| `boundary='transparent' EXTENDS THE REACH OF A DEFECT …` | the same runs as the first line, and what that permission is able to produce. The certificate is what licenses `interval.boundary_div` to drop a divisor box's zero endpoint, and the quotient box it returns can exclude the value the program computes: a false VERIFIED, or a false REFUTED where the quotient decides a `cond` selector and the analysis walks only the branch the program does not take. Measured through `reduce_sum` and, by a different mechanism, through `dot_general`. **It names one route and bounds nothing** — see below. Not repaired in this release |
+| `boundary='transparent' EXTENDS THE REACH OF A DEFECT …` | the same runs as the first line, and what that permission is able to produce. The certificate is what licenses `interval.boundary_div` to drop a divisor box's zero endpoint, and the half-infinite quotient box it returns can exclude the value the program computes, **in either direction**: a false VERIFIED, or a false REFUTED — which needs no `cond`, the box decides an ordinary bound obligation directly. Measured through `reduce_sum` and, by a different mechanism, through `dot_general`. **It names one route and bounds nothing** — see below. Not repaired in this release |
 
 **NO LINE MEANS `opaque`, AND THAT IS DECIDABLE RATHER THAN CONVENTIONAL.**
 The default adds nothing to the stamp — deliberately, so that a
@@ -442,12 +442,36 @@ already stamp, and whatever the next lowering does. The **route** does have
 one — `interval.boundary_div` is consulted only on a divisor box that
 reaches zero, and a certificate crossing a boundary is what this dial
 widens — so the fourth line names the route, says it bounds nothing, and
-leaves the general statement where it has always been correct: the
-`semantics:` line at the top of every real-mode stamp, *"the traced
-program's IEEE float behaviour is NOT modeled — a predicate can hold in ℝ
-and fail in floats"*. Both members above are pinned by
+hands the class to the `semantics:` line at the top of every real-mode
+stamp. Both members above are pinned by
 `tests/test_boundary_dial_jax.py::test_the_CLASS_is_wider_than_the_ROUTE_and_has_no_single_mechanism`,
 which asserts that they exist and asserts nothing about what they share.
+
+**READ THAT HAND-OFF IN BOTH DIRECTIONS, BECAUSE THE SENTENCE IT HANDS TO
+NAMES ONE.** The `semantics:` line reads *"obligations judged in exact real
+arithmetic over the declared sets; the traced program's IEEE float
+behaviour is NOT modeled — a predicate can hold in ℝ and fail in floats"*.
+That is the false-VERIFIED direction. **The false REFUTED is its converse**
+— the predicate fails in ℝ and holds in floats — and the same licence
+produces it, with no `cond` and already at the default:
+`assume(x < 0)` over `x ∈ [-1, -0.25]` with `assert_(1/Σ(x·1e-200·1e-200) >
+0.0)` is REFUTED while the compiled quotient is `+inf` at every declared
+point. The first clause of the `semantics:` line — *judged in exact real
+arithmetic* — covers both; its closing example does not, and this page said
+"where it has always been correct" without saying which half.
+(`::test_a_false_REFUTED_needs_no_cond_at_all`.)
+
+**AND THERE IS A THIRD DIRECTION THAT NEVER REACHES THIS PAGE AT ALL.** The
+same half-infinite quotient box can make a *downstream* `assume` definitely
+false, and `check()` then RAISES
+`stelling.propagate.UnsatisfiableAssumptionError` instead of returning —
+telling you your harness is defective on a query the executable satisfies
+at every declared point. An exception carries no stamp, so **none of the
+four lines above are delivered on that path**, and the guidance further
+down this page to fix the declaration or the precondition is the wrong
+advice there. The refusal message itself now says the dial was on and why
+that can be the cause; re-run at `boundary="opaque"` before believing it
+(`::test_the_UNSATISFIABLE_channel_carries_the_dial_because_no_stamp_can`).
 
 That is the whole of what a verdict-reader gets, and it is deliberate that
 there is no more: `Stamp` has no `boundary` field. A **programmatic**

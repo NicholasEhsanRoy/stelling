@@ -316,8 +316,39 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     but the dial makes the certificate reach queries it did not reach
     before, and therefore makes that direction reach them too. Pinned at
     ``tests/test_boundary_dial.py::test_the_dial_can_also_move_UNKNOWN_to_REFUTED``.
-    Neither direction can be a WRONG answer for the reason the certificate
-    is sound; both are answers the default does not give.
+    **AND THAT SENTENCE ENDED "Neither direction can be a WRONG answer for
+    the reason the certificate is sound; both are answers the default does
+    not give." THE FIRST HALF IS WITHDRAWN** (0.3.0 P1 closing audit, F1).
+    It is the ℝ-as-cover argument, and this same change withdraws it twice
+    over in :meth:`stelling.propagate._Propagator._strict_sign_out` and in
+    :data:`stelling.propagate.BOUNDARY_TRANSPARENT_REACH_DISCLOSURE` — and
+    THIS door is the only one of the three surfaces a caller reads. Both
+    directions can be wrong about the executable, and both were driven on
+    jax 0.11.0 and 0.10.2 over ``x`` declared ``[-1, -0.25]`` with
+    ``assume(x < 0)`` and ``q = 1/Σ(x·1e-200·1e-200)``:
+
+    * ``assert_(q < 0.0)`` with the chain inside a ``jax.jit`` is UNKNOWN
+      at the default and VERIFIED here, and the compiled ``q`` is ``+inf``;
+    * ``assert_(q > 0.0)``, **with no ``cond`` anywhere**, is UNKNOWN at
+      the default and REFUTED here, and ``q > 0`` is TRUE at every declared
+      point of the compiled program.
+
+    So: both are answers the default does not give, and both can be false
+    of the program. The reach disclosure below carries the mechanism and
+    what it does and does not bound.
+
+    **AND THERE IS A THIRD DIRECTION, ON A CHANNEL THAT CARRIES NO STAMP.**
+    A half-infinite quotient box can make a DOWNSTREAM ``assume``
+    definitely false, and this door then RAISES
+    :class:`stelling.propagate.UnsatisfiableAssumptionError` instead of
+    returning — telling the caller their harness is defective on a query
+    the executable satisfies at every declared point. Driven on both lanes:
+    ``assume(q > 0.0)`` after the chain above returns VERIFIED at
+    ``"opaque"`` and raises here. An exception carries no :class:`Stamp`,
+    so none of the boundary lines reach a caller on that path; the refusal
+    message itself now says the dial was on and why that can be the cause
+    (:data:`stelling.propagate.BOUNDARY_UNSATISFIABLE_SUFFIX`), which is
+    the only channel that path has.
 
     The verdict discloses the position in its stamped assumption lines
     when it is off the default, and ``docs/reading-a-verdict.md`` says how

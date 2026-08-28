@@ -866,9 +866,15 @@ class Propagation:
     # boundary-opaque propagation, so the default is the true value
     # rather than a placeholder.
     #
-    # WHAT READS IT. :func:`propagate` itself, to decide whether to write
-    # the stamped position line (:data:`BOUNDARY_TRANSPARENT_POSITION`)
-    # into `assumptions`; no transfer, judgment or counter does.
+    # WHAT READS IT: NOTHING IN ``src/``. **This comment used to say
+    # "`propagate` itself, to decide whether to write the stamped position
+    # line"** (0.3.0 P1 closing audit, F5) — `propagate` reads its own
+    # PARAMETER there, several frames before this record exists. The field
+    # is written once, at the end, and is write-only for the library: it
+    # exists for a programmatic reader of a `Propagation`, which is the
+    # only route to the position that does not go through the stamp
+    # (`Stamp` has no boundary field). No transfer, judgment or counter
+    # reads it either.
     boundary: str = "opaque"
     # How many strict-sign certificates actually CROSSED a sub-jaxpr
     # boundary on this run — see `_Propagator.boundary_crossings` for what
@@ -9214,6 +9220,14 @@ class _Propagator:
         if self.branch_depth:
             vacuous.append(desc)
             return True
+        if self._carry_refusal() is None and self.boundary != "opaque":
+            # the ONE fact this channel can carry, and the only channel
+            # this path has: see :data:`BOUNDARY_UNSATISFIABLE_SUFFIX`.
+            # Conditioned on the carry being LIVE, not on the dial being
+            # off default, for the reason `_carry_refusal` exists: an ieee
+            # run that asked for the carry and was refused did not get one
+            # and must not be told it might have.
+            message = message + BOUNDARY_UNSATISFIABLE_SUFFIX
         raise UnsatisfiableAssumptionError(message)
 
     def _assume_constrain(self, eqn: ir.JaxprEqn, where: str) -> None:
@@ -11455,6 +11469,38 @@ class _Propagator:
                 self.exact.mark_declared(out.id)
 
 
+# THE FOURTH CHANNEL, AND THE ONLY ONE THAT CARRIES NO STAMP. A walk whose
+# assume is definitely false RAISES instead of returning, so
+# :class:`UnsatisfiableAssumptionError` reaches a caller with no `Verdict`
+# and therefore with none of the three boundary lines above. The dial can
+# put a caller on that path: a half-infinite quotient box from
+# :func:`stelling.interval.boundary_div` makes a DOWNSTREAM assume
+# definitely false, and the caller is told their harness is defective on a
+# query the executable satisfies at every declared point.
+#
+# MEASURED at `f1c35f4` on 2026-08-28 (0.3.0 P1 closing audit, F3), jax
+# 0.11.0 and 0.10.2: `assume(x < 0)`, `q = jit(1/Σ(x·1e-200·1e-200))(x)`,
+# `assume(q > 0.0)`, `assert_(q > -1e400)` returns VERIFIED at `"opaque"`
+# and RAISES at `"transparent"`, while the compiled `q` is `+inf` at every
+# declared point, so the precondition holds there.
+#
+# This is the ieee-stamp repair's shape one channel over — a fact about the
+# run that only one output could carry — so the fact is appended to the
+# message, on exactly the runs whose carry was live. The DEFAULT message is
+# unchanged byte for byte, which is the same acceptance criterion the
+# stamped lines are held to.
+BOUNDARY_UNSATISFIABLE_SUFFIX = (
+    " \u2014 AND THIS RUN WAS AT boundary='transparent', WHICH CAN BE WHY: "
+    "a strict-sign certificate that crossed a sub-jaxpr boundary licenses "
+    "interval.boundary_div to return a half-infinite quotient box, and such "
+    "a box can make a downstream assume definitely false on a query the "
+    "compiled program satisfies at every declared point. Re-run at "
+    "boundary='opaque' before treating this as a harness defect; this "
+    "channel raises rather than returning a verdict, so none of the "
+    "boundary lines a stamp would carry reach you here"
+)
+
+
 def _check_assume_mode(assume_mode: str) -> None:
     if assume_mode not in _ASSUME_MODES:
         raise ValueError(
@@ -11689,13 +11735,20 @@ BOUNDARY_CROSSED_DISCLOSURE = (
 #     not re-derivable without the declared envelope"* without it, losing
 #     the per-obligation note as well. Pinned by
 #     ``tests/test_boundary_dial_jax.py::test_the_widen_recheck_runs_at_the_SAME_dial_position``.
-#   * ``_region_witness``'s argument turns ``region_inhabited`` and a
-#     ``violated-over-set`` into ``False`` and ``unknown`` on a query whose
-#     certificate comes from the CONSTVAR writer — **the third re-audit's
-#     measurement, not mine**: six shapes tried here reproduced the
-#     withholding path but never with ``narrowing_uncertified`` engaged, so
-#     it is recorded with that provenance rather than as something this
-#     builder saw.
+#   * ``_region_witness``'s argument turns a ``violated-over-set`` with
+#     ``region_inhabited=True`` into ``unknown`` with ``False``. **THIS
+#     ENTRY CARRIED A PROVENANCE DISCLAIMER — "the third re-audit's
+#     measurement, not mine; six shapes tried here never engaged
+#     ``narrowing_uncertified``" — AND THE DISCLAIMER IS RETIRED**: the
+#     shape is reproducible and that search was one ingredient short
+#     (closing audit, F4). It needs THREE things at once, and the sixth
+#     shape had two: a CONSTVAR-sourced certificate, because a pinned probe
+#     DROPS assumes on declared inputs and writer 1 never mints inside one;
+#     a SEPARATE narrowing assume on a DERIVED value, to hold
+#     ``narrowing_uncertified`` True; and an assume DOWNSTREAM of the
+#     crossed division, which is the one the pinned probe cannot satisfy.
+#     Measured at `f1c35f4` on 2026-08-28 and pinned by
+#     ``tests/test_boundary_dial_jax.py::test_the_region_probe_runs_at_the_SAME_dial_position``.
 #   * :func:`_reachability_witnesses` remains unobserved by anything
 #     measured on either side.
 #
@@ -11738,18 +11791,21 @@ BOUNDARY_TRANSPARENT_REACH_DISCLOSURE = (
     "boundary='transparent' EXTENDS THE REACH OF A DEFECT THAT IS NOT "
     "CONFINED TO IT. The strict-sign certificate is what licenses "
     "interval.boundary_div to drop a divisor box's zero endpoint, and the "
-    "quotient box it returns can exclude the value the compiled program "
-    "computes \u2014 the verdict is then contradicted at a point of the "
-    "declared box, as a false VERIFIED or, through a cond selector, a false "
-    "REFUTED. Measured through reduce_sum and through dot_general. No "
-    "assume is required (an array constant certifies too), and the DEFAULT "
-    "reaches this route wherever the certificate and the division share a "
-    "scope; what this position adds is that they may sit on opposite sides "
-    "of a sub-jaxpr boundary \u2014 a wrapper body or a cond branch \u2014 "
-    "that the default DECLINED. **THIS NAMES ONE ROUTE AND BOUNDS "
-    "NOTHING**: the semantics line above is the general statement about "
-    "what real-mode judging models, and this line does not narrow it. NOT "
-    "REPAIRED IN THIS RELEASE"
+    "half-infinite quotient box it returns can exclude the value the "
+    "compiled program computes \u2014 the verdict is then contradicted at a "
+    "point of the declared box, IN EITHER DIRECTION: a false VERIFIED, or a "
+    "false REFUTED (which needs no cond \u2014 the box decides an ordinary "
+    "bound obligation directly). Measured through reduce_sum and, by a "
+    "different mechanism, through dot_general. No assume is required (an "
+    "array constant certifies too), and the DEFAULT reaches this route "
+    "wherever the certificate and the division share a scope; what this "
+    "position adds is that they may sit on opposite sides of a sub-jaxpr "
+    "boundary \u2014 a wrapper body or a cond branch \u2014 that the default "
+    "DECLINED. **THIS NAMES ONE ROUTE AND BOUNDS NOTHING.** The general "
+    "statement is the semantics line above, and READ IT AS COVERING BOTH "
+    "DIRECTIONS: its words are that a predicate can hold in real arithmetic "
+    "and fail in floats, and the false REFUTED is the converse of that "
+    "sentence rather than an instance of it. NOT REPAIRED IN THIS RELEASE"
 )
 
 # The mechanical guard on the domain dial: quoted verbatim when a
