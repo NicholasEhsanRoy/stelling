@@ -551,8 +551,11 @@ def test_every_commit_a_status_paragraph_names_is_an_ancestor():
     two are those checkouts and two are `upload-artifact` and
     `download-artifact`, plus four comment lines quoting the string. A count
     taken off that grep is a count of matches and not of checkouts.) Both
-    steps carry exactly two inputs, `persist-credentials: false` and
-    `fetch-depth: 0`, and no `fetch-tags` -- which `fetch-depth: 0` makes
+    steps carry three inputs -- `persist-credentials: false`,
+    `ref: ${{ github.sha }}` and `fetch-depth: 0`. This sentence said "exactly
+    two inputs" and named the first and third; the `ref:` input arrived later,
+    to stop the action overwriting a tag ref with the release commit. No
+    `fetch-tags` -- which `fetch-depth: 0` makes
     inert anyway, because the all-history refspec it fetches already
     contains `+refs/tags/*:refs/tags/*`. DRIVEN in the sandbox above with
     that config instead: not shallow, 1079 commits, `v0.1.0` resolves, and

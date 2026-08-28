@@ -1584,8 +1584,11 @@ def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
     `jobs.test.steps[0]` and `jobs.build.steps[0]`; `publish` checks
     nothing out, and `grep -c "uses: actions/"` reading EIGHT there counts
     two artefact steps and four comment mentions alongside them. Both
-    checkouts carry exactly `persist-credentials: false` and
-    `fetch-depth: 0`, and no `fetch-tags`, which `fetch-depth: 0` makes
+    checkouts carry `persist-credentials: false`, `ref: ${{ github.sha }}`
+    and `fetch-depth: 0` — the `ref:` input arrived later than this sentence,
+    which read "exactly `persist-credentials: false` and `fetch-depth: 0`",
+    and it is what stops the action re-fetching `+<github.sha>:refs/tags/<tag>`
+    and overwriting a tag ref — and no `fetch-tags`, which `fetch-depth: 0` makes
     inert because the all-history refspec already contains
     `+refs/tags/*:refs/tags/*`. Built the way that config builds a tree —
     `git init`, ONE fetch of `+refs/heads/*:refs/remotes/origin/*` and
