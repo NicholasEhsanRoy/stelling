@@ -858,6 +858,41 @@ RULES = (
     ),
     Rule(
         when=(
+            "the solver battery's committed transcript directory is not in "
+            "this tree. It is TRACKED evidence — `scratchpad` is a WITHHELD "
+            "root, recorded in `tests/test_sdist_contents.py` as kept in the "
+            "tree it registers against and deliberately not distributed — and "
+            "`[tool.hatch.build.targets.sdist].include` does not carry it, so "
+            "an unpacked sdist has no transcripts for "
+            "`tests/test_solver_battery.py` to hold the page's quoted figures "
+            "to. What ships in their place is the reason `/tools` is "
+            "allowlisted at all: `tools/solver_battery.py` re-drives the "
+            "battery on the reader's own machine. THE CONDITION IS COMPUTABLE "
+            "HERE, so BOTH directions are asserted, and the predicate asks "
+            "the same question the site asks — is that directory here — "
+            "rather than testing for `.git` or for a tarball. UNTIL 0.2.1 "
+            "THIS WAS UNDISCLOSED, and it is the reason the completeness "
+            "verdict came out `failed` in every session run from an unpacked "
+            "sdist: measured 2026-08-28 at 17ef918, three skip entries in two "
+            "reason strings from one condition, `verdict=failed` and exit 1 "
+            "with jax and without it alike. The second spelling is gone (see "
+            "`test_the_clock_gap_the_page_states_is_the_one_its_transcripts_show`) "
+            "and what is left is one reason, emitted at one site. THE SITE "
+            "DERIVES IT with an f-string from its own `_EVIDENCE` constant, "
+            "so the literal below is a hand-typed twin of a computed string: "
+            "if the directory moves, the emitted reason moves, no rule names "
+            "it, and the skip reads as undisclosed — which is fail-closed and "
+            "is caught by ci.yml's `sdist-suite` job, and by nothing in a "
+            "checkout, where this skip never fires at all"
+        ),
+        reasons=frozenset({
+            "scratchpad/D7-solver-battery is tracked evidence and is not in "
+            "the sdist; there is nothing to check against here",
+        }),
+        legitimate=lambda: not (REPO / "scratchpad" / "D7-solver-battery").is_dir(),
+    ),
+    Rule(
+        when=(
             "git cannot read THIS TREE'S OWN HISTORY at the commit the "
             "routing manifest names — an unpacked sdist, an export, a "
             "shallow CI clone that does not reach it, a tree unpacked "

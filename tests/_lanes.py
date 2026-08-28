@@ -51,25 +51,26 @@ paragraph is not a claim that it is safe from the same thing.** What it has
 that the nightly reader did not is :func:`_agreed` and the four-link
 ``${EXTRAS}`` chain, which produce a NAMED can't-tell rather than a
 permissive default — so what is exposed here is the FIND layer, not the
-value layer. Re-measured 2026-08-28 at the commit that added the two
-working-tree lanes, off PyYAML's own event stream rather than off a regex
-for `&` and `*`: `ci.yml` carries **0 anchors, 0 aliases and 0 merge keys**,
-and :data:`_JOB` finds EVERY job a real parse finds — 12 of them then, where
-this sentence said *"all ten"* — plus `push:` from under `on:`, which
-:func:`_classify` drops for having no ``python -m pytest`` line. The figure
-is the rotting half and the AGREEMENT is the claim: what matters is that the
-two enumerations differ by that one known extra and by nothing else, at
-whatever size the file has reached. That gap is written down in
-`SWEEP-CARRY-FORWARD.md` rather than closed here.
+value layer. Re-measured 2026-08-28 at the commit that added the sdist
+lane, off PyYAML's own event stream rather than off a regex for `&` and
+`*`: `ci.yml` carries **0 anchors, 0 aliases and 0 merge keys**, and
+:data:`_JOB` finds EVERY job a real parse finds — 13 of them now, where this
+sentence said *"12 of them then"* and, before that, *"all ten"* — plus
+`push:` from under `on:`, which :func:`_classify` drops for having no
+``python -m pytest`` line. The figure is the rotting half and the AGREEMENT
+is the claim: what matters is that the two enumerations differ by that one
+known extra and by nothing else, at whatever size the file has reached. That
+gap is written down in `SWEEP-CARRY-FORWARD.md` rather than closed here.
 
 **AND THE MEASUREMENT NAMED TWO FILES AND COVERED ONE.** The paragraph
 above names ``release.yml`` as read the same way for the same reason, and
 the anchor/alias/merge-key figure was taken on `ci.yml` alone — a narrower
 measurement than the exposure it was disclosing. Taken now, the same way:
 ``release.yml`` carries **0 anchors, 0 aliases and 0 merge keys**, and its
-three jobs are ``build``, ``publish`` and ``test``. So nothing is wrong in
-either file today; what was wrong was a figure standing for a file it had
-not been taken on.
+three jobs are ``build``, ``publish`` and ``test``. (Both halves re-measured
+the same way at the commit that added the sdist lane; `release.yml` has not
+moved.) So nothing is wrong in either file today; what was wrong was a
+figure standing for a file it had not been taken on.
 
 **COMMENTS ARE STRIPPED IN ONE PLACE, :func:`_strip_comment`, AND THAT IS THE
 POINT.** This module used to drop *whole-line* comments only, and a comment is
@@ -329,12 +330,13 @@ def _code_lines(text: str) -> list[str]:
     is matched against ONE LINE of this list instead, and ``splitlines()``
     breaks on CR, CRLF, U+0085, U+2028 and U+2029 as well as on LF.
     Re-measured 2026-08-28 on this repository's own ``ci.yml``, re-rendered
-    with each of those five in place of every newline: **13 job blocks and 10
+    with each of those five in place of every newline: **14 job blocks and 11
     pytest lanes, identical tuples, in all five renderings**. (This read
-    *"11 job blocks and 8 pytest lanes … in all four renderings"*. The first
-    two figures moved when two lanes were added, which is what a count of a
-    growing file does; the *"four"* was wrong when it was written — there are
-    five break characters in the list it is counting, and
+    *"13 job blocks and 10 pytest lanes"*, and before that *"11 job blocks
+    and 8 pytest lanes … in all four renderings"*. The first two figures move
+    every time a lane is added, which is what a count of a growing file does;
+    the *"four"* was wrong when it was written — there are five break
+    characters in the list it is counting, and
     ``test_the_lane_reader_reads_ONE_FILE_however_its_lines_end`` drives all
     five.) The counts are a record of a run. What does not rot is the
     EQUALITY: the same tuples come back however the lines end. So the
@@ -591,14 +593,28 @@ EXPECTED_LANES: dict[str, tuple[str, bool | None, bool, bool, bool]] = {
     "acceptance-reproducer": ("matrix", True, True, False, True),
     "property": ("floating", False, False, False, False),
     "random-order": ("floating", True, True, True, False),
-    # THE TWO LANES WHOSE SUBJECT IS THE SHAPE OF THE WORKING TREE, and their
+    # THE LANES WHOSE SUBJECT IS THE SHAPE OF THE WORKING TREE, and their
     # readings are byte-identical to `test-no-jax`'s. That is expected rather
     # than a duplicate: what distinguishes them is not the environment they
     # provision but the TREE they provision it in — a `.venv` in the checkout,
-    # and a `--depth 1` clone — and this reading has no field for that and does
-    # not pretend to. Each also runs the suite TWICE and compares the two runs,
-    # which this table cannot see either: `whole_suite` means *some* step runs
+    # a `--depth 1` clone, and an unpacked sdist — and this reading has no
+    # field for that and does not pretend to.
+    #
+    # (This sentence said "THE TWO LANES" and named two. `sdist-suite` is the
+    # third, and it arrived one commit later. The count is gone rather than
+    # bumped, for the reason `Lane.verdict_channel` gives about its own
+    # fraction: a numeral over a population that grows every time a lane is
+    # added is a defect with a delay fuse, and the fact it stood for — these
+    # rows differ from `test-no-jax` in the tree and in nothing this table
+    # reads — does not move.)
+    #
+    # THE OTHER THING THIS TABLE CANNOT SEE is how many runs a job makes.
+    # `venv-in-the-working-tree` and `shallow-clone` each run the suite TWICE
+    # and compare the two reports; `sdist-suite` runs it once, because a
+    # distribution's suite EXITING 1 is visible in an exit code where a stray
+    # `.venv` and a shallow clone are not. `whole_suite` means *some* step runs
     # the whole tree, never *exactly one* does.
+    "sdist-suite": ("absent", True, True, False, True),
     "shallow-clone": ("absent", True, True, False, True),
     "test-jax": ("floating", True, True, False, True),
     "test-jax-0-10": ("0.10", True, True, False, True),
@@ -933,6 +949,7 @@ EXPECTED_PYTHON: dict[str, tuple[str, ...]] = {
     # somebody else on the day it runs, and a seed is not a reproducer without
     # the configuration it was drawn against.
     "ci.yml:random-order": ("runner-default", "reporting"),
+    "ci.yml:sdist-suite": ("runner-default",),
     "ci.yml:shallow-clone": ("runner-default",),
     "ci.yml:test-jax": ("runner-default",),
     "ci.yml:test-jax-0-10": ("runner-default",),

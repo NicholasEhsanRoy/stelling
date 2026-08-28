@@ -334,15 +334,36 @@ WITHHELD = {
 # Recording it here rather than in WITHHELD keeps the two questions apart: a
 # reader asking "why is this not distributed" must not be handed an entry whose
 # answer is "it is nothing BUT distributed".
+#
+# **AND "NEVER IN THIS CHECKOUT" WAS FALSE IN THE ONE TREE THIS DICT EXISTS
+# FOR.** The reason below used to read *"It exists at the root of an unpacked
+# sdist and never in this checkout"*. Run the suite FROM an unpacked sdist —
+# which is a place this comment's own paragraph above says it is meant to be
+# runnable — and the checkout IS an unpacked sdist, `PKG-INFO` is a real file
+# at its root, and `test_the_untracked_scan_agrees_with_the_tarball` copied it
+# into the tree it builds from and reported this entry as a false record.
+# Measured 2026-08-28 at 17ef918, `uv build --sdist` then `tar xzf` then the
+# whole suite inside the unpacked tree: `4 failed, 4760 passed, 30 skipped` on
+# jax + both solvers and `4 failed, 2362 passed, 199 skipped` with solvers and
+# no jax, and this was one of the four in both.
+#
+# THE ENTRY IS NOT THE DEFECT AND IT HAS NOT MOVED. What moved is how the
+# check decides whether a name here is really generated: it used to ask
+# whether the tree has a file at that path, which answers the question in a
+# git checkout and answers a DIFFERENT question in a distribution, where such
+# a file is the PREVIOUS build's output. It now decides by running the build —
+# see `test_the_untracked_scan_agrees_with_the_tarball`.
 GENERATED_IN_DISTRIBUTION = {
     "PKG-INFO": (
-        "written by the build backend from the project metadata. It exists at "
-        "the root of an unpacked sdist and never in this checkout, so it is "
-        "not an allowlist entry (the allowlist names tree paths) and not a "
-        "WITHHELD one (it is not withheld — it is the one member the tree "
-        "cannot supply). `test_the_untracked_scan_agrees_with_the_tarball` "
-        "subtracts exactly this name when it demands that every other member "
-        "have a counterpart in the tree"
+        "written by the build backend from the project metadata. It is not an "
+        "allowlist entry (the allowlist names tree paths) and not a WITHHELD "
+        "one (it is not withheld — it is the one member the tree cannot "
+        "supply, and a tree that HAS one at its root is an unpacked sdist "
+        "carrying the last build's output rather than a source of this one). "
+        "`test_the_untracked_scan_agrees_with_the_tarball` subtracts exactly "
+        "this name when it demands that every other member have a counterpart "
+        "in the tree, and establishes by intervention that the artefact's copy "
+        "does not come from the tree's"
     ),
 }
 
@@ -2236,6 +2257,69 @@ def test_an_arbitrary_new_file_does_not_ship(tmp_path: pathlib.Path) -> None:
     )
 
 
+#: The name the generated-member intervention uses as its POSITIVE CONTROL,
+#: and it is a real file this tree really ships. See
+#: :func:`_plant_generated_probes`: an intervention whose marker turns up in
+#: NO member proves nothing about the member it was aimed at, because "the
+#: build did not take this file" and "the reader cannot see a marker at all"
+#: look identical from the answer side. `README.md` is force-included AND
+#: allowlisted AND recorded in neither dict — the same benign example
+#: `test_a_record_of_a_force_included_path_is_read_as_false` uses — so its
+#: marker MUST come back, on the same build, or the absence next to it means
+#: nothing.
+_GENERATED_PROBE_CONTROL = "README.md"
+
+
+def _plant_generated_probes(
+    staged: pathlib.Path, names: set[str]
+) -> dict[str, str]:
+    """Append a unique marker to each of `names` that is a real file here.
+
+    **WHY AN INTERVENTION AND NOT A LOOK AT THE DISK.**
+    :data:`GENERATED_IN_DISTRIBUTION` claims a member is written by the
+    backend rather than taken from a file, and the check for that used to be
+    ``(staged / name).exists()``. That is the right question asked of the
+    wrong thing: it decides "is there a file here", and in a tree that IS an
+    unpacked sdist there is one — the last build's `PKG-INFO` — while the
+    build under way still generates its own. The two cases are
+    indistinguishable by looking, and byte-comparison cannot separate them
+    either, since building the same metadata twice produces the same bytes.
+
+    So the tree's file is MARKED and the artefact is read back. If the member
+    carries the marker the build took the file, and the record is false
+    whatever tree this is; if it does not, the backend wrote the member.
+    One question, decided by running the program, with the same answer in a
+    checkout and in a distribution.
+
+    Regular files only. A SYMLINK at such a path is never backend output — the
+    build stores it as a link or follows it, and either way the record is
+    false — so it is refused statically at the call site rather than written
+    through here.
+
+    Returns ``{name: marker}`` for the files it actually marked; a name with
+    nothing at its path is absent, which is the checkout's answer and needs no
+    experiment.
+    """
+    planted: dict[str, str] = {}
+    for name in sorted(names):
+        candidate = staged / name
+        if candidate.is_symlink() or not candidate.is_file():
+            continue
+        marker = "zz-generated-probe-" + name.replace("/", "-").replace(".", "-")
+        with candidate.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n{marker}\n")
+        # re-read, because an intervention that did not happen makes every
+        # absence below vacuous — the standard
+        # `test_an_arbitrary_new_file_does_not_ship` already holds itself to
+        assert marker in candidate.read_text(encoding="utf-8"), (
+            f"the marker was not written into {name}; nothing below could "
+            f"distinguish 'the build did not take this file' from 'there was "
+            f"no marker to find'"
+        )
+        planted[name] = marker
+    return planted
+
+
 # --- the scan against the artefact, on a tree that carries every hazard ------
 
 # Every path this control plants, with what the BUILD must do with it. The four
@@ -2324,10 +2408,32 @@ def test_the_untracked_scan_agrees_with_the_tarball(tmp_path: pathlib.Path) -> N
     Two of the three, not all three: the invocation still carries
     ``-c core.excludesFile=/dev/null``, so the global-gitignore case survives
     that particular mistake and the other two do not.
+
+    **AND THE THIRD THING THIS BUILD IS USED FOR: WHETHER A NAME IN**
+    :data:`GENERATED_IN_DISTRIBUTION` **IS REALLY GENERATED.** That was a look
+    at the disk — *"the tree has a file at that path"* — which decides the
+    question in a git checkout and decides a different one in an unpacked
+    sdist, where such a file is the previous build's output. It reported
+    `PKG-INFO` as a false record in every sdist session; see
+    :func:`_plant_generated_probes` for the argument and
+    :data:`GENERATED_IN_DISTRIBUTION` for the measurement. The marked files
+    are planted before the repository below is created, so the tree the build
+    reads is the tree the markers are in, and the answer costs no second
+    build.
     """
     allow = _allowlist()
     _assert_allowlist_is_plain(allow)
     staged = _tree_to_build(tmp_path)
+
+    # THE GENERATED-MEMBER INTERVENTION, planted before anything else touches
+    # the tree so the repository below commits a marked file rather than a
+    # modified one. `_GENERATED_PROBE_CONTROL` rides on the same build: a
+    # marker that turns up in NO member says nothing about the member it was
+    # aimed at, so one name whose marker MUST come back is planted beside the
+    # ones whose markers must not.
+    planted = _plant_generated_probes(
+        staged, set(GENERATED_IN_DISTRIBUTION) | {_GENERATED_PROBE_CONTROL}
+    )
 
     # A real repository, so that `git status` has something to be wrong about.
     _git(["init", "-q", "."], staged)
@@ -2387,6 +2493,20 @@ def test_the_untracked_scan_agrees_with_the_tarball(tmp_path: pathlib.Path) -> N
     assert len(built) == 1, f"expected one sdist, got {built}"
     with tarfile.open(built[0]) as tf:
         members = tf.getnames()
+        # WHICH MARKED FILES THE ARTEFACT FOLLOWED. Read here, inside the one
+        # `tarfile.open` this test does, because the answer is a property of
+        # the member's BYTES and nothing else in this file reads those.
+        followed = set()
+        for full in members:
+            _, _, relative = full.partition("/")
+            marker = planted.get(relative)
+            if marker is None:
+                continue
+            handle = tf.extractfile(full)
+            if handle is None:  # a directory or a link, not a regular member
+                continue
+            if marker in handle.read().decode("utf-8", "replace"):
+                followed.add(relative)
     assert any(n.endswith("/pyproject.toml") for n in members), (
         "the built sdist has no pyproject.toml — this is not a real artefact "
         "and the comparison below would be vacuous"
@@ -2409,22 +2529,91 @@ def test_the_untracked_scan_agrees_with_the_tarball(tmp_path: pathlib.Path) -> N
     # exempt from the two assertions that follow — and nothing used to check
     # that a name in it is generated at all. That is the escape hatch WITHHELD
     # used to be, and it is closed the same way: by asking the question the
-    # dict claims to answer. A backend-generated member has no counterpart in
-    # the tree and is not force-included from one; and a name that is not in
-    # the artefact at all is a rotted entry widening the exemption for nothing.
+    # dict claims to answer. A name that is not in the artefact at all is a
+    # rotted entry widening the exemption for nothing.
+    #
+    # THE OTHER HALF OF THAT SENTENCE IS WITHDRAWN AND IS THE 0.2.1 REPAIR.
+    # It read *"A backend-generated member has no counterpart in the tree and
+    # is not force-included from one"*, and the first clause is FALSE in the
+    # one tree this dict exists for: run from an unpacked sdist, the tree has
+    # a `PKG-INFO` at its root — the previous build's — and the member this
+    # build writes is generated all the same. Having no counterpart is not
+    # what makes a member generated; not being TAKEN from the counterpart is,
+    # and that is decided by the intervention below rather than by looking.
+    # The force-include clause stands: it is the one route the intervention
+    # cannot reach, because the file may be outside this tree.
+    #
+    # THE POSITIVE CONTROL FIRST, because everything after it is an absence.
+    # If the marker in a file the build really does take does not come back,
+    # then the planting, the build or the reader is broken and the absences
+    # below are vacuous rather than reassuring.
+    assert _GENERATED_PROBE_CONTROL in planted, (
+        f"{_GENERATED_PROBE_CONTROL} is this intervention's positive control "
+        f"and there is no such regular file in the staged tree, so nothing "
+        f"was planted in it"
+    )
+    assert _GENERATED_PROBE_CONTROL in followed, (
+        f"the marker planted in {_GENERATED_PROBE_CONTROL} did not reach the "
+        f"artefact. That file IS taken from this tree — it is force-included "
+        f"and allowlisted both — so either the build did not read the tree "
+        f"the markers were planted in, or the reader above cannot see a "
+        f"marker at all. Every 'the member is generated' verdict below is an "
+        f"absence measured with that instrument and none of them means "
+        f"anything until this passes."
+    )
+    assert _GENERATED_PROBE_CONTROL not in GENERATED_IN_DISTRIBUTION, (
+        f"{_GENERATED_PROBE_CONTROL} is the control for this experiment and "
+        f"is now one of its subjects; pick a control the dict does not name"
+    )
+
     forced_here = _force_included(staged)
+    # WHAT MAKES A RECORD FALSE, and there are three routes rather than one.
+    #
+    # THIS USED TO BE `(staged / name).exists()`, WHICH IS THE RIGHT QUESTION
+    # ASKED OF THE WRONG THING. A name in this dict claims the BACKEND writes
+    # the member; "there is a file at that path" is a proxy for that, and it is
+    # a correct proxy in a git checkout and a wrong one in an unpacked sdist,
+    # where such a file is the LAST build's output and this build still
+    # generates its own. Run from an unpacked sdist the proxy reported
+    # `PKG-INFO` as a false record — measured 2026-08-28 at 17ef918, one of the
+    # four failures the suite the sdist ships exited 1 on — while the record
+    # was true. Byte-comparison cannot separate the two either: the same
+    # metadata built twice gives the same bytes.
+    #
+    # So the question is decided by RUNNING THE BUILD. The tree's file is
+    # marked before the build and the member is read after it: a member
+    # carrying the marker came from the file, and that is a false record in
+    # ANY tree. The two static routes stay, because neither is answerable that
+    # way — a force-included path may be taken from a file OUTSIDE this tree
+    # (an ancestor's `.hgignore`), and a symlink is never something a backend
+    # wrote.
+    #
+    # The `.hgignore` drive this assertion was built on is unaffected: that
+    # file is force-included, so it is caught by the first route below without
+    # ever reaching the intervention.
+    def _why_false(name: str) -> str | None:
+        if name in forced_here:
+            return f"hatchling FORCE-INCLUDES it from {forced_here[name]}"
+        if (staged / name).is_symlink():
+            return (
+                f"the tree has a SYMLINK at that path "
+                f"({os.readlink(staged / name)}); a backend does not write one"
+            )
+        if name in followed:
+            return (
+                f"the artefact's copy carries a marker this test wrote into "
+                f"{staged / name} before the build, so the member was TAKEN "
+                f"FROM THAT FILE and not generated"
+            )
+        return None
+
     dishonest = sorted(
-        name
-        for name in GENERATED_IN_DISTRIBUTION
-        if (staged / name).exists()
-        or (staged / name).is_symlink()
-        or name in forced_here
+        name for name in GENERATED_IN_DISTRIBUTION if _why_false(name)
     )
     assert not dishonest, (
         "these names are recorded in GENERATED_IN_DISTRIBUTION and are NOT "
-        "generated — the tree has a file at that path, or hatchling "
-        "force-includes one there:\n    "
-        + "\n    ".join(f"{name}  <- {forced_here.get(name, staged / name)}" for name in dishonest)
+        "generated:\n    "
+        + "\n    ".join(f"{name}  <- {_why_false(name)}" for name in dishonest)
         + "\n\nThat dict exempts a name from the counterpart check below and "
         "from the scan/tarball comparison, so an entry that is really a file "
         "buys a shipping path a silent pass. Driven at a4c16fe with a root "

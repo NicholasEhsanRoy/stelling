@@ -776,9 +776,21 @@ def test_the_clock_gap_the_page_states_is_the_one_its_transcripts_show(row_n):
     and a busy box cannot redden it.
 
     Watched to fail: putting *"a hundred to three hundred"* back on row 10.
+
+    **THE EARLY GUARD THIS USED TO OPEN WITH IS GONE, AND IT WAS A SECOND
+    SPELLING RATHER THAN A SECOND CHECK.** It read ``if not
+    _EVIDENCE.is_dir(): pytest.skip("scratchpad/ is tracked evidence and is
+    not in the sdist")`` — the same condition :func:`_evidence_or_skip` tests
+    on the very next line, under a different sentence, and one that named the
+    whole working directory where the condition is about :data:`_EVIDENCE`
+    alone. Two reasons for one condition is a skip set that has to be
+    disclosed twice, and it was: measured 2026-08-28 at 17ef918
+    inside an unpacked sdist, `tests/test_skip_inventory.py` reported THREE
+    undisclosed skip entries here in TWO reason strings, from ONE condition
+    and one parametrised test. The condition is now stated once, at the site
+    that reads the directory, and disclosed once in
+    `tests/test_skip_inventory.py`'s ``RULES``.
     """
-    if not _EVIDENCE.is_dir():
-        pytest.skip("scratchpad/ is tracked evidence and is not in the sdist")
     los, his = [], []
     for name in _BATTERY_RUNS:
         lo, hi = _measured_z3(_evidence_or_skip(name), row_n)
