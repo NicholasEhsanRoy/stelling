@@ -836,7 +836,7 @@ repairing them, and the repairs are in place above and in
   swept — a paragraph naming what a sweep reached must move when the page
   grows a section the sweep never saw, or the reach statement quietly
   widens to cover text nobody drove.
-* **The `## Log` below was not read line by line.** It is **16,168 lines** as
+* **The `## Log` below was not read line by line.** It is **16,204 lines** as
   this is written — the `## Log` heading to the end of the file, and that is
   the population — and it was swept EXHAUSTIVELY BY INSTRUMENT — every
   `path::name` citation, every backticked module-qualified identifier, every
@@ -858,8 +858,8 @@ repairing them, and the repairs are in place above and in
   arithmetic were all stale by 2026-08-25 and are re-derived here rather
   than left**: measured on this tree by the same two rules — physical lines
   from the `## Log` heading to the last line of the file, and
-  `_detail_sections` over the 72 routed bodies — the Log is **16,168**
-  lines, the routed sections **3,470**, and the difference **12,698**,
+  `_detail_sections` over the 72 routed bodies — the Log is **16,204**
+  lines, the routed sections **3,470**, and the difference **12,734**,
   which is not 11,000-odd any more either. The two rules are stated because
   they are what reproduce the historical figures: they give 14,926 at
   `3fe29d3`, 14,924 at `391e50e` and 14,823 at `5ad906f`, so nothing above
@@ -8108,12 +8108,35 @@ and a count over entries that happened to say something is not a count.
   *whether zero is a value the divisor can take*.
 
   **What the propagator knew, measured rather than assumed.** Nothing.
-  `_classify_cmp` meets the CLOSED half-space and writes it straight into
-  `env`; strictness is destroyed at that line and no table, flag or note
-  survives it. Transfers receive `(eqn, params, ins)` — boxes only — so
-  even a `div` whose divisor IS the assumed variable could not recover it.
-  It is *recoverable*, though, because the assume equation is still in the
-  jaxpr and the propagator still sees it, which is what the fix does.
+  `_Propagator._classify_assumed_pred` meets the CLOSED half-space and
+  writes it straight into `env`; strictness is destroyed at that line and
+  no table, flag or note survives it. Transfers receive `(eqn, params,
+  ins)` — boxes only — so even a `div` whose divisor IS the assumed
+  variable could not recover it. It is *recoverable*, though, because the
+  assume equation is still in the jaxpr and the propagator still sees it,
+  which is what the fix does.
+
+  **That method was named `_classify_cmp` here until 2026-08-28, and it is
+  a pointer that was never live.** `git log --all -S "def _classify_cmp"
+  -- src/` returns no commit at any revision, so the name is not a rename
+  half-finished and correcting it destroys no record — it was broken from
+  the line it was written on. The 0.2.1 sweep found the same invented name
+  at eight sites and `_Walker`, a class this repository has also never
+  had, at two more; both of these were among them, and they were the last
+  two repaired, because neither gate that caught the others can see this
+  page. `tests/test_referenced_names_resolve.py` reads `src/` and resolves
+  Sphinx roles; these are plain backticks and this is not `src/`.
+  `tests/test_documented_names_exist.py` reads documents, but this page is
+  a DATED EVENT RECORD and is excluded from its corpus by rule — and it
+  would have called the name present anyway, because it tests presence by
+  substring over `src/` and the correction record in
+  `src/stelling/propagate.py` puts `_classify_cmp` back into that text.
+  That last point is a limit of that gate which 0.2.1 opened, declared and
+  drove rather than closed; its reasons are in the other file's docstring.
+  **THE SENTENCE ITSELF STANDS AND IS A READING OF THE PRE-FIX
+  TREE**, not of this one: a table does now survive that line, and it is
+  the subject of the next paragraph. What the propagator knew BEFORE is
+  the whole diagnosis, so rewriting it would delete the finding.
 
   **The fix: a strict-sign certificate, one source, one rule set, one
   consumer.** `_Propagator.strict_sign` maps a var id to `+1`/`-1`, read
@@ -8121,12 +8144,25 @@ and a count over entries that happened to say something is not a count.
   point of the assumed region" — a claim about true reals, never about the
   box.
 
-  * **Source** (`_classify_cmp`): a strict `gt` with every per-element
-    bound `>= 0` records `+1`; a strict `lt` with every bound `<= 0`
-    records `-1`. `assume(x > -5)` records nothing, which is right: it
-    excludes no zero. Later assumes cannot invalidate a record, because
-    narrowing is a meet and the assumed region is the conjunction — a fact
-    true of the region stays true of every sub-region.
+  * **Source** (`_Propagator._classify_assumed_pred`, named
+    `_classify_cmp` here until 2026-08-28 — see above): a strict `gt` with
+    every per-element bound `>= 0` records `+1`; a strict `lt` with every
+    bound `<= 0` records `-1`. `assume(x > -5)` records nothing, which is
+    right: it excludes no zero. Later assumes cannot invalidate a record,
+    because narrowing is a meet and the assumed region is the conjunction
+    — a fact true of the region stays true of every sub-region.
+
+    **"one source" IN THE HEADING ABOVE WAS TRUE WHEN THIS ENTRY WAS
+    WRITTEN AND STOPPED BEING TRUE THE SAME DAY**, and it stands because
+    it is a record. This entry landed at `0dff2a9`, 2026-08-15 04:18;
+    `0fc6c13`, 2026-08-15 06:07, gave a CONSTVAR its own strict sign in
+    `_Propagator.run`, and that is a second writer of the table. Since
+    then the table has had two writers and the CERTIFICATE has had three
+    sources — those two plus `_literal_strict_sign`, which recomputes a
+    literal's sign on every read and stores nothing. The comment in
+    `src/stelling/propagate.py` that said "THE ONE SOURCE" was corrected
+    in 0.2.1; this sentence is dated instead, because what the fix was on
+    the day it shipped is the thing this log is for.
   * **Propagation** (`_strict_sign_out`, a closed by-NAME set):
     `mul`/`div` multiply the signs; `add`/`add_any` keep a shared sign;
     `neg` flips; `abs`/`square` give `+1`; `integer_pow` gives `+1` for

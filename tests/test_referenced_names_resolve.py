@@ -7,21 +7,43 @@
 reason it exists. That gate's subject is *"a name a document presents as
 EXISTING, that `src/` does not have"*, and it reads the project's `.md`
 prose. It cannot see a stale reference written in a source docstring, and it
-would not judge one the same way if it could — so **nine references to three
-names that do not exist** stood in this repository: eight of them inside
-`src/`, six of those in `src/stelling/propagate.py`, the file whose subject
-is a soundness certificate, and no gate could reach any of them.
+would not judge one the same way if it could — so **eleven references to
+three names that do not exist** stood in this repository, and no gate could
+reach any of them.
 
-**WHAT WAS THERE.** Measured at `9b5b496` on 2026-08-28, before the repairs
-this branch ships with:
+**THIS SAID "NINE", AND NINE WAS THE COUNT OF WHAT THIS FILE CAN SEE RATHER
+THAN OF WHAT WAS THERE** — the 0.2.1 audit found the other two. They are in
+`SOUNDNESS.md`, a tracked, shipped page and an sdist member, and they are
+outside both gates by construction: this one reads `src/` and resolves
+Sphinx roles, and `SOUNDNESS.md`'s two are plain backticks. **A census taken
+with one instrument and reported as a census of the tree is the defect this
+branch is about, one level up**, and it is worth more than the two sites it
+undercounted.
 
-* ``:meth:`_classify_cmp` `` at four sites in `src/stelling/propagate.py`,
-  plus a fifth in a plain backticked comment there and a sixth in
-  `tests/test_strict_sign_algebra.py`. **`git log --all -S "def
-  _classify_cmp" -- src/` returns nothing**: the name has never been defined
-  in this repository. The method those six sentences describe is
-  `_Propagator._classify_assumed_pred`, added in `8106a55` (2026-08-07); the
-  first of the six landed the same day, in `f116890`.
+**WHAT WAS THERE.** Measured at `9b5b496` on 2026-08-28 by counting every
+occurrence of the three names in every tracked file, and staged by whether
+the occurrence is a Sphinx role or a plain backtick:
+
+    src/                     8   (6 roles, 2 plain)
+    SOUNDNESS.md             2   (0 roles, 2 plain)
+    tests/                   1   (0 roles, 1 plain)
+                            ──
+                            11   (6 roles, 5 plain)
+
+Six of the eight in `src/` are in `src/stelling/propagate.py`, the file
+whose subject is a soundness certificate. Per name: `_classify_cmp` eight,
+`_Walker` two, `ir.JaxprEqn.from_dict` one.
+
+* `_classify_cmp`, eight sites — four ``:meth:`` roles in
+  `src/stelling/propagate.py`, a fifth occurrence in a plain backticked
+  comment there, a sixth in `tests/test_strict_sign_algebra.py`, and TWO IN
+  `SOUNDNESS.md`, both plain backticks and both present-tense claims about
+  the propagator. **`git log --all -S "def _classify_cmp" -- src/` returns
+  nothing**: the name has never been defined in this repository. The method
+  those eight sentences describe is `_Propagator._classify_assumed_pred`,
+  added in `8106a55` (2026-08-07); the first of the eight landed the same
+  day, in `f116890`. The `SOUNDNESS.md` two were repaired one release later,
+  in 0.2.1's fix round, and that page's entry carries the record.
 * ``:meth:`_Walker._conjunct_certainly_true` `` in `propagate.py`, and
   `_Walker` again in a plain comment in `src/stelling/obligation.py`. **`git
   log --all -S "class _Walker" -- src/` also returns nothing.** The class is
@@ -108,11 +130,12 @@ A target resolves if, read from the module it is written in:
 * **A name that exists but is not the one the sentence means.** This decides
   existence, never aptness. ``:meth:`slice` `` would resolve just as happily
   if the sentence were about some other slicer.
-* **The plain backticked identifier**, which is how three of the nine stale
-  references above were written (`` `_classify_cmp` `` in a comment in
+* **The plain backticked identifier**, which is how five of the eleven
+  stale references above were written (`` `_classify_cmp` `` in a comment in
   `propagate.py`, `` `_Walker._classify_assumed_pred` `` in one in
-  `obligation.py`, and `` `_classify_cmp` `` again in
-  `tests/test_strict_sign_algebra.py`). A gate over every backticked word in
+  `obligation.py`, `` `_classify_cmp` `` again in
+  `tests/test_strict_sign_algebra.py`, and twice more in `SOUNDNESS.md`).
+  A gate over every backticked word in
   `src/` would report parameter names, jax primitive names, SMT-LIB
   operators, shell fragments and English words in emphasis; that is the
   false-positive rate the sibling file's docstring says kills a lint. Those
@@ -124,9 +147,44 @@ A target resolves if, read from the module it is written in:
   resolves them — and it is the one place a Python VERSION moves this gate: a
   name that becomes a builtin stops being checked here.
 
+## The hole this branch OPENED in the sibling gate, and why it stays open
+
+`tests/test_documented_names_exist.py` decides "present in `src/`" by
+substring over the concatenated source text, comments and docstrings
+included. **The correction records this branch wrote keep `_classify_cmp`
+and `_Walker` in that text**, so a document that asserted either name would
+now be told it exists — by the very sentences that say it does not. A gate
+whose presence test is satisfied by a record of absence has stopped looking
+for that name, and this branch is what put it there.
+
+**It is not closed, and the obvious way to close it is refused on a
+measurement rather than on a preference.** The strengthening would be to
+resolve an asserted name as a SYMBOL — this file already builds that table,
+and the 0.2.1 audit checked it against the imported runtime package. Run
+over the sibling's own corpus on this tree, that swap turns **39 of its 62
+asserted-name rows** into findings — 28 distinct document-and-name pairs,
+**25 distinct names across 14 documents** — and the names are `real`,
+`ieee`, `int8`, `float32`, `bool`, `UNCHECKED`, `vacuity_mode`,
+`fill_value`, `precision`, `arithmetic`, `stability`: verdict VALUES and
+record KEYS, which are strings in this project and symbols in no tree. That
+is exactly the false-positive rate the sibling's docstring says kills a
+lint, now re-derived instead of believed. A derived rule — *"in the source
+text, not a symbol, and asserted by a document"* — selects the same 39 rows
+and fails for the same reason.
+
+**So the limit is declared and DRIVEN instead**, by
+:func:`test_the_sibling_gates_presence_test_is_satisfied_by_a_record_of_absence`,
+which plants each name in the sibling's own constructions, runs its own
+`missing_names`, and asserts it reports nothing — with a control that a name
+absent from the text is still caught. Two facts that test also holds, and
+either can go red: the names are still not symbols (if one becomes one, the
+entry is dead), and **no document in the sibling's corpus asserts either of
+them today**, so the hole is LATENT rather than live. That last assertion is
+the alarm the sibling gate cannot raise for itself.
+
 ## Why `src/` and not `tests/`
 
-`tests/test_strict_sign_algebra.py` carried one of the nine stale
+`tests/test_strict_sign_algebra.py` carried one of the eleven stale
 references, so the answer is not automatic. It is still `src/` only, and the
 reason is about the construction rather than about the directory:
 
@@ -158,6 +216,7 @@ import builtins
 import collections
 import dataclasses
 import functools
+import importlib
 import pathlib
 import re
 import sys
@@ -191,6 +250,25 @@ NON_PYTHON_ROLES = {
            "`tests/test_documented_names_exist.py` is what reads that tree",
     "doc": "a path to a document, resolved against the documentation source "
            "root and never against any Python module",
+}
+
+#: The names this repository has RECORDED AS NEVER DEFINED, and which its own
+#: records therefore keep present in `src/` as text. Two, and the table is
+#: prunable in three directions rather than being a list nobody revisits —
+#: :func:`test_the_sibling_gates_presence_test_is_satisfied_by_a_record_of_absence`
+#: fails if a name here becomes a symbol, if the record that mentions it is
+#: deleted, or if a document in the sibling gate's corpus starts asserting
+#: it. It is not an allowlist: nothing here is excused, and the entries exist
+#: so that the blindness they describe is measured on every run.
+NEVER_DEFINED = {
+    "_classify_cmp": "the name eight sentences gave "
+        "`_Propagator._classify_assumed_pred`; `git log --all -S \"def "
+        "_classify_cmp\" -- src/` returns no commit at any revision, and the "
+        "correction record above `class _Propagator` is what keeps the string "
+        "in `src/`",
+    "_Walker": "the name two sentences gave `_Propagator`; `git log --all -S "
+        "\"class _Walker\" -- src/` likewise returns no commit, and the same "
+        "correction record quotes it",
 }
 
 #: A dotted path of Python identifiers, which is the only target shape this
@@ -705,6 +783,92 @@ def test_every_role_in_src_is_classified():
         assert len(why.split()) >= 10, (
             f"the entry for :{role}: carries no reason a reader can check"
         )
+
+
+def test_the_sibling_gates_presence_test_is_satisfied_by_a_record_of_absence():
+    """The limit this branch opened in `tests/test_documented_names_exist.py`.
+
+    **A GUARD THAT IS GREEN BECAUSE IT IS BLIND IS THE THING THIS REPOSITORY
+    KEEPS FINDING**, so the blindness is measured here rather than asserted
+    in a docstring. The sibling gate decides "present in `src/`" by substring
+    over the source text; the correction records this branch wrote put
+    `_classify_cmp` and `_Walker` into that text; so a document asserting
+    either name is now told it exists by the sentences that say it does not.
+
+    **THIS TEST GOES RED WHEN THE HOLE IS CLOSED, AND THAT IS THE POINT.**
+    If the sibling gate ever stops reporting the plant below as findable,
+    delete this test and say so — the same discipline
+    `test_documented_names_exist.py::test_every_permitted_name_is_still_needed`
+    uses. Until then it is the only thing in the tree that re-derives the
+    limit every run.
+
+    The module docstring carries why the obvious repair — resolving an
+    asserted name as a symbol — is refused: 28 of 62 rows, on a measurement
+    rather than on a preference.
+    """
+    sibling = importlib.import_module("test_documented_names_exist")
+    table = namespace()
+    source = sibling._in_source()
+    absent = "a_name_that_is_definitely_not_in_this_package"
+
+    for name, why in NEVER_DEFINED.items():
+        assert len(why.split()) >= 12, (
+            f"the entry for {name!r} carries no reason a reader can check"
+        )
+        # 1. still not a symbol. If it becomes one, the entry is dead.
+        resolved = any(
+            name in module.bound
+            or any(p.rpartition(".")[-1] == name for p in module.attributes)
+            for module in table.values()
+        )
+        assert not resolved, (
+            f"{name!r} is a symbol of this package now, so nothing about it "
+            f"is a record of absence any more. Delete its `NEVER_DEFINED` "
+            f"entry and the paragraph that describes this limit."
+        )
+        # 2. still in the source TEXT, which is what makes the hole real.
+        assert name in source, (
+            f"{name!r} is no longer anywhere in `src/`, so the record that "
+            f"kept it there is gone and the sibling gate can see it again. "
+            f"Delete its `NEVER_DEFINED` entry."
+        )
+        # 3. THE HOLE, driven through the sibling's own machinery: its four
+        #    constructions, its own `missing_names`, its own source text.
+        planted = f"The `{name}` method is read on every assume."
+        assert sibling.asserted_names(planted), (
+            f"the plant for {name!r} does not fire the sibling's own "
+            f"constructions, so this test would prove nothing about it"
+        )
+        assert not sibling.missing_names([("<plant>", planted)], source), (
+            f"the sibling gate now REPORTS {name!r}. The hole is closed — "
+            f"delete this test and the limit paragraph in the module "
+            f"docstring, which both say it is open."
+        )
+
+    # THE CONTROL, without which the three assertions above are satisfied by
+    # a gate that reports nothing at all.
+    control = f"The `{absent}` method is read on every assume."
+    assert sibling.missing_names([("<plant>", control)], source), (
+        "the sibling gate did not report a name that is nowhere in `src/`. "
+        "Its own tests own that failure, but this one cannot distinguish "
+        "'blind to records of absence' from 'blind to everything' without it."
+    )
+
+    # ... and the hole is LATENT, not live: nothing the sibling gate actually
+    # reads asserts either name. This is the alarm that gate cannot raise for
+    # itself, and it is derived from its corpus rather than pinned.
+    live = sorted(
+        (rel, name)
+        for rel, text in sibling.corpus()
+        for _line, _label, name, _q in sibling.asserted_names(text)
+        if name in NEVER_DEFINED
+    )
+    assert not live, (
+        f"a document the sibling gate reads now asserts a name this tree "
+        f"only records as never-defined: {live}. That gate will call it "
+        f"PRESENT, because a correction record in `src/` spells it. Repair "
+        f"the document — the name has never existed."
+    )
 
 
 @pytest.mark.parametrize("stage", ["files", "references", "resolutions"])
