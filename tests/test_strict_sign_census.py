@@ -1469,181 +1469,361 @@ def test_the_message_names_every_transfer_in_one_of_its_three_lists():
 
 
 # --- F3: the narrowing that makes those four xfails non-vacuous, ENFORCED ----
+#
+# TWO INSTRUMENTS, DIFFERENT REACH, AND NEITHER IS TOTAL ALONE. Getting this
+# wrong is what the re-audit caught: the first version of this section claimed
+# that its AST walker and the property suite's walker PARTITIONED `tests/`,
+# and the check that said so called this module's own walker twice and derived
+# the other half by string-matching `"property/"` in a nodeid. It was an
+# identity of one walker with itself, true whatever the other covered.
+#
+#   * :func:`_collected_xfail_markers` asks PYTEST. It runs a real collection
+#     and reads `item.iter_markers("xfail")`, so it is INDEPENDENT OF SPELLING
+#     — a marker written as a decorator, as `pytestmark`, through an imported
+#     name, via `getattr`, or attached by a `conftest.py` all arrive the same
+#     way. Its reach is what this lane actually COLLECTS: every module under
+#     `tests/property/` gates on `importorskip("hypothesis")`, which is in
+#     none of the three merge lanes, so their markers are invisible to it
+#     there.
+#   * :func:`_xfail_markers_under` reads SOURCE. Its reach is every `*.py`
+#     under `tests/` whether or not it imports in this lane — but it can only
+#     see the spellings it matches syntactically.
+#
+# THE RESIDUAL, stated because it is real: a marker reached through a plain
+# NAME inside `tests/property/` is seen by neither on a merge lane — not by
+# collection (the module does not import) and not by the source walk (the
+# name is an `ast.Name`, and what it is bound to is not decidable from this
+# file). The property suite's own walker does not see it either; it reads
+# `decorator_list` only. Anything of that shape outside `tests/property/` IS
+# caught, by collection — driven below.
 
+import ast as _ast
+import json as _json
+import os as _os
+import subprocess as _subprocess
+import sys as _sys
 
 _TESTS_DIR = __import__("pathlib").Path(__file__).resolve().parent
+_REPO_ROOT = _TESTS_DIR.parent
+
+_MARK_DUMPER = '''
+import json, os
+def pytest_collection_modifyitems(items):
+    out = []
+    for item in items:
+        for mark in item.iter_markers("xfail"):
+            out.append({
+                "nodeid": item.nodeid,
+                "args": len(mark.args),
+                "kwargs": sorted(mark.kwargs),
+                "strict": mark.kwargs.get("strict"),
+                "reason": bool(mark.kwargs.get("reason")),
+            })
+    with open(os.environ["STELLING_MARKDUMP"], "w") as handle:
+        json.dump({"items": len(items), "marks": out}, handle)
+'''
+"""The collection plugin, as source. Written to a `tmp_path` and loaded with
+`-p`, which is the idiom `tests/test_skip_inventory.py` already uses for the
+sessions it has to run from outside itself."""
 
 
-def _xfail_markers_under(root, skip_dir):
-    """Every `pytest.mark.xfail(...)` under `root`, as ``(where, kwargs)``.
+def _collected_xfail_markers(tmp_path):
+    """Every `xfail` marker PYTEST sees, over a real collection of `tests/`.
 
-    AST, and by the CALL rather than by decorator position — two reasons,
-    both measured.
+    Returns ``(collected item count, [marker dicts])``. Measured at
+    `68ca084` on the jax lane: 5123 items collected in 2.2 s, so this is a
+    three-second check and not a second suite."""
+    plugin_dir = tmp_path / "markplugin"
+    plugin_dir.mkdir()
+    (plugin_dir / "stelling_markdump.py").write_text(_MARK_DUMPER, "utf-8")
+    dump = tmp_path / "marks.json"
+    env = dict(_os.environ)
+    env["PYTHONPATH"] = _os.pathsep.join(
+        [str(_REPO_ROOT / "src"), str(plugin_dir), env.get("PYTHONPATH", "")]
+    )
+    env["STELLING_MARKDUMP"] = str(dump)
+    proc = _subprocess.run(
+        [_sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         "-p", "stelling_markdump", "--collect-only", str(_TESTS_DIR)],
+        cwd=str(_REPO_ROOT), env=env, capture_output=True, text=True,
+        timeout=900,
+    )
+    assert dump.exists(), (
+        "the collection sub-session wrote no marker dump, so this check "
+        f"observed nothing:\nexit {proc.returncode}\n{proc.stdout[-3000:]}"
+    )
+    data = _json.loads(dump.read_text("utf-8"))
+    return data["items"], data["marks"]
 
-    A regex is wrong because `tests/test_skip_inventory.py` carries the text
+
+def _xfail_markers_under(root):
+    """Every syntactic `pytest.mark.xfail(...)` under `root`, as
+    ``(where, kwargs)``.
+
+    AST and not a regex: `tests/test_skip_inventory.py` carries the text
     `@pytest.mark.xfail(run=False, ...)` inside the SUBJECT SOURCES it writes
     to temp files for its miniature sessions, and a text scan reads those as
     live markers on this suite. Measured: a text scan over `tests/` reports
     seven files, the AST reports one.
 
-    Decorator position alone is wrong because THIS MODULE'S OWN MARKERS ARE
-    NOT IN IT. They are built inside `_zero_row_params` and handed to
-    `pytest.param(..., marks=marks)` through a local variable, so a walker
-    that reads `decorator_list` and `marks=` literals finds zero of them —
-    measured, this test failed exactly that way when it was written. What is
-    stable is the CALL: `pytest.mark.xfail(...)` is the thing the rule is
-    about, wherever it is spelled.
-    """
-    import ast
+    By the CALL and not by decorator position, because THIS MODULE'S OWN
+    MARKERS ARE NOT IN DECORATOR POSITION — they are built inside
+    `_zero_row_params` and handed to `pytest.param(..., marks=marks)` through
+    a local, and a walker reading `decorator_list` finds zero of them
+    (measured; it is also the shape the property suite's walker still has).
 
+    **WHAT IT CANNOT SEE, and this is the correction the re-audit forced.**
+    It matches an attribute chain ending in `xfail` and containing `mark`. A
+    marker built elsewhere and reached through a plain NAME is an `ast.Name`
+    and matches nothing, as a decorator or inside `marks=`. That vector is
+    covered by :func:`_collected_xfail_markers` instead — for every module
+    that imports in this lane — and the residual is stated in the block
+    comment above. Over `*.py` and not `test_*.py`, so a `conftest.py` that
+    attaches one is in scope."""
     out = []
-    for path in sorted(root.rglob("test_*.py")):
-        if skip_dir in path.parts:
-            continue
+    for path in sorted(root.rglob("*.py")):
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except SyntaxError:  # pragma: no cover - a broken test file reds first
+            tree = _ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - a broken file reds first
             continue
         enclosing = {}
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                for child in ast.walk(node):
+        for node in _ast.walk(tree):
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                for child in _ast.walk(node):
                     enclosing.setdefault(id(child), node.name)
-        rel = path.relative_to(_TESTS_DIR.parent)
-        # the `func` of a Call is itself an Attribute node that `ast.walk`
-        # visits, so a called marker would be counted twice — once as the
-        # call and once as the bare attribute. The bare form (`@pytest.mark
-        # .xfail` with no parentheses) still has to be caught, since it
-        # carries none of the three required kwargs, so the called ones are
-        # subtracted rather than the bare ones ignored.
-        called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and id(node) in called:
+        rel = path.relative_to(_REPO_ROOT)
+        called = {id(n.func) for n in _ast.walk(tree)
+                  if isinstance(n, _ast.Call)}
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Attribute) and id(node) in called:
                 continue
-            func = node.func if isinstance(node, ast.Call) else node
-            if not (isinstance(func, ast.Attribute) and func.attr == "xfail"):
+            func = node.func if isinstance(node, _ast.Call) else node
+            if not (isinstance(func, _ast.Attribute) and func.attr == "xfail"):
                 continue
             chain, cur = [], func.value
-            while isinstance(cur, ast.Attribute):
+            while isinstance(cur, _ast.Attribute):
                 chain.append(cur.attr)
                 cur = cur.value
-            if isinstance(cur, ast.Name):
+            if isinstance(cur, _ast.Name):
                 chain.append(cur.id)
             if "mark" not in chain:
                 continue
             kwargs = (
                 {k.arg: k.value for k in node.keywords}
-                if isinstance(node, ast.Call) else {}
+                if isinstance(node, _ast.Call) else {}
             )
-            out.append((
-                f"{rel}::{enclosing.get(id(node), '<module>')}", kwargs,
-            ))
+            out.append(
+                (f"{rel}::{enclosing.get(id(node), '<module>')}", kwargs)
+            )
     return out
 
 
-def test_every_xfail_OUTSIDE_the_property_suite_is_strict_and_narrowed():
-    """THE RULE THAT WAS APPLIED BY HAND, APPLIED BY A CHECK INSTEAD.
+def _bad_marker(nodeid, strict, has_raises, has_reason):
+    problems = []
+    if strict is not True:
+        problems.append(
+            f"{nodeid}: xfail is not `strict=True`. A non-strict xfail passes "
+            f"silently the day the defect is fixed, which is the one day it "
+            f"must not be the first to notice."
+        )
+    if not has_raises:
+        problems.append(
+            f"{nodeid}: xfail carries no `raises=`, so it is a blanket "
+            f"amnesty over every exception the test can raise — its vacuity "
+            f"guards included, which then fail GREEN."
+        )
+    if not has_reason:
+        problems.append(
+            f"{nodeid}: xfail carries no `reason=`, so the run's summary line "
+            f"does not say what is not being checked."
+        )
+    return problems
+
+
+def test_every_xfail_PYTEST_COLLECTS_is_strict_and_narrowed(tmp_path):
+    """THE RULE, ASKED OF PYTEST RATHER THAN OF THE SOURCE.
 
     `tests/property/test_suite_disclosure.py::
-    test_every_xfail_in_the_suite_is_strict_and_narrowed_by_raises` states
-    the rule — strict, narrowed to an exception type, carrying a reason —
-    and says in its own docstring that it "applies to every xfail in the
-    tree rather than to one named test". **Its implementation walks
-    `tests/property/` only**, and it is gated on `importorskip("hypothesis")`,
-    which is absent from all three merge lanes. So the four `xfail` markers
-    this module carries — MEASURED by the AST walk above, the only live ones
-    anywhere outside `tests/property/` — stood under a comment saying the
-    rule had been "applied by hand", and by nothing else.
+    test_every_xfail_in_the_suite_is_strict_and_narrowed_by_raises` states the
+    rule — strict, narrowed to an exception type, carrying a reason — and says
+    it "applies to every xfail in the tree rather than to one named test".
+    Its implementation walks `tests/property/` MINUS two files, non-
+    recursively, reading `decorator_list`.
 
-    Applied by hand means enforced by nothing. DRIVEN: with
-    `raises=WrongSignedZeroUnderCertificate` deleted AND the class row broken
-    so it executes no zero at all, this file came back
-    `164 passed, 4 xfailed` and `test_suite_disclosure.py` plus
-    `test_skip_inventory.py` came back `81 passed, 1 skipped`. A blanket
-    amnesty over `AssertionError` swallows this table's own vacuity guards
-    and nothing objected.
+    **THE ONE REASON THIS CHECK IS HERE IS SCOPE, AND THE FIRST VERSION OF
+    THIS DOCSTRING GAVE A DIFFERENT AND FALSE ONE.** It said the property
+    suite's check "is gated on `importorskip(\\"hypothesis\\")`, which is
+    absent from all three merge lanes" and that this check "is here rather
+    than in the property suite for one reason: it must RUN in the lanes that
+    gate a merge". `test_suite_disclosure.py` carries NO hypothesis gate —
+    measured, that test is `1 passed` on `stelling-nojax` and on
+    `stelling-jax`. It runs in every lane. What it does not do is reach
+    `tests/` outside `tests/property/`, and that — scope, not gating — is why
+    this exists.
 
-    This check is here rather than in the property suite for one reason: it
-    must RUN in the lanes that gate a merge, and it needs neither jax nor
-    hypothesis to do it. The two checks are asserted jointly TOTAL over
-    `tests/` below, so the division of labour cannot leave a gap."""
+    Asking pytest is what makes this spelling-independent. DRIVEN, a marker
+    built in another module and reached through a plain name::
+
+        tests/_audit_marks.py:  BLANKET = pytest.mark.xfail
+        used as `@BLANKET` and as `pytest.param(1, marks=BLANKET)`
+          -> the planted module: 2 xfailed, EXIT 0, two hard AssertionErrors
+             swallowed
+          -> the source walker: 3 passed, it matched an `ast.Name` and
+             therefore nothing
+
+    REACH, stated: what a collection sees is what this lane IMPORTS. Every
+    module under `tests/property/` gates on hypothesis, absent from all three
+    merge lanes, so their markers are invisible here — which is exactly why
+    the source walker below still earns its place."""
+    items, marks = _collected_xfail_markers(tmp_path)
+    assert items > 100, (
+        f"the collection sub-session collected {items} item(s); it did not "
+        f"collect the suite, so this check saw almost none of it"
+    )
     bad = []
-    for nodeid, kw in _xfail_markers_under(_TESTS_DIR, "property"):
-        import ast as _ast
-
-        strict = kw.get("strict")
-        if not (isinstance(strict, _ast.Constant) and strict.value is True):
-            bad.append(
-                f"{nodeid}: xfail is not `strict=True`. A non-strict xfail "
-                f"passes silently the day the defect is fixed, which is the "
-                f"one day it must not be the first to notice."
-            )
-        if "raises" not in kw:
-            bad.append(
-                f"{nodeid}: xfail carries no `raises=`, so it is a blanket "
-                f"amnesty over every exception the test can raise — its "
-                f"vacuity guards included, which then fail GREEN."
-            )
-        if not kw.get("reason"):
-            bad.append(
-                f"{nodeid}: xfail carries no `reason=`, so the run's summary "
-                f"line does not say what is not being checked."
-            )
-    assert not bad, "\n  ".join(["xfail markers outside tests/property/:", *bad])
-
-
-def test_this_module_is_where_those_markers_ARE_so_the_check_is_not_vacuous():
-    """The absence half. A walker that finds nothing passes for free.
-
-    Both directions: this module must still carry markers for the check above
-    to be about anything, and the count is DERIVED from the diverging rows
-    rather than typed, so adding a diverging row without a marker reds."""
-    found = _xfail_markers_under(_TESTS_DIR, "property")
-    mine = [n for n, _ in found if "test_strict_sign_census.py::" in n]
-    assert len(mine) == 1, (
-        f"this module builds its markers at ONE `pytest.mark.xfail(...)` "
-        f"site inside `_zero_row_params`, and the walk finds {len(mine)}: "
-        f"{mine}. The check above is measuring something other than this "
-        f"table."
+    for mark in marks:
+        bad.extend(_bad_marker(
+            mark["nodeid"], mark["strict"],
+            "raises" in mark["kwargs"], mark["reason"],
+        ))
+    assert not bad, "\n  ".join(
+        ["xfail markers pytest collected in this lane:", *bad]
     )
-    # ...and that one site is what marks every diverging row, derived
+    mine = [m for m in marks if "test_strict_sign_census.py" in m["nodeid"]]
     want = sum(1 for r in ZERO_UNDER_CERTIFICATE.values() if r.diverges)
-    marked = sum(
-        1 for prm in _zero_row_params()
-        if getattr(prm, "marks", ())
-    )
-    assert marked == want > 0, (
-        f"{want} row(s) declare `diverges` and {marked} carry a mark; the "
-        f"one site above is not reaching every diverging row"
-    )
-    assert len(found) == len(mine), (
-        f"an xfail marker appeared outside `tests/property/` and outside this "
-        f"module: {sorted(n for n, _ in found if n not in mine)}. That is "
-        f"fine — but it is now this check's business, and this assertion is "
-        f"how its author finds that out."
+    assert len(mine) == want, (
+        f"{want} row(s) of ZERO_UNDER_CERTIFICATE declare `diverges` and "
+        f"pytest collected {len(mine)} xfail marker(s) in this module. The "
+        f"rule above is being asked of something other than this table."
     )
 
 
-def test_the_two_xfail_WALKERS_are_jointly_total_over_the_tests_tree():
-    """Neither check may assume the other's scope.
+def test_every_xfail_IN_THE_SOURCE_is_strict_and_narrowed():
+    """The same rule over every `*.py` under `tests/`, importable or not.
 
-    The property suite's walker takes `tests/property/`; the one above takes
-    everything else. Total by construction only while both predicates are the
-    complement of each other, so the complement is asserted here rather than
-    trusted — over the file set pytest would actually collect."""
-    everywhere = _xfail_markers_under(_TESTS_DIR, "\0no-such-part\0")
-    outside = _xfail_markers_under(_TESTS_DIR, "property")
-    inside = [n for n, _ in everywhere if "property/" in n.replace("\\", "/")]
-    assert len(everywhere) == len(outside) + len(inside), (
-        f"{len(everywhere)} xfail markers under `tests/`, {len(outside)} "
-        f"claimed by this module's walker and {len(inside)} by the property "
-        f"suite's — the two do not partition the tree and a marker is "
-        f"governed by neither"
+    This is the half that reaches `tests/property/` on a merge lane, where
+    nothing collects. It is spelling-limited where the collection check is
+    not, and lane-independent where the collection check is not; the block
+    comment above states what falls between them.
+
+    DRIVEN — with `raises=` deleted AND the class row broken so it executes no
+    zero, before either of these checks existed, this file came back
+    `164 passed, 4 xfailed` and the disclosure gates came back
+    `81 passed, 1 skipped`. A blanket amnesty over `AssertionError` swallows
+    this table's own vacuity guards and nothing objected."""
+    bad = []
+    for nodeid, kw in _xfail_markers_under(_TESTS_DIR):
+        strict = kw.get("strict")
+        bad.extend(_bad_marker(
+            nodeid,
+            strict.value if isinstance(strict, _ast.Constant) else None,
+            "raises" in kw,
+            bool(kw.get("reason")),
+        ))
+    assert not bad, "\n  ".join(["xfail markers in the source:", *bad])
+
+
+def test_the_source_walk_and_the_collection_AGREE_where_both_can_see():
+    """Neither instrument may be trusted where the other cannot check it.
+
+    The claim this replaces was that the two walkers PARTITION `tests/`. They
+    do not, and the test that said so never asked the other walker: it called
+    this module's own twice and split the result by a substring. Measured,
+    two plants that both walkers passed:
+
+        bare `@pytest.mark.xfail` in tests/property/test_generator_floor.py
+          — which `_property_modules()` excludes by name —          3 passed
+        `pytestmark = [pytest.mark.xfail(strict=False)]` in
+          tests/property/test_metamorphic.py, which it does NOT
+          exclude, but reads `decorator_list` and so misses  3 passed, and
+          the property suite's own walker: 1 passed
+
+    So this asserts the relationship that IS true: every marker the source
+    walk finds outside `tests/property/` is one pytest also collects here,
+    and this module's own markers are found by both. A marker that one sees
+    and the other does not, in the region where both should see it, means one
+    of them has quietly narrowed."""
+    source = {
+        nodeid.split("::")[0]
+        for nodeid, _ in _xfail_markers_under(_TESTS_DIR)
+        if "property" not in nodeid.split("::")[0].split("/")
+    }
+    assert "tests/test_strict_sign_census.py" in source, (
+        "the source walk no longer finds this module's own markers, so it is "
+        "measuring nothing and the agreement below is vacuous"
     )
-    assert inside, (
-        "the property suite carries no xfail marker, so the walker this one "
-        "divides labour with has nothing to do and the division is a claim "
-        "about nothing"
+    # the property suite's own scope, read from ITS definitions rather than
+    # guessed at, so its two by-name exclusions cannot silently widen
+    disclosure = _TESTS_DIR / "property" / "test_suite_disclosure.py"
+    text = disclosure.read_text(encoding="utf-8")
+    assert '"test_generator_floor.py",' in text and "HERE.glob" in text, (
+        "`test_suite_disclosure.py` no longer excludes `test_generator_floor"
+        ".py` by name from a non-recursive glob. Its scope has changed and "
+        "the residual this section documents must be re-measured."
+    )
+    assert "decorator_list" in text, (
+        "`test_suite_disclosure.py` no longer reads `decorator_list`; if it "
+        "now reads markers another way, the residual documented above — a "
+        "name-reached marker inside `tests/property/` seen by nobody — may "
+        "be closed, and this section should say so"
+    )
+
+
+# --- F3 (re-audit): the tests themselves, pinned so DELETION is caught ------
+
+_OWNED_PIN_DOC = """The three modules this item owns, and the tests they define.
+
+**WHY A PIN AND NOT A DERIVATION.** Every other guard in these modules is
+derived from the tree at test time, which is the house rule. It cannot be
+here: the thing being guarded against is a test FUNCTION VANISHING, and any
+count or set derived from the file shrinks with it. Measured — deleting
+three contiguous guards from the sweep module leaves `44 passed`, exit 0,
+against a 47-test baseline, and deleting this item's positive witness AND the
+citation guard together leaves `309 passed, 9 skipped, 4 xfailed`, exit 0.
+Nothing anywhere pins a test count, and **38 of these 52 test functions
+appear nowhere in the repository but their own `def` line**, so a citation
+check cannot catch their removal either.
+
+The price is that ADDING a test to one of these modules reds this until the
+name is written here. That is the price of deletion being detectable, and it
+is paid deliberately."""
+
+
+def _defined_test_names(path):
+    tree = _ast.parse(path.read_text(encoding="utf-8"))
+    return frozenset(
+        node.name for node in _ast.walk(tree)
+        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
+    )
+
+
+def test_no_test_this_item_owns_has_been_DELETED():
+    """The guard the re-audit asked for, and the one shape of loss every
+    other check in these modules is blind to.
+
+    Both directions: a name in the pin that no longer exists is a deleted
+    test, and a name in the file that is not in the pin is a new test whose
+    author must add it here. The pin lives in `_OWNED_PIN`, beside this."""
+    problems = []
+    for rel, names in sorted(_OWNED_PIN.items()):
+        path = _REPO_ROOT / rel
+        assert path.exists(), f"{rel} is gone entirely"
+        found = _defined_test_names(path)
+        gone = sorted(names - found)
+        added = sorted(found - names)
+        if gone:
+            problems.append(
+                f"{rel}: {len(gone)} test(s) this item defined are GONE: "
+                f"{gone}"
+            )
+        if added:
+            problems.append(
+                f"{rel}: {len(added)} test(s) exist that the pin does not "
+                f"name: {added} — add them to `_OWNED_PIN`"
+            )
+    assert not problems, "\n  ".join(
+        ["the tests this item owns have changed:", *problems]
     )
 
 
@@ -1714,3 +1894,70 @@ def test_the_seeded_reduction_sign_bit_has_a_witness_that_is_NOT_an_amnesty():
 
 def _show_zero(v: float) -> str:
     return "-0.0" if math.copysign(1.0, v) < 0 else "+0.0"
+
+
+_OWNED_PIN = {
+    "tests/test_strict_sign_census.py": frozenset({
+        "test_DELIBERATELY_NO_RULE_is_non_empty_and_every_member_carries_a_reason",
+        "test_a_ROUTING_rule_that_produces_an_EMPTY_output_certifies_nothing",
+        "test_a_multi_output_equation_mints_nothing_outside_the_routing_class",
+        "test_a_primitive_in_two_classes_RAISES",
+        "test_a_routing_primitive_with_no_value_operands_mints_nothing",
+        "test_a_strict_assume_on_a_SIZE_0_declaration_certifies_nothing",
+        "test_a_wrong_VALUE_OPERAND_map_is_caught_by_the_executed_program",
+        "test_an_executed_zero_under_a_certificate_carries_the_CERTIFIED_sign_bit",
+        "test_an_exempt_primitive_mints_nothing_even_with_every_operand_certified",
+        "test_boundary_div_tolerates_only_a_MATCHING_signed_zero",
+        "test_every_0_3_0_rule_has_an_EXECUTED_truth_case",
+        "test_every_exempt_primitive_is_PROBED",
+        "test_every_rule_carrying_primitive_has_a_case_that_MINTS_and_one_that_DROPS",
+        "test_every_rule_carrying_primitive_is_PROBED",
+        "test_every_rule_the_message_names_as_conditioned_really_is",
+        "test_every_xfail_IN_THE_SOURCE_is_strict_and_narrowed",
+        "test_every_xfail_PYTEST_COLLECTS_is_strict_and_narrowed",
+        "test_max_and_min_are_the_two_ROUTING_members_that_are_not_a_bit_copy",
+        "test_no_test_this_item_owns_has_been_DELETED",
+        "test_registering_a_transfer_without_classifying_it_RAISES",
+        "test_sign_is_refused_because_ITS_TRANSFER_adds_a_zero_and_sqrt_does_not",
+        "test_sqrt_diverges_on_a_STRICTLY_SMALLER_set_than_the_mul_this_table_admits",
+        "test_the_census_classes_are_disjoint",
+        "test_the_census_is_total_over_TRANSFERS",
+        "test_the_certificate_is_TRUE_of_the_EXECUTED_program",
+        "test_the_decline_message_makes_no_COUNT_claim_about_the_conditioned_rules",
+        "test_the_gated_set_is_DERIVED_from_the_census",
+        "test_the_message_names_every_transfer_in_one_of_its_three_lists",
+        "test_the_one_writer_refuses_a_size_0_value_and_accepts_a_sized_one",
+        "test_the_rule_answers_what_the_census_says_it_does",
+        "test_the_seeded_reduction_sign_bit_has_a_witness_that_is_NOT_an_amnesty",
+        "test_the_source_walk_and_the_collection_AGREE_where_both_can_see",
+        "test_the_target_flushes_a_subnormal_SQRT_OPERAND_to_zero",
+        "test_the_value_operand_map_defaults_to_EVERY_operand",
+        "test_the_zero_table_has_a_control_in_BOTH_directions",
+    }),
+    "tests/test_executed_sign_bit_sweep.py": frozenset({
+        "test_MAINS_TEN_are_all_still_carried_on_this_branch",
+        "test_THE_ANSWER_for_MAINS_TEN_carrying_primitives",
+        "test_THE_ANSWER_for_THE_CENSUSS_THIRTY_ONE_carrying_primitives",
+        "test_a_certified_div_under_an_ORDINARY_declaration_executes_as_NaN",
+        "test_a_certified_value_really_CAN_execute_as_a_matching_signed_zero",
+        "test_every_row_actually_EXECUTED_a_zero_and_the_counts_are_reported",
+        "test_every_row_carries_an_ARGUMENT",
+        "test_every_run_really_EXECUTES_the_primitive_it_is_a_row_for",
+        "test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves",
+        "test_the_0_3_0_widening_admitted_no_new_SIBLING_but_did_widen_the_REACH",
+        "test_the_CLASSIFIER_separates_the_three_buckets",
+        "test_the_SAME_reduction_compiles_AT_LEAST_THREE_WAYS_and_they_disagree_on_the_sign_bit",
+        "test_the_THIRD_lowering_changes_the_bits_and_changes_NO_CLASSIFICATION",
+        "test_the_census_module_still_carries_the_DELETION_pin_and_its_guards",
+        "test_the_declared_bucket_is_the_one_the_TARGET_puts_in_memory",
+        "test_the_jit_leg_agrees_with_the_eager_one_except_where_DECLARED",
+        "test_the_sweep_is_TOTAL_over_the_carrying_set",
+        "test_the_three_certificate_SOURCES_cannot_mint_a_wrong_signed_zero",
+    }),
+    "tests/property/test_strict_sign_property.py": frozenset({
+        "test_a_certified_sign_is_TRUE_at_every_assumed_point",
+    }),
+}
+"""The test functions each owned module defines, as of this commit."""
+
+OWNED_TEST_NAMES = dict(_OWNED_PIN)

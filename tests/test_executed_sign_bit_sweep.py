@@ -107,6 +107,18 @@ for the second.
 * It says nothing about VERDICTS. Whether a wrong-signed zero reaches a
   wrong answer is `boundary_div`'s four-arm asymmetry, pinned in the census
   module.
+* **three routing rows exclude their one dangerous configuration BY READING
+  THE TRANSFER, in a module whose headline is the opposite.** `gather`,
+  `dynamic_slice` and `scatter` are clean here partly because their admitted
+  row forms cannot reach a fill or a clamp — and that argument is read off
+  `_t_gather`/`_t_dynamic_slice`/`_t_scatter`, not executed. It holds
+  (`_t_gather` raises on a straddling index range, and `_strict_sign_out` is
+  reached only after the transfer has returned, so an out-of-range form never
+  gets a certificate to be wrong about), and it is still an argument of the
+  kind this module says it does not make. Named as a shape rather than
+  repaired: executing the excluded form would mean building an equation the
+  transfer declines, which mints nothing, so there is no configuration to
+  execute. The rows that ARE executed are executed.
 * **rank > 1 and non-trivial params.** Every row is rank 0 or rank 1 with a
   small static extent and the simplest admitted dimension numbers. A
   reduction over one axis of a rank-3 operand, a batched `dot_general`, a
@@ -1403,7 +1415,13 @@ def test_the_three_certificate_SOURCES_cannot_mint_a_wrong_signed_zero():
       `x < 0` (or `> 0`) over ℝ, so every point of the assumed region is a
       strictly signed real, and binary64's round-to-nearest carries a
       negative real to a negative float or to `-0.0` — never to `+0.0`.
-      Driven with a real that underflows the format entirely.
+      Driven with a real that underflows the format entirely. **DRIVEN IN
+      CPYTHON, not on the target**: these are constant expressions evaluated
+      by the interpreter, so this bullet is a fact about IEEE binary64
+      rounding and not about what jax does with it. The same fact is driven
+      ON JAX one bullet down, where a certified subnormal literal is
+      multiplied and comes back `-0.0`; that is the one that speaks about
+      the program.
     * **a LITERAL.** `_literal_strict_sign` reads the decoded value, and
       `-0.0 < 0` is False in ℝ and in Python, so a signed-zero literal is
       certified 0 and mints nothing. Both zeros checked.
@@ -1616,7 +1634,14 @@ def test_the_0_3_0_widening_admitted_no_new_SIBLING_but_did_widen_the_REACH():
     with only `_STRICT_SIGN_PRIMITIVES` swapped between the two carrying
     sets. The certificate's presence is what flips the verdict, and the
     verdict flips to a DISCHARGED obligation the compiled program makes
-    false at every sampled point of the assumed region."""
+    false at every sampled point of the assumed region.
+
+    THIS MUTATES `P._STRICT_SIGN_PRIMITIVES` IN A MODULE THAT MEMOIZES
+    THROUGH IT (`_CACHE`, `_FOLD_CACHE`). Restored in `finally`, and the
+    trap is a spurious RED and not a silent pass: a memo poisoned under the
+    narrow set would make a row look clean and red its own bucket assertion,
+    which is the direction that gets noticed. Stated because the reader
+    should not have to re-derive it."""
     pytest.importorskip("jax")
     jax, jnp, lax = _f64_lax()
     from stelling.harness import any_array, assert_, assume, trace
@@ -1894,6 +1919,63 @@ def test_the_SAME_reduction_compiles_AT_LEAST_THREE_WAYS_and_they_disagree_on_th
         )
 
 
+def _prose_of(path):
+    """This item's prose in `path`, split into the three kinds it lives in:
+    ``{"docstrings": [...], "strings": [...], "comments": [...]}``.
+
+    AST, so a `def test_…` line is NOT prose. That distinction is half the
+    correction the re-audit forced: the first version regexed the WHOLE
+    SOURCE TEXT, so every test's own definition counted as a citation of
+    itself — of the 57 names it collected, 52 were local definitions.
+
+    SPLIT BY KIND, which is the other half. Counting them together is what
+    let the floor survive the mutation it exists to catch: replace every
+    DOCSTRING with a placeholder and the assertion-message strings still
+    carry eight foreign citations, over any single global floor. Measured on
+    this tree, citations that are NOT this item's own definitions:
+
+        docstrings      11
+        other strings    8
+        comments         3
+
+    so each kind is floored separately below."""
+    import ast
+    import io
+    import tokenize
+
+    text = path.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    doc_ids = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef))
+        and node.body and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+        and isinstance(node.body[0].value.value, str)
+    }
+    out = {"docstrings": [], "strings": [], "comments": []}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            key = "docstrings" if id(node) in doc_ids else "strings"
+            out[key].append(node.value)
+    for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+        if tok.type == tokenize.COMMENT:
+            out["comments"].append(tok.string)
+    return out
+
+
+def _cited_names(chunks):
+    """Backticked-or-bare `test_…` names in `chunks`, de-wrapped across
+    adjacent string literals only — see the house rule in the assertion
+    below for why the join is deliberately not fuzzier."""
+    import re
+
+    flat = re.sub(r'"\s*\n\s*(?:f?")?', "", "\n".join(chunks))
+    flat = re.sub(r"\s*\n\s*#?\s*", " ", flat)
+    return set(re.findall(r"\btest_[A-Za-z0-9_]{8,}\b", flat))
+
+
 def test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves():
     """A citation nobody reads is a claim about nothing, and this one bit.
 
@@ -1905,19 +1987,27 @@ def test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves():
     THIS IS NOT HYPOTHETICAL AND IT IS WHY THE CHECK EXISTS. While this
     item's fixes were being written, an edit that replaced a block by index
     truncated the tail of this module: the third-lowering machinery and two
-    whole tests went with it, and **three citations of the
-    three-lowerings test — one of them the `xfail` reason string pytest
-    prints in the summary line — were left pointing at nothing.** (Its name
-    is not spelled here: this scan is strict about line wraps, deliberately,
-    and the rule that buys the strictness is below.) The suite stayed
-    green: the file still imported, the surviving tests still passed, and no
-    gate in the tree reads a docstring. It was found by a red-drive anchor
-    failing to match, which is luck.
+    whole tests went with it, and **three citations of the three-lowerings
+    test — one of them the `xfail` reason string pytest prints in the summary
+    line — were left pointing at nothing.** The suite stayed green: the file
+    still imported, the surviving tests still passed, and no gate in the tree
+    reads a docstring. It was found by a red-drive anchor failing to match,
+    which is luck.
+
+    **WHAT THIS DOES NOT REACH, and the re-audit measured it.** It fires only
+    on a citation that resolves to NOTHING. It cannot see a test that is
+    deleted and cited nowhere — and 38 of this item's 52 test functions
+    appeared nowhere in the repository but their own `def` line, so deleting
+    them was invisible here. That is
+    `tests/test_strict_sign_census.py::test_no_test_this_item_owns_has_been_DELETED`'s
+    job, which pins the names; this one keeps the CITATIONS honest. It also
+    cannot protect itself: it is one function in a file, and a truncation
+    that removes it removes the report before anything it could report on —
+    which is why the pin lives in the other module.
 
     Scope: the three modules this item owns. Tree-wide is
     `test_prose_hygiene.py`'s business and widening it is not this item's."""
     import ast
-    import re
 
     owned = (
         _TESTS_ROOT / "test_executed_sign_bit_sweep.py",
@@ -1928,7 +2018,7 @@ def test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves():
     # things this item's prose points at, and `test_prose_hygiene.py`'s own
     # resolver is built the same way (`names.add(path.stem)` beside the
     # defined function names)
-    defined = set()
+    defined, local = set(), set()
     for path in sorted(_TESTS_ROOT.rglob("test_*.py")):
         defined.add(path.stem)
         try:
@@ -1938,18 +2028,18 @@ def test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves():
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 defined.add(node.name)
+                if path in owned:
+                    local.add(node.name)
 
-    # a cited name may be wrapped across lines inside a docstring or split
-    # across adjacent string literals, so the source is de-wrapped first
-    cited, dangling = set(), []
+    by_kind = {"docstrings": set(), "strings": set(), "comments": set()}
+    dangling = []
     for path in owned:
-        text = path.read_text(encoding="utf-8")
-        flat = re.sub(r'"\s*\n\s*(?:f?")?', "", text)
-        flat = re.sub(r"\s*\n\s*#?\s*", " ", flat)
-        for name in re.findall(r"\btest_[A-Za-z0-9_]{8,}\b", flat):
-            cited.add(name)
-            if name not in defined:
-                dangling.append(f"{path.name}: {name}")
+        prose = _prose_of(path)
+        for kind, chunks in prose.items():
+            for name in _cited_names(chunks):
+                by_kind[kind].add(name)
+                if name not in defined:
+                    dangling.append(f"{path.name}: {name}")
 
     assert not dangling, (
         "test name(s) cited in this item's prose that no test defines:\n  "
@@ -1963,8 +2053,67 @@ def test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves():
         "buys is: a cited symbol goes on one line, or is split only at a "
         "string-literal boundary."
     )
-    assert len(cited) > 10, (
-        f"only {len(cited)} test name(s) were found cited across "
-        f"{[p.name for p in owned]}; the scan has stopped reading the prose "
-        f"it is supposed to check"
+
+    # THE NON-VACUITY HALF, per kind and counting only names that are NOT
+    # this item's own definitions. Floors are set below the measurements in
+    # `_prose_of`'s docstring (11 / 8 / 3); a single global floor is what the
+    # broken version had, and stripping every docstring cleared it on the
+    # assertion strings alone.
+    floors = {"docstrings": 4, "strings": 3, "comments": 1}
+    thin = []
+    for kind, floor in sorted(floors.items()):
+        foreign = by_kind[kind] - local
+        if len(foreign) < floor:
+            thin.append(
+                f"{kind}: {len(foreign)} foreign citation(s) < {floor} "
+                f"({sorted(foreign)})"
+            )
+    assert not thin, (
+        "this item's prose has stopped citing the tests it is supposed to "
+        "point at, by kind:\n  " + "\n  ".join(thin)
+        + "\n\nEach kind is floored separately because they fail "
+        "separately: a refactor that rewrites docstrings leaves the "
+        "assertion strings intact, and a single total cannot tell you that."
+    )
+
+
+def test_the_census_module_still_carries_the_DELETION_pin_and_its_guards():
+    """The reciprocal half, and the reason it lives in the OTHER file.
+
+    `test_no_test_this_item_owns_has_been_DELETED` catches a test of this
+    module vanishing. Nothing catches IT vanishing, because a guard cannot
+    report its own removal — and it and the marker checks all sit in the tail
+    of `tests/test_strict_sign_census.py`, which is where the one truncation
+    this item actually suffered landed.
+
+    So each module asserts the other's guards exist. Deleting one file's tail
+    is caught here; deleting both is a two-file edit that a diff shows."""
+    census = _TESTS_ROOT / "test_strict_sign_census.py"
+    import ast
+
+    tree = ast.parse(census.read_text(encoding="utf-8"))
+    names = {
+        node.name for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assigned = {
+        target.id
+        for node in ast.walk(tree) if isinstance(node, ast.Assign)
+        for target in node.targets if isinstance(target, ast.Name)
+    }
+    required = {
+        "test_no_test_this_item_owns_has_been_DELETED",
+        "test_every_xfail_PYTEST_COLLECTS_is_strict_and_narrowed",
+        "test_every_xfail_IN_THE_SOURCE_is_strict_and_narrowed",
+        "test_the_seeded_reduction_sign_bit_has_a_witness_that_is_NOT_an_amnesty",
+    }
+    missing = sorted(required - names)
+    assert not missing, (
+        f"{census.name} no longer defines {missing}. Those are the guards "
+        f"that catch a test of THIS module being deleted and the four xfail "
+        f"markers being widened; without them both are undetectable."
+    )
+    assert "_OWNED_PIN" in assigned, (
+        f"{census.name} no longer assigns `_OWNED_PIN`, so the deletion "
+        f"guard has nothing to compare against and passes over an empty table"
     )
