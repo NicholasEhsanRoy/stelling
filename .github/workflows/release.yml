@@ -1212,15 +1212,54 @@ jobs:
           # pattern would step PAST a malformed newest heading and take an
           # older one for the newest, which is a guard reading the absence of
           # a match as the absence of a problem.
-          heading_any='^##[[:space:]]'
-          heading_re='^##[[:space:]]+([0-9][0-9A-Za-z._+!-]*)[[:space:]]+—[[:space:]]+([^[:space:]].*[^[:space:]]|[^[:space:]])[[:space:]]*$'
+          # THE HEADING RULE IS A RENDERER'S, NOT A REGEX'S, AND AN AUDITOR
+          # DROVE WHY. This read `^##[[:space:]]` and its Python twin read
+          # `^##\s` over the whole document. Both missed a heading indented by
+          # ONE TO THREE spaces, which CommonMark renders as an ordinary <h2> --
+          # so a NEWER heading written that way was stepped past to an older
+          # one, and this gate returned rc=0 over exactly the tag/heading
+          # disagreement it exists to refuse. Both also took a `##` line inside
+          # a fenced block or an HTML comment, and `CHANGELOG.md` opens with an
+          # HTML comment. Driven, on the body this file shipped: an indented
+          # newer heading gave `release.yml gate rc=0`.
+          #
+          # Four leading spaces is an indented code block and is deliberately
+          # NOT a heading, which is why the bound is three. `##` with nothing
+          # after it IS a heading line and is refused by `heading_re` below,
+          # which is the point -- refusing beats reading past.
+          heading_any='^ {0,3}##([[:space:]]|$)'
+          heading_re='^[[:space:]]*##[[:space:]]+([0-9][0-9A-Za-z._+!-]*)[[:space:]]+—[[:space:]]+([^[:space:]].*[^[:space:]]|[^[:space:]])[[:space:]]*$'
           heading=""
           heading_version=""
           heading_rest=""
           if [ ! -f CHANGELOG.md ] || [ ! -r CHANGELOG.md ]; then
             problems+=("there is no readable regular file called CHANGELOG.md at the root of the tagged tree, so the release note this tag claims to carry cannot be read at all.")
           else
+            fenced=0
+            in_comment=0
             while IFS= read -r line || [ -n "${line}" ]; do
+              if [ "${in_comment}" -eq 1 ]; then
+                case "${line}" in *'-->'*) in_comment=0 ;; esac
+                continue
+              fi
+              # A FENCE IS MATCHED WITH `case` AND NOT A REGEX, because a
+              # backtick cannot be written into a single-quoted bash regex in
+              # this YAML without the backslash surviving into the pattern --
+              # driven: the first attempt made every line read as a fence and
+              # the gate reported "no '## ' heading at all" on a changelog
+              # whose first line is one.
+              case "${line}" in
+                '```'*|' ```'*|'  ```'*|'   ```'*|\
+                '~~~'*|' ~~~'*|'  ~~~'*|'   ~~~'*)
+                  fenced=$(( 1 - fenced )); continue ;;
+              esac
+              if [ "${fenced}" -eq 0 ]; then
+                case "${line}" in
+                  *'<!--'*'-->'*) : ;;
+                  *'<!--'*) in_comment=1; continue ;;
+                esac
+              fi
+              [ "${fenced}" -eq 1 ] && continue
               if [[ "${line}" =~ $heading_any ]]; then
                 heading="${line}"
                 break

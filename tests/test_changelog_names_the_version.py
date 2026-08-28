@@ -170,10 +170,63 @@ def is_unshipped(version: str) -> bool:
     return bool(_UNSHIPPED.search(version))
 
 
-#: A release heading's POSITION, independent of whether it parses. `## ` and
-#: nothing else, because that is what makes a line a heading in this file;
-#: whether it is a WELL-FORMED heading is the next question and not this one.
-_ANY_HEADING_LINE = re.compile(r"^##\s.*$", re.M)
+#: A release heading's POSITION, independent of whether it parses — applied to
+#: ONE LINE at a time, never to the document.
+#:
+#: **`^##\s` WAS BOTH TOO NARROW AND TOO WIDE, AND AN AUDITOR DROVE BOTH.** It
+#: read `^##\s.*$` over the whole text with `re.M`, which:
+#:
+#: * **missed a heading indented by one to three spaces**, which CommonMark
+#:   renders as an ordinary `<h2>`. A newer heading written that way was
+#:   stepped past to an older one — the exact defect this function was added
+#:   to close, one spelling out;
+#: * **took a `##` line inside an HTML comment or a fenced block**, neither of
+#:   which a renderer treats as a heading. `CHANGELOG.md` opens with an HTML
+#:   comment, so that route is one edit away at all times;
+#: * and `\s` **matches a newline**, so `##` alone on a line fused with the
+#:   line below it and parsed as though they were one heading.
+#:
+#: Four leading spaces is an indented code block and is deliberately NOT a
+#: heading, which is why the bound is three.
+_HEADING_LINE = re.compile(r"^ {0,3}##(?:\s|$)")
+
+#: A fence opener or closer, ``` or ~~~, indented up to three spaces. A `##`
+#: inside a fenced block is source, not a heading.
+_FENCE_LINE = re.compile(r"^ {0,3}(?:```|~~~)")
+
+
+def heading_lines(text: str):
+    """`(line number, line)` for every line a RENDERER would make an `<h2>`.
+
+    Fenced blocks and HTML comments are skipped, because a `##` inside either
+    is not a heading to any reader but a regex. The scan is line-by-line so
+    that nothing can fuse two lines into one heading.
+
+    **Its reach, stated:** this is a line grammar, not a Markdown parser. It
+    does not know setext headings (`Release\n=======`), a fence opened with a
+    longer run than it is closed with, or an HTML comment opened inside a
+    fence. Those are all shapes `CHANGELOG.md` does not use, and a heading it
+    misses is stepped past — which is the direction :func:`newest_heading`
+    refuses, so a miss here becomes a refusal there rather than a silent
+    older reading.
+    """
+    fenced = False
+    in_comment = False
+    for number, line in enumerate(text.splitlines(), 1):
+        if in_comment:
+            if "-->" in line:
+                in_comment = False
+            continue
+        if _FENCE_LINE.match(line):
+            fenced = not fenced
+            continue
+        if not fenced and "<!--" in line and "-->" not in line:
+            in_comment = True
+            continue
+        if fenced:
+            continue
+        if _HEADING_LINE.match(line):
+            yield number, line
 
 
 def headings(text: str) -> list[tuple[str, str]]:
@@ -216,12 +269,13 @@ def newest_heading(text: str) -> tuple[str, str] | None:
     distinguishable — and they are the two cases the caller's message has to
     tell apart.
     """
-    line = _ANY_HEADING_LINE.search(text)
-    if line is None:
+    first = next(iter(heading_lines(text)), None)
+    if first is None:
         return None
-    parsed = _HEADING.match(line.group(0))
+    _, line = first
+    parsed = _HEADING.match(line.strip())
     if parsed is None:
-        raise MalformedNewestHeading(line.group(0))
+        raise MalformedNewestHeading(line)
     return parsed.group("version"), parsed.group("rest")
 
 

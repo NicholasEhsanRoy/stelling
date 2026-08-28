@@ -3045,6 +3045,126 @@ def test_the_lightweight_remedy_this_step_prints_is_the_one_that_works(tmp_path)
     )
     assert f"tagged={d1}" in third.stdout and f"0.2.1 — {d1}" in third.stdout
 
+#: SHAPES BOTH READERS MUST AGREE ABOUT, and the reason this table exists is
+#: that they did not. `.github/workflows/release.yml` decides "the newest
+#: heading" in bash and `tests/test_changelog_names_the_version.py` decides it
+#: in Python, and until an auditor drove them side by side the two were
+#: `^##[[:space:]]` and `^##\s` over a whole document — which agreed on the
+#: shapes anybody had thought to try and disagreed on five, three of them in
+#: the direction that returns rc=0 over a real tag/heading disagreement.
+#:
+#: Each row is `(label, changelog text, expected reading)`, where the reading
+#: is the `(version, rest)` pair or `None` for "refuses". The two readers are
+#: run over the SAME rows, so the table cannot describe one of them.
+_HEADING_SHAPES = (
+    ("plain",
+     "## 0.2.0 — 2026-08-25\n", ("0.2.0", "2026-08-25")),
+    ("older below the newest",
+     "## 0.2.0 — 2026-08-25\n\nbody\n\n## 0.1.0 — 2026-08-12\n",
+     ("0.2.0", "2026-08-25")),
+    # A CommonMark <h2> may carry one to three leading spaces. Both readers
+    # missed this, and a NEWER heading written this way was stepped past.
+    ("indented one space",
+     "  ## 0.2.0 — 2026-08-25\n\n## 0.1.0 — 2026-08-12\n",
+     ("0.2.0", "2026-08-25")),
+    ("indented three spaces",
+     "   ## 0.2.0 — 2026-08-25\n\n## 0.1.0 — 2026-08-12\n",
+     ("0.2.0", "2026-08-25")),
+    # Four is an indented code block, not a heading -- so the real heading
+    # below it is the newest, and that is a reading rather than a miss.
+    ("indented four spaces is a code block",
+     "    ## 9.9.9 — 2000-01-01\n\n## 0.2.0 — 2026-08-25\n",
+     ("0.2.0", "2026-08-25")),
+    # `CHANGELOG.md` opens with an HTML comment, so this route is always one
+    # edit away.
+    ("inside an HTML comment",
+     "<!--\n## 9.9.9 — 2000-01-01\n-->\n\n## 0.2.0 — 2026-08-25\n",
+     ("0.2.0", "2026-08-25")),
+    ("inside a fenced block",
+     "```\n## 9.9.9 — 2000-01-01\n```\n\n## 0.2.0 — 2026-08-25\n",
+     ("0.2.0", "2026-08-25")),
+    # `##` alone IS a heading line and does not parse: refusing beats reading
+    # past to an older one. In Python `\s` used to match the newline and fuse
+    # the two lines into one heading.
+    ("bare ## above a real heading",
+     "##\n0.2.0 — 2026-08-25\n\n## 0.1.0 — 2026-08-12\n", None),
+    ("no em dash", "## 0.2.0 - 2026-08-25\n", None),
+    ("no heading at all", "nothing here\n", None),
+)
+
+
+@_needs_a_shell
+@pytest.mark.parametrize(
+    "label,changelog,expected", _HEADING_SHAPES,
+    ids=[row[0].replace(" ", "-") for row in _HEADING_SHAPES],
+)
+def test_BOTH_readers_of_the_newest_heading_agree(label, changelog, expected, tmp_path):
+    """The bash gate and the Python gate, over one table of shapes.
+
+    **TWO READERS OF ONE RULE, WRITTEN IN TWO LANGUAGES, HELD TO EACH OTHER BY
+    NOTHING** — until an auditor ran them side by side and found five shapes
+    they disagree about. Three of those five are the direction that matters:
+    the bash gate returned `rc=0` on a tree whose newest heading names a
+    DIFFERENT version from the tag, because the heading was indented one
+    space and neither reader called it a heading.
+
+    So the rule is one table now and both readers are driven over it. The
+    Python side is compared by its return value; the bash side by whether it
+    refuses, and — where it does not — by the version and date it read, which
+    are recovered from its own complaint when it is made to disagree with a
+    tag it should agree with.
+
+    What this does NOT hold: that either reader implements CommonMark. Both
+    are line grammars, both say so, and shapes neither handles (setext
+    headings, an unbalanced fence) are outside the table rather than pinned
+    to a behaviour.
+    """
+    from test_changelog_names_the_version import (
+        MalformedNewestHeading, newest_heading,
+    )
+
+    # THE PYTHON READER.
+    try:
+        got = newest_heading(changelog)
+    except MalformedNewestHeading:
+        got = None
+    assert got == expected, f"{label}: python read {got!r}, table says {expected!r}"
+
+    # THE BASH GATE, over the same text. It is driven against a real annotated
+    # tag whose version and date are the table's expected reading, so it must
+    # be GREEN exactly where the table says a reading exists.
+    body = _step_body(_CHANGELOG_STEP)
+    if expected is None:
+        tree = _tagged_tree(tmp_path, f"{label}-none", tag="v0.2.0",
+                            tagger_date="2026-08-25", changelog=changelog)
+        done = _drive(body, tree, GITHUB_REF_NAME="v0.2.0")
+        assert done.returncode == 1, (
+            f"{label}: the python reader refuses this and the bash gate "
+            f"accepted it:\n{done.stdout}"
+        )
+        return
+
+    version, rest = expected
+    tree = _tagged_tree(tmp_path, f"{label}-ok", tag=f"v{version}",
+                        tagger_date=rest, changelog=changelog)
+    done = _drive(body, tree, GITHUB_REF_NAME=f"v{version}")
+    assert done.returncode == 0, (
+        f"{label}: python read {expected!r} and the bash gate refused a tag "
+        f"carrying exactly that:\n{done.stdout}"
+    )
+
+    # ... and it must REFUSE the same text against a tag that disagrees, or
+    # the green above is a gate that accepts everything rather than one that
+    # read the same heading.
+    other = _tagged_tree(tmp_path, f"{label}-bad", tag="v9.9.9",
+                         tagger_date="2000-01-01", changelog=changelog)
+    done = _drive(body, other, GITHUB_REF_NAME="v9.9.9")
+    assert done.returncode == 1, (
+        f"{label}: the bash gate accepted a tag naming neither the version "
+        f"nor the date the python reader found:\n{done.stdout}"
+    )
+
+
 @_needs_a_shell
 def test_the_changelog_gate_reads_the_NEWEST_heading_by_POSITION(tmp_path):
     """Newest is a POSITION in the document, and this is what says so.
