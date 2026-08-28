@@ -1413,25 +1413,35 @@ def test_the_ieee_STAMP_does_not_claim_a_rule_the_walk_refused():
     under ieee has always been correct — but "correct today because it
     sits beside a checked line" is not what a guard on an exclusive set is
     for, and a later hand that moved one write and not the other would
-    have found nothing here. Every line the non-refused arm writes is now
-    named, and the enumeration is derived from the module rather than
-    typed, so a FIFTH line joins this assertion by being defined.
+    have found nothing here.
+
+    **AND THE FIRST REPAIR DERIVED THE SET FROM THE WRONG THING** (second
+    re-audit, F4). It read every module-level name starting `BOUNDARY_`,
+    and claimed *"a FIFTH line joins this assertion by being defined"*. It
+    does not: a fifth sentence named anything else is invisible to a name
+    scan. DRIVEN — a constant `CARRY_REACH_NOTE`, stamped for every
+    non-opaque run, reddens `::test_the_dial_is_INERT_under_ieee` (2
+    failed) whose exhaustive set difference is the right oracle, and left
+    this test GREEN. The set is now derived the same way: what a live-carry
+    `transparent` run stamps that the `opaque` run of the same query does
+    not. A fifth sentence joins by BEING STAMPED, whatever it is called.
     """
-    import stelling.propagate as P
     from stelling.propagate import (
         BOUNDARY_INERT_UNDER_IEEE, BOUNDARY_TRANSPARENT_POSITION,
+        BOUNDARY_TRANSPARENT_REACH_DISCLOSURE,
     )
 
-    # every stamped boundary sentence this module defines, EXCEPT the one
-    # an ieee run is supposed to write. Derived, so the set cannot go stale.
-    refused_here = {
-        getattr(P, name)
-        for name in dir(P)
-        if name.startswith("BOUNDARY_") and isinstance(getattr(P, name), str)
-    } - {BOUNDARY_INERT_UNDER_IEEE}
+    carrying, _ = wrapped_sumsq_query("jit", assume_inside=False)
+    refused_here = set(
+        propagate(carrying, semantics="real", boundary="transparent")
+        .assumptions
+    ) - set(
+        propagate(carrying, semantics="real", boundary="opaque").assumptions
+    )
     assert len(refused_here) >= 3, sorted(refused_here)
     assert BOUNDARY_TRANSPARENT_POSITION in refused_here
-    assert P.BOUNDARY_TRANSPARENT_REACH_DISCLOSURE in refused_here
+    assert BOUNDARY_TRANSPARENT_REACH_DISCLOSURE in refused_here
+    assert BOUNDARY_INERT_UNDER_IEEE not in refused_here
 
     for build in (
         lambda: wrapped_sumsq_query("jit", assume_inside=False)[0],
@@ -1447,12 +1457,11 @@ def test_the_ieee_STAMP_does_not_claim_a_rule_the_walk_refused():
             "an ieee verdict claims the certificate was allowed to cross"
         )
         for line in refused_here:
-            # the CROSSED line is a template, so it is matched on its
-            # invariant head rather than on the unformatted string
-            head = line.split("{")[0]
-            assert not any(a.startswith(head) for a in p.assumptions), (
+            # these are RENDERED lines from a real run, so the comparison
+            # is exact; the CROSSED line's count is already substituted
+            assert line not in p.assumptions, (
                 f"an ieee run stamped a sentence about a carry it refused: "
-                f"{head[:80]!r}"
+                f"{line[:80]!r}"
             )
     # the sentence has to SAY the two things a reader needs: that nothing
     # crossed, and that the verdict is the boundary-opaque one. Checked as
@@ -1461,6 +1470,76 @@ def test_the_ieee_STAMP_does_not_claim_a_rule_the_walk_refused():
     assert "INERT under semantics='ieee'" in BOUNDARY_INERT_UNDER_IEEE
     assert "Nothing crossed" in BOUNDARY_INERT_UNDER_IEEE
     assert "boundary='opaque' run would have used" in BOUNDARY_INERT_UNDER_IEEE
+
+
+def _literal_operand_wrapper_query():
+    """A `jit` whose OPERAND IS A LITERAL, so the carry needs no table entry.
+
+    `read_strict_sign` answers for a Literal from its own decoded value
+    (`_literal_strict_sign`), so this is the ONE query shape in which the
+    ieee conjunct of `_Propagator._carry_refusal` is observable as an
+    EVENT: with the conjunct in place nothing crosses, and with it gone a
+    sign is re-keyed onto the body's invar and `boundary_crossings` moves.
+    Every other query in this module hands the wrapper a Var whose table
+    entry is empty under ieee, so the counter cannot move either way.
+    """
+    nxt = _ids()
+    bx, by = nxt(F64), nxt(F64)
+    body = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(), invars=(bx,), outvars=(by,),
+            eqns=(eqn("mul", [bx, bx], by, []),),
+        )
+    )
+    out, o = nxt(F64), nxt(F64)
+    return close(
+        [
+            eqn("jit", [lit(-2.0, F64)], out, [("jaxpr", body)]),
+            eqn("stelling_assert", [out], o, []),
+        ],
+        [o],
+    )
+
+
+def test_the_ieee_REFUSAL_is_an_EVENT_and_not_only_a_SENTENCE():
+    """**THE ieee CONJUNCT OF `_carry_refusal` HAD NO INSTRUMENT THAT COULD
+    SEE IT** (0.3.0 P1 second re-audit, F2).
+
+    `::test_the_dial_is_INERT_under_ieee` asserts `not w.strict_sign` on the
+    propagator's TOP-LEVEL table — which `run` scope-swaps and RESTORES, so
+    a write made inside a wrapper body is structurally invisible to it —
+    and its query's wrapper operand is a Var, so the crossing counter
+    cannot move either. DRIVEN: with the conjunct deleted, that test and
+    three siblings still red, but every one of them reds on the missing
+    SENTENCE (`BOUNDARY_INERT_UNDER_IEEE`), and `boundary_crossings` stayed
+    0 on every query this module had. Not a live bug — the dispatcher's
+    `elif ieee:` arm precedes the transfer read — but the gate itself was
+    untested.
+
+    A LITERAL wrapper operand is the shape that observes it, because
+    `read_strict_sign` recomputes a Literal's sign with no table entry
+    needed. Measured at `c5fb33e`: `semantics="real"` crosses twice,
+    `semantics="ieee"` crosses zero times, and with the conjunct deleted
+    the ieee run crosses ONCE.
+    """
+    from stelling.propagate import _Propagator
+
+    q = _literal_operand_wrapper_query()
+    seen = {}
+    for semantics in ("real", "ieee"):
+        w = _Propagator("constrain", semantics, None, "transparent")
+        w.run(q.jaxpr, list(q.consts), [])
+        seen[semantics] = w.boundary_crossings
+
+    assert seen["real"] > 0, (
+        f"the Literal operand did not carry under real semantics either, so "
+        f"this query cannot observe the ieee refusal: {seen}"
+    )
+    assert seen["ieee"] == 0, (
+        f"an ieee walk CARRIED a strict-sign certificate across a sub-jaxpr "
+        f"boundary. The certificate is a claim about \u211d and is false on "
+        f"a flush-to-zero target, so nothing may cross there: {seen}"
+    )
 
 
 def test_the_inertness_disclosure_reaches_the_verdict():

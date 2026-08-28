@@ -377,9 +377,20 @@ stamp's own first rendered line — `stelling <version>` — separates them:
   written on *every* run that is not boundary-opaque, so their absence is
   the `opaque` position and not a gap in the record.
 
+**THE SPLIT TURNS ON A RELEASE THIS PAGE NEVER NAMED, AND ON A DEVELOPMENT
+BRANCH IT DOES NOT SEPARATE ANYTHING.** The dial ships in **0.3.0**; the
+version this working tree stamps is `stelling.__version__`, and while the
+dial is being developed that string is still the PREVIOUS release, so a
+stamp produced here reads a version "below the release that ships the dial"
+while the dial is fully available. The split above is sound for released
+artifacts and is *not* a way to read a verdict produced from a source tree
+between releases — for those, read `stelling.propagate.propagate(...)`'s
+`.boundary` field, which is a fact about the run rather than an inference
+from a version.
+
 **AND THE ABSENCE OF THE FOURTH LINE IS NOT A STATEMENT THAT THE DEFECT IT
-NAMES IS ABSENT.** The default reaches it too, wherever the certificate and
-the reduction sit in the same scope — measured, and pinned by
+NAMES IS ABSENT.** The default reaches that route too, wherever the
+certificate and the reduction sit in the same scope — measured, and pinned by
 `tests/test_boundary_dial_jax.py::test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts`,
 whose first row is an `opaque` VERIFIED the program contradicts with no
 boundary crossed at all. The line is withheld from `opaque` runs only
@@ -400,12 +411,35 @@ said *"behind a wrapper"*, which in this codebase names only the
 unconditional four; the `cond` route is measured in
 `::test_the_carry_reaches_it_through_a_cond_BRANCH_and_not_only_a_wrapper`.
 
-**Nor is the reach a story about small numbers.** The condition is that the
-*analysis's own* binary64 box underflows onto zero at one boundary, and any
-long enough chain gets there from ordinary declared values: `x` declared
-`[-0.4, -0.2]` with `assume(x < 0)` and `1.0 / jnp.sum(x ** 1001) < 0.0` is
-VERIFIED at the default, with no boundary line in its stamp, and returns
-`+inf` (`::test_an_ORDINARY_magnitude_chain_reaches_it_at_the_DEFAULT`).
+**Nor is the reach a story about small numbers.** Any long enough chain gets
+there from ordinary declared values: `x` declared `[-0.4, -0.2]` with
+`assume(x < 0)` and `1.0 / jnp.sum(x ** 1001) < 0.0` is VERIFIED at the
+default, with no boundary line in its stamp, and returns `+inf`
+(`::test_an_ORDINARY_magnitude_chain_reaches_it_at_the_DEFAULT`).
+
+**AND THE FOURTH LINE IS NOT A BOUND ON WHEN A `real` VERDICT CAN BE
+WRONG — this paragraph once implied that it was.** It said the condition is
+that *"the analysis's own binary64 box underflows onto zero at one
+boundary"*. That is the condition for the route this dial widens, because
+`interval.boundary_div` is consulted only on a divisor box that reaches
+zero. The wider condition is the box entering **the target's subnormal
+band**, which needs no certificate, no reduction and no division at all:
+
+| | |
+|---|---|
+| the query | `x = any_array((), f64, (-1.0, -0.5))`; `assert_(x * 2**-512 * 2**-511 < 0.0)` |
+| the boxes | `[-7.458e-155, -3.729e-155]` then `[-1.1125e-308, -5.563e-309]` — **zero excluded** |
+| `semantics="real"` | **VERIFIED**, 0 boundary crossings, no boundary line in the stamp |
+| the program | `-0.0` at every declared point, eager and jitted, so `< 0.0` is **False** |
+| exact ℝ | `-1.1125e-308`, so `< 0.0` is **True**; `python` and `numpy` return that value |
+| `semantics="ieee"` | **UNKNOWN** |
+
+The `semantics:` line at the top of every real-mode stamp already carries
+the general statement — *"the traced program's IEEE float behaviour is NOT
+modeled — a predicate can hold in ℝ and fail in floats"* — and it is true
+and covers this. The fourth line narrows nothing off it; it names one route
+in more detail because that is the route the dial widens. Pinned by
+`tests/test_boundary_dial_jax.py::test_the_WIDER_route_needs_neither_certificate_nor_reduction`.
 
 That is the whole of what a verdict-reader gets, and it is deliberate that
 there is no more: `Stamp` has no `boundary` field. A **programmatic**

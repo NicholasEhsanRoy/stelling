@@ -54,10 +54,10 @@ import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
 from jax import lax  # noqa: E402
 
-from stelling.coverage import DEFAULT_TRANSPARENT  # noqa: E402
+from stelling.coverage import DEFAULT_TRANSPARENT, sub_jaxprs  # noqa: E402
 from stelling.harness import any_array, assert_, assume, trace  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
-from stelling.propagate import propagate  # noqa: E402
+from stelling.propagate import interval_env, propagate  # noqa: E402
 
 from test_assume_scope_identity import _wrappers  # noqa: E402
 
@@ -319,12 +319,19 @@ def test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts():
        3 is in the table so that nobody later reads it as evidence of a
        carry.
 
-    **IF THIS TEST REDDENS BECAUSE THE REPAIR LANDED, THE DISCLOSURE HAS
-    GONE FALSE WITH IT** — the taint that carries sign-bit faithfulness for
-    a negative-certified reduction operand is a separate change, and the
-    day it lands `BOUNDARY_TRANSPARENT_REACH_DISCLOSURE` stops being true
-    and must go out with the same commit. That coupling is the reason this
-    test asserts the defect rather than describing it.
+    **IF THIS TEST REDDENS BECAUSE THE REPAIR LANDED, THE DISCLOSURE MUST
+    BE RE-READ — AND NOT DELETED.** This paragraph used to say the day the
+    reduction taint lands `BOUNDARY_TRANSPARENT_REACH_DISCLOSURE` *"stops
+    being true and must go out with the same commit"*, and that commitment
+    was a net regression the tree had written down (0.3.0 P1 second
+    re-audit, F1b). The taint keys on a CERTIFICATE and a REDUCTION; the
+    wider route the same sentence now names —
+    `::test_the_WIDER_route_needs_neither_certificate_nor_reduction` — has
+    neither, so the taint closes the narrow sub-route and leaves the wider
+    one open. Deleting the line then removes the only sentence in the stamp
+    that gestures at what is still open. The coupling this test buys is
+    that the sentence cannot go stale unnoticed, which is a reason to
+    RE-READ it, not to retire it.
     """
     from stelling.propagate import BOUNDARY_TRANSPARENT_REACH_DISCLOSURE
 
@@ -553,6 +560,112 @@ def test_an_ORDINARY_magnitude_chain_reaches_it_at_the_DEFAULT():
     )
 
 
+def _wider_route_harness():
+    """The whole defect class in four equations, and the stamped sentence's
+    own counterexample.
+
+    `x * 2**-512 * 2**-511` over `x` declared `[-1, -0.5]`. No `assume`, no
+    strict-sign certificate, no reduction, no division, no `boundary_div` —
+    just two multiplications whose exact result lands in the target's
+    SUBNORMAL BAND.
+    """
+    def h():
+        x = any_array((), "float64", (-1.0, -0.5))
+        return assert_(x * 2.0**-512 * 2.0**-511 < 0.0)
+
+    return h
+
+
+def test_the_WIDER_route_needs_neither_certificate_nor_reduction():
+    """**THE STAMPED SENTENCE ONCE READ "THE CONDITION IS ONLY THAT THE
+    ANALYSIS'S OWN BOX UNDERFLOWS ONTO ZERO", AND THE WORD *ONLY* MADE IT A
+    BOUND IT IS NOT** (0.3.0 P1 second re-audit, F1).
+
+    That is the condition for the route the dial widens — `boundary_div` is
+    consulted only on a divisor box that reaches zero. It is NOT the
+    condition for a real-mode VERIFIED the compiled program contradicts,
+    and a reader meeting `only` in a stamp concludes that a verdict whose
+    boxes never touch zero is safe.
+
+    The witness below has ZERO EXCLUDED from every box, no certificate, no
+    reduction and no division, and it is VERIFIED at the default while the
+    program returns `-0.0` at every declared point. The wider condition is
+    the box entering the target's subnormal band: this target flushes a
+    subnormal RESULT of an ordinary `mul`, while the real-mode transfer
+    computes it exactly — `python` and `numpy` both return
+    `-1.1125369292536007e-308` for the same arithmetic.
+
+    Three controls, so this is a reading and not an anecdote: the query has
+    none of the machinery the reach sentence names; `semantics="ieee"`
+    declines it; and a sibling one binade up, whose result stays NORMAL, is
+    VERIFIED *and* agrees with the program.
+    """
+    cj = trace(_wider_route_harness())
+    prims = _all_primitives(cj.jaxpr)
+    assert prims == {"stelling_any", "mul", "lt", "stelling_assert"}, sorted(
+        prims
+    )
+
+    p = propagate(cj, semantics="real")
+    assert p.obligations[0].status == "discharged", p.obligations[0].detail
+    assert p.boundary_crossings == 0
+    assert p.relational_assumes == ()
+    assert p.coverage.constrained == 0
+
+    boxes = interval_env(cj, assume_mode="constrain")
+    producers = {o.id: e.primitive for e in cj.jaxpr.eqns for o in e.outvars}
+    divisor_like = [
+        (b.los[0], b.his[0])
+        for vid, b in boxes.items()
+        if producers.get(vid) == "mul"
+    ]
+    assert all(lo < 0.0 and hi < 0.0 for lo, hi in divisor_like), divisor_like
+    assert any(
+        abs(hi) < 2.2250738585072014e-308 for _, hi in divisor_like
+    ), (
+        f"no box reaches the binary64 subnormal band, so this witness is not "
+        f"about the band at all: {divisor_like}"
+    )
+
+    v = check(_wider_route_harness(), vacuity_mode="all", semantics="real")
+    assert v.status == "VERIFIED", v.render()
+    assert not any("boundary=" in a for a in v.stamp.assumptions), (
+        "this row is supposed to arrive with NOTHING in the stamp about a "
+        "boundary; the defect it shows is the default's"
+    )
+
+    for at in (-1.0, -0.75, -0.5):
+        x = jnp.array(at, dtype=jnp.float64)
+        for f in (lambda z: z * 2.0**-512 * 2.0**-511,
+                  jax.jit(lambda z: z * 2.0**-512 * 2.0**-511)):
+            assert not bool(f(x) < 0.0), (
+                f"the program satisfies the obligation at x={at}, so the "
+                f"target no longer flushes this result and the wider route "
+                f"named in the stamp has closed: {float(f(x))!r}"
+            )
+    # ...and the same arithmetic OFF this target keeps the value
+    assert float(np.float64(-1.0) * 2.0**-512 * 2.0**-511) < 0.0, (
+        "numpy flushes it too, so this is not a target-flush finding"
+    )
+
+    # CONTROL 1: ieee declines the whole thing
+    assert check(_wider_route_harness(), vacuity_mode="all",
+                 semantics="ieee").status == "UNKNOWN"
+
+    # CONTROL 2: one binade up, the result is NORMAL and everything agrees
+    def normal():
+        x = any_array((), "float64", (-1.0, -0.5))
+        return assert_(x * 2.0**-512 * 2.0**-509 < 0.0)
+
+    assert check(normal, vacuity_mode="all", semantics="real").status == (
+        "VERIFIED"
+    )
+    assert float(jnp.float64(-0.5) * 2.0**-512 * 2.0**-509) < 0.0, (
+        "the control's result is flushed too, so it does not separate the "
+        "subnormal band from arithmetic in general"
+    )
+
+
 _REFUTING_CONST = np.array([-0.3, -0.35])
 
 
@@ -617,27 +730,78 @@ def test_the_same_licence_mints_a_false_REFUTED():
 
 def _all_primitives(jaxpr):
     """Every primitive in a jaxpr AND in every sub-jaxpr it carries, at any
-    depth.
+    depth, via `stelling.coverage.sub_jaxprs`.
 
     A top-level `{e.primitive for e in jaxpr.eqns}` census answers a
     question about the OUTERMOST equation list, and "does this query
     contain a wrapper" is not that question — a wrapper nested inside a
     `cond` branch is invisible to it and is exactly what would spoil the
     separation the caller is measuring.
+
+    **AND THE FIRST DESCENT WRITTEN HERE WAS `getattr(sub, "jaxpr", None)`,
+    WHICH IS A FACT ABOUT ONE JAX SERIES** (0.3.0 P1 second re-audit, F3).
+    It finds a `ClosedJaxpr` and misses a bare `ir.Jaxpr`, and
+    `stelling.coverage.call_body`'s own table records that `remat2`'s body
+    is a bare `Jaxpr` on jax 0.10.2 and a `ClosedJaxpr` on 0.11.0 — jax 0.11
+    merged the two classes. Measured over 8 nested wrapper queries: 0
+    disagreements on 0.11.0, and on **0.10.2** the hand-rolled descent
+    missed `['mul', 'reduce_sum']` under `remat2 alone`, `remat2 in jit` and
+    `remat2 in remat2`, and `['jit', 'mul', 'reduce_sum']` under `jit in
+    remat2`. `sub_jaxprs` is the project's canonical accessor for exactly
+    this reason and its docstring says so.
+
+    **WHAT THAT BLINDNESS DID *NOT* DO IS OPEN A HOLE IN THE ONE ASSERTION
+    THAT CONSUMES THIS TODAY**, and saying otherwise would be claiming a
+    repair nobody needed. `::test_the_carry_reaches_it_through_a_cond_
+    BRANCH_and_not_only_a_wrapper` asks whether ANY member of
+    `DEFAULT_TRANSPARENT` appears, and the outermost wrapper is visible to
+    either descent — a wrapper nested inside a `remat2` body implies a
+    `remat2` at an outer level, which is itself a member. Driven: a
+    `jax.checkpoint` smuggled into each cond branch reddens that test on
+    both series under BOTH descents. The defect was in this helper's own
+    contract — its first line promises *every* primitive at *any* depth —
+    and it is pinned directly by
+    `::test_the_primitive_census_descends_a_remat2_body`, which is the
+    assertion that does observe the difference.
     """
     seen = set()
 
     def walk(jx):
         for e in jx.eqns:
             seen.add(e.primitive)
-            for _, val in e.params:
-                for sub in (val if isinstance(val, (list, tuple)) else (val,)):
-                    inner = getattr(sub, "jaxpr", None)
-                    if inner is not None and hasattr(inner, "eqns"):
-                        walk(inner)
+            for sub in sub_jaxprs(e):
+                walk(sub)
 
     walk(jaxpr)
     return seen
+
+
+def test_the_primitive_census_descends_a_remat2_body():
+    """`_all_primitives` promises every primitive at any depth, and the
+    `remat2` body is where that promise is series-dependent.
+
+    `stelling.coverage.call_body`'s measured table: `remat2` carries a bare
+    `ir.Jaxpr` on jax 0.10.2 and a `ClosedJaxpr` on 0.11.0, because 0.11
+    merged the two classes. A descent keyed on `getattr(sub, "jaxpr")`
+    therefore finds the body on one series and not the other, and this
+    module runs on both.
+
+    Asserted against CONCRETE primitives rather than against
+    `sub_jaxprs`'s own answer: comparing the helper to the function it
+    calls would be a restatement, not a check.
+    """
+    def h():
+        x = any_array((3,), "float64", (0.0, 2.0))
+        assume(x > 0.0)
+        return assert_(1.0 / jax.checkpoint(lambda v: jnp.sum(v * v))(x) > 0.0)
+
+    prims = _all_primitives(trace(h).jaxpr)
+    assert "remat2" in prims, sorted(prims)
+    assert {"mul", "reduce_sum"} <= prims, (
+        f"the census stopped at the remat2 equation and never entered its "
+        f"body, so it is reporting the outer equation list and not the "
+        f"query: {sorted(prims)}"
+    )
 
 
 def _cond_harness(*, forced):
