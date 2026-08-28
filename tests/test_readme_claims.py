@@ -250,10 +250,25 @@ def _which_python() -> str:
     return re.split(r"\n#{1,6} ", rest, maxsplit=1)[0]
 
 
-def _interpreter_violations(badge: str, section: str, floor: str, pins: dict) -> list[str]:
-    """Every way the README's two interpreter claims can disagree with the
+def _interpreter_violations(
+    badge: str, section: str, floor: str, pins: dict, reporting
+) -> list[str]:
+    """Every way the README's THREE interpreter claims can disagree with the
     files that hold them. Pure, so the control below can drive it on prose
-    this repository does not ship."""
+    this repository does not ship.
+
+    THE THIRD CLAIM IS NEW AND SO IS THE SENTENCE IT HOLDS. This read *"two
+    interpreter claims"* — the badge's floor, and which jobs pin — and the
+    `### Which Python` section ended *"and nothing here pins it, asserts it or
+    records it"*. The last third stopped being true when the `random-order`
+    lane started printing the interpreter and the jax it resolved, which is
+    the repair for a lane whose configuration nobody recorded. A corrected
+    sentence held by nothing is the same defect one wording along, so RECORDING
+    is measured here exactly as pinning is: every job that does it has to be
+    named in the section, and the section has to state the COUNT — which is
+    the half that reddens when the last such step is deleted and the name is
+    left standing.
+    """
     bad = []
     versions_in_badge = set(re.findall(r"\d+\.\d+", badge))
     if versions_in_badge != {floor}:
@@ -283,7 +298,12 @@ def _interpreter_violations(badge: str, section: str, floor: str, pins: dict) ->
             bad.append(f"{job} pins python {version} and the README does not name it")
         if version not in section:
             bad.append(f"{job} pins python {version} and the README does not say so")
-    counted = re.search(r"exactly (\w+) job", section, re.I)
+    # `job pins`, not `job`. This was `r"exactly (\w+) job"`, which reads the
+    # FIRST such phrase in the section — fine while there was one, and a trap
+    # the moment a second `exactly N job …` sentence was added below it, since
+    # the count of pinning jobs would then be read off whichever sentence
+    # happened to come first.
+    counted = re.search(r"exactly (\w+) job pins", section, re.I)
     if counted is None:
         bad.append(
             "`### Which Python` states no count of pinning jobs. The count is "
@@ -293,6 +313,29 @@ def _interpreter_violations(badge: str, section: str, floor: str, pins: dict) ->
         bad.append(
             f"the README says exactly {counted.group(1)} job(s) pin an "
             f"interpreter; the workflows say {len(pins)}: {sorted(pins)}"
+        )
+    for job in sorted(reporting):
+        name = job.split(":", 1)[1]
+        if name not in section:
+            bad.append(
+                f"{job} PRINTS the interpreter it was given and `### Which "
+                f"Python` does not name it. Which lanes record their own "
+                f"configuration is the difference between a red somebody can "
+                f"reproduce and a red nobody can."
+            )
+    recorded = re.search(r"exactly (\w+) job records", section, re.I)
+    if recorded is None:
+        bad.append(
+            "`### Which Python` states no count of jobs that RECORD the "
+            "interpreter they were given. The count is the half that reddens "
+            "when the last such step is deleted and the job's name is left "
+            "standing in this section."
+        )
+    elif _NUMBER_WORDS.get(recorded.group(1).lower()) != len(reporting):
+        bad.append(
+            f"the README says exactly {recorded.group(1)} job(s) record the "
+            f"interpreter they got; the workflows say {len(reporting)}: "
+            f"{sorted(reporting)}"
         )
     allowed = {floor, *pins.values(), *_FOREIGN_VERSIONS}
     for version in sorted(set(re.findall(r"\d+\.\d+", section)) - allowed):
@@ -307,7 +350,11 @@ def _interpreter_violations(badge: str, section: str, floor: str, pins: dict) ->
 def test_the_interpreter_claims_are_what_pyproject_and_the_workflows_say():
     """The badge names the floor; the section names what CI provisions."""
     bad = _interpreter_violations(
-        _python_badge(), _which_python(), _floor(), _lanes.python_pins()
+        _python_badge(),
+        _which_python(),
+        _floor(),
+        _lanes.python_pins(),
+        _lanes.python_reporting(),
     )
     assert not bad, "\n  ".join(
         ["the README's python claims and the files that hold them disagree:"] + bad
@@ -345,40 +392,59 @@ def test_every_foreign_version_named_in_the_readme_comes_from_a_file():
 
 
 def test_the_interpreter_gate_actually_bites():
-    """The positive control: the badge that shipped, and the four ways this
-    pair can come apart.
+    """The positive control: the badge that shipped, and the SIX ways these
+    claims can come apart. (It was four before the section grew its third one;
+    the two new ones are the recording half.)
 
-    `floor` and `pins` are HISTORY — the values measured at this commit,
-    written down rather than read, so that the replay keeps replaying the
-    defect after the files move. The last assertion drives the LIVE badge and
-    section against them, so a floor or a pin that moves reddens here as well
-    as in the measured/declared tests above. That is deliberate: this control
-    is a claim about a specific pair of facts, and it should stop passing when
-    it stops describing them."""
+    `floor`, `pins` and `reporting` are HISTORY — the values measured at this
+    commit, written down rather than read, so that the replay keeps replaying
+    the defect after the files move. The last assertion drives the LIVE badge
+    and section against them, so a floor, a pin or a recording lane that moves
+    reddens here as well as in the measured/declared tests above. That is
+    deliberate: this control is a claim about a specific set of facts, and it
+    should stop passing when it stops describing them."""
     floor, pins = "3.10", {"ci.yml:acceptance-reproducer": "3.12"}
+    reporting = ("ci.yml:random-order",)
     section = _which_python()
     shipped = (
         "![python: 3.12, the version CI measures]"
         "(https://img.shields.io/badge/python-3.12%20tested-blue.svg)"
     )
     # the badge as it stood: wrong version, and a coverage word
-    assert len(_interpreter_violations(shipped, section, floor, pins)) >= 2
+    assert len(
+        _interpreter_violations(shipped, section, floor, pins, reporting)
+    ) >= 2
     # a badge naming the floor with a coverage word is still the defect
     assert _interpreter_violations(
-        "![python](…/badge/python-%3E%3D3.10%20tested-blue.svg)", section, floor, pins
+        "![python](…/badge/python-%3E%3D3.10%20tested-blue.svg)",
+        section, floor, pins, reporting,
     )
     # a second job starts pinning and the README still says one
     assert _interpreter_violations(
-        _python_badge(), section, floor, {**pins, "ci.yml:test-jax": "3.13"}
+        _python_badge(), section, floor,
+        {**pins, "ci.yml:test-jax": "3.13"}, reporting,
     )
     # the pin moves under the sentence
     assert _interpreter_violations(
-        _python_badge(), section, floor, {"ci.yml:acceptance-reproducer": "3.13"}
+        _python_badge(), section, floor,
+        {"ci.yml:acceptance-reproducer": "3.13"}, reporting,
     )
-    # and the shipped pair is clean, which is what makes the four above mean
+    # a second job starts RECORDING and the README still says one. This is the
+    # direction a per-job name check alone would have caught; it is here so
+    # that the COUNT is driven too.
+    assert _interpreter_violations(
+        _python_badge(), section, floor, pins,
+        (*reporting, "ci.yml:test-jax"),
+    )
+    # AND THE DIRECTION A NAME CHECK CANNOT REACH: the last recording step is
+    # deleted and the job's name is left standing in the section. Nothing is
+    # then missing from the prose — what is missing is the thing the prose is
+    # about — and only the count notices.
+    assert _interpreter_violations(_python_badge(), section, floor, pins, ())
+    # and the shipped set is clean, which is what makes the six above mean
     # something
     assert not _interpreter_violations(
-        _python_badge(), section, floor, pins
+        _python_badge(), section, floor, pins, reporting
     )
 
 
