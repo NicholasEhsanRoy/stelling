@@ -106,7 +106,7 @@ def scalar_nonzero(dtype, envelope):
 
 def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
           refine=None, solver=None, strict=False, libm_budget=None,
-          falsify=None):
+          falsify=None, boundary="opaque"):
     """Run a precondition harness end-to-end and return the stamped
     :class:`stelling.verdict.Verdict` — with the vacuity check built in:
     **this entry point cannot return an unchecked VERIFIED.**
@@ -290,6 +290,34 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     keyword rather than a decision; the decision is that every door that
     can mint a VERIFIED can ask for the downstream check.
 
+    ``boundary``: ``"opaque"`` (the default) or ``"transparent"``, passed
+    straight through to :func:`stelling.propagate.propagate` — and to the
+    VERIFIED widen re-check, at the same position, for the same reason the
+    re-check runs at the same pipeline depth: a control run under a
+    different rule than the run it controls measures the rule and not the
+    envelope. Under the default this door is byte-identical to the one
+    that shipped without the keyword. Under ``"transparent"`` the
+    strict-sign certificate crosses the sub-jaxpr boundaries the walk
+    already enters (IN and OUT for the unconditional wrappers, IN only for
+    a ``cond`` branch), which can turn an UNKNOWN into a VERIFIED on a
+    query whose division sits inside a ``jit``; that function's docstring
+    carries the argument, the exclusions and the ieee behaviour. The
+    verdict discloses the position in its stamped assumption lines when it
+    is off the default.
+
+    **IT IS NOT ACCEPTED BY THE TWO SIBLING DOORS**,
+    :func:`stelling.contracts.check_contract` and
+    :func:`stelling.inductive.check_inductive_step`, and that is the
+    ``semantics`` precedent rather than an omission: neither of those
+    takes ``semantics`` either, because both are ANALYSIS-MODE dials that
+    change what the walk is allowed to conclude, while ``falsify`` — which
+    all three do take — is a downstream check on a VERIFIED those doors
+    can mint. A caller who wants a boundary-transparent contract or
+    inductive step runs the trace through :func:`check` or through
+    :func:`stelling.propagate.propagate` directly; plumbing it is a
+    decision about those doors' surfaces and belongs with whatever also
+    plumbs ``semantics``.
+
     Version, precision, and solver stamps are filled from the live
     environment; the precision entry records the *actual*
     ``jax_enable_x64`` state at trace time, not an assumption.
@@ -318,6 +346,7 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
             solver=solver,
             libm_budget=libm_budget,
             falsify=falsify,
+            boundary=boundary,
         )
     except ir.TranscriptionError as e:
         # stelling could not READ the query. That is a capability gap, not a
@@ -338,7 +367,8 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
 
 
 def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
-              refine=None, solver=None, libm_budget=None, falsify=None):
+              refine=None, solver=None, libm_budget=None, falsify=None,
+              boundary="opaque"):
     """The one pipeline behind :func:`check` — trace, propagate, optional
     affine refinement (``refine="affine"``, never on by default), optional
     solver escalation, stamped verdict assembly, and the VERIFIED widen
@@ -427,9 +457,16 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     # typo'd profile name must raise where it was written, not arrive as a
     # decline three layers down that reads like a stelling limitation
     from stelling.propagate import (
-        LIBM_BUDGET_REAL_MODE_REFUSAL, resolve_libm_budget,
+        LIBM_BUDGET_REAL_MODE_REFUSAL, _check_boundary, resolve_libm_budget,
     )
 
+    # the boundary dial, validated by the SAME function `propagate` uses
+    # rather than by a second spelling of its value set here. It is
+    # validated in this shared helper and not in `check` because
+    # `check_contract` reaches the pipeline without passing through
+    # `check`, and a dial checked at only one of two doors is a dial that
+    # is unchecked at the other.
+    _check_boundary(boundary)
     libm_budget = resolve_libm_budget(libm_budget)
     if libm_budget is not None and semantics != "ieee":
         raise ValueError(LIBM_BUDGET_REAL_MODE_REFUSAL)
@@ -599,7 +636,9 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
         )
         return v, cj
 
-    p = propagate(cj, semantics=semantics, libm_budget=libm_budget)
+    p = propagate(
+        cj, semantics=semantics, libm_budget=libm_budget, boundary=boundary
+    )
     versions = dict(
         stelling_version=_stelling.__version__,
         jax_version=jax_version(),
@@ -749,7 +788,18 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
         return dataclasses.replace(v, stamp=stamp), cj
 
     wide, wide_ref = _finish(
-        wcj, propagate(wcj, semantics=semantics, libm_budget=libm_budget)
+        # THE SAME DIAL AS THE RUN IT CONTROLS. The widen re-check exists
+        # to ask whether the declared envelope was load-bearing, and it
+        # can only ask that if everything else about the two runs is
+        # equal — the same reason it runs refined iff the original
+        # refined and escalated iff the original escalated.
+        wcj,
+        propagate(
+            wcj,
+            semantics=semantics,
+            libm_budget=libm_budget,
+            boundary=boundary,
+        ),
     )
     still = [
         o.index for o in wide.obligations if o.status == "discharged"

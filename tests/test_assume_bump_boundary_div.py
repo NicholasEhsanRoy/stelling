@@ -879,30 +879,79 @@ _EXACT_RULES = {
     "sub": lambda a, b: [x - y for x, y in zip(a, b)],
 }
 
+# The UNARY half of the same table. Added when the boundary dial's
+# generated search began drawing `neg`, `square` and `abs` — all three are
+# members of `propagate._STRICT_SIGN_PRIMITIVES`, so all three can mint a
+# certificate this oracle then has to be able to check. Exact rationals
+# throughout: `x * x` is exact in `Fraction`, so `square` needs no float.
+_EXACT_UNARY = {
+    "neg": lambda a: [-x for x in a],
+    "square": lambda a: [x * x for x in a],
+    "abs": lambda a: [abs(x) for x in a],
+}
 
-def _exact_eval(eqns, point):
+
+def _exact_eval(eqns, point, env=None):
     """Evaluate the arithmetic spine of a built query in exact Fractions.
 
     `point` is the list of Fractions bound to var 0. Returns
     `var id -> list[Fraction]`. Only the primitives these queries use are
     implemented; anything else raises, so a query that grows a new
     primitive cannot silently skip its own check.
+
+    **IT DESCENDS A TRANSPARENT WRAPPER**, because the boundary dial gave
+    the propagator a way to certify a value on the far side of one and
+    an oracle that stopped at the wrapper could not check that
+    certificate at all. The body is evaluated into the SAME `env`, so an
+    inner var id that collided with an outer one would silently clobber
+    it — the callers here allocate inner ids from a disjoint block and
+    the collision is CHECKED rather than assumed (the assertion below
+    fires on a builder that forgets).
+
+    `env` is the recursion's own parameter and is not part of the
+    caller's interface: pass `point` and leave it alone.
+
+    **WHAT IT DOES NOT REACH.** It has no `cond` arm. A `cond` is a
+    choice, and evaluating one exactly needs the predicate, which needs
+    the comparison primitives this evaluator deliberately skips. So a
+    certificate carried INTO a cond branch is not checked by this oracle
+    — it is checked by the verdict-level tests in
+    `tests/test_boundary_dial.py`, and the direction that could mint a
+    false VERIFIED (carrying one OUT of a cond) is refused by the
+    propagator and driven red there against a deliberately broken build.
     """
-    env = {0: list(point)}
+    if env is None:
+        env = {0: list(point)}
+
+    def val(atom):
+        if isinstance(atom, ir.Literal):
+            return [Fraction(atom.val)]
+        return env[atom.id]
+
     for e in eqns:
         prim = e.primitive
         if prim in ("stelling_any", "stelling_assume", "stelling_assert",
                     "gt", "lt", "ge", "le"):
             continue
+        if prim in DEFAULT_TRANSPARENT:
+            body = next(v for k, v in e.params if k == "jaxpr")
+            for inner_in, atom in zip(body.jaxpr.invars, e.invars):
+                assert inner_in.id not in env, (
+                    f"inner invar {inner_in.id} is already bound in this "
+                    f"env: the builder reused an outer var id inside a "
+                    f"{prim!r} body and this oracle would clobber it"
+                )
+                env[inner_in.id] = val(atom)
+            _exact_eval(body.jaxpr.eqns, None, env)
+            for out, inner_out in zip(e.outvars, body.jaxpr.outvars):
+                env[out.id] = val(inner_out)
+            continue
         out = e.outvars[0].id
-
-        def val(atom):
-            if isinstance(atom, ir.Literal):
-                return [Fraction(atom.val)]
-            return env[atom.id]
-
         if prim == "reduce_sum":
             env[out] = [sum(val(e.invars[0]), Fraction(0))]
+            continue
+        if prim in _EXACT_UNARY:
+            env[out] = _EXACT_UNARY[prim](val(e.invars[0]))
             continue
         if prim in _EXACT_RULES:
             a, b = val(e.invars[0]), val(e.invars[1])
@@ -1296,23 +1345,72 @@ def _jit_wrapped_sumsq_query(*, assume_inside):
 
 
 @pytest.mark.parametrize("assume_inside", [False, True])
-def test_the_certificate_does_not_cross_jit_in_either_direction(assume_inside):
-    """The measurement the disclosure now reports, pinned.
+@pytest.mark.parametrize("boundary", ["opaque", "transparent"])
+def test_the_certificate_crosses_a_jit_boundary_IFF_THE_DIAL_SAYS_SO(
+    boundary, assume_inside
+):
+    """**THIS TEST WAS CALLED
+    ``test_the_certificate_does_not_cross_jit_in_either_direction`` AND
+    ITS CLAIM WAS UNCONDITIONAL.** That test is now
+    ``::test_the_certificate_crosses_a_jit_boundary_IFF_THE_DIAL_SAYS_SO``,
+    which is this one. Its docstring read:
 
-    Not a bug — a fresh table per sub-jaxpr is what stops a branch-local
-    assume licensing anything outside its branch. It is a COST, and the
-    point of the finding is that the cost was disclosed under the names of
-    two wrappers nobody writes.
+        The measurement the disclosure now reports, pinned.
+
+        Not a bug — a fresh table per sub-jaxpr is what stops a
+        branch-local assume licensing anything outside its branch. It is
+        a COST, and the point of the finding is that the cost was
+        disclosed under the names of two wrappers nobody writes.
+
+    Every word of that is still true, and it is now true of ONE POSITION
+    of a dial rather than of the analysis. The old body is the
+    ``boundary="opaque"`` half below, unchanged in what it asserts — and
+    that half is the regression guard that the DEFAULT did not move,
+    which is the acceptance criterion the boundary dial was built to.
+    The half that is new is ``"transparent"``.
+
+    The transparent half does not assert ``discharged`` as a literal: it
+    asserts EQUALITY WITH THE UNWRAPPED CONTROL
+    (``::test_the_uncrossed_jit_query_is_green_without_the_wrapper``,
+    whose query is rebuilt here), because the wrapped and unwrapped
+    queries are the same arithmetic and a dial that made them agree for
+    some other reason would not be worth having. If the control ever
+    stops being green this half stops asserting a verdict and starts
+    asserting an agreement, which is the claim that survives.
     """
     query = _jit_wrapped_sumsq_query(assume_inside=assume_inside)
-    p = propagate(query, semantics="real")
-    assert p.obligations[0].status != "discharged", (
-        "the certificate crossed a jit boundary — if this is now intended, "
-        "the CHANGELOG disclosure and this test must both be rewritten"
+    p = propagate(query, semantics="real", boundary=boundary)
+    unwrapped, _ = _coeff_query(_build_sumsq, n=4)
+    control = propagate(unwrapped, semantics="real", boundary=boundary)
+    if boundary == "opaque":
+        assert p.obligations[0].status != "discharged", (
+            "the certificate crossed a jit boundary UNDER THE DEFAULT — "
+            "the default has moved, which is the one thing the boundary "
+            "dial may not do"
+        )
+        assert any(
+            "REACHES zero at a boundary" in str(n) for n in p.notes
+        ) or (
+            "REACHES zero at a boundary" in str(p.obligations[0].detail)
+        ), (p.notes, p.obligations[0].detail)
+        assert p.boundary_crossings == 0, p.boundary_crossings
+        assert p.boundary == "opaque"
+        return
+    assert p.obligations[0].status == control.obligations[0].status, (
+        f"the jit-wrapped query is {p.obligations[0].status!r} while the "
+        f"same arithmetic without the wrapper is "
+        f"{control.obligations[0].status!r}; under boundary='transparent' "
+        f"a boundary that carries the certificate must make the two agree "
+        f"— {p.obligations[0].detail}"
     )
-    assert any("REACHES zero at a boundary" in str(n) for n in p.notes) or (
-        "REACHES zero at a boundary" in str(p.obligations[0].detail)
-    ), (p.notes, p.obligations[0].detail)
+    assert p.obligations[0].status == "discharged", (
+        f"the CONTROL is not green either, so this parametrisation is "
+        f"asserting agreement between two UNKNOWNs: "
+        f"{control.obligations[0].detail}"
+    )
+    assert p.boundary_crossings > 0, (
+        "the verdict moved but nothing was recorded as having crossed"
+    )
 
 
 def test_the_uncrossed_jit_query_is_green_without_the_wrapper():
