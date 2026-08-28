@@ -520,20 +520,42 @@ def test_MRO_FORGERY_is_possible_for_most_stored_types_and_buys_NOTHING():
             cls = _forgeable(bool, derive_from=(int,))
         (forgeable if cls is not None else refused).append(t)
 
-    # THE ARMS THAT READ `issubclass` ARE EXACTLY THE ONES CPYTHON REFUSES.
-    # That, and not "only `bool`", is what makes the forgery inert here.
+    # EVERY ARM THAT READS `issubclass` IS ONE CPYTHON REFUSES. That, and
+    # not "only `bool`", is what makes the forgery inert here.
     for base in read_bases + containers:
         assert _forgeable(base) is None, (
             f"an MRO entry for {base.__name__} can now be forged, and it "
             f"is a base this door dispatches `issubclass` against"
         )
-    # what CPython refuses, among the types this module STORES, is exactly
-    # the read bases: `tuple` and `list` are refused too but are not
-    # themselves stored types, which is why they are checked in the loop
-    # above and not in this set
-    assert set(refused) == set(read_bases), (
+
+    # ONE-SIDED, AND THE INTERPRETER IS WHY — this read `set(refused) ==
+    # set(read_bases)`, an EQUALITY, and equality is a claim about CPython's
+    # layout rule rather than about this door. Measured 2026-08-28 on the
+    # three interpreters `requires-python` admits: CPython 3.12.3 permits the
+    # `bool`-from-`int`-subclass forgery below and 3.10.20 and 3.11.15 refuse
+    # it, so on the DECLARED FLOOR `refused` is `read_bases` plus `bool` and
+    # the equality failed — in a suite that ships inside the sdist, on two of
+    # the three interpreters the distribution says it supports.
+    #
+    # The direction this door needs is the subset one: every base it
+    # dispatches `issubclass` against must be unforgeable. A CPython that
+    # refuses MORE is refusing in the safe direction and cannot weaken
+    # anything here, so an equality was asserting a property nobody needs and
+    # tying a shipped suite to one interpreter's layout rule. What the extra
+    # refusals ARE is recorded rather than asserted, because that is a fact
+    # about the running interpreter and not about this module.
+    assert set(read_bases) <= set(refused), (
+        f"a base this door reads with `issubclass` is FORGEABLE here: "
+        f"{sorted(t.__name__ for t in set(read_bases) - set(refused))}. "
         f"refused={sorted(t.__name__ for t in refused)} "
         f"read_bases={sorted(t.__name__ for t in read_bases)}"
+    )
+    beyond = set(refused) - set(read_bases)
+    assert beyond <= {bool}, (
+        f"this interpreter refuses a forgery for {sorted(t.__name__ for t in beyond)}, "
+        f"which is neither a read base nor `bool`. That is a new fact about "
+        f"CPython's layout rule and the paragraph above needs re-measuring "
+        f"rather than this assertion needs widening."
     )
     assert len(forgeable) == len(stored) - len(refused)
     assert len(forgeable) > 1, (
@@ -563,7 +585,23 @@ def test_the_one_forgery_CPython_permits_is_stored_as_the_int_it_carries():
     not a lie about the payload — and `int.__index__` stores that payload.
     """
     cls = _forgeable(bool, derive_from=(int,))
-    assert cls is not None, "CPython no longer permits this direction"
+    if cls is None:
+        # NOT "no longer" — NOT YET, AND THE OLD MESSAGE NAMED THE WRONG
+        # DIRECTION. This read `assert cls is not None, "CPython no longer
+        # permits this direction"`, which tells a reader on the declared floor
+        # to look for a CPython regression that has not happened. Measured
+        # 2026-08-28: 3.12.3 permits it; 3.10.20 and 3.11.15 raise
+        # `TypeError: mro() returned base with unsuitable layout ('bool')`, so
+        # the permission ARRIVED in 3.12 and the two older interpreters
+        # `requires-python` admits never had it. There is nothing to store and
+        # nothing to check, and saying so is the honest reading — the sibling
+        # test above asserts the direction that matters (every read base is
+        # unforgeable) on every interpreter.
+        pytest.skip(
+            "this interpreter refuses the bool-from-int-subclass forgery; "
+            "it is permitted from CPython 3.12 and this test is about what "
+            "the door does with it WHEN it is permitted"
+        )
     obj = cls(7)
     assert issubclass(type(obj), bool)
     out = ir._canonical(obj)

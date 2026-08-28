@@ -598,6 +598,24 @@ PINNED = (
 )
 
 
+def _bool_forgery_refused() -> bool:
+    """Whether THIS interpreter refuses an MRO claiming `bool` from `int`.
+
+    Asked by attempting it, not by comparing a version — see the rule that
+    uses it. Same construction as
+    `tests/test_canonicalization_routes.py::_forgeable`, on purpose.
+    """
+    class Meta(type):
+        def mro(cls):
+            return [cls, int, bool, object]
+
+    try:
+        Meta("Forged", (int,), {})
+    except TypeError:
+        return True
+    return False
+
+
 # --- the rules: a skip reason any test may carry, and when it is legitimate --
 
 
@@ -717,6 +735,35 @@ RULES = (
         when="the cvc5 wheel is not installed",
         reasons=frozenset({"needs cvc5"}),
         legitimate=lambda: not _wheel("cvc5"),
+    ),
+    # THE INTERPRETER'S LAYOUT RULE, AND THE PREDICATE IS THE MEASUREMENT
+    # RATHER THAN A VERSION NUMBER. `tests/test_canonicalization_routes.py`
+    # asks what this door does with the one MRO forgery CPython permits — a
+    # `bool` claimed from a real `int` subclass, which shares `int`'s layout.
+    # Measured 2026-08-28 on the three interpreters `requires-python` admits:
+    # CPython 3.12.3 permits it, 3.10.20 and 3.11.15 raise `TypeError: mro()
+    # returned base with unsuitable layout ('bool')`. So on the DECLARED FLOOR
+    # there is no forgery to store and the test says so instead of failing —
+    # which it did, in a suite that ships inside the sdist, on two of the
+    # three interpreters the distribution claims.
+    #
+    # `legitimate` RE-TAKES THE MEASUREMENT rather than reading
+    # `sys.version_info`. A version comparison would be a second claim about
+    # which CPython permits what, sitting beside the first and free to drift
+    # from it; attempting the forgery asks the interpreter. It is the same
+    # construction the test uses, deliberately duplicated here, because a
+    # rule whose condition is computed differently from the skip it excuses
+    # is a rule that can agree with it by accident.
+    Rule(
+        when="this interpreter refuses the bool-from-int-subclass MRO forgery",
+        reasons=frozenset(
+            {
+                "this interpreter refuses the bool-from-int-subclass "
+                "forgery; it is permitted from CPython 3.12 and this test is "
+                "about what the door does with it WHEN it is permitted"
+            }
+        ),
+        legitimate=lambda: _bool_forgery_refused(),
     ),
     Rule(
         when="`uv` is not on PATH, so no distribution can be built to inspect",

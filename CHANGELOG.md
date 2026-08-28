@@ -118,7 +118,8 @@ guard.
   construction.
 
 - **`propagate.py`'s module docstring claimed "no cond/scan descent" while
-  descending `cond`**, contradicting line 98 of its own docstring; and the
+  descending `cond`**, contradicting a sentence lower in the SAME docstring —
+  *"The walk enters the transparent wrappers and `cond`"*; and the
   assume-side strict-sign writer called itself "THE ONE SOURCE" beside
   neighbours reading "TWO WRITERS" and "THE SECOND SOURCE".
 

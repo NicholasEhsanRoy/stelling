@@ -846,9 +846,24 @@ def test_the_doc_keys_heading_is_SCOPED_to_the_sweep_it_measured():
             d = {"k": "tuple", "items": [d]}
         return d
 
+    # TWO CLAIMS, AND THEY WERE FUSED INTO ONE LINE THAT ONLY ONE
+    # INTERPRETER COULD RUN. The deep case read
+    # `json.loads(json.dumps(nest(4 * sys.getrecursionlimit())))`, so the
+    # fixture was built by round-tripping a structure thousands deep through
+    # `json`. Measured 2026-08-28: CPython 3.12.3 manages it; **3.10.20 and
+    # 3.11.15 raise `RecursionError` inside `json/encoder.py` itself**, before
+    # `ir._decode` is reached at all — so this test failed on two of the three
+    # interpreters `requires-python` admits, in a suite that ships inside the
+    # sdist, and it failed in the SETUP rather than in its subject.
+    #
+    # The round-trip carries the *reachable from pure JSON* half and the depth
+    # carries the *`_decode` recurses* half, and neither needs the other. They
+    # are separated now: the reachability is shown at a depth every
+    # interpreter round-trips, and the recursion is shown on a structure built
+    # in Python, which is what `_decode` would receive either way.
     shallow = json.loads(json.dumps(nest(200)))
     assert isinstance(ir._decode(shallow), tuple)
-    deep = json.loads(json.dumps(nest(4 * sys.getrecursionlimit())))
+    deep = nest(4 * sys.getrecursionlimit())
     with pytest.raises(RecursionError):
         ir._decode(deep)
 
