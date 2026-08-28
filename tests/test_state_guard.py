@@ -980,14 +980,34 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
 #
 # **HOW THE INNER SESSION IS OBSERVED, AND WHY NOT THE OTHER WAYS**, because
 # the choice is what the check can see. :data:`_OBSERVER` is a pytest plugin
-# named to every session in the observed process tree through the
-# `PYTEST_PLUGINS` environment variable, and it reports through
-# `pytest_plugin_registered` — a HISTORIC hook, so plugins registered BEFORE
-# the observer was still reach it and there is no ordering in which a
-# registration is missed. It matches on the resolved `__file__` of the
-# registered object rather than on the name it was registered under, because a
-# name is a spelling and spellings are the thing five rounds could not
-# enumerate.
+# that reports through TWO halves whose union is what the reach is, and it
+# matches on the resolved `__file__` of the registered object rather than on
+# the name it was registered under, because a name is a spelling and spellings
+# are the thing five rounds could not enumerate.
+#
+#   * **THE WRAP, which is the half that is not an enumeration.** On import it
+#     wraps `pluggy.PluginManager.register`. That is the one function every
+#     route into a plugin manager ends in — `-p`, `pytest_plugins`, a
+#     `pytest11` entry point, `PYTEST_PLUGINS`, a conftest, a bare
+#     `pluginmanager.register(mod)` — because `PytestPluginManager.register`
+#     overrides it and calls `super().register`, and because nothing writes
+#     `_name2plugin` directly (something that did would get no hooks wired and
+#     no fixtures collected, so it would not be a loaded plugin at all). Once
+#     the wrap is in, EVERY plugin manager in THAT PROCESS is covered, whether
+#     or not this module is registered in it and whatever its environment
+#     held. That is a closed class by construction, not a list of idioms.
+#   * **THE HISTORIC HOOK, for what the wrap cannot have: registrations that
+#     happened before it existed.** `pytest_plugin_registered` is declared
+#     `historic=True`, so a manager this module is registered in reports every
+#     plugin it already held. One real ordering needs it: `Config._preparse`
+#     runs `consider_preparse` — where `-p _state_guard` is consumed — BEFORE
+#     `consider_env`, which is what imports this module. In a child session
+#     started with `-p _state_guard` the subject is already registered by the
+#     time the wrap exists, and only the hook sees it.
+#
+# The module gets INTO a session through the `PYTEST_PLUGINS` environment
+# variable, and the observation points that were NOT taken are named beside
+# it, because a rejected alternative is half of what a check can see:
 #
 #   * `PYTEST_PLUGINS` rather than `-p`, because `-p` reaches the session this
 #     file launches and nothing that session spawns. `Config._preparse` calls
@@ -1007,8 +1027,45 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
 #     checking is a check that thing can switch off by accident.
 #
 # **WHAT IT DOES NOT REACH.** A behavioural check has limits like any other,
-# and these are declared rather than discovered:
+# and these are declared rather than discovered — **THE FIRST TWO BECAUSE AN
+# AUDITOR DISCOVERED THEM, WHICH IS THE WHOLE OF WHY THIS LIST IS NOW WRITTEN
+# AROUND THE MECHANISM RATHER THAN AROUND THE INTENTION.** This list used to
+# open *"it sees the sessions IT RUNS — `sys.executable`, this venv's
+# installed distributions, this pytest"*, naming only another interpreter,
+# another pytest and another entry-point set as out of reach. A blinded audit
+# of 0.2.1 drove a child spawned with an explicit `env=` — same interpreter,
+# same pytest, same venv, so INSIDE the declared reach — which registered
+# `tests/_state_guard.py` for real and produced no row, with all three
+# assertions of the check below staying green over it. The sentence claimed a
+# reach the wiring did not have; the wrap above is the answer for one class
+# and these bullets are the answer for the rest:
 #
+#   * **the reach is per PROCESS, and it is not the same on both sides of that
+#     line.** In the process the observer is loaded in, every REGISTRATION is
+#     reported — that is the wrap, and it does not care how the session was
+#     configured. A CHILD process is reached only if it inherits this
+#     process's environment, because that is how the module gets there at all:
+#     a child spawned with an explicit `env=` that drops `PYTEST_PLUGINS`
+#     loads the subject unseen. Pinned by
+#     `test_a_CHILD_PROCESS_THAT_SCRUBS_THE_ENVIRONMENT_loads_it_UNSEEN`,
+#     which asserts the ROUTE first — the guard fires inside that child and
+#     names the planted test — and only then that this instrument is blind to
+#     it. **A LIMIT PINNED ONLY BY "THE INSTRUMENT CANNOT SEE IT" IS THE
+#     MISTAKE THE `pytest_configure(c)` FIXTURE MADE**, one layer out.
+#     NOT LIVE UNDER TODAY'S SUBJECT, and that is a dated reading of another
+#     file rather than anything held here: measured 2026-08-28 at `8dae8cb`,
+#     `tests/test_tripwire_plugin.py` imports no `subprocess` and passes no
+#     `env=` anywhere; every child it spawns goes through `Pytester.popen`,
+#     which does `env = os.environ.copy()` and therefore inherits. A file that
+#     grew one would be outside this reach, and nothing here would say so —
+#     which is why the limit is written down rather than reasoned away;
+#   * **it watches REGISTRATION, not activation.** A conftest that does
+#     `from _state_guard import state_guard` re-exports the fixtures into its
+#     own namespace, where pytest collects them: they run, and no plugin was
+#     ever registered, so there is nothing for this to report. Pinned the same
+#     way by `test_a_conftest_that_IMPORTS_THE_FIXTURES_makes_them_live_UNSEEN`
+#     — the guard is shown FIRING in the inner session, and the report is
+#     shown empty;
 #   * it sees the sessions IT RUNS — `sys.executable`, this venv's installed
 #     distributions, this pytest. A session under another interpreter, another
 #     pytest, or another set of `pytest11` entry points can have a different
@@ -1037,6 +1094,12 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
 #                  processes; 0 registrations of tests/_state_guard.py in any
 #                  of them
 #
+# RE-DERIVED UNCHANGED after the wrap around `pluggy.PluginManager.register`
+# was added, 2026-08-28 at `8dae8cb` plus this change: 37 rows, 26 in-process
+# nested, 10 in child processes, 0 registrations. The wrap widens what CAN be
+# seen; it found nothing new here, which is the reading a widened instrument
+# is supposed to be able to give.
+#
 # The autoload-OFF half of that was driven by hand rather than through
 # :func:`_observe`, because :func:`_observe` is what drops the variable: a
 # measurement of a configuration the helper refuses to reproduce can only be
@@ -1056,8 +1119,24 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
 # are `test_a_module_leak_is_still_named_when_a_TEST_RUNS_A_NESTED_SESSION`
 # and `test_a_WELL_BEHAVED_module_stays_silent_when_a_test_runs_a_nested_
 # session`, both below, and both are green. The argument holds. This check is
-# still the belt rather than the braces — but it is a belt that measures now,
-# and it can no longer be defeated by a spelling nobody thought of.
+# still the belt rather than the braces — but it is a belt that measures now.
+#
+# **THE SENTENCE THAT USED TO END THIS PARAGRAPH WAS "and it can no longer be
+# defeated by a spelling nobody thought of", AND IT WAS FALSE WHEN IT WAS
+# WRITTEN.** A blinded audit of 0.2.1 defeated it with a spelling nobody had
+# thought of: a child process spawned with an explicit `env=`. The claim was
+# also the wrong SHAPE — it announced a completeness instead of naming a
+# mechanism, which is the same move the four docstrings before the syntactic
+# scan's last one made, and which the scan's own history is a record of. What
+# is true, and is all that is claimed now: within one process the enumeration
+# is gone, because `pluggy.PluginManager.register` is one door rather than a
+# set of names; across a process boundary the reach is exactly inheritance of
+# an environment, and the two ways past that are declared above and pinned by
+# fixtures that assert the route reaches before they assert this cannot see
+# it. **AND THE AUDITOR'S DEEPER POINT IS CONCEDED AND ANSWERED RATHER THAN
+# ARGUED WITH:** an enumeration of spawn idioms would have been the same
+# defect one layer out, so there is no enumeration of spawn idioms here. There
+# is one wrap, and beyond it, declared blindness.
 
 
 #: The observer, written into a temporary directory by :func:`_observe`.
@@ -1076,6 +1155,8 @@ question is asked by running the program rather than by reading it.
 import json
 import os
 
+import pluggy
+
 _REPORT = os.environ["STATE_GUARD_OBSERVER_REPORT"]
 _SUBJECT = os.path.realpath(os.environ["STATE_GUARD_OBSERVER_SUBJECT"])
 
@@ -1086,6 +1167,12 @@ _SUBJECT = os.path.realpath(os.environ["STATE_GUARD_OBSERVER_SUBJECT"])
 #: nested load be attributed to the outer session.
 _ORDINALS = {}
 _KEEP = []
+
+#: ``(session ordinal, id(plugin))`` already reported. The two halves below
+#: overlap on every registration made after this module was imported -- the
+#: wrap sees it going in, the historic hook sees it a moment later -- and one
+#: act must be one row.
+_SEEN = set()
 
 
 def _session(manager):
@@ -1104,18 +1191,66 @@ def _emit(row):
         report.write(json.dumps(row, sort_keys=True) + "\n")
 
 
-def pytest_plugin_registered(plugin, plugin_name, manager):
-    """Every plugin registered in every manager here, matched by FILE.
+def _note(manager, plugin, name):
+    """Report one registration of the subject, at most once.
 
-    Historic hook: this is called for the plugins registered before this
-    module was as well as for every one after, so there is no ordering in
-    which a registration is missed. ``plugin_name`` is reported but never
-    matched on: the name a plugin is registered under is a spelling.
+    Matched on the resolved ``__file__`` of the registered object and never on
+    ``name``: the name a plugin is registered under is a spelling, and
+    spellings are the thing five rounds of a scan could not enumerate.
     """
     where = getattr(plugin, "__file__", None)
     if where is None or os.path.realpath(where) != _SUBJECT:
         return
-    _emit({"kind": "loaded", "session": _session(manager), "name": plugin_name})
+    ordinal = _session(manager)
+    if (ordinal, id(plugin)) in _SEEN:
+        return
+    _SEEN.add((ordinal, id(plugin)))
+    _KEEP.append(plugin)  # so no later object can inherit this ``id()``
+    _emit({"kind": "loaded", "session": ordinal, "name": name})
+
+
+_REGISTER = pluggy.PluginManager.register
+
+
+def _register(self, plugin, name=None):
+    """``pluggy.PluginManager.register``, wrapped for THIS PROCESS.
+
+    THE CHOKE POINT, AND IT IS WHY THIS HALF IS NOT AN ENUMERATION. Every
+    route by which a plugin enters a plugin manager -- ``-p``,
+    ``pytest_plugins``, a ``pytest11`` entry point, ``PYTEST_PLUGINS``, a
+    conftest, a bare ``pluginmanager.register(mod)`` -- ends in this one
+    function; ``PytestPluginManager.register`` overrides it and calls
+    ``super().register``. Nothing writes ``_name2plugin`` directly, and
+    something that did would not get its hooks wired or its fixtures
+    collected, so it would not be a loaded plugin at all.
+
+    So within this process the reach does not depend on how a session was
+    configured, on what its environment held, or on whether this module is
+    registered in it. It depends on pluggy having one door.
+    """
+    registered = _REGISTER(self, plugin, name)
+    if registered is not None:
+        _note(self, plugin, registered)
+    return registered
+
+
+if getattr(pluggy.PluginManager.register, "_state_guard_observer", None) is None:
+    _register._state_guard_observer = True
+    pluggy.PluginManager.register = _register
+
+
+def pytest_plugin_registered(plugin, plugin_name, manager):
+    """The half the wrap above cannot have: what was registered BEFORE it.
+
+    A HISTORIC hook, so a manager this module is registered in reports every
+    plugin it already held. That matters for one real ordering:
+    ``Config._preparse`` runs ``consider_preparse`` -- which is where ``-p
+    _state_guard`` is consumed -- BEFORE ``consider_env``, which is what
+    imports this module. In a child session started with ``-p _state_guard``
+    the subject is therefore already registered by the time the wrap exists,
+    and only this hook sees it.
+    """
+    _note(manager, plugin, plugin_name)
 
 
 def pytest_configure(config):
@@ -1137,26 +1272,31 @@ class _Observed:
     A session is identified by ``(pid, ordinal)``: the ordinal alone repeats
     across processes. The OUTER session is the first one to configure, because
     nothing it spawns can configure before it does.
+
+    **THE NESTED SESSIONS ARE COUNTED FROM EVERY ROW AND NOT FROM THE SESSION
+    ROWS ALONE**, and that is not tidiness. A session the observer is not
+    registered in emits no ``pytest_configure`` row, but the wrap around
+    ``pluggy.PluginManager.register`` still reports what it loaded. That is
+    the whole subject of
+    ``test_an_IN_PROCESS_session_that_SCRUBS_THE_ENVIRONMENT_is_still_named``:
+    a nested session with a registration and no session row. Counting only
+    session rows would have called that session absent while holding the
+    evidence that it ran.
     """
 
     def __init__(self, rows: list[dict]) -> None:
         self.rows = rows
-        sessions = [row for row in rows if row["kind"] == "session"]
+        configured = [row for row in rows if row["kind"] == "session"]
         self.outer = (
-            (sessions[0]["pid"], sessions[0]["session"]) if sessions else None
+            (configured[0]["pid"], configured[0]["session"]) if configured else None
         )
-        self.here = [
-            row
-            for row in sessions
-            if self.outer is not None
-            and row["pid"] == self.outer[0]
-            and (row["pid"], row["session"]) != self.outer
-        ]
-        self.elsewhere = [
-            row
-            for row in sessions
-            if self.outer is not None and row["pid"] != self.outer[0]
-        ]
+        seen: list[tuple[int, int]] = []
+        for row in rows:
+            key = (row["pid"], row["session"])
+            if key != self.outer and key not in seen:
+                seen.append(key)
+        self.here = [key for key in seen if self.outer and key[0] == self.outer[0]]
+        self.elsewhere = [key for key in seen if self.outer and key[0] != self.outer[0]]
         #: Registrations of the subject in a session that is NOT the outer
         #: one. The outer session is excluded because its plugin set is
         #: decided entirely by :func:`_observe` -- its own argv and its own
@@ -1419,6 +1559,214 @@ def test_a_nested_session_that_only_MENTIONS_this_module_is_not_named(tmp_path):
     assert not seen.loaded, (
         f"the observer fires on a nested session that loads nothing:\n{seen}\n"
         "A guard that reports its own explanation is a guard that gets deleted."
+    )
+
+
+# ── the reach, at the two boundaries an audit found it at ───────────────────
+#
+# THREE PLANTS, AND EACH OF THEM ASSERTS THE ROUTE BEFORE ANYTHING ASSERTS THE
+# INSTRUMENT. The first shows the wrap holding where the wiring does not: a
+# nested session created after `PYTEST_PLUGINS` has been taken out of
+# `os.environ` is still named, so environment-scrubbing is not a way past this
+# in one process. The other two are declared LIMITS, and they are pinned in
+# the shape the `pytest_configure(c)` fixture failed to be — the subject
+# first, the blindness second. Each of the three drives the guard itself into
+# the inner session and reads its report, because "the module is loaded there"
+# is a claim about what the module DOES, and this file decides those by
+# running it.
+
+
+#: An IN-PROCESS nested session created after the observer's own wiring has
+#: been removed from the environment. The wrap around
+#: `pluggy.PluginManager.register` is the only thing that can see this: the
+#: observer is never registered in that session, so it gets no
+#: `pytest_configure` row and the historic hook never fires for it.
+_SCRUBBED_IN_PROCESS = r'''import os
+
+import pytest
+
+
+def test_middle(tmp_path):
+    inner = tmp_path / "test_inner.py"
+    inner.write_text("def test_inner():\n    assert True\n", encoding="utf-8")
+    # The wiring the observer arrives by, taken out before the session exists.
+    os.environ.pop("PYTEST_PLUGINS", None)
+    assert pytest.main([
+        "-q", "-p", "no:cacheprovider", "-p", "no:randomly",
+        "-p", "_state_guard", str(inner),
+    ]) == 0
+'''
+
+#: A CHILD PROCESS spawned with an explicit `env=`. Same interpreter, same
+#: pytest, same venv — and no `PYTEST_PLUGINS`, so the observer is not there
+#: at all. This is the route a blinded audit of 0.2.1 drove; the plant asserts
+#: it REACHES by making the guard fire inside the child and reading the
+#: report, and `tests/` is derived from the path the observer was pointed at
+#: rather than typed, so the child cannot resolve a different module than the
+#: one being watched.
+_SCRUBBED_CHILD = r'''import os
+import subprocess
+import sys
+
+
+def test_middle(tmp_path):
+    child = tmp_path / "test_child.py"
+    child.write_text(
+        "import os\n\n\ndef test_leaks():\n"
+        "    os.environ['STELLING_PLANTED_BY_THE_CHILD'] = '1'\n",
+        encoding="utf-8",
+    )
+    env = {
+        "PATH": os.environ["PATH"],
+        "HOME": os.environ.get("HOME", str(tmp_path)),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": os.path.dirname(os.environ["STATE_GUARD_OBSERVER_SUBJECT"]),
+    }
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         "-p", "no:randomly", "-p", "_state_guard", str(child)],
+        capture_output=True, text=True, cwd=str(tmp_path), env=env,
+    )
+    # THE SUBJECT OF THE LIMIT, ASSERTED HERE AND NOT ASSUMED: the guard is
+    # loaded in that child and doing its job, naming the planted test at its
+    # own teardown. A limit pinned only by "the instrument cannot see it" can
+    # be satisfied by source that never reached, which is exactly what the
+    # struck `pytest_configure(c)` entry turned out to be.
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "test_child.py::test_leaks changed process-global state" in proc.stdout, (
+        proc.stdout + proc.stderr
+    )
+'''
+
+#: A conftest that IMPORTS the two fixtures by name instead of registering the
+#: module. pytest collects fixtures out of a conftest's namespace, so they are
+#: live in the inner session and nothing was ever registered — the boundary
+#: between what this instrument watches and what makes the guard run.
+_IMPORTS_THE_FIXTURES = r'''pytest_plugins = ["pytester"]
+
+
+def test_middle(pytester):
+    pytester.makepyfile(
+        test_inner="import os\n\n\ndef test_leaks():\n"
+        "    os.environ['STELLING_PLANTED_INNER'] = '1'\n"
+    )
+    pytester.makeconftest(
+        "from _state_guard import state_guard, module_state_guard  # noqa: F401\n"
+    )
+    # THE SUBJECT OF THE LIMIT, ASSERTED: the fixtures are LIVE in there.
+    pytester.runpytest().stdout.fnmatch_lines(["*changed process-global state*"])
+'''
+
+
+def _unconfigured(seen: _Observed) -> list[dict]:
+    """Registrations in a session that never emitted a ``pytest_configure`` row.
+
+    Which is to say: the ones only the wrap can have reported, because the
+    observer was not registered in that session for the historic hook to reach
+    it. Without this distinction
+    ``test_an_IN_PROCESS_session_that_SCRUBS_THE_ENVIRONMENT_is_still_named``
+    would pass just as well on a tree where the scrub silently did nothing.
+    """
+    configured = {
+        (row["pid"], row["session"]) for row in seen.rows if row["kind"] == "session"
+    }
+    return [
+        row for row in seen.loaded if (row["pid"], row["session"]) not in configured
+    ]
+
+
+def test_an_IN_PROCESS_session_that_SCRUBS_THE_ENVIRONMENT_is_still_named(tmp_path):
+    """Taking the observer's wiring out of the environment does not hide a load.
+
+    **THE ANSWER TO "THE ENUMERATION MERELY MOVED".** The audit's fair hit was
+    that replacing *spellings that load a plugin* with *spawn idioms that
+    inherit an environment* trades one open set for another. It would have,
+    if the reach were the environment. In one process it is not: it is
+    `pluggy.PluginManager.register`, which every route ends in, wrapped once.
+    This plant removes `PYTEST_PLUGINS` from `os.environ` and only then builds
+    the session, so the observer is registered nowhere in it and the historic
+    hook cannot fire — and the registration is named anyway.
+
+    The second assertion is what stops this passing for the wrong reason: the
+    row must belong to a session that emitted NO `pytest_configure` row. If
+    the scrub had quietly failed, the observer would have been registered
+    there, the hook would have reported it, and a check that only asked
+    "was it named" would have called that a pass.
+    """
+    proc, seen = _observe_plant(tmp_path, _SCRUBBED_IN_PROCESS)
+    assert proc.returncode == 0, (
+        f"the plant did not run, so it loaded nothing\n{proc.stdout}\n{proc.stderr}"
+    )
+    assert seen.loaded, (
+        "an in-process nested session registered tests/_state_guard.py and "
+        f"was not named:\n{seen}\n{proc.stdout}\n"
+        "That is the defect this check exists for, arriving through the one "
+        "door the wrap is on. If `pluggy.PluginManager.register` has stopped "
+        "being that door, this file's central claim is gone and the prose "
+        "above needs rewriting, not this test."
+    )
+    assert _unconfigured(seen), (
+        "the load WAS named, but by a session that also configured the "
+        f"observer — so the scrub did nothing and this proves nothing:\n{seen}"
+    )
+
+
+def test_a_CHILD_PROCESS_THAT_SCRUBS_THE_ENVIRONMENT_loads_it_UNSEEN(tmp_path):
+    """A DECLARED LIMIT, pinned subject-first: the route reaches, and this is blind.
+
+    A child spawned with an explicit `env=` does not inherit `PYTEST_PLUGINS`,
+    so the observer is not in it and there is no wrap in that process either.
+    The plant proves the route is real the only way that means anything — the
+    guard fires in the child and names the planted test — and this asserts the
+    report is empty of it.
+
+    **WHY THIS IS DECLARED RATHER THAN CLOSED.** Closing it means injecting
+    wiring into children the observed program deliberately scrubbed, which
+    changes the program under observation; and a second process shares no
+    bookkeeping, which is the whole of the harm this guard was built around.
+    The honest form is a limit that is checked, and the check is here.
+    """
+    proc, seen = _observe_plant(tmp_path, _SCRUBBED_CHILD)
+    assert proc.returncode == 0, (
+        "the route no longer reaches: the guard did not fire in the "
+        f"env-scrubbed child\n{proc.stdout}\n{proc.stderr}\n"
+        "Say what changed, with the measurement. A limit whose route has "
+        "quietly stopped reaching is a limit nobody is checking."
+    )
+    assert not seen.loaded, (
+        f"the env-scrubbed child IS visible now:\n{seen}\n"
+        "That is good news, not a bug. Strike the matching bullet from the "
+        "WHAT IT DOES NOT REACH list above and delete this fixture, so the "
+        "file stops declaring a blindness it has outgrown."
+    )
+
+
+def test_a_conftest_that_IMPORTS_THE_FIXTURES_makes_them_live_UNSEEN(tmp_path):
+    """The other declared limit: this watches REGISTRATION, not activation.
+
+    `from _state_guard import state_guard` puts the fixture in a conftest's
+    namespace, where pytest collects it. It runs; no plugin is registered;
+    there is nothing for a register-watcher to see. The plant asserts the
+    first half by making the guard fire in the inner session, and this asserts
+    the second.
+
+    Harmless for the same reason everything else here is: the fixtures reach
+    the trajectory through `request.config`, so an inner session gets its own.
+    Named because a limits list that omits the route beside the one an audit
+    found is a list that will be wrong again.
+    """
+    proc, seen = _observe_plant(tmp_path, _IMPORTS_THE_FIXTURES)
+    assert proc.returncode == 0, (
+        "the route no longer reaches: the re-exported fixtures did not fire "
+        f"in the inner session\n{proc.stdout}\n{proc.stderr}"
+    )
+    assert seen.here, (
+        f"the plant spawned no nested session, so it shows nothing\n{seen}"
+    )
+    assert not seen.loaded, (
+        f"a conftest that only IMPORTS the fixtures is reported now:\n{seen}\n"
+        "That is good news. Strike the matching bullet from the WHAT IT DOES "
+        "NOT REACH list above and delete this fixture."
     )
 
 
