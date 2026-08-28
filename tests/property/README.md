@@ -431,7 +431,7 @@ docstring against its implementation, a figure against the corpus it was
 computed over, a count against the registry it describes, a falsifier against
 the claim it is supposed to falsify. **Nothing in this suite reads a docstring.**
 
-Two further limits worth naming:
+Three further limits worth naming:
 
 * the ~29 code-verdict defects in bucket (e) need **mutation testing and
   hand-built IR**. A harness generator plus a mutation rig covers 79 of 80
@@ -441,6 +441,18 @@ Two further limits worth naming:
   found in one pass by installing the other jax series. The cross-series
   property here is a first instrument, over a 225-harness corpus; it is
   under-explored, not nearly exhausted.
+* **no property here can see a float SIGN BIT, and one of them is about a
+  value that has one.** `test_strict_sign_property.py` evaluates in exact
+  `Fraction`, and ℚ has no signed zero: `(+0) + (−0)` is `0`, full stop, and
+  `Fraction(0) < 0` is False whichever way the bits went. So that property
+  cannot express — let alone falsify — "the executed zero carries the wrong
+  sign bit", and a null from it is evidence about ℝ and about nothing else.
+  This is not a gap a wider grammar closes; it is what an exact-rational
+  oracle IS. A real defect of exactly that shape sat under this suite and
+  under a hand table at the same time and neither could draw it (0.3.0's
+  seeded-reduction class). The guard for it executes on the target and reads
+  the bits: `tests/test_executed_sign_bit_sweep.py` and
+  `tests/test_strict_sign_census.py`, both outside this suite.
 
 **This does not replace the audit discipline.** It is a cheap, always-on net
 under one class of defect. The class it cannot see is the larger one.
@@ -530,6 +542,7 @@ refusals are recorded next to the clauses that replaced them:
 | `test_metamorphic.py` | two runs related to each other |
 | `test_cvc5_protocol.py` | the cvc5 record protocol as a fuzz target, flat and stateful |
 | `test_cross_series.py` | jax 0.10.2 against jax 0.11.0 |
+| `test_strict_sign_property.py` | the strict-sign certificate, searched in exact `Fraction`s — and therefore blind to sign bits, see *What this system cannot reach* |
 | `test_generator_floor.py` | the strategies still draw what they claim to |
 | `test_suite_disclosure.py` | runs with neither hypothesis nor jax, so "examined nothing" is never silent |
 

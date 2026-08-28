@@ -60,10 +60,34 @@ it* — is the whole reason the two guards that existed could not draw this
 class.
 
 **THE ANSWER IS REPORTED FOR TWO CARRYING SETS.** `main` carries the
-certificate on ten primitives and the 0.3.0 census carries it on thirty-one
-(both derived below, neither typed twice). A sibling under the wider set only
-is a 0.3.0 blocker; one under the narrower set is live on `main` today. The
-two answers are separate tests.
+certificate on ten primitives and the 0.3.0 census carries it on thirty-one.
+The thirty-one are DERIVED from the census at test time; the ten are a frozen
+record of another tree, and :data:`MAIN_CARRIERS` says why it cannot be
+derived here and what was done instead. A sibling under the wider set only
+would be a 0.3.0 blocker; one under the narrower set is live on `main` today.
+The two answers are separate tests.
+
+**AND THE ANSWER IS ABOUT PRIMITIVES, NOT ABOUT REACH — a distinction this
+module got wrong and now states twice.** "The twenty-one carriers 0.3.0 added
+are all clean" is true, and it does NOT mean the release left this class
+where it found it. Widening the carrier set widens the set of PROGRAMS that
+arrive at the two diverging primitives still holding a certificate, and that
+is a change in blast radius even though no new primitive diverges. MEASURED,
+same `src/`, only `_STRICT_SIGN_PRIMITIVES` swapped between the two sets::
+
+    u = any_array((), f64, (-1.0, -0.25));  assume(u < 0)
+    v = jnp.stack([u, u])                   # `stack`: a 0.3.0 carrier
+    assert_(1.0 / jnp.sum(v * 1e-200 * 1e-200) < 0.0)
+        main's ten  -> unknown
+        census's 31 -> discharged, and the program says False at every point
+
+`jnp.broadcast_to(u, (3,))` splits the same way through
+`broadcast_in_dim`. So the honest pair of sentences is: **0.3.0 admitted no
+new diverging primitive, and 0.3.0 did widen the reach of the two that
+diverge.** Both are checked —
+`test_THE_ANSWER_for_THE_CENSUSS_THIRTY_ONE_carrying_primitives` for the
+first, `test_the_0_3_0_widening_admitted_no_new_SIBLING_but_did_widen_the_REACH`
+for the second.
 
 **WHAT THIS SWEEP DOES NOT REACH.**
 
@@ -143,6 +167,8 @@ from stelling import ir
 from stelling import propagate as P
 from stelling.propagate import _Propagator
 
+_TESTS_ROOT = __import__("pathlib").Path(__file__).resolve().parent
+
 
 # --- what `main` carries, recorded rather than derived -----------------------
 
@@ -152,9 +178,9 @@ MAIN_CARRIERS = frozenset({
 })
 """The ten primitives `_STRICT_SIGN_PRIMITIVES` names on `main`.
 
-A FROZEN RECORD OF ANOTHER TREE, and it is the one thing in this module that
-is typed rather than measured, because it cannot be derived from the tree
-this file is in. Measured on 2026-08-28 at `a90862b` by reading the other
+A FROZEN RECORD OF ANOTHER TREE. It is TYPED rather than derived — the one
+set in this module that is, because it cannot be derived from the tree this
+file is in — and its CONTENT is measured, by the command below. Measured on 2026-08-28 at `a90862b` by reading the other
 tree out of git rather than the developer's checkout::
 
     git show main:src/stelling/propagate.py
@@ -320,6 +346,13 @@ class Row:
 
     The bucket is COMPARED against what the executions actually did, so all
     three arms are live: a row cannot be parked in a bucket by assertion.
+
+    ``jit_disagrees`` is about the TWO RUNTIME LEGS this row executes —
+    eager, and `jit` over the drawn scalar arguments. It is NOT a claim that
+    every lowering agrees: a third, constant-folded lowering exists and
+    differs on many of these rows — how many is version-dependent — which is
+    a separate question with its own check,
+    `test_the_THIRD_lowering_changes_the_bits_and_changes_NO_CLASSIFICATION`.
     """
 
     def __init__(self, bucket, cases, why, *, nans=False,
@@ -427,9 +460,10 @@ SWEEP: dict[str, Row] = {
         ),
         "The same XOR, and the same argument. A zero DIVISOR gives an "
         "infinity rather than a zero, so it cannot produce a wrong-signed "
-        "zero; a zero DIVIDEND gives a zero whose sign bit is the XOR. See "
-        "`test_a_certified_div_of_two_executed_zeros_is_a_NaN` for the one "
-        "thing this row does produce that is not a number.",
+        "zero; a zero DIVIDEND gives a zero whose sign bit is the XOR. The "
+        "one thing this row produces that is not a number IS reachable end "
+        "to end from an ordinary declaration — measured in "
+        "`test_a_certified_div_under_an_ORDINARY_declaration_executes_as_NaN`.",
         nans=True,
     ),
     "neg": Row(
@@ -518,9 +552,11 @@ SWEEP: dict[str, Row] = {
         "MEASURED, eager and under `jit`: `sum([-0.0])` is `-0.0` (one term, "
         "the seed never has to absorb a second) and `sum([-0.0, -0.0])` is "
         "`+0.0`. ASYMMETRIC: a `+1` certificate survives, because the seed "
-        "is the sign it claims. This row's eager and `jit` legs DISAGREE, "
-        "and that disagreement is itself a measurement — see "
-        "`test_the_SAME_reduction_compiles_two_ways_with_two_DIFFERENT_sign_bits`.",
+        "is the sign it claims. This row's two RUNTIME legs disagree, and "
+        "a third, constant-folded lowering disagrees with both — see "
+        "`test_the_SAME_reduction_compiles_AT_LEAST_THREE_WAYS_and_they_"
+        "disagree_on_the_sign_bit`. `dot_general` splits the same way one "
+        "leg further out.",
         jit_disagrees=True,
     ),
     "dot_general": Row(
@@ -549,8 +585,18 @@ SWEEP: dict[str, Row] = {
                  why="an extent-1 contraction: the control inside the row"),
         ),
         "**SIBLING.** `reduce_sum`'s seed reached through a contraction: "
-        "each output element is a sum of products, and the sum is seeded "
-        "with `+0.0` exactly as `reduce_sum`'s is. MEASURED: "
+        "each output element is a sum of products, and under the lowerings "
+        "this row executes that sum is seeded with `+0.0` as `reduce_sum`'s "
+        "is. **THAT SENTENCE USED TO END \"exactly as `reduce_sum`'s is\" "
+        "WITH NO QUALIFIER, AND IT IS THE SAME UNQUALIFIED SHAPE THIS "
+        "MODULE EXISTS TO REFUSE.** The seed is a property of the LOWERING: "
+        "`dot_general` splits across lowerings exactly as `reduce_sum` does, "
+        "just one leg further out — measured at this row's own case-0 values "
+        "`(-1.0, -1.0, 0.0, 0.0)` on jax 0.11.0 and again on 0.10.2, eager "
+        "`+0.0`, jit-from-scalars `+0.0`, jit-over-constants `-0.0`. The two "
+        "legs this row executes agree; a third does not. See "
+        "`test_the_SAME_reduction_compiles_AT_LEAST_THREE_WAYS_and_they_"
+        "disagree_on_the_sign_bit`. MEASURED: "
         "`dot([-0.,-0.], [1.,1.])` is `+0.0` under a `-1` certificate, and "
         "the extent-1 contraction `dot([-0.], [1.])` is `-0.0`. DATA "
         "DEPENDENT in a way `reduce_sum` is not — `dot([-1e-200,-1e-200], "
@@ -1156,57 +1202,6 @@ def test_the_jit_leg_agrees_with_the_eager_one_except_where_DECLARED():
     )
 
 
-def test_the_SAME_reduction_compiles_two_ways_with_two_DIFFERENT_sign_bits():
-    """THE MEASUREMENT BEHIND `reduce_sum`'s DECLARED DISAGREEMENT, and the
-    sharpest statement in this module of why the question had to be decided
-    by running the program.
-
-    One stelling-level `reduce_sum` over an extent-2 operand of `-0.0`
-    compiles two ways on jax 0.11.0 CPU binary64:
-
-    * the operand arriving as an ARRAY — eager, and `jit(lambda v: sum(v))` —
-      is a real reduction seeded with `+0.0`, and returns **`+0.0`**;
-    * the operand BUILT inside the jit from two scalar parameters —
-      `jit(lambda p, q: sum(stack([p, q])))` — is rewritten by XLA into a
-      bare `add(p, q)` with no seed at all, and returns **`-0.0`**. The
-      compiled HLO for that second form contains
-      ``ROOT %reduce_sum.1 = f64[] add(%param_0, %param_1)`` inside a fusion
-      and no `constant(0)` operand: the reduction is gone.
-
-    So the sign bit of the executed zero is NOT a function of the IR the
-    propagator sees. Any repair that reasons "XLA seeds reductions with
-    `+0.0`, therefore ..." is reasoning about one of two lowerings of the
-    same equation. This test is the record that both exist, and it reddens
-    if either stops."""
-    pytest.importorskip("jax")
-    jax, jnp, lax = _f64_lax()
-
-    def go():
-        vec = jnp.array([-0.0, -0.0], dtype=jnp.float64)
-        p = q = jnp.float64(-0.0)
-        return (
-            float(jnp.sum(vec)),
-            float(jax.jit(lambda v: jnp.sum(v))(vec)),
-            float(jax.jit(lambda a, b: jnp.sum(jnp.stack([a, b])))(p, q)),
-        )
-
-    eager_array, jit_array, jit_scalars = _at_x64(go)
-    assert eager_array == 0.0 and math.copysign(1.0, eager_array) > 0, (
-        f"eager sum of an array of -0.0 is {_show(eager_array)}; the seeded "
-        f"lowering is what makes this class a defect and it is gone"
-    )
-    assert jit_array == 0.0 and math.copysign(1.0, jit_array) > 0, (
-        f"jit over the whole array gives {_show(jit_array)}: the seed does "
-        f"not survive compilation, and the defect this branch discloses "
-        f"would be an eager-only artifact"
-    )
-    assert jit_scalars == 0.0 and math.copysign(1.0, jit_scalars) < 0, (
-        f"jit over two scalar parameters gives {_show(jit_scalars)}; the "
-        f"XLA simplification that removes the seed is gone, and with it the "
-        f"reason `reduce_sum` declares an eager/jit disagreement"
-    )
-
-
 # --- the two answers ---------------------------------------------------------
 
 
@@ -1239,8 +1234,14 @@ def test_THE_ANSWER_for_THE_CENSUSS_THIRTY_ONE_carrying_primitives():
     introduced. There is none: the two diverging primitives are both
     `main`'s, and the twenty-one carriers 0.3.0 added are all clean.
 
-    That is the finding, and it is worth stating in the direction that can
-    be wrong: this branch did not make the class bigger."""
+    **THE CLAIM IS ABOUT THE PRIMITIVE SET AND ONLY ABOUT IT.** This
+    docstring used to close *"this branch did not make the class bigger"*,
+    which reads as a statement about the release and is false of the REACH:
+    the widening lets programs that could not previously carry a certificate
+    into the two diverging primitives carry one there now. Measured in
+    `test_the_0_3_0_widening_admitted_no_new_SIBLING_but_did_widen_the_REACH`
+    and in this module's docstring. The sentence that survives is the narrow
+    one: **0.3.0 admitted no new diverging primitive.**"""
     pytest.importorskip("jax")
     got = _diverging(P._STRICT_SIGN_PRIMITIVES)
     assert got == ["dot_general", "reduce_sum"], (
@@ -1452,28 +1453,60 @@ def test_the_three_certificate_SOURCES_cannot_mint_a_wrong_signed_zero():
     ) == -1, "a wholly-negative subnormal box is no longer certified"
 
 
-def test_a_certified_div_of_two_executed_zeros_is_a_NaN():
-    """AN ADJACENT FINDING, recorded because the sweep tripped over it and
-    because it is NOT the class this item is about.
+def test_a_certified_div_under_an_ORDINARY_declaration_executes_as_NaN():
+    """AN ADJACENT FINDING, and its reachability is MEASURED, not disclaimed.
 
     `div` mints the XOR of its operands' certificates, and both operands may
-    execute as matching-signed zeros under the hypothesis above. `0/0` is a
-    NaN, and a NaN is not a value ℝ has: the certificate says the quotient
-    is a nonzero real of a definite sign and the target computes something
-    that compares false against everything.
+    execute as matching-signed zeros. `0/0` is a NaN, and a NaN is not a
+    value ℝ has: the certificate says the quotient is a nonzero real of a
+    definite sign, and the target computes something that compares false
+    against everything.
 
-    **WHAT IS NOT ESTABLISHED HERE IS REACHABILITY.** For a query to reach
-    this, the divisor's own interval would have to be certified nonzero
-    while containing the zero its value flushes to, and `_t_div` declines a
-    divisor box that straddles zero unless a certificate excludes it. This
-    module asks the LOCAL question and answers it; whether a whole query can
-    get here is not measured, and this docstring is the disclosure rather
-    than the claim."""
+    **THIS TEST USED TO SAY REACHABILITY WAS NOT ESTABLISHED, AND THE ROUTE
+    IT NAMED WAS THE WRONG ONE.** It read: *"WHAT IS NOT ESTABLISHED HERE IS
+    REACHABILITY. For a query to reach this, the divisor's own interval would
+    have to be certified nonzero while containing the zero its value flushes
+    to, and `_t_div` declines a divisor box that straddles zero unless a
+    certificate excludes it. This module asks the LOCAL question and answers
+    it; whether a whole query can get here is not measured, and this
+    docstring is the disclosure rather than the claim."*
+
+    Two things were wrong with that. The route it named is **structurally
+    impossible** — a certified value that flushes has the box `[0, 0]`, and
+    :func:`stelling.interval.boundary_div` raises on exactly that, so every
+    construction of that shape comes back UNKNOWN. And the route that DOES
+    work needs none of it: the divisor's box can exclude zero entirely and
+    still flush at runtime, because the flush belongs to the KERNEL and not
+    to the box. An ordinary declaration scaled into the subnormal band is
+    enough.
+
+    DRIVEN, jax 0.11.0 CPU binary64, this exact query::
+
+        x = any_array((), float64, (-1.0, -0.25));  assume(x < 0)
+        y = x * 1e-200 * 1e-108     box [-1.0000000000000004e-308,
+                                         -2.499999999999997e-309]
+                                    SUBNORMAL, and it EXCLUDES zero
+        assert_(y / y > 0)          ->  discharged
+
+    `y` is certified `-1` and the quotient `+1` — this row's configuration
+    exactly — the divisor box never straddles zero so `boundary_div` is not
+    involved at all, and at every sampled point of the assumed region the
+    target computes `y = -0.0` and `y / y = nan`. **No note fires**:
+    `_SUBNORMAL_TELL_ROWS` holds the six COMPARISONS only, so nothing in the
+    verdict, the notes or the assumptions tells the user a subnormal was
+    reached.
+
+    NOT REPAIRED HERE, and not this item's to repair: it is a different class
+    from the wrong-signed zero (the executed value is not a zero at all), it
+    needs no change to any sign rule, and the surface it would want is
+    `_subnormal_flush_tell`, whose predicate and wording are
+    comparison-shaped. This is the disclosure, and it is now a driven one."""
     pytest.importorskip("jax")
     jax, jnp, lax = _f64_lax()
-    got = _at_x64(
-        lambda: float(lax.div(jnp.float64(0.0), jnp.float64(0.0)))
-    )
+    from stelling.harness import any_array, assert_, assume, trace
+
+    # 1. the LOCAL fact
+    got = _at_x64(lambda: float(lax.div(jnp.float64(0.0), jnp.float64(0.0))))
     assert math.isnan(got), (
         f"lax.div(+0.0, +0.0) is {got!r}; the `div` row declares that it can "
         f"execute as NaN under a certificate and that declaration now rests "
@@ -1486,73 +1519,452 @@ def test_a_certified_div_of_two_executed_zeros_is_a_NaN():
         f"produces, and a run with neither is not exercising the case"
     )
 
+    # 2. the REACHABILITY, end to end, from an ordinary declaration.
+    #
+    # ONE `chain`, used by the traced harness AND by the point evaluation.
+    # They were written twice, and a mutation that changed only the harness
+    # left this test green while the executed half went on measuring the
+    # ORIGINAL expression — the "a check whose two halves are two copies"
+    # shape. Driven: `1e-200 * 1e-108` -> `1e-20 * 1e-10` in the harness
+    # alone used to pass.
+    def chain(v):
+        return v * 1e-200 * 1e-108
 
-# --- the ROUTING class comment's "exactly two exceptions", checked over all 18
+    def h():
+        x = any_array((), jnp.float64, (-1.0, -0.25))
+        assume(x < 0)
+        y = chain(x)
+        return assert_(y / y > 0)
+
+    cj = _at_x64(lambda: trace(h))
+    report = _at_x64(lambda: P.propagate(cj, semantics="real"))
+    statuses = [o.status for o in report.obligations]
+    assert statuses == ["discharged"], (
+        f"the NaN query now reports {statuses}. If it stopped discharging, "
+        f"this disclosure is out of date in the GOOD direction — re-measure "
+        f"the paragraph above rather than deleting it."
+    )
+
+    p = _Propagator("constrain")
+    p.run(cj.jaxpr, list(cj.consts), [])
+    asserts = [e for e in cj.jaxpr.eqns if e.primitive == "stelling_assert"]
+    pred = asserts[0].invars[0]
+    cmp_eqn = next(
+        e for e in cj.jaxpr.eqns if e.outvars and e.outvars[0].id == pred.id
+    )
+    quotient = cmp_eqn.invars[0]
+    producer = next(
+        e for e in cj.jaxpr.eqns
+        if any(o.id == quotient.id for o in e.outvars)
+    )
+    assert producer.primitive == "div", (
+        f"the compared value is produced by {producer.primitive!r}, so this "
+        f"reproduction no longer exercises the `div` row"
+    )
+    assert p.strict_sign.get(quotient.id) == 1, (
+        f"the quotient is certified {p.strict_sign.get(quotient.id)}, not +1 "
+        f"— this is no longer the `div` row's configuration"
+    )
+    divisor_box = p.env[producer.invars[1].id]
+    assert not iv.straddles_zero(divisor_box), (
+        f"the divisor box {(divisor_box.los[0], divisor_box.his[0])} "
+        f"straddles zero, which would route this through `boundary_div`. "
+        f"The whole point of this reproduction is that it does NOT: the box "
+        f"excludes zero and the runtime flushes anyway."
+    )
+
+    points = (-1.0, -0.5, -0.25)
+    flushed = _at_x64(lambda: [
+        float(chain(jnp.float64(pt))) for pt in points
+    ])
+    quotients = _at_x64(lambda: [
+        float(chain(jnp.float64(pt)) / chain(jnp.float64(pt)))
+        for pt in points
+    ])
+    assert all(v == 0.0 and math.copysign(1.0, v) < 0 for v in flushed), (
+        f"the certified value executes as {[_show(v) for v in flushed]}, not "
+        f"as a negative zero, so the 0/0 configuration is not reached"
+    )
+    assert all(math.isnan(q) for q in quotients), (
+        f"the executed quotients are {quotients}; the disclosure is that a "
+        f"DISCHARGED obligation is NaN at every sampled point of the assumed "
+        f"region"
+    )
+    told = [n for n in report.notes if "subnormal" in n.lower()]
+    assert not told, (
+        f"a subnormal note now fires for this query: {told}. That is an "
+        f"improvement, and the claim above that nothing tells the user must "
+        f"be corrected rather than left standing."
+    )
 
 
-def test_the_ROUTING_class_comment_names_EXACTLY_the_members_that_are_not_bit_copies():
-    """The class comment in `propagate.py` says every ROUTING output element
-    IS an element of a value operand **over ℝ**, and names `max` and `min`
-    as the only two members for which that is false OF THE EXECUTABLE — the
-    target's DAZ flush destroys a subnormal operand before the comparison,
-    so the result is a zero neither operand held.
+def test_the_0_3_0_widening_admitted_no_new_SIBLING_but_did_widen_the_REACH():
+    """THE SENTENCE A RELEASE NOTE GETS BUILT FROM, measured in both halves.
 
-    **THE CENSUS MODULE CHECKED THAT CLAIM AGAINST THREE MEMBERS**
-    (`test_max_and_min_are_the_two_ROUTING_members_that_are_not_a_bit_copy`
-    executes `max`, `min`, `reshape` and a `copy`), which establishes that
-    the two named members ARE exceptions and that two others are not. It
-    does not establish that the list is COMPLETE, and "exactly two" is a
-    completeness claim over eighteen.
+    The sweep's two answers are about PRIMITIVES: no carrier 0.3.0 added
+    diverges. That is a real and useful fact and it is the whole of what the
+    sweep can say, because the sweep asks a LOCAL question and says nothing
+    about which local configurations a query can reach.
 
-    So it is asked of all eighteen here, by execution: feed the smallest
-    subnormal into every value slot and require every output element to be
-    bit-identical to an input value. Sixteen must pass and the two named
-    must fail — the failing direction on an operand pair the flush can
-    separate, which is what makes them exceptions rather than merely
-    untested.
+    Reach is a separate question with a separate answer, and it is not the
+    reassuring one. Admitting `stack`, `broadcast_in_dim` and the rest of
+    the routing class means a certificate now SURVIVES constructions it used
+    to die in, and some of those constructions end at `reduce_sum`. The
+    diverging primitive is `main`'s; the program that reaches it is not.
 
-    WHAT THIS DOES NOT REACH: it is one operand value per member. A member
-    that introduced a value of its own only at some other input is not
-    caught, and neither is one that introduces a value on a shape or param
-    form outside the admitted row (an out-of-bounds `gather` fill, a
-    `dynamic_slice` clamp) — those forms decline at the transfer and never
-    reach a certificate at all, which is the argument the class comment
-    makes and not one this test measures."""
+    Driven here rather than argued: the same `src/`, the same traced query,
+    with only `_STRICT_SIGN_PRIMITIVES` swapped between the two carrying
+    sets. The certificate's presence is what flips the verdict, and the
+    verdict flips to a DISCHARGED obligation the compiled program makes
+    false at every sampled point of the assumed region."""
     pytest.importorskip("jax")
     jax, jnp, lax = _f64_lax()
+    from stelling.harness import any_array, assert_, assume, trace
+
+    def build(reshape):
+        def h():
+            u = any_array((), jnp.float64, (-1.0, -0.25))
+            assume(u < 0)
+            v = reshape(u)
+            return assert_(1.0 / jnp.sum(v * 1e-200 * 1e-200) < 0.0)
+        return h
+
+    routes = {
+        "stack": lambda u: jnp.stack([u, u]),
+        "broadcast_in_dim": lambda u: jnp.broadcast_to(u, (3,)),
+    }
+    widened = []
+    for name, reshape in sorted(routes.items()):
+        cj = _at_x64(lambda reshape=reshape: trace(build(reshape)))
+        assert name in {e.primitive for e in cj.jaxpr.eqns}, (
+            f"the {name!r} route no longer traces to {name!r}; it cannot "
+            f"demonstrate anything about that carrier"
+        )
+        assert name in P._STRICT_SIGN_PRIMITIVES - MAIN_CARRIERS, (
+            f"{name!r} is not one of the carriers 0.3.0 added, so this route "
+            f"is not about the widening"
+        )
+        verdicts = {}
+        for label, carriers in (("main", MAIN_CARRIERS),
+                                ("census", frozenset(P._STRICT_SIGN_PRIMITIVES))):
+            saved = P._STRICT_SIGN_PRIMITIVES
+            P._STRICT_SIGN_PRIMITIVES = carriers
+            try:
+                verdicts[label] = _at_x64(
+                    lambda: P.propagate(cj, semantics="real")
+                ).obligations[0].status
+            finally:
+                P._STRICT_SIGN_PRIMITIVES = saved
+        if verdicts["main"] != verdicts["census"]:
+            widened.append((name, verdicts["main"], verdicts["census"]))
+        # ...and the program disagrees with the wider verdict
+        executed = _at_x64(lambda reshape=reshape: [
+            float(1.0 / jnp.sum(reshape(jnp.float64(pt)) * 1e-200 * 1e-200))
+            for pt in (-1.0, -0.5, -0.25)
+        ])
+        assert all(not (q < 0.0) for q in executed), (
+            f"{name}: the obligation `1/sum < 0` is TRUE somewhere in "
+            f"{executed}, so this route no longer exhibits the defect"
+        )
+
+    assert widened, (
+        "neither route's verdict differs between the two carrying sets, so "
+        "0.3.0's widening buys no reach here and this module's docstring "
+        "overstates it. Re-measure the paragraph rather than deleting it."
+    )
+    for name, before, after in widened:
+        assert (before, after) == ("unknown", "discharged"), (
+            f"{name}: the widening moves the verdict {before!r} -> {after!r}, "
+            f"and this branch measured 'unknown' -> 'discharged'"
+        )
+    # the OTHER half, and the one the sweep's answers assert: no new sibling
+    added = frozenset(P._STRICT_SIGN_PRIMITIVES) - MAIN_CARRIERS
+    assert not [p for p in added if SWEEP[p].bucket == "diverges"], (
+        "a carrier 0.3.0 added now diverges, which makes the release the "
+        "author of a sibling rather than only of its reach"
+    )
+
+
+# --- the THIRD lowering, and what it does and does not change ---------------
+
+def _fold_row(prim: str, row: "Row"):
+    """Run one row's whole enumeration a third way — `jit` over a closure
+    taking NO arguments, so XLA constant-folds the operands into the graph.
+
+    Returns ``(executions whose bits differ from eager, wrong-signed zeros)``.
+    """
+    jax, jnp, lax = _f64_lax()
     mods = (jax, jnp, lax)
-    tiny = 5e-324
-    named = {"max", "min"}
+    differing = wrong = 0
+    for case in row.cases:
+        minted = _minted(prim, case.signs, case.shapes, case.params,
+                         case.outvars)
+        if not minted:
+            continue
+        pools = [
+            _candidates(s, len(case.slot_signs)) for s in case.slot_signs
+        ]
+        for vals in itertools.product(*pools):
+            args = tuple(jnp.float64(v) for v in vals)
+            eager = _flat(jnp, case.run(mods, args))
+            folded = _flat(jnp, jax.jit(
+                lambda case=case, vals=vals: case.run(
+                    mods, tuple(jnp.float64(v) for v in vals))
+            )())
+            if len(eager) != len(folded) or any(
+                (a != b and not (math.isnan(a) and math.isnan(b)))
+                or (a == 0.0
+                    and math.copysign(1.0, a) != math.copysign(1.0, b))
+                for a, b in zip(eager, folded)
+            ):
+                differing += 1
+            for v in folded:
+                if v == 0.0 and math.copysign(1.0, v) != float(minted):
+                    wrong += 1
+    return differing, wrong
+
+
+_FOLD_CACHE: dict[str, tuple[int, int]] = {}
+
+
+def _folded(prim: str) -> tuple[int, int]:
+    if prim not in _FOLD_CACHE:
+        _FOLD_CACHE[prim] = _at_x64(lambda: _fold_row(prim, SWEEP[prim]))
+    return _FOLD_CACHE[prim]
+
+
+def test_the_THIRD_lowering_changes_the_bits_and_changes_NO_CLASSIFICATION():
+    """The sweep executes two lowerings; a third exists; this is what it does.
+
+    **THE SOUNDNESS QUESTION AND THE CURIOSITY ARE DIFFERENT QUESTIONS AND
+    ARE ANSWERED SEPARATELY.** Over the whole enumeration, run a third way:
+
+    * the BITS differ on many rows, and **WHICH rows is a fact about the jax
+      in the room, not about this tree**;
+    * a wrong-signed zero under a certificate appears only in rows this table
+      already classifies `"diverges"`. So **the third lowering adds no
+      sibling**: the answer over three lowerings is the answer over two, and
+      both reported answers stand.
+
+    Only the second is asserted, and that is a correction. This check first
+    named the differing rows in a frozen set and asserted set EQUALITY —
+    which made it a check whose input is the developer's jax version, the
+    shape this project's rules forbid. MEASURED, same tree, same values, the
+    two lanes disagree:
+
+        jax 0.11.0   11 rows differ: add add_any div dot_general max min mul
+                                     reduce_sum scatter-add sqrt sub
+        jax 0.10.2   20 rows differ: the above minus scatter-add and sqrt,
+                                     plus broadcast_in_dim copy dynamic_slice
+                                     dynamic_update_slice gather scatter
+                                     select_n slice split squeeze
+                                     stop_gradient
+
+    The equality assertion passed on 0.11.0 and reddened the whole jax-0.10
+    lane. The count is not the point and never was: DAZ/FTZ is a property of
+    the runtime kernel, the constant folder does not share it, and HOW MUCH
+    of the graph a given XLA folds is a version-to-version implementation
+    choice. What must hold on every version is the subset below, and it does
+    — on 0.11.0 the folded leg's wrong-signed zeros are `{dot_general}`, on
+    0.10.2 `{dot_general, reduce_sum}`, and both are inside the declared
+    diverging set.
+
+    That subset is also why the third leg is a check of its own rather than a
+    third leg inside `_measure`: folding it in would have merged a benign,
+    version-dependent fact with the load-bearing one, and left every row's
+    counts unable to tell a reader which was which."""
+    pytest.importorskip("jax")
+    differ, wrong = set(), {}
+    for prim in sorted(SWEEP):
+        d, w = _folded(prim)
+        if d:
+            differ.add(prim)
+        if w:
+            wrong[prim] = w
+    assert differ, (
+        "the constant-folded lowering returned bit-identical results to the "
+        "runtime legs on all 31 rows, so this third leg is measuring nothing "
+        "and the classification below is a subtraction over an empty set"
+    )
+    already = {p for p in SWEEP if SWEEP[p].bucket == "diverges"}
+    assert set(wrong) <= already, (
+        f"the constant-folded lowering produces a wrong-signed zero under a "
+        f"certificate in {sorted(set(wrong) - already)}, which this table "
+        f"classifies as clean. That is a SIBLING the two executed legs cannot "
+        f"see, and both reported answers are short by it."
+    )
+    assert wrong, (
+        "the folded leg produced no wrong-signed zero anywhere, so this "
+        "check's subtraction is over an empty set and demonstrates nothing"
+    )
+
+
+def test_the_SAME_reduction_compiles_AT_LEAST_THREE_WAYS_and_they_disagree_on_the_sign_bit():
+    """THE SHARPEST STATEMENT IN THIS MODULE of why the question had to be
+    decided by running the program.
+
+    **THIS TEST USED TO SAY "TWO WAYS" AND NAME ONLY `reduce_sum`.** It read
+    *"One stelling-level `reduce_sum` over an extent-2 operand of `-0.0`
+    compiles two ways"*, and the module declared `jit_disagrees` for
+    `reduce_sum` alone while `dot_general`'s row carried the unqualified
+    claim that its sum "is seeded with `+0.0` exactly as `reduce_sum`'s is".
+    Both primitives split across lowerings. They split at DIFFERENT legs, and
+    the two legs the sweep executes both land on the same side for
+    `dot_general` — so the sweep's own `jit_disagrees` column gave it a clean
+    bill. The count is "at least three" and not "three" because nothing here
+    enumerates the lowerings; it exhibits them.
+
+    MEASURED on jax 0.11.0 CPU binary64, and again on 0.10.2 with identical
+    answers, under a `-1` certificate in every cell:
+
+        lowering                  reduce_sum([-0.,-0.])   dot_general(...)
+        eager                           +0.0                   +0.0
+        jit, scalar parameters          -0.0                   +0.0
+        jit, operand a parameter        +0.0                   +0.0
+        jit, constant-folded            -0.0                   -0.0
+
+    The scalar-parameter form of the reduction compiles to
+    ``ROOT %reduce_sum.1 = f64[] add(%param_0, %param_1)`` inside a fusion,
+    with no `constant(0)` operand: the reduction, and its seed, are gone. So
+    the sign bit of an executed zero is NOT a function of the IR the
+    propagator sees, for either primitive. A repair that reasons "XLA seeds
+    reductions with `+0.0`, therefore ..." is reasoning about one of at least
+    three lowerings of the same equation.
+
+    This reddens if any cell of that table moves, which is the point."""
+    pytest.importorskip("jax")
+    jax, jnp, lax = _f64_lax()
+
+    def dot(a, b):
+        return lax.dot_general(a, b, (((0,), (0,)), ((), ())))
 
     def go():
-        introduces = set()
-        for prim in sorted(P._SIGN_ROUTING):
-            for case in SWEEP[prim].cases:
-                vals = tuple(
-                    tiny if s >= 0 else -1.0 for s in case.slot_signs
-                )
-                args = tuple(jnp.float64(v) for v in vals)
-                out = _flat(jnp, case.run(mods, args))
-                if any(v not in vals for v in out):
-                    introduces.add(prim)
-        return introduces
+        neg2 = jnp.array([-0.0, -0.0], dtype=jnp.float64)
+        lhs = jnp.array([-1.0, -1.0], dtype=jnp.float64)
+        rhs = jnp.array([0.0, 0.0], dtype=jnp.float64)
+        z = jnp.float64(-0.0)
+        return {
+            ("reduce_sum", "eager"): float(jnp.sum(neg2)),
+            ("reduce_sum", "jit/scalars"): float(
+                jax.jit(lambda a, b: jnp.sum(jnp.stack([a, b])))(z, z)),
+            ("reduce_sum", "jit/array"): float(jax.jit(jnp.sum)(neg2)),
+            ("reduce_sum", "jit/folded"): float(
+                jax.jit(lambda: jnp.sum(jnp.array([-0.0, -0.0])))()),
+            ("dot_general", "eager"): float(dot(lhs, rhs)),
+            ("dot_general", "jit/scalars"): float(
+                jax.jit(lambda a, b, c, d: dot(
+                    jnp.stack([a, b]), jnp.stack([c, d])))(
+                        jnp.float64(-1.0), jnp.float64(-1.0),
+                        jnp.float64(0.0), jnp.float64(0.0))),
+            ("dot_general", "jit/array"): float(jax.jit(dot)(lhs, rhs)),
+            ("dot_general", "jit/folded"): float(jax.jit(
+                lambda: dot(jnp.array([-1.0, -1.0]),
+                            jnp.array([0.0, 0.0])))()),
+        }
 
-    introduces = _at_x64(go)
-    assert introduces == named, (
-        f"the ROUTING class comment names {sorted(named)} as the only "
-        f"members whose executed output can be a value no operand held, and "
-        f"executing all {len(P._SIGN_ROUTING)} of them on the smallest "
-        f"subnormal says {sorted(introduces)}. A NEW name is a member the "
-        f"comment's 'exactly two' does not cover; a MISSING one means the "
-        f"flush stopped separating that member's operands and the "
-        f"exception is no longer one."
-    )
-    # ...and being an exception is not the same as being wrong-signed: both
-    # named members are in the `"matching"` bucket above, which is the whole
-    # reason the class comment's departure from ℝ costs no verdict.
-    for prim in sorted(named):
-        assert SWEEP[prim].bucket == "matching", (
-            f"{prim} introduces a value no operand held AND its bucket is "
-            f"{SWEEP[prim].bucket!r} — the two facts together are a wrong "
-            f"verdict, not a documented ℝ gap"
+    got = _at_x64(go)
+    want = {
+        ("reduce_sum", "eager"): +1.0,
+        ("reduce_sum", "jit/scalars"): -1.0,
+        ("reduce_sum", "jit/array"): +1.0,
+        ("reduce_sum", "jit/folded"): -1.0,
+        ("dot_general", "eager"): +1.0,
+        ("dot_general", "jit/scalars"): +1.0,
+        ("dot_general", "jit/array"): +1.0,
+        ("dot_general", "jit/folded"): -1.0,
+    }
+    moved = []
+    for key, value in sorted(got.items()):
+        if value != 0.0:
+            moved.append(f"{key[0]} {key[1]}: {value!r} is not a zero at all")
+        elif math.copysign(1.0, value) != want[key]:
+            moved.append(
+                f"{key[0]} {key[1]}: {_show(value)}, and this tree measured "
+                f"{'+0.0' if want[key] > 0 else '-0.0'}"
+            )
+    assert not moved, "the lowering table moved:\n  " + "\n  ".join(moved)
+    # BOTH primitives must actually SPLIT, or "at least three" is a claim
+    # about a table in which nothing disagrees
+    for prim in ("reduce_sum", "dot_general"):
+        bits = {math.copysign(1.0, v) for k, v in got.items() if k[0] == prim}
+        assert bits == {-1.0, 1.0}, (
+            f"{prim} returns the same sign bit under every lowering here, so "
+            f"it no longer demonstrates that the sign bit is not a function "
+            f"of the equation"
         )
+
+
+def test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves():
+    """A citation nobody reads is a claim about nothing, and this one bit.
+
+    `tests/test_prose_hygiene.py` checks backticked test names in SHIPPED
+    prose — `SOUNDNESS.md`, `docs/`, the root `README.md`. It does not read
+    test-module docstrings, so a name cited by one test file about another is
+    unchecked.
+
+    THIS IS NOT HYPOTHETICAL AND IT IS WHY THE CHECK EXISTS. While this
+    item's fixes were being written, an edit that replaced a block by index
+    truncated the tail of this module: the third-lowering machinery and two
+    whole tests went with it, and **three citations of the
+    three-lowerings test — one of them the `xfail` reason string pytest
+    prints in the summary line — were left pointing at nothing.** (Its name
+    is not spelled here: this scan is strict about line wraps, deliberately,
+    and the rule that buys the strictness is below.) The suite stayed
+    green: the file still imported, the surviving tests still passed, and no
+    gate in the tree reads a docstring. It was found by a red-drive anchor
+    failing to match, which is luck.
+
+    Scope: the three modules this item owns. Tree-wide is
+    `test_prose_hygiene.py`'s business and widening it is not this item's."""
+    import ast
+    import re
+
+    owned = (
+        _TESTS_ROOT / "test_executed_sign_bit_sweep.py",
+        _TESTS_ROOT / "test_strict_sign_census.py",
+        _TESTS_ROOT / "property" / "test_strict_sign_property.py",
+    )
+    # a citation resolves to a test FUNCTION or to a test MODULE — both are
+    # things this item's prose points at, and `test_prose_hygiene.py`'s own
+    # resolver is built the same way (`names.add(path.stem)` beside the
+    # defined function names)
+    defined = set()
+    for path in sorted(_TESTS_ROOT.rglob("test_*.py")):
+        defined.add(path.stem)
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - a broken file reds first
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defined.add(node.name)
+
+    # a cited name may be wrapped across lines inside a docstring or split
+    # across adjacent string literals, so the source is de-wrapped first
+    cited, dangling = set(), []
+    for path in owned:
+        text = path.read_text(encoding="utf-8")
+        flat = re.sub(r'"\s*\n\s*(?:f?")?', "", text)
+        flat = re.sub(r"\s*\n\s*#?\s*", " ", flat)
+        for name in re.findall(r"\btest_[A-Za-z0-9_]{8,}\b", flat):
+            cited.add(name)
+            if name not in defined:
+                dangling.append(f"{path.name}: {name}")
+
+    assert not dangling, (
+        "test name(s) cited in this item's prose that no test defines:\n  "
+        + "\n  ".join(sorted(set(dangling)))
+        + "\n\nEither the citation is stale — the thing it names is gone, "
+        "which is the case this check exists for — or the NAME IS WRAPPED "
+        "ACROSS A LINE. This scan de-wraps across adjacent string literals "
+        "(`\"...foo_\"` / `\"bar...\"`) and NOT across a plain line break "
+        "inside a docstring, because a fuzzy join is a scan that can excuse "
+        "a real stale citation by accident. So the house rule this check "
+        "buys is: a cited symbol goes on one line, or is split only at a "
+        "string-literal boundary."
+    )
+    assert len(cited) > 10, (
+        f"only {len(cited)} test name(s) were found cited across "
+        f"{[p.name for p in owned]}; the scan has stopped reading the prose "
+        f"it is supposed to check"
+    )

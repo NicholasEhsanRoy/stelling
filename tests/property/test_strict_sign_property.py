@@ -60,9 +60,22 @@ NOT covered:
   have hand cases elsewhere."* That was true and it is no longer: the extent
   is DRAWN (`k` in `_specs`, 1 to 4), and `sum_broadcast` and
   `dot_broadcast` emit a real `reduce_sum` / `dot_general` down to a scalar
-  and a `broadcast_in_dim` back to `(k,)`, so both rules and both of their
-  SIZE guards are searched over generated extents including `k = 1`. What
-  the widening does not buy is the entry above it: in ℚ a reduction of
+  and a `broadcast_in_dim` back to `(k,)`, so both rules are searched over
+  generated extents, and each rule's SIZE GUARD is searched **on its
+  admitting side only, at `k = 1`**. *This entry first said "both of their
+  SIZE guards are searched", which is not supported:* `EXTENTS` starts at 1,
+  the refusing side is `size == 0`, and DRIVEN — with `reduce_sum`'s
+  `ins[0].size > 0` guard deleted outright, this property still PASSES. The
+  refusing side is unreachable from this grammar by construction and not by
+  omission: no size-0 value is ever certified
+  (`_Propagator._record_strict_sign`), and `_box_strict_sign` answers 0 on an
+  empty box, so a drawn chain cannot present a certified empty operand to a
+  reduction. Those two are driven in
+  `tests/test_strict_sign_census.py::
+  test_the_one_writer_refuses_a_size_0_value_and_accepts_a_sized_one` and
+  `tests/test_strict_sign_census.py::
+  test_a_ROUTING_rule_that_produces_an_EMPTY_output_certifies_nothing`.
+  What the widening does not buy is the entry above it: in ℚ a reduction of
   negatives is negative at every extent, so the sign-bit class stays
   invisible here by construction.
 * **ieee semantics.** The certificate is never written under ieee (the call
@@ -462,11 +475,30 @@ def test_a_certified_sign_is_TRUE_at_every_assumed_point():
     Adding `sum_broadcast` and `dot_broadcast` to `OPS` and drawing the
     extent changes the whole derandomized stream, and at budget 400 the new
     stream gives **`slice: 4`** — the search still reaches the op, but four
-    certified slices is not a search of it, and the floor caught it. At 800
-    the same stream gives `slice: 485`. That 120x jump for a 2x budget is
-    hypothesis's staged generation broadening late, and it is the honest
-    reason the budget is where it is: not "more is better" but "the ci
-    stream needs this much to reach the rarest op in the grammar".
+    certified slices is not a search of it, and the floor caught it.
+
+    **400 IS AN ISOLATED POTHOLE FOR `slice`, NOT A COVERAGE FLOOR, and this
+    paragraph used to imply otherwise.** It closed *"not 'more is better' but
+    'the ci stream needs this much to reach the rarest op in the grammar'"*,
+    which reads as a threshold. There is no threshold. MEASURED, nine
+    budgets, each a whole pytest run of this module with the pinned constant
+    pool, rarest tag over the whole census reported:
+
+        budget   result   rarest tag   slice
+          400     FAIL          4        4      <- `slice` alone, under floor 5
+          500     pass        131      215
+          600     pass        162      180
+          700     pass        207      411
+          800     pass        156      485
+          900     pass        264      272
+         1000     pass        302      366
+         1100     pass        390      390
+         1200     pass        349      669
+
+    Every budget from 500 up clears every floor by at least 26x, and no other
+    op is anywhere near collapse at 400 — the failure is one op in one
+    stream. 800 is kept because it is the budget whose census is recorded
+    below tag for tag, not because anything needs it.
 
     MEASURED on 2026-08-28 on this branch, `ci` profile, budget 800,
     derandomized, hypothesis 6.165.10, by the same wrapping:

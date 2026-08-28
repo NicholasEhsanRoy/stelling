@@ -1087,13 +1087,17 @@ class ZeroRow:
 # operand's size: a `reduce_sum` over an operand of six elements whose
 # every output cell sums ONE term keeps the sign bit.
 #
-# **"OVER AN ARRAY OPERAND" IS A QUALIFIER AND NOT A HEDGE.** The same
-# equation compiles two ways: `jit(lambda v: sum(v))` over an array keeps
-# the seeded reduction and returns `+0.0`, and
+# **"OVER AN ARRAY OPERAND" IS A QUALIFIER AND NOT A HEDGE, AND THE COUNT OF
+# LOWERINGS IS AT LEAST THREE.** *This paragraph said "compiles two ways" and
+# named only `reduce_sum`; both halves were short.* `jit(lambda v: sum(v))`
+# over an array keeps the seeded reduction and returns `+0.0`;
 # `jit(lambda p, q: sum(stack([p, q])))` is rewritten by XLA into a bare
-# `add(p, q)` with no seed and returns `-0.0`. Both are measured in
+# `add(p, q)` with no seed and returns `-0.0`; a constant-folded
+# `jit(lambda: sum(array([-0.,-0.])))` also returns `-0.0`. **`dot_general`
+# splits the same way**, one leg further out — eager and jit-from-scalars
+# both `+0.0`, constant-folded `-0.0`. All eight cells are measured in
 # `tests/test_executed_sign_bit_sweep.py::
-# test_the_SAME_reduction_compiles_two_ways_with_two_DIFFERENT_sign_bits`.
+# test_the_SAME_reduction_compiles_AT_LEAST_THREE_WAYS_and_they_disagree_on_the_sign_bit`.
 # The rows below evaluate the traced `fn` at points, which is the first
 # form; the sign bit of an executed zero is not a function of the IR alone
 # and no row here should be read as if it were.
@@ -1226,11 +1230,17 @@ def _zero_row_points(row):
 
 
 _DIVERGING_XFAIL = (
-    "OPEN DEFECT, not a gap in this test: XLA lowers `reduce_sum` and "
-    "`dot_general` as accumulations SEEDED with `+0.0`, so a value the "
-    "strict-sign certificate calls NEGATIVE whose every element flushes to "
-    "`-0.0` reduces to a `+0.0`. An opposite-signed zero falls outside "
-    "every arm of `interval.boundary_div` "
+    "OPEN DEFECT, not a gap in this test: under the lowering these rows "
+    "execute — an ARRAY operand, eager or jit — XLA accumulates `reduce_sum` "
+    "and `dot_general` from a `+0.0` seed, so a value the strict-sign "
+    "certificate calls NEGATIVE whose every element flushes to `-0.0` "
+    "reduces to a `+0.0`. THE SEED IS A PROPERTY OF THE LOWERING AND NOT OF "
+    "THE EQUATION: at least three lowerings of the same equation exist and "
+    "they do not agree on the sign bit "
+    "(`tests/test_executed_sign_bit_sweep.py::"
+    "test_the_SAME_reduction_compiles_AT_LEAST_THREE_WAYS_and_they_disagree"
+    "_on_the_sign_bit`). An opposite-signed zero falls outside every arm of "
+    "`interval.boundary_div` "
     "(`test_boundary_div_tolerates_only_a_MATCHING_signed_zero`), which "
     "turns it into a false VERIFIED on a lower-bound obligation and a "
     "false REFUTED on an upper one. Disclosed here rather than deleted: "
@@ -1456,3 +1466,251 @@ def test_the_message_names_every_transfer_in_one_of_its_three_lists():
         f"{missing} appear in no list the decline message prints, so a user "
         f"reading it cannot tell whether they carry the certificate"
     )
+
+
+# --- F3: the narrowing that makes those four xfails non-vacuous, ENFORCED ----
+
+
+_TESTS_DIR = __import__("pathlib").Path(__file__).resolve().parent
+
+
+def _xfail_markers_under(root, skip_dir):
+    """Every `pytest.mark.xfail(...)` under `root`, as ``(where, kwargs)``.
+
+    AST, and by the CALL rather than by decorator position — two reasons,
+    both measured.
+
+    A regex is wrong because `tests/test_skip_inventory.py` carries the text
+    `@pytest.mark.xfail(run=False, ...)` inside the SUBJECT SOURCES it writes
+    to temp files for its miniature sessions, and a text scan reads those as
+    live markers on this suite. Measured: a text scan over `tests/` reports
+    seven files, the AST reports one.
+
+    Decorator position alone is wrong because THIS MODULE'S OWN MARKERS ARE
+    NOT IN IT. They are built inside `_zero_row_params` and handed to
+    `pytest.param(..., marks=marks)` through a local variable, so a walker
+    that reads `decorator_list` and `marks=` literals finds zero of them —
+    measured, this test failed exactly that way when it was written. What is
+    stable is the CALL: `pytest.mark.xfail(...)` is the thing the rule is
+    about, wherever it is spelled.
+    """
+    import ast
+
+    out = []
+    for path in sorted(root.rglob("test_*.py")):
+        if skip_dir in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - a broken test file reds first
+            continue
+        enclosing = {}
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for child in ast.walk(node):
+                    enclosing.setdefault(id(child), node.name)
+        rel = path.relative_to(_TESTS_DIR.parent)
+        # the `func` of a Call is itself an Attribute node that `ast.walk`
+        # visits, so a called marker would be counted twice — once as the
+        # call and once as the bare attribute. The bare form (`@pytest.mark
+        # .xfail` with no parentheses) still has to be caught, since it
+        # carries none of the three required kwargs, so the called ones are
+        # subtracted rather than the bare ones ignored.
+        called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and id(node) in called:
+                continue
+            func = node.func if isinstance(node, ast.Call) else node
+            if not (isinstance(func, ast.Attribute) and func.attr == "xfail"):
+                continue
+            chain, cur = [], func.value
+            while isinstance(cur, ast.Attribute):
+                chain.append(cur.attr)
+                cur = cur.value
+            if isinstance(cur, ast.Name):
+                chain.append(cur.id)
+            if "mark" not in chain:
+                continue
+            kwargs = (
+                {k.arg: k.value for k in node.keywords}
+                if isinstance(node, ast.Call) else {}
+            )
+            out.append((
+                f"{rel}::{enclosing.get(id(node), '<module>')}", kwargs,
+            ))
+    return out
+
+
+def test_every_xfail_OUTSIDE_the_property_suite_is_strict_and_narrowed():
+    """THE RULE THAT WAS APPLIED BY HAND, APPLIED BY A CHECK INSTEAD.
+
+    `tests/property/test_suite_disclosure.py::
+    test_every_xfail_in_the_suite_is_strict_and_narrowed_by_raises` states
+    the rule — strict, narrowed to an exception type, carrying a reason —
+    and says in its own docstring that it "applies to every xfail in the
+    tree rather than to one named test". **Its implementation walks
+    `tests/property/` only**, and it is gated on `importorskip("hypothesis")`,
+    which is absent from all three merge lanes. So the four `xfail` markers
+    this module carries — MEASURED by the AST walk above, the only live ones
+    anywhere outside `tests/property/` — stood under a comment saying the
+    rule had been "applied by hand", and by nothing else.
+
+    Applied by hand means enforced by nothing. DRIVEN: with
+    `raises=WrongSignedZeroUnderCertificate` deleted AND the class row broken
+    so it executes no zero at all, this file came back
+    `164 passed, 4 xfailed` and `test_suite_disclosure.py` plus
+    `test_skip_inventory.py` came back `81 passed, 1 skipped`. A blanket
+    amnesty over `AssertionError` swallows this table's own vacuity guards
+    and nothing objected.
+
+    This check is here rather than in the property suite for one reason: it
+    must RUN in the lanes that gate a merge, and it needs neither jax nor
+    hypothesis to do it. The two checks are asserted jointly TOTAL over
+    `tests/` below, so the division of labour cannot leave a gap."""
+    bad = []
+    for nodeid, kw in _xfail_markers_under(_TESTS_DIR, "property"):
+        import ast as _ast
+
+        strict = kw.get("strict")
+        if not (isinstance(strict, _ast.Constant) and strict.value is True):
+            bad.append(
+                f"{nodeid}: xfail is not `strict=True`. A non-strict xfail "
+                f"passes silently the day the defect is fixed, which is the "
+                f"one day it must not be the first to notice."
+            )
+        if "raises" not in kw:
+            bad.append(
+                f"{nodeid}: xfail carries no `raises=`, so it is a blanket "
+                f"amnesty over every exception the test can raise — its "
+                f"vacuity guards included, which then fail GREEN."
+            )
+        if not kw.get("reason"):
+            bad.append(
+                f"{nodeid}: xfail carries no `reason=`, so the run's summary "
+                f"line does not say what is not being checked."
+            )
+    assert not bad, "\n  ".join(["xfail markers outside tests/property/:", *bad])
+
+
+def test_this_module_is_where_those_markers_ARE_so_the_check_is_not_vacuous():
+    """The absence half. A walker that finds nothing passes for free.
+
+    Both directions: this module must still carry markers for the check above
+    to be about anything, and the count is DERIVED from the diverging rows
+    rather than typed, so adding a diverging row without a marker reds."""
+    found = _xfail_markers_under(_TESTS_DIR, "property")
+    mine = [n for n, _ in found if "test_strict_sign_census.py::" in n]
+    assert len(mine) == 1, (
+        f"this module builds its markers at ONE `pytest.mark.xfail(...)` "
+        f"site inside `_zero_row_params`, and the walk finds {len(mine)}: "
+        f"{mine}. The check above is measuring something other than this "
+        f"table."
+    )
+    # ...and that one site is what marks every diverging row, derived
+    want = sum(1 for r in ZERO_UNDER_CERTIFICATE.values() if r.diverges)
+    marked = sum(
+        1 for prm in _zero_row_params()
+        if getattr(prm, "marks", ())
+    )
+    assert marked == want > 0, (
+        f"{want} row(s) declare `diverges` and {marked} carry a mark; the "
+        f"one site above is not reaching every diverging row"
+    )
+    assert len(found) == len(mine), (
+        f"an xfail marker appeared outside `tests/property/` and outside this "
+        f"module: {sorted(n for n, _ in found if n not in mine)}. That is "
+        f"fine — but it is now this check's business, and this assertion is "
+        f"how its author finds that out."
+    )
+
+
+def test_the_two_xfail_WALKERS_are_jointly_total_over_the_tests_tree():
+    """Neither check may assume the other's scope.
+
+    The property suite's walker takes `tests/property/`; the one above takes
+    everything else. Total by construction only while both predicates are the
+    complement of each other, so the complement is asserted here rather than
+    trusted — over the file set pytest would actually collect."""
+    everywhere = _xfail_markers_under(_TESTS_DIR, "\0no-such-part\0")
+    outside = _xfail_markers_under(_TESTS_DIR, "property")
+    inside = [n for n, _ in everywhere if "property/" in n.replace("\\", "/")]
+    assert len(everywhere) == len(outside) + len(inside), (
+        f"{len(everywhere)} xfail markers under `tests/`, {len(outside)} "
+        f"claimed by this module's walker and {len(inside)} by the property "
+        f"suite's — the two do not partition the tree and a marker is "
+        f"governed by neither"
+    )
+    assert inside, (
+        "the property suite carries no xfail marker, so the walker this one "
+        "divides labour with has nothing to do and the division is a claim "
+        "about nothing"
+    )
+
+
+def test_the_seeded_reduction_sign_bit_has_a_witness_that_is_NOT_an_amnesty():
+    """THE SIGN-BIT FACT, ASSERTED POSITIVELY, in an ordinary green test.
+
+    The four rows above disclose the defect through `xfail(strict=True)`,
+    which is the right shape for "this obligation is violated and the repair
+    will make it pass" — but an xfail is an ABSENCE of a verdict. Every
+    statement it makes is made by not raising, and this project's own rule is
+    that an instrument whose evidence is an absence is the weak form.
+
+    So the underlying fact about the TARGET is stated here as a presence, in
+    a test that is green today, has no marker on it, and cannot be silenced
+    by widening an amnesty. It is deliberately a claim about jax and NOT
+    about the certificate: it does not read `strict_sign`, so the day the
+    SEEDED-REDUCTION REPAIR lands this keeps passing (the rule will change,
+    the lowering will not) and the four xfails become XPASS and red. One
+    tripwire on the repair, not five.
+
+    Measured on jax 0.11.0 CPU binary64, and re-measured on 0.10.2 with the
+    same answers."""
+    pytest.importorskip("jax")
+    jax, jnp, lax = _f64_lax()
+
+    def go():
+        neg2 = jnp.array([-0.0, -0.0], dtype=jnp.float64)
+        neg1 = jnp.array([-0.0], dtype=jnp.float64)
+        pos2 = jnp.array([0.0, 0.0], dtype=jnp.float64)
+        ones = jnp.array([1.0, 1.0], dtype=jnp.float64)
+        dot = lambda a, b: lax.dot_general(a, b, (((0,), (0,)), ((), ())))
+        return {
+            "sum n=2 eager": float(jnp.sum(neg2)),
+            "sum n=2 jit": float(jax.jit(jnp.sum)(neg2)),
+            "sum n=1 eager": float(jnp.sum(neg1)),
+            "sum n=1 jit": float(jax.jit(jnp.sum)(neg1)),
+            "sum n=2 POSITIVE": float(jnp.sum(pos2)),
+            "dot n=2 eager": float(dot(neg2, ones)),
+            "dot n=2 jit": float(jax.jit(dot)(neg2, ones)),
+        }
+
+    got = _at_x64(go)
+    for key, value in got.items():
+        assert value == 0.0, f"{key} is {value!r}, not a zero at all"
+
+    # THE FACT: a reduction of two negative zeros carries the PLUS sign bit
+    for key in ("sum n=2 eager", "sum n=2 jit",
+                "dot n=2 eager", "dot n=2 jit"):
+        assert math.copysign(1.0, got[key]) > 0, (
+            f"{key} is {_show_zero(got[key])}. The seeded-reduction class is "
+            f"this fact; if it has gone, the four xfail rows above are "
+            f"XPASSing and this suite is already red — check there before "
+            f"believing the target changed."
+        )
+    # ...and the two controls that make it a fact about the SEED and not
+    # about reductions in general
+    for key in ("sum n=1 eager", "sum n=1 jit"):
+        assert math.copysign(1.0, got[key]) < 0, (
+            f"{key} is {_show_zero(got[key])}; a one-term reduction must "
+            f"keep the sign bit, or the boundary is not the reduced extent"
+        )
+    assert math.copysign(1.0, got["sum n=2 POSITIVE"]) > 0, (
+        "a POSITIVE-certified reduction no longer keeps its sign bit either, "
+        "which would make this a symmetric defect rather than the asymmetric "
+        "one the repair is shaped around"
+    )
+
+
+def _show_zero(v: float) -> str:
+    return "-0.0" if math.copysign(1.0, v) < 0 else "+0.0"
