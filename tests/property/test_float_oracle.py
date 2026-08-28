@@ -24,8 +24,11 @@ compile-time constants is executed at runtime, where the backend flushes a
 subnormal, instead of being constant-folded in full precision the way the
 compiled program folds it. Every candidate violation is therefore re-checked
 against the same jaxpr staged into ONE ``jax.jit``, and one the compiled
-program does not have is declined rather than reported: **76 of 639 candidates
-in a 1500-example run**. That second route follows
+program does not have is declined rather than reported: **9 of 572 candidates
+in a 1500-example run** (``route_declined`` 9 against 563 reported; the figure
+here read "76 of 639" and was quoted from the ``03b2dbe`` run, whose partition
+the same file already called superseded — see :data:`FLOAT_ORACLE_MEASURED`).
+That second route follows
 ``stelling.falsify._whole_program_route``, including the two properties that
 make it safe — it is consulted only after a violation, and it can only
 DECLINE.
@@ -128,15 +131,21 @@ module docstring in full. In one line each, here, where a reader of a null
 result will meet them:
 
 1. **⊤ is unfalsifiable, and it is not the only bucket that is.** A declined
-   equation's box is ``[-inf, inf]`` and contains every finite float, so this
-   instrument is blind exactly where the propagator already declined. The pass
-   rate is **not** a safety signal. The census counts boxes in FOUR buckets —
-   ⊤ (15 %), EMPTY (12 %: a size-0 declaration, no element to violate
-   anything), INTEGER (11 %: never compared, because a binary64 box endpoint
-   cannot represent an ``int64`` above 2**53) and compared (61 %) — and both
-   properties floor on the last alone. **39 % of the field of view is blind**,
-   for three different reasons, and the third of them was counted as
-   falsifiable until an audit instrumented it.
+   equation's box admits every value its dtype can take, so this instrument is
+   blind exactly where the propagator already declined. The pass rate is
+   **not** a safety signal. The census counts boxes in FOUR buckets — ⊤,
+   EMPTY (a size-0 declaration: no element to violate anything), INTEGER
+   (never compared, because a binary64 box endpoint cannot represent an
+   ``int64`` above 2**53) and compared — and both properties floor on the last
+   alone, restricted to the unbiased generator. The percentages are in
+   :data:`FLOAT_ORACLE_MEASURED` with the run that produced them; **most of
+   the field of view is blind**, for three different reasons, and that figure
+   has been wrong twice in the same direction. It read 24 % blind until the
+   integer bucket was counted apart, then 39–41 % until an audit found that
+   ``_float_oracle.is_top`` tested ``±inf`` and so missed the BOOL lattice's
+   own top — a box of ``[0, 1]`` on a bool output, which every declined
+   comparison in this grammar produces and which no executed bool can fall
+   outside of.
 2. **The sampler's grid.** Only dtype-representable points strictly inside the
    declared box are executed, snapped inward with ``nextafter``. A declaration
    whose box holds no value of its own dtype is reported ``unsampleable`` and
@@ -159,10 +168,22 @@ PROVED to be a box wrong about ℝ*.
 PARAGRAPH USED TO SAY.** It read *"the ``unclassified`` count is how much of
 the field that proof did not cover. It is 0 in the shipped run."* Zero is
 true and it measures the wrong thing: a violation an UNPROVED rule names is
-not unclassified, it is classified on no evidence, and 57 of the 563 were.
-The census carries :data:`_float_oracle.BASES` — 303 proved, 203 sound by
-construction, 57 heuristic — and the heuristic row is the honest answer to
-"how much did the proof not cover".
+not unclassified, it is classified on no evidence. The census carries
+:data:`_float_oracle.BASES` — proved / sound-by-construction / heuristic, with
+the run's own counts in :data:`FLOAT_ORACLE_MEASURED` — and the heuristic row
+is the honest answer to "how much did the proof not cover".
+
+**AND ``sound-by-construction`` WAS OVERSTATED, WHICH IS THE SAME MISTAKE ONE
+COLUMN LEFT.** That basis means the rule needs no ℝ reading to be right, and
+three rules claimed it while making a claim about ℝ: ``overflow-to-inf``
+(*no finite box contains an infinity* is structural, but *an overflow of a
+box that is RIGHT about ℝ produced it* is not), ``assume-narrowing`` (decided
+by comparing two boxes, which cannot tell a narrowing that is right about ℝ
+from one that is wrong), and the operand-NaN rule (which scanned every element
+of every operand rather than the ones the element under judgement depends on).
+All three are now proved where they can be and heuristic where they cannot;
+the ``sound-by-construction`` row shrinks by exactly the amount the ``proved``
+row grows.
 
 ────────────────────────────────────────────────────────────────────────────
 POSITIVE CONTROLS
@@ -179,6 +200,8 @@ Run them: ``python tools/property_check.py --controls``.
 """
 
 from __future__ import annotations
+
+import math
 
 import pytest
 
@@ -203,28 +226,80 @@ FLOAT_BOX_DEFECT = (
 #: THE PARTITION, as a dated record rather than a present-tense claim, and
 #: with the column that decides a repair beside the one that does not.
 #:
-#: Measured 2026-08-28 at ``03b2dbe`` — jax 0.11.0, jaxlib 0.11.0, numpy
-#: 2.5.2, CPython 3.12.3, hypothesis 6.165.10, ``JAX_PLATFORMS=cpu``, x64
-#: forced on by this module's fixture — by running THIS FILE's residual leg at
-#: ``STELLING_PROPERTY_SCALE=12.5``, i.e. 1500 examples, and reading its own
-#: census. Re-derivable by anyone with this tree and that command.
+#: Measured 2026-08-29 on the tree THIS COMMIT creates — jax 0.11.0, jaxlib
+#: 0.11.0, numpy 2.5.2, CPython 3.12.3, hypothesis 6.165.10, pytest 9.1.1,
+#: ``JAX_PLATFORMS=cpu``, x64 forced on by this module's fixture — by running
+#: THIS FILE's residual leg at ``STELLING_PROPERTY_SCALE=12.5``, i.e. 1500
+#: examples, and reading its own census. Re-derivable by anyone with this tree
+#: and that command. (A commit cannot contain its own hash; the commit that
+#: follows this one replaces this sentence with the sha and changes nothing
+#: else, so the numbers stay reproducible at the commit they name.)
+#:
+#: **THE ANCHOR ITSELF WAS WRONG AND THAT IS WHY THIS SENTENCE IS SO CAREFUL.**
+#: It read *"Measured 2026-08-28 at ``03b2dbe``"* while the table it introduced
+#: reproduced only at the commit AFTER it. Re-derived 2026-08-29 by
+#: ``git archive 03b2dbe src tests`` into a scratch tree and running the same
+#: command there: **13727 boxes, 8411 compared, 95 falsified discharges, 76
+#: route declines, 537 obligation readings taken by both routes, 17 of them
+#: disagreeing**, and 563 violations as 316 nan / 175 flush / 29 narrow /
+#: 27 reassoc / 16 overflow. That is the run this file called superseded two
+#: paragraphs below while pointing its own anchor at it.
+#:
+#: **AND TWO FIGURES FROM THAT RUN SURVIVED IN THE PROSE AROUND THE TABLE**,
+#: 250 lines from a census that contradicts them: *"76 of 639 candidates"*
+#: declined by the second route (76 + 563 = 639 — correct AT ``03b2dbe``, and
+#: 9 of 572 on the tree that shipped it), and *"17 of the 537 obligation
+#: readings … it is why this cannot be left on the eager reading"* (537 and 17
+#: at ``03b2dbe``; 420 and **0** on the tree that shipped it, so the argument
+#: was resting on a number that had gone to zero). Neither was wrong when it
+#: was taken. Both were left behind by the tree, which is exactly what a
+#: present-tense figure does and exactly what the anchor exists to prevent.
+#: Both are corrected where they stood.
 #:
 #: **EVENTS ARE THE WRONG DENOMINATOR AND THE RANKING INVERTS ON THEM.** 563
 #: events stand on 90 distinct programs and 110 distinct sites, and one pinned
 #: ``@example`` re-drawn contributes as many events as it is re-drawn. By
-#: events ``flush(231) > nan(162) > narrow(83) > reassoc(46)``; by distinct
-#: programs ``nan(31) > reassoc(30) > flush(12) > narrow(10)``. **A repair
-#: prioritised on 231-vs-46 would be prioritised on how often an example was
+#: events ``flush(232) > nan(162) > narrow(83) > reassoc(46)``; by distinct
+#: programs ``nan(31) > reassoc(30) > flush(13) > narrow(10)``. **A repair
+#: prioritised on 232-vs-46 would be prioritised on how often an example was
 #: re-drawn** — reduction reassociation is the second largest class by
 #: programs and the fourth by events. Both columns ship.
 #:
-#: **AND THE THREE GENERATORS HAVE NOTHING IN COMMON BUT THIS CENSUS.** The
-#: unbiased grammar, the aimed cancelling-sum strategy and the pinned members
-#: are counted apart now, because mixing them makes the partition a statement
-#: about draw densities. The previous partition did mix them, and
-#: ``read/unlabelled`` — documented as "THE UNBIASED HALF, COUNTED SEPARATELY"
-#: — counted the aimed strategy too, because that one also yields
-#: ``label == ""``.
+#: **AND THE DISTINCT COLUMN IS STILL NOT A DENOMINATOR UNTIL IT IS CROSSED
+#: WITH THE STRATEGY.** This is the correction this round exists for. The
+#: three generators have nothing in common but this census: an unbiased
+#: grammar, a strategy aimed at ONE known class whose own docstring says it
+#: "finds that class and nothing else", and a fixed list of pinned
+#: ``@example``s re-drawn as often as Hypothesis feels like re-drawing them.
+#: Round 2 crossed the CAUSE partition with them and left the two figures a
+#: repair is actually scoped on uncrossed. Crossed:
+#:
+#:   * **"116 violations are a discharge falsified, over 21 DISTINCT
+#:     PROGRAMS"** — the sentence every consumer of this module quotes as the
+#:     denominator — is **100 events over 5 programs from the pinned
+#:     ``@example``s**, **16 over 16 from the aimed cancelling-sum strategy**,
+#:     and **0 from the unbiased leg**. The 16 are shrink neighbours of one
+#:     construction, which is measured and not asserted: 15 of the 16 have the
+#:     same vector length and 13 the same pinned envelope, and of the 69 pairs
+#:     that share both, **10 differ in at most 4 of their 33 elements, 7 in at
+#:     most 2, and one pair in exactly ONE element**. A repair team reading
+#:     "21 independent situations" is reading **six**;
+#:   * **"by distinct programs reassoc(30) is second"** rests on **29 draws of
+#:     the aimed strategy**, against a leg this module PROVES cannot reach the
+#:     class at all — the residual leg asserts that premise against
+#:     ``_grammar.SHAPES`` on every run now. The only rows in the table that
+#:     are a statement about the TOOL rather than about a strategy someone
+#:     aimed are the unbiased column: nan 30, narrow 8, flush 7, overflow 7,
+#:     reassoc 0.
+#:
+#: The unbiased leg's zero in the discharge column is NOT floorable — a floor
+#: on zero is not a floor — so it is written into the table as an explicit
+#: cell rather than left absent, because an absent cell reads as evidence of
+#: absence. What IS floored is ``distinct/falsified/member``, at
+#: ``len(_float_oracle.DISCHARGE_FALSIFYING)``: that figure is 5 at the ``ci``
+#: profile and 5 here, where the uncrossed ``distinct/falsified`` is 5 and 21.
+#: The crossed one is a fact about the tree; the uncrossed one is a fact about
+#: the budget.
 #:
 #: **THE PARTITION THIS FILE SHIPPED AT ``03b2dbe`` IS SUPERSEDED.** It read
 #: 563 as 316 nan / 175 flush / 29 narrow / 27 reassoc / 16 overflow. Four
@@ -234,57 +309,94 @@ FLOAT_BOX_DEFECT = (
 #: assume-narrowing class was being counted as arithmetic; and the refutation
 #: half of the obligation count was not element-aligned. The **ranking
 #: survives** on the column that matters.
+#:
+#: **AND THE PARTITION AT ``100679f`` IS SUPERSEDED BY THIS ONE**, in three
+#: places and by three fixes rather than by a re-run. The bucket table moves
+#: because ``is_top`` now counts the bool lattice's own ⊤ as declined
+#: (compared 7719 -> 5491, TOP 1787 -> 4015, and the disclosure everywhere
+#: goes from "39 %/41 % blind" to 58 %; measured with that function
+#: instrumented to report the split it was hiding, the 7719 were 2228 bool
+#: ⊤, 1777 definite bool and 3714 float). The evidence column moves because
+#: three rules that claimed ``sound-by-construction`` were making a claim
+#: about ℝ (proved 303 -> 344, sound-by-construction 203 -> 162, heuristic
+#: unchanged at 57). And ONE LIVE VIOLATION CHANGES CAUSE: a draw of
+#: ``assume-narrows-past-the-program`` at ``x0 = 5e-324`` — a point that
+#: satisfies its own ``assume`` EXACTLY over ℝ — was reported
+#: ``assume-narrowing`` and is ``flush-or-subnormal`` now, which is why the
+#: flush row is 232 and not 231 and its distinct column 13 and not 12.
 FLOAT_ORACLE_MEASURED = """\
-1511 programs drawn, 1129 read, 42.3 s (28 ms/example, load average 3)
+1511 programs drawn, 1129 read, 46.2 s (31 ms/example, load average 2.4)
  382 not read: 108 ValueError, 79 TypeError, 50 OverflowError and 1
      ZeroDivisionError at the declaration door; 95 whose assumes admit none of
      the sampled points; 29 unsampleable; 20 UnsatisfiableAssumptionError
 
 13041 boxes read, in four buckets:
-     7719  compared  (59 %)  where a finite value can be caught outside a box
+     5491  compared  (42 %)  where an executed value can be caught outside a box
+     4015  TOP       (31 %)  the analysis declined. A ⊤ box admits every value
+                             its dtype can take: [-inf, inf] for a float,
+                             [0, 1] for a bool. Only a NaN escapes one
      1948  EMPTY     (15 %)  a size-0 declaration: no element to violate
-     1787  TOP       (14 %)  the analysis declined; contains every finite float
      1587  INTEGER   (12 %)  never compared; a binary64 box endpoint cannot
                              represent an int64 above 2**53
+                             --> 58 % of the field of view is blind, for three
+                                 different reasons, and only the first of them
+                                 is the analysis having declined
 
 563 VIOLATIONS                      events   distinct programs
-    flush-or-subnormal                 231                  12
+    flush-or-subnormal                 232                  13
     nan                                162                  31
     narrow-format-rounding              83                  10
     reduction-reassociation             46                  30
     overflow-to-inf                     25                   8
-    assume-narrowing                    16                   1
+    assume-narrowing                    15                   1
     UNEXPLAINED                          0                   0
     unclassified                         0                   0
                                        ---                 ---
                                        563     90 programs, 110 sites
 
 BY EVIDENCE, which "0 unclassified" was standing in for:
-    303  proved                 an exact rational reading of the equation
+    344  proved                 an exact rational reading of the equation
                                 backed the cause AND placed the box inside ℝ
-    203  sound-by-construction  a NaN is in no box; an infinity a finite box
-                                excludes is in no box; a narrowing is decided
-                                by comparing two boxes. No reading needed
+    162  sound-by-construction  a NaN is in no box; an operand this element
+                                depends on is not a real number. No reading
+                                needed, and three rules claimed this and
+                                needed one
      57  heuristic              a rule that names a plausible cause and proves
                                 nothing, reachable only where no exact reading
                                 of the primitive exists (exp, sqrt, sign)
 
-BY STRATEGY                     drawn    read   violations
-    uniform (unbiased)            773     391          255
-    cancelling-sum (aimed)        607     607           29
-    pinned members                129     129          276
-    pinned probes                   2       2            3
+BY STRATEGY, WHICH IS WHERE THE HEADLINE COMES APART
+                            drawn   read  violations   FALSIFIED DISCHARGES
+                                                        events  distinct progs
+    uniform (unbiased)        773    391         255         0          0
+    cancelling-sum (aimed)    607    607          29        16         16
+    pinned members            129    129         276       100          5
+    pinned probes               2      2           3         0          0
+                                                          ----       ----
+                                                           116         21
+    The 16 cancelling programs are shrink neighbours of one construction.
+    "21 distinct programs" is six independent situations.
 
-   9 candidates DECLINED by the second route; 0 times it was unavailable
+DISTINCT PROGRAMS, BY CAUSE AND BY STRATEGY
+                           uniform  cancelling  member  probe     all
+    nan                         30           0       1      0      31
+    reduction-reassociation      0          29       1      0      30
+    flush-or-subnormal           7           0       6      0      13
+    narrow-format-rounding       8           0       2      0      10
+    overflow-to-inf              7           0       0      1       8
+    assume-narrowing             0           0       1      0       1
+    any cause                   51          29       9      1      90
+    The uniform column is the only one that is a statement about the tool.
+    Its reassociation cell is 0 BY PROOF, not by under-sampling: SHAPES tops
+    out at 4 elements and jnp.sum splits into two windows at n >= 33.
+
+2180 admitted points; 0 sampler artefacts (a violation on `stelling_any` in a
+     harness whose assumes did not narrow that declaration)
+   9 of 572 candidates DECLINED by the second (compiled) route; 0 times it
+     was unavailable
  420 obligation readings taken by BOTH routes, 0 of them disagreeing
-   0 sampler artefacts (a violation on `stelling_any` in a harness whose
-     assumes did not narrow that declaration)
-
-116 violations are a DISCHARGE FALSIFIED, over 21 DISTINCT PROGRAMS: an
-    obligation whose box says "definitely true for all elements", whose
-    predicate executed FALSE at an admitted, dtype-representable point of its
-    own declared box. The programs are the denominator a repair is scoped on.
- 10 are the other direction: a "violated-over-set" that executed TRUE.
+  10 violations are the other direction: a "violated-over-set" that executed
+     TRUE
 """
 
 
@@ -380,15 +492,46 @@ def _record(reading, census, program, distinct=None):
     distinct programs ``reassoc(17) > flush(8)``, because 170 of the 175
     flushes are one pinned example re-drawn. A repair prioritised on the first
     would be prioritised on how often an ``@example`` was re-drawn.
+
+    ────────────────────────────────────────────────────────────────────────
+    AND ``distinct`` ALONE IS STILL THE WRONG DENOMINATOR, WHICH IS THE SAME
+    MISTAKE ONE COLUMN OVER
+    ────────────────────────────────────────────────────────────────────────
+
+    The two columns above were crossed with :attr:`_float_oracle.Program.source`
+    for the CAUSE partition and not for the two figures a repair is actually
+    scoped on — the falsified-discharge count, and the distinct-program column
+    of the cause table. Both are crossed here now, and the crossing is not a
+    refinement: it changes what the headline says.
+
+    ``falsified_discharges`` is the count every consumer of this module quotes
+    as *"the denominator a repair is scoped on"*. Uncrossed it is one number
+    over one set of programs. Crossed, it separates three generators with
+    nothing in common but this census — an unbiased grammar, a strategy aimed
+    at one known class whose own docstring says it *"finds that class and
+    nothing else"*, and a fixed list of pinned ``@example``s that are re-drawn
+    as often as Hypothesis feels like re-drawing them. A number that adds
+    those together is a statement about draw densities wearing the clothes of
+    a statement about the tool. The dated composition is in
+    :data:`FLOAT_ORACLE_MEASURED`.
+
+    ``distinct/cause/<cause>/<source>`` is the same crossing on the cause
+    table, and it is here for one specific reading it makes impossible:
+    ``reduction-reassociation`` is second by distinct programs, and every one
+    of those programs comes from ``cancelling_sum_programs``, against a leg
+    that ``_float_oracle.uniform_float_programs`` PROVES cannot reach the
+    class at all. Ranking a class found only by the strategy built to find it
+    against classes found by an unbiased search is not a ranking.
     """
+    source = program.source or "unknown"
     census.draw()
-    census.tag(f"strategy/{program.source or 'unknown'}")
+    census.tag(f"strategy/{source}")
     if reading.status != "read":
         census.skip(reading.status)
         return
     census.tag("read")
-    census.tag(f"read/{program.source or 'unknown'}")
-    if program.source == "uniform":
+    census.tag(f"read/{source}")
+    if source == "uniform":
         census.tags["compared_boxes/uniform"] += reading.compared_boxes
     if not program.label:
         # THE UNBIASED HALF, COUNTED SEPARATELY, because every other floor in
@@ -405,6 +548,9 @@ def _record(reading, census, program, distinct=None):
     census.tags["compared_boxes"] += reading.compared_boxes
     census.tags["admitted_points"] += reading.admitted_points
     census.tags["falsified_discharges"] += reading.falsified_discharges
+    census.tags[f"falsified_discharges/{source}"] += (
+        reading.falsified_discharges
+    )
     census.tags["contradicted_refutations"] += (
         reading.contradicted_refutations
     )
@@ -412,6 +558,7 @@ def _record(reading, census, program, distinct=None):
     census.tags["route_unavailable"] += reading.route_unavailable
     if distinct is not None and reading.falsified_discharges:
         distinct.setdefault("falsified", set()).add(program.render())
+        distinct.setdefault(f"falsified/{source}", set()).add(program.render())
     census.tags["route_obligations_compared"] += (
         reading.route_obligations_compared
     )
@@ -422,11 +569,13 @@ def _record(reading, census, program, distinct=None):
     for v in reading.violations:
         census.tag(f"cause/{v.cause}")
         census.tag(f"basis/{v.basis}")
-        census.tag(f"violations/{program.source or 'unknown'}")
+        census.tag(f"violations/{source}")
         if distinct is not None:
             key = program.render()
             distinct.setdefault(f"cause/{v.cause}", set()).add(key)
+            distinct.setdefault(f"cause/{v.cause}/{source}", set()).add(key)
             distinct.setdefault("any", set()).add(key)
+            distinct.setdefault(f"any/{source}", set()).add(key)
             # A SITE is a program AND the equation in it, because one program
             # violating at three equations is three things to repair and one
             # program re-drawn thirty times is one.
@@ -489,15 +638,28 @@ def test_the_executed_value_lies_inside_the_computed_box():
 def test_every_violation_it_finds_has_a_known_ieee_cause():
     """The residual, and the thing that keeps the xfail above honest.
 
-    Five causes are known, each of which is a way IEEE execution differs from
-    exact real arithmetic and none of which is a defect in the interval domain
-    itself: a NaN (which no box contains, ⊤ included), an overflow to infinity
-    where the box is finite, a reduction the compiler reassociated while the
-    box is provably right about ℝ, a rounding into a format narrower than the
-    binary64 the box was computed in, and a flush or gradual underflow in the
-    program's own subnormal band. A SIXTH kind — a violation with none of
-    those explanations — would mean the box is wrong about the reals, and that
+    Five causes are IEEE differences, each of which is a way execution differs
+    from exact real arithmetic and none of which is a defect in the interval
+    domain itself: a NaN (which no box contains, ⊤ included), an overflow to
+    infinity where the box is finite, a reduction the compiler reassociated
+    while the box is provably right about ℝ, a rounding into a format narrower
+    than the binary64 the box was computed in, and a flush or gradual
+    underflow in the program's own subnormal band. A violation with none of
+    those explanations would mean the box is wrong about the reals, and that
     is what this leg forbids.
+
+    **THIS PARAGRAPH SAID "FIVE" AND THE LEG PERMITS SEVEN**, which is a
+    docstring naming a smaller check than the one that runs.
+    ``_float_oracle.CAUSES`` has eight entries: the five above, plus
+    ``assume-narrowing`` — a violation that exists only against the box an
+    ``assume`` tightened, which is a finding about the PRECONDITION rather
+    than about the arithmetic — plus ``unclassified``, which is a refusal, and
+    ``UNEXPLAINED``, which is the one this leg forbids. Seven answers pass
+    here, and the two that are not IEEE differences are the two that most need
+    a reader to know they exist: ``unclassified`` is where the proof did not
+    reach, and ``assume-narrowing`` is proved only where the sampled point is
+    shown to be outside the assumed set over ℝ and is ``heuristic``
+    otherwise.
 
     EVERY PINNED MEMBER IS AN ``@example`` HERE, and the census floor
     requires each of them to have produced a violation, so this leg is also
@@ -583,8 +745,50 @@ def test_every_violation_it_finds_has_a_known_ieee_cause():
     # DISTINCT PROGRAMS ALONGSIDE EVENTS, because the ranking inverts between
     # them and a repair scoped on the event column would be scoped on how
     # often an `@example` was re-drawn.
+    #
+    # EVERY CELL OF THE STRATEGY CROSSING IS WRITTEN OUT, ZEROS INCLUDED, and
+    # the zeros are the finding. A key that is simply absent reports absence of
+    # evidence, which is read as evidence of absence — and the two cells that
+    # matter most here are empty: the unbiased leg contributes no falsified
+    # discharge and no reassociation at all. The source and cause lists are
+    # read off the census rather than typed, so a fourth strategy or an eighth
+    # cause appears in the table without anybody remembering to add it.
+    sources = sorted(k.split("/", 1)[1] for k in census.tags
+                     if k.startswith("strategy/"))
+    causes = sorted(k.split("/", 1)[1] for k in census.tags
+                    if k.startswith("cause/"))
+    for s in sources:
+        census.tags[f"falsified_discharges/{s}"] += 0
+        distinct.setdefault(f"falsified/{s}", set())
+        distinct.setdefault(f"any/{s}", set())
+        for c in causes:
+            distinct.setdefault(f"cause/{c}/{s}", set())
     for key, seen in distinct.items():
         census.tags[f"distinct/{key}"] = len(seen)
+    # THE PREMISE OF THE ZERO IN THAT TABLE, ASSERTED WHERE IT IS STATED.
+    # `distinct/cause/reduction-reassociation/uniform` is 0, and the crossing
+    # is worth having only because that zero is a PROOF about the generator
+    # rather than an under-sampled cell: `_grammar.SHAPES` tops out at four
+    # elements and `jnp.sum` splits into two windows only at n >= 33, so no
+    # draw of `uniform_float_programs` can cross the boundary. That is the
+    # sentence `_float_oracle.uniform_float_programs` makes, and the whole
+    # weight of "reassociation is second by distinct programs" rests on it —
+    # the class is second on a strategy built to find it and nothing else,
+    # against a leg that cannot reach it AT ALL rather than one that merely
+    # did not. Nothing checked the premise, so it is checked here, at the
+    # source rather than in the table: a shape big enough to reach the split
+    # turns the zero from a proof into a null result, and a null result may
+    # not be quoted the way this one is.
+    biggest = max((math.prod(s) for s in _grammar.SHAPES), default=0)
+    assert biggest < fo.REDUCTION_SPLIT_N, (
+        "`_grammar.SHAPES` now admits an array of %d elements, which reaches "
+        "`jnp.sum`'s n >= %d two-window split. The unbiased leg's ZERO in the "
+        "reduction-reassociation row is a proof about the generator only "
+        "while that is false; with this shape it becomes a null result, and "
+        "every consumer that ranks the causes by distinct programs is quoting "
+        "it as the former. Re-derive the ranking, or re-state the proof."
+        % (biggest, fo.REDUCTION_SPLIT_N)
+    )
     floors = {
         "read": 30,
         "read/uniform": 15,
@@ -592,6 +796,15 @@ def test_every_violation_it_finds_has_a_known_ieee_cause():
         "compared_boxes/uniform": 50,
         "admitted_points": 30,
         "falsified_discharges": 1,
+        # THE FALSIFIED-DISCHARGE FIGURE, CROSSED, AND THE CROSSED ONE IS THE
+        # ONE THAT MEANS ANYTHING. `falsified_discharges` and
+        # `distinct/falsified` are both functions of the BUDGET — measured on
+        # this tree, `distinct/falsified` is 5 at the `ci` profile and 21 at
+        # `STELLING_PROPERTY_SCALE=12.5`, because the extra 16 are one aimed
+        # strategy's shrink neighbours. `distinct/falsified/member` is 5 in
+        # both: it is a fact about the tree, and it is the pin that says all
+        # five discharge-falsifying members are still falsifying one.
+        "distinct/falsified/member": len(fo.DISCHARGE_FALSIFYING),
         "distinct/any": 10,
     }
     floors.update({f"pinned/{name}": 1 for name in fo.MEMBER_NAMES})

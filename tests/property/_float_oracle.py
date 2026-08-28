@@ -34,34 +34,48 @@ Each was got wrong on a first attempt, each is measured, and each is a
 separate mechanism in this file rather than a paragraph asking a reader to be
 careful.
 
-**1. ⊤ IS UNFALSIFIABLE, SO THE PASS RATE IS NOT A SAFETY SIGNAL.** A box of
-``[-inf, inf]`` contains every finite float, so a query the propagator
-declined on — every decline lands as ⊤ — reports "no violation" precisely
-where the analysis already gave up. Two consequences, both acted on here:
-:func:`read` counts ⊤ boxes separately (:attr:`Reading.top_boxes`) and the
-properties assert a floor on NON-⊤ boxes examined; and the assumes are KEPT
+**1. ⊤ IS UNFALSIFIABLE, SO THE PASS RATE IS NOT A SAFETY SIGNAL.** A ⊤ box
+admits every value its dtype can take, so a query the propagator declined
+on — every decline lands as ⊤ — reports "no violation" precisely where the
+analysis already gave up. Two consequences, both acted on here: :func:`read`
+counts ⊤ boxes separately (:attr:`Reading.top_boxes`) and the properties
+assert a floor on NON-⊤ boxes examined; and the assumes are KEPT
 (``assume_mode="constrain"``), because dropping them widens every box a
-narrowing would have tightened. Measured 2026-08-28 at ``874d8ba`` on jax
-0.11.0, by the shipped residual leg at ``STELLING_PROPERTY_SCALE=12.5``
-(1500 examples), of **13727** boxes read:
+narrowing would have tightened.
 
-    2042  ⊤        (15 %)  the analysis declined; contains every finite float
-    1697  EMPTY    (12 %)  a size-0 declaration: no element to violate anything
-    1577  INTEGER  (11 %)  not compared at all; see below
-    8411  compared (61 %)  where a finite value can be caught outside its box
+The bucket table is a DATED RECORD and the figure in it has been wrong twice.
+Its current value is in :data:`test_float_oracle.FLOAT_ORACLE_MEASURED`, which
+is anchored to a commit and to a command; what belongs HERE is the shape of
+the partition and the two corrections that produced it, because those do not
+rot.
 
-**THE FOURTH BUCKET IS A CORRECTION AND THE THIRD WAS HIDING IN IT.** This
-read "8708 (76 %) that a finite value could be caught outside of", and 1327 of
-that 8708 were integer boxes the comparison ``continue``s past — counted as
-falsifiable and never compared. Integer-dtype outputs are skipped because a
-box endpoint is a binary64 float and an ``int64`` above 2**53 has no exact
-binary64 image, so the comparison would report its own rounding; that is a
-sound decision and it was not disclosed anywhere a reader could find it. The
-real figure is 61 %, and **39 % of this instrument's own field of view is a
-place where it cannot see a finite violation at all**, for three different
-reasons which are now counted apart. NaN is the one exception — no box
-contains a NaN, ⊤ included — which is why the ``nan`` cause survives a ⊤ and
-the other four do not.
+**THE FOURTH BUCKET IS A CORRECTION AND THE THIRD WAS HIDING IN IT.** The
+table read "8708 (76 %) that a finite value could be caught outside of", and
+1327 of that 8708 were integer boxes the comparison ``continue``s past —
+counted as falsifiable and never compared. Integer-dtype outputs are skipped
+because a box endpoint is a binary64 float and an ``int64`` above 2**53 has no
+exact binary64 image, so the comparison would report its own rounding; that is
+a sound decision and it was not disclosed anywhere a reader could find it.
+
+**AND THE ``compared`` BUCKET THEN HID THE BOOL LATTICE'S OWN ⊤, WHICH IS THE
+SAME MISTAKE A THIRD TIME.** :func:`is_top` tested for ``±inf`` and nothing
+else, so a ``bool`` box of ``[0, 1]`` — which admits both values a bool can
+take, and which every declined comparison, connective and obligation in this
+grammar produces — was counted as a place a violation could be found. Measured
+2026-08-29 by the residual leg at ``STELLING_PROPERTY_SCALE=12.5``, with
+:func:`is_top` instrumented to report the split it was hiding, of the 7719
+boxes the four-bucket table called ``compared``: 2228 were bool ``[0, 1]``,
+1777 were a definite bool, 3714 were float. The
+falsifiable field was **5491 of 13041**, and the disclosure in this file said
+39 % blind, ``README.md`` and ``ci.yml`` said 41 %, and the true figure is
+**58 %**. :func:`is_top` asks *"does this box admit every value the executed
+dtype can take"* now, which is one rule and not a list of dtype spellings.
+
+So a large majority of this instrument's own field of view is a place where it
+cannot see a finite violation at all, for three different reasons which are
+counted apart. NaN is the one exception — no box contains a NaN, ⊤ included —
+which is why the ``nan`` cause survives a ⊤ and the other four do not, and why
+a float ⊤ is very slightly less blind than a bool one.
 
 **2. A DECLARED ENDPOINT IS NOT NECESSARILY A POINT OF THE PROGRAM'S DTYPE.**
 ``np.float32(1e-20)`` is ``9.9999997e-21``, which is BELOW a box declared
@@ -160,6 +174,20 @@ WHAT THIS MODULE DOES NOT REACH
   drawn interior point. A box is a set; this looks at up to six of its points.
   Finding one violating point refutes the containment claim; finding none
   confirms nothing.
+
+  **AND A NULL FROM IT IS NOT MARKED AS UNINFORMATIVE, WHICH IS MEASURED.**
+  The candidate set is built from the DECLARATION and knows nothing about the
+  harness's assumes, so a narrowing whose boundary is not one of those six
+  points is invisible. Driven on a tree carrying the documented ieee-only
+  endpoint bump in real mode (the plant the ``assume-narrowing`` fix was
+  red-driven against):
+  ``x0: float64 (0,1); assume(x0 >= 0.0); assert_(x0 > 0.0)`` is a wrong
+  VERIFIED and this module reports it, because 0.0 is a candidate; the SAME
+  wrong VERIFIED with ``assume(x0 >= 0.25)`` is reported as **0 violations**
+  with ``Reading.status == "read"``. Nothing distinguishes that null from a
+  null on a correct program. Repairing it means sampling the assume bounds
+  too, which is a change to what the sampler is given rather than to how it
+  rounds, and it is not made here.
 * **The assumes are satisfied, not solved.** A sampled point that any
   ``assume`` rejects is discarded rather than repaired, so a harness whose
   admitted region is a thin slice of its declared box may contribute no points
@@ -179,8 +207,11 @@ WHAT THIS MODULE DOES NOT REACH
   CREATED by comparing against the narrowed box. It is a real finding and it
   is a different one, so it is separated rather than assumed away: every
   violation is re-read against the ``inert`` environment and one that
-  disappears there is :data:`NARROWING`. Measured over 1500 examples: **547
-  arithmetic, 16 narrowing, 0 that the inert reading could not answer.**
+  disappears there is :data:`NARROWING` — but ONLY where the sampled point is
+  proved to be outside the assumed set over ℝ, because the two-box comparison
+  alone cannot tell a narrowing that is right about ℝ from one that is wrong
+  about it. See :func:`assumes_hold_over_reals`, which is the third fact, and
+  :func:`classify`, which spends it.
 * **``semantics="ieee"`` is not exercised.** Every box here is a real-mode
   box, which is the mode every published verdict in this repository was
   stamped with. What an ieee-mode box would say about the same nine programs
@@ -351,6 +382,16 @@ class Program:
     #: draws and 218 from 115 member re-draws — so a partition that does not
     #: separate them is a statement about how often an ``@example`` was
     #: re-drawn.
+    #:
+    #: **AND IT WAS SPENT ON THE CAUSE PARTITION AND NOT ON THE FIGURE EVERY
+    #: CONSUMER QUOTES**, which is the harder half of the same mistake. The
+    #: falsified-discharge count — "the denominator a repair is scoped on" —
+    #: and the distinct-program column of the cause table were both left
+    #: uncrossed for a round. Crossed, "116 violations over 21 distinct
+    #: programs" is five pinned ``@example``s re-drawn plus one aimed
+    #: strategy's shrink neighbours, and **nothing at all from the unbiased
+    #: leg**. ``test_float_oracle._record`` does the crossing and
+    #: :data:`test_float_oracle.FLOAT_ORACLE_MEASURED` carries the table.
     source: str = ""
 
     @staticmethod
@@ -549,6 +590,19 @@ def snap_inward(dtype: str, lo: float, hi: float):
         return (vals[0], vals[-1]) if vals else None
     if dtype in INT_DTYPES:
         info = np.iinfo(getattr(np, dtype))
+        # `math.ceil(inf)` and `math.floor(-inf)` RAISE `OverflowError`, and
+        # `math.ceil(nan)` raises `ValueError` — so an integer declaration of
+        # `(inf, inf)` came out of this function as an exception rather than as
+        # a refusal, and an exception from a sampler is a red suite that names
+        # the wrong subject. Found by 8000 hypothesis examples over all 13
+        # dtypes and all seven `_grammar.SHAPES`; unreachable from the shipped
+        # generators, which is why it was latent. A low bound of `+inf`, a high
+        # bound of `-inf` and a NaN bound all name NO INTEGER AT ALL, which is
+        # the same answer `a > b` gives below, so they take the same exit.
+        if math.isnan(lo) or math.isnan(hi):
+            return None
+        if lo == math.inf or hi == -math.inf:
+            return None
         a = info.min if lo == -math.inf else max(info.min, math.ceil(lo))
         b = info.max if hi == math.inf else min(info.max, math.floor(hi))
         return (a, b) if a <= b else None
@@ -594,6 +648,54 @@ def sample_points(shape, dtype: str, lo: float, hi: float, interior: float):
     point of ``[-1, 1]`` and an endpoint-only sampler measured **no
     violation** on it — the ``nan`` class is reachable only by sampling the
     interior, and 0 is the interior point that matters most often.
+
+    ────────────────────────────────────────────────────────────────────────
+    AND EVERY ARRAY IT RETURNS IS CHECKED TO BE A POINT OF ``(lo, hi)``,
+    HERE, AT THE SOURCE
+    ────────────────────────────────────────────────────────────────────────
+
+    THREE DEFECTS OF ONE SHAPE HAVE BEEN FOUND IN THIS SAMPLER — a float32
+    endpoint below its own binary64 bound, integer candidates routed through
+    ``float`` so ``any_array((), "int64", (1, 2**63 - 1))`` sampled
+    ``-9223372036854775808``, and an INFINITE endpoint sampled as if it were a
+    member of an unbounded set — and each was caught by a reader noticing a
+    strange violation, not by a check.
+
+    **THE CHECK THAT WAS SUPPOSED TO CATCH THEM COULD NOT SEE THE THIRD.**
+    :attr:`Reading.sampler_artefacts` fires on a violation AT
+    ``stelling_any`` — and an unbounded declaration's own box is ⊤, so ±inf is
+    INSIDE it and there is no violation to fire on. It was structurally blind
+    to the very class it had just been extended for. Driven 2026-08-29, same
+    seed at ``STELLING_PROPERTY_SCALE=12.5``, with the ±inf clamp removed from
+    :func:`snap_inward` AND this assertion removed (without which the run
+    cannot finish, which is the point): the ``nan`` cause goes from **162 to
+    164 events** and from 30 to 35 distinct unbiased programs, every other
+    cause is identical, and ``sampler_artefacts`` is **0 in both runs**. An
+    earlier run of the same A/B, reported by the audit that found this and
+    taken before the classifier reorder, gave 177 -> 252; it does not
+    reproduce here and the figure above is the one this tree gives. The delta
+    is smaller and the conclusion is the one that matters and is unchanged:
+    the counter written to catch this class reports zero on a tree that has
+    it.
+
+    So membership is asserted where the point is BUILT rather than inferred
+    from what the program did with it later. For a float dtype every element
+    must be FINITE and within ``[lo, hi]`` — an infinite endpoint is a bound
+    and not a member, which is what ``_jax_compat.any_array`` says in its own
+    words when it refuses ``(inf, inf)``; for an integer or ``bool`` dtype
+    every element must be within the bounds in exact Python arithmetic. This
+    is an ``AssertionError`` and NOT a counted violation: a sampler outside
+    its own declared box is this module being wrong, not stelling, and it must
+    stop the run rather than be censused as a finding.
+
+    WHAT IT DOES NOT REACH: the declaration stelling itself builds. These
+    bounds are the ones the harness asked for; the box the propagator computes
+    from them holds the ``binary64`` IMAGE of each bound
+    (``_bound_spelling.binary64_image``), which for a ``float32`` declaration
+    can be an endpoint no float32 can take. This assertion says the sampled
+    point is in the DECLARED set, not that it is in the propagator's box for
+    it, and the gap between those two is a declaration-layer defect this
+    module only works around.
     """
     snapped = snap_inward(dtype, lo, hi)
     if snapped is None:
@@ -640,8 +742,58 @@ def sample_points(shape, dtype: str, lo: float, hi: float, interior: float):
         if key in seen:
             continue
         seen.add(key)
+        _assert_points_of(arr, dtype, lo, hi)
         out.append(arr)
     return out or None
+
+
+def _assert_points_of(arr, dtype: str, lo: float, hi: float) -> None:
+    """Every element of ``arr`` is a point of the declared set ``(lo, hi)``.
+
+    The membership assertion :func:`sample_points` ends on. Split out so the
+    condition is readable and so the message can name the three defects it
+    exists for. A size-0 array has no element and passes, which is right: an
+    empty declaration contributes no point rather than a bad one.
+
+    WHAT IT DOES NOT REACH, AT THE INTEGER DTYPES. ``lo`` and ``hi`` arrive
+    here as binary64 floats — that is what ``declarations()`` reads out of the
+    equation's params and what stelling stores — so for an ``int64`` bound
+    above 2**53 the interval this checks against is the bound's binary64
+    IMAGE. ``src``'s ``any_array`` refuses any integer bound whose image would
+    NARROW the declared set and admits only the widening direction, so the
+    check is a WIDENED one: it can pass a value that is outside the true
+    declared set and inside its image. The comparison in ``_violating_elements``
+    has the same limit for the same reason, which is why integer-dtype outputs
+    are never compared at all. What closes the gap in practice is
+    :func:`snap_inward`, which clamps integer candidates to
+    ``np.iinfo``'s own ``min``/``max`` in exact Python integers before this
+    function ever sees them.
+    """
+    flat = np.asarray(arr).reshape(-1)
+    if flat.size == 0:
+        return
+    if dtype in INT_DTYPES or dtype == "bool":
+        # EXACT PYTHON ARITHMETIC, because `float(2**63 - 1)` is `2**63` and a
+        # check that rounds its own subject is the defect it is checking for.
+        bad = [int(w) for w in flat.tolist()
+               if not (lo <= int(w) <= hi)]
+    else:
+        vals = [float(w) for w in flat]
+        bad = [w for w in vals
+               if not (math.isfinite(w) and lo <= w <= hi)]
+    assert not bad, (
+        "THIS MODULE'S OWN SAMPLER LEFT THE DECLARED SET. %r is not a point "
+        "of the %s declaration (%r, %r) — %d of %d element(s) are outside it "
+        "or non-finite. Everything downstream of this would be a violation "
+        "of a box the propagator computed for a set this value is not in, "
+        "i.e. this instrument reporting itself as a defect in stelling. "
+        "Three defects of exactly this shape have already been found here "
+        "(a float32 endpoint below its own binary64 bound; integer "
+        "candidates routed through `float`; an infinite endpoint sampled as "
+        "a member of an unbounded set), and `Reading.sampler_artefacts` "
+        "could not see the third."
+        % (bad[:4], dtype, lo, hi, len(bad), flat.size)
+    )
 
 
 # ── the two runs ─────────────────────────────────────────────────────────────
@@ -675,22 +827,64 @@ def boxes_of(closed, assume_mode: str = "constrain"):
     return out
 
 
-def is_top(box) -> bool:
-    """Is every element of this box ``[-inf, +inf]``? ⊤ contains every float.
+def is_top(box, dtype: str) -> bool:
+    """Is this box ⊤ — does it admit EVERY VALUE THE EXECUTED DTYPE CAN TAKE?
+
+    A ⊤ box cannot be violated by anything the program computes, so it is a
+    place this instrument can see nothing, and counting it as a place a
+    violation could have been caught is the difference between a field of view
+    and a pass rate. The one exception is a NaN, which no box contains, ⊤
+    included — which is why the ``nan`` cause survives a ⊤ and the others do
+    not, and why a FLOAT ⊤ is very slightly less blind than a bool one.
+
+    **IT TESTED ``±inf`` AND NOTHING ELSE, SO THE BOOL LATTICE'S OWN TOP WAS
+    COUNTED AS FALSIFIABLE.** A ``bool`` output takes exactly two values, so a
+    box of ``[0, 1]`` admits both of them and NO executed bool can fall
+    outside it — it is exactly as unfalsifiable as ``[-inf, inf]``, and for
+    exactly the same reason: the analysis declined to say anything. Every
+    comparison, every connective and every obligation in this grammar has a
+    bool output, so that is not a corner. Measured 2026-08-29 by the residual
+    leg at ``STELLING_PROPERTY_SCALE=12.5``, with this function instrumented
+    to report the split the four-bucket table was hiding, of the **7719**
+    boxes that table called ``compared``:
+
+        2228  bool ``[0, 1]``   the bool lattice's ⊤: no executed bool is
+                                outside it, ever
+        1777  bool definite     ``[0, 0]`` or ``[1, 1]`` — falsifiable, and
+                                where five of the nine members are caught
+        3714  float            falsifiable
+
+    so the falsifiable field was **5491 of 13041 = 42 %**, and the disclosure
+    everywhere read 39 %, 41 % or 24 % blind against a true **58 %**.
+
+    THE RULE IS ONE RULE AND NOT A LIST OF DTYPE SPELLINGS. *Admits every
+    value of its dtype* collapses to ``[-inf, +inf]`` for every float format
+    on its own — a float32 can take ``±inf``, so a box of
+    ``[-3.4e38, 3.4e38]`` does NOT admit every float32 and is falsifiable —
+    and to ``lo <= 0 and hi >= 1`` for ``bool``, whose value set is ``{0, 1}``
+    with no infinity and no NaN in it. Integer dtypes are never compared at
+    all (see :func:`_violating_elements`) and reach this function only through
+    the float branch, which is what they did before.
 
     **AN EMPTY BOX IS NOT ⊤ AND THIS FUNCTION SAID IT WAS.** ``all()`` over no
     elements is ``True``, so a size-0 declaration — ``_grammar.SHAPES`` draws
     ``(0,)`` and ``(0, 3)`` — answered ⊤ here. Both are unfalsifiable, and for
     entirely different reasons: a ⊤ box is a value the analysis declined to
     bound, an empty one is a value that does not exist. Conflating them
-    inflated the headline ⊤ figure with array shapes. Measured by the shipped
-    residual leg at ``STELLING_PROPERTY_SCALE=12.5``: of 13727 boxes read,
+    inflated the headline ⊤ figure with array shapes. Measured by the residual
+    leg at ``STELLING_PROPERTY_SCALE=12.5`` on the tree that carried it: of
+    13727 boxes read,
     **1697 are size-0** against **2042** that are genuinely ⊤ — so the
     conflated figure would be 3739, and 45 % of it array shapes. The counters
-    are four-way now (⊤ / empty / integer / compared) and
+    are four-way (⊤ / empty / integer / compared) and
     :attr:`Reading.empty_boxes` is the second.
     """
-    return box.size > 0 and all(
+    if box.size == 0:
+        return False
+    if dtype == "bool":
+        return all(lo <= 0.0 and hi >= 1.0
+                   for lo, hi in zip(box.los, box.his))
+    return all(
         lo == -math.inf and hi == math.inf
         for lo, hi in zip(box.los, box.his)
     )
@@ -811,6 +1005,41 @@ def staged_runner(jax_closed):
     ``any_array`` declaration is an input to the program the user runs and a
     literal is a constant in it. Getting that split wrong in either direction
     would make this route answer about a different program.
+
+    ────────────────────────────────────────────────────────────────────────
+    AND IT IS LOAD-BEARING FOR THE REPAIR, NOT ONLY FOR THIS MODULE. READ
+    THIS BEFORE BUILDING A REPRODUCER
+    ────────────────────────────────────────────────────────────────────────
+
+    **MOST OF THESE VIOLATIONS DISAPPEAR IF THE DECLARATION IS FOLDED IN AS A
+    CONSTANT**, because XLA then constant-folds the arithmetic in full
+    precision and the value the box excludes is never computed. *Any repair
+    validated against a constant-folded reproducer will look fixed and will
+    not be.*
+
+    Measured 2026-08-29 on this tree (jax 0.11.0, jaxlib 0.11.0, CPU, x64 on),
+    by running every pinned member through this function and through a second
+    interpreter identical to it except that the points are CLOSED OVER instead
+    of passed in — driver in the builder's scratchpad, not in the tree — and
+    counting box-violating ``(round, equation, output, element)`` sites and
+    :func:`_contradicted_obligations` under each:
+
+        member                             sites ARG  FOLDED   discharges
+        underflow-reciprocal                       9       0      0 -> 0
+        ftz-subnormal-sum                          6       0      2 -> 0
+        f32-underflow                              3       1      1 -> 0
+        nan-from-y-over-y                          1       1      0 -> 0
+        reassociation-n33                          1       1      0 -> 0
+        f32-single-multiply                        3       3      1 -> 1
+        f32-exp                                    4       1      1 -> 0
+        subnormal-comparison                       2       0      0 -> 0
+        assume-narrows-past-the-program            3       3      1 -> 1
+
+    **3 of the 5 discharge-falsifying members lose the falsified discharge
+    entirely**, 5 of the 9 lose violating sites, and 3 of those lose every
+    site they had. The audit that asked for this fact to be preserved reported
+    "4 of the 5" for the discharge column; the re-derivation above gives 3, by
+    the method stated, and the consequence is the same one.
     """
     import jax
     import jax.extend.core as jex
@@ -974,64 +1203,88 @@ _EXACT_CMP = {
 }
 
 
-def _element(operand, idx: int, n_out: int):
-    """One operand element as an exact :class:`~fractions.Fraction`, or ``None``.
+class _Exact:
+    """One operand, read as exact rationals — ``None`` per element it refuses.
 
-    ``None`` for a broadcast this reader will not guess at, for a
-    non-arithmetic dtype, and for a non-finite value — each of which is a
-    refusal to answer rather than an answer.
+    A flat tuple of :class:`~fractions.Fraction`, with ``None`` in every
+    position this reader will not answer for: a non-arithmetic dtype, a
+    non-finite value, an operand that is not there at all.
+
+    IT EXISTS SO THERE IS ONE TABLE AND NOT TWO. :func:`exact_value` reads a
+    numpy operand and :func:`exact_walk` reads an operand that is already
+    rational, and both have to dispatch on the same primitive names with the
+    same broadcast rule. Two dispatches would be a second evaluator living next
+    door, which is the thing this module's own docstring forbids at the top —
+    so the dispatch (:func:`_exact_apply`) takes these and the two callers
+    differ only in how they build one.
     """
-    if operand is None:
+
+    __slots__ = ("vals",)
+
+    def __init__(self, vals):
+        self.vals = tuple(vals)
+
+    @staticmethod
+    def of(operand) -> "_Exact":
+        """One numpy operand (or ``None``, or a python scalar) as ``_Exact``."""
+        if operand is None:
+            return _Exact((None,))
+        arr = np.asarray(operand)
+        name = str(arr.dtype)
+        if name not in FLOAT_TYPES and name != "bool" and name not in INT_DTYPES:
+            return _Exact((None,) * max(1, arr.size))
+        out = []
+        for w in arr.reshape(-1):
+            w = float(w)
+            out.append(Fraction(w) if math.isfinite(w) else None)
+        return _Exact(out)
+
+    def element(self, idx: int, n_out: int):
+        """This operand's contribution to output element ``idx``, or ``None``.
+
+        The broadcast rule is *size 1 or size n_out and nothing else*: a shape
+        this reader cannot align is a refusal, never a guess.
+        """
+        n = len(self.vals)
+        if n == 1:
+            return self.vals[0]
+        if n == n_out and idx < n:
+            return self.vals[idx]
         return None
-    arr = np.asarray(operand)
-    name = str(arr.dtype)
-    if name not in FLOAT_TYPES and name != "bool" and name not in INT_DTYPES:
-        return None
-    flat = arr.reshape(-1)
-    if flat.size == 1:
-        w = flat[0]
-    elif flat.size == n_out and idx < flat.size:
-        w = flat[idx]
-    else:
-        return None
-    w = float(w)
-    if not math.isfinite(w):
-        return None
-    return Fraction(w)
+
+    def whole(self):
+        """Every element, or ``None`` if any one of them is a refusal."""
+        return None if any(v is None for v in self.vals) else self.vals
 
 
-def _exact_reduction(operands):
-    """The exact real sum of a ``reduce_sum``'s operand, or ``None``."""
-    flat = np.asarray(operands[0]).astype(np.float64).reshape(-1)
-    if not np.all(np.isfinite(flat)):
-        return None
-    total = Fraction(0)
-    for w in flat:
-        total += Fraction(float(w))
-    return total
+def _exact_apply(primitive: str, ops, idx: int, n_out: int):
+    """The EXACT REAL value of one output element from ``_Exact`` operands.
 
-
-def exact_value(primitive: str, operands, idx: int, n_out: int):
-    """The EXACT REAL value of one output element, or ``None``.
-
-    ``None`` is a refusal to answer and it is what separates
-    :data:`UNEXPLAINED` from :data:`UNCLASSIFIED`. The table is deliberately
-    small — the four field operations, the two lattice operations, sign and
-    magnitude, a format conversion, the six comparisons, and ``reduce_sum`` —
-    because every entry is a claim that this function computes the same real
-    number the primitive is specified to compute, and a wrong entry would
-    manufacture an UNEXPLAINED out of its own arithmetic. ``sqrt``, ``exp``,
-    ``sign``, ``integer_pow``, every reduction other than ``reduce_sum`` and
-    everything not listed answer ``None``.
+    The one dispatch. The table is deliberately small — the four field
+    operations, the two lattice operations, magnitude and negation, a format
+    conversion, the six comparisons, and ``reduce_sum`` — because every entry
+    is a claim that this function computes the same real number the primitive
+    is specified to compute, and a wrong entry would manufacture an
+    ``UNEXPLAINED`` out of its own arithmetic. ``sqrt``, ``exp``, ``sign``,
+    ``integer_pow``, the boolean connectives, every reduction other than
+    ``reduce_sum`` and everything not listed answer ``None``.
     """
     if primitive == "reduce_sum":
-        return _exact_reduction(operands) if n_out == 1 else None
-    if primitive in _EXACT_UNARY and len(operands) == 1:
-        a = _element(operands[0], idx, n_out)
+        if n_out != 1 or len(ops) != 1:
+            return None
+        vals = ops[0].whole()
+        if vals is None:
+            return None
+        total = Fraction(0)
+        for w in vals:
+            total += w
+        return total
+    if primitive in _EXACT_UNARY and len(ops) == 1:
+        a = ops[0].element(idx, n_out)
         return None if a is None else Fraction(_EXACT_UNARY[primitive](a))
-    if len(operands) == 2:
-        a = _element(operands[0], idx, n_out)
-        b = _element(operands[1], idx, n_out)
+    if len(ops) == 2:
+        a = ops[0].element(idx, n_out)
+        b = ops[1].element(idx, n_out)
         if a is None or b is None:
             return None
         if primitive in _EXACT_BINARY:
@@ -1041,6 +1294,107 @@ def exact_value(primitive: str, operands, idx: int, n_out: int):
         if primitive == "div" and b != 0:
             return a / b
     return None
+
+
+def exact_value(primitive: str, operands, idx: int, n_out: int):
+    """The EXACT REAL value of one output element, or ``None``.
+
+    ``None`` is a refusal to answer and it is what separates
+    :data:`UNEXPLAINED` from :data:`UNCLASSIFIED`. See :func:`_exact_apply`
+    for the table and for why it is small.
+    """
+    return _exact_apply(primitive, [_Exact.of(o) for o in operands], idx,
+                        n_out)
+
+
+def exact_walk(jax_closed, points):
+    """``(i, j) -> _Exact`` — every equation's output, over ℝ, at this point.
+
+    The same reading :func:`exact_value` makes of ONE equation, chained down
+    the whole jaxpr, and it exists for exactly one question:
+    :data:`NARROWING`'s third fact — *does the sampled point satisfy the
+    harness's ``assume``s OVER THE REALS?* (:func:`assumes_hold_over_reals`).
+
+    A refusal PROPAGATES. An equation whose primitive has no entry in the
+    table, or whose operands are not all exactly known, has no exact reading —
+    and neither has anything computed from it. That is what makes the answer
+    usable as a premise: where this walk answers at all, it answers exactly.
+
+    The three stelling primitives are the identity on their operand, which is
+    what their own ``def_impl`` says and what :func:`execute` does with them.
+    ``stelling_any`` takes the sampled array, which is a float and therefore
+    its own exact rational.
+    """
+    import jax.extend.core as jex
+
+    env = {}
+    for var, val in zip(jax_closed.jaxpr.constvars, jax_closed.consts):
+        env[var] = _Exact.of(val)
+    out = {}
+    k = 0
+    for i, eqn in enumerate(jax_closed.jaxpr.eqns):
+        name = eqn.primitive.name
+        if name == "stelling_any":
+            res = [_Exact.of(points[k])]
+            k += 1
+        else:
+            ops = [_Exact.of(a.val) if isinstance(a, jex.Literal)
+                   else env.get(a, _Exact((None,)))
+                   for a in eqn.invars]
+            if name in ("stelling_assume", "stelling_assert",
+                        "stelling_nonvacuity"):
+                res = [ops[0]]
+            elif len(eqn.outvars) != 1:
+                # A multi-output primitive has no per-output entry in the
+                # table, so there is nothing to align an answer to. Refuse.
+                res = [_Exact((None,)) for _ in eqn.outvars]
+            else:
+                size = 1
+                for d in eqn.outvars[0].aval.shape:
+                    size *= int(d)
+                res = [_Exact(
+                    _exact_apply(name, ops, e, size) for e in range(size)
+                )]
+        for j, (ov, val) in enumerate(zip(eqn.outvars, res)):
+            env[ov] = val
+            out[(i, j)] = val
+    return out
+
+
+def assumes_hold_over_reals(jax_closed, points):
+    """``True``, ``False`` or ``None`` for the harness's ``assume``s at a point.
+
+    ``True``  — every ``assume`` is EXACTLY true over ℝ at this point;
+    ``False`` — at least one is EXACTLY false, so the point is not in the
+                assumed set over ℝ however the compiled program answered;
+    ``None``  — a refusal: no assume is provably false and at least one has no
+                exact reading (a connective, ``jnp.all``, a ``sqrt``).
+
+    THE FACT :data:`NARROWING` NEEDED AND DID NOT HAVE. Comparing the narrowed
+    box against the un-narrowed one decides only that the violation was
+    CREATED by the narrowing; it cannot tell *"the narrowing is right over ℝ
+    and the compiled comparison admitted a point ℝ excludes"* — the disclosed
+    posture, and what ``assume-narrows-past-the-program`` is — from *"the
+    narrowing is wrong over ℝ"*, which is a soundness defect in ``propagate``.
+    The two differ in exactly this predicate, and the first is ``False`` here.
+
+    A harness with no ``assume`` answers ``True`` vacuously, which is the
+    right answer and is never asked: a violation that vanishes against the
+    inert boxes requires a narrowing, and a narrowing requires an assume.
+    """
+    walk = exact_walk(jax_closed, points)
+    unknown = False
+    for i, eqn in enumerate(jax_closed.jaxpr.eqns):
+        if eqn.primitive.name != "stelling_assume":
+            continue
+        vals = walk.get((i, 0))
+        whole = None if vals is None else vals.whole()
+        if whole is None:
+            unknown = True
+            continue
+        if any(w == 0 for w in whole):
+            return False
+    return None if unknown else True
 
 
 def _exact_in_box(exact, lo: float, hi: float) -> bool:
@@ -1161,9 +1515,65 @@ def _same_side_of_zero(v: float, lo: float, hi: float) -> bool:
     return True
 
 
+def _exact_of_equation(primitive: str, inputs, idx: int, n_out: int, v: float):
+    """:func:`exact_value`, plus the one equation whose operands cannot say it.
+
+    A ``stelling_any`` COMPUTES NOTHING: its value is the sampled point, and
+    :func:`sample_points` asserts that every point it returns is a member of
+    the declared set (:func:`_assert_points_of`). So the exact real value of
+    that equation is the float that ran, exactly; it needs no table entry, and
+    it has no operands to read — ``execute`` records ``()`` for it, which is
+    why :func:`exact_value` alone answers ``None`` here.
+
+    That matters for one specific proof, and it is what :data:`NARROWING`'s
+    third fact is FOR. When an ``assume`` narrows a DECLARATION's box past a
+    point that satisfies every assume over ℝ, there is no arithmetic anywhere
+    in the finding — the box excludes a member of its own assumed set — and
+    without this reading the violation has no exact value at all and falls out
+    as a heuristic rather than as the proof it is.
+
+    IT ALSO WIDENS WHAT ``UNEXPLAINED`` CAN PROVE, and that is deliberate: a
+    ``stelling_any`` violation in a harness with NO narrowing is now
+    ``UNEXPLAINED`` too, because the sampled point is asserted to be a member
+    of the declared set and the propagator's box for that very declaration
+    excludes it. That is a box wrong about its own declared set, which is a
+    stronger finding than the sampler-artefact counter beside it and is
+    measured at 0 on this tree.
+
+    :func:`exact_walk` says the same thing in its own way, reading the point
+    out of ``points`` because it has them and this does not. One fact, two
+    callers, and neither can borrow the other's spelling.
+    """
+    if primitive == "stelling_any":
+        return Fraction(v) if math.isfinite(v) else None
+    return exact_value(primitive, inputs, idx, n_out)
+
+
+def _left_to_right_fold(operand, dtype: str):
+    """``sum(operand)`` folded IN ORDER in ``dtype``, or ``None``.
+
+    The one association order a reader can name without asking the compiler,
+    and therefore the only thing that makes ``reduction-reassociation`` a
+    PROOF rather than an attribution read off the primitive's identity.
+    ``None`` where the format is not one this module can accumulate in, which
+    is a refusal and drops the rule to ``heuristic``.
+    """
+    T = FLOAT_TYPES.get(dtype)
+    if T is None or operand is None:
+        return None
+    arr = np.asarray(operand)
+    if str(arr.dtype) not in FLOAT_TYPES:
+        return None
+    with np.errstate(all="ignore"):
+        total = T(0.0)
+        for w in arr.reshape(-1):
+            total = T(total + T(w))
+    return float(total)
+
+
 def classify(primitive: str, dtype: str, v: float, lo: float, hi: float,
              inputs, element: int = 0, n_out: int = 1,
-             inert: tuple | None = None) -> tuple:
+             inert: tuple | None = None, assumes: bool | None = None) -> tuple:
     """Why is ``v`` outside ``[lo, hi]``? ``(cause, basis)``.
 
     ────────────────────────────────────────────────────────────────────────
@@ -1190,51 +1600,126 @@ def classify(primitive: str, dtype: str, v: float, lo: float, hi: float,
     that CAN be proved is now tried before ``UNEXPLAINED``, every rule that
     cannot is tried after it, and each answer carries which it was.
 
+    ────────────────────────────────────────────────────────────────────────
+    AND THE REORDER LEFT THREE RULES ABOVE THE EXACT READING THAT ASK
+    NOTHING ABOUT ℝ. ALL THREE ARE BELOW IT NOW
+    ────────────────────────────────────────────────────────────────────────
+
+    The rule was *"every provable rule above ``UNEXPLAINED``, every unprovable
+    one below"*, and the first pass sorted by which rules had been CAUGHT
+    rather than by which ones could prove anything. An independent audit drove
+    each of the three:
+
+    * **``overflow-to-inf``** was ``sound-by-construction`` and it is not.
+      What is sound by construction is *"no finite box contains an
+      infinity"* — the violation. The ATTRIBUTION, that an overflow of a box
+      the propagator got RIGHT is what produced the infinity, needs the same
+      ℝ reading every other cause needs. Driven, on a tree where
+      ``interval._mul_corners``' upper endpoint is halved above ``1e50``, a
+      box provably wrong about ℝ::
+
+          exact_value("mul", (1e300, 1e300))  ~ 1e600
+          _exact_in_box(exact, 0.0, 1.0)      False
+          classify("mul", "float64", inf, 0.0, 1.0, (1e300, 1e300))
+             -> ('overflow-to-inf', 'sound-by-construction')
+
+      — and end to end, ``OVERFLOW_PROBE`` reported ``overflow-to-inf /
+      sound-by-construction`` with its exact value ``8.99e76`` OUTSIDE the
+      box, ``Any UNEXPLAINED? False``, and the residual leg ``1 passed``. It
+      is now ``PROVED`` inside the ``in_box`` block and ``HEURISTIC`` below
+      ``UNEXPLAINED``;
+    * **``assume-narrowing``** was the first act of this function and decided
+      on a comparison of two BOXES, which cannot tell *"the narrowing is right
+      over ℝ and the floats disagree"* — ``assume-narrows-past-the-program``,
+      the disclosed posture — from *"the narrowing is wrong over ℝ"*, which is
+      a soundness defect in ``propagate``. It needs a third fact, and
+      :func:`assumes_hold_over_reals` is it: the cause is PROVED only where an
+      ``assume`` is EXACTLY FALSE at the sampled point over ℝ, so the compiled
+      program admitted a point the reals exclude. Where every assume is
+      exactly TRUE there and the narrowing dropped the point anyway, this
+      returns nothing and the ladder below proves ``UNEXPLAINED``. Driven on a
+      tree carrying the documented ieee-only endpoint bump in real mode,
+      ``x0: float64 (0,1); assume(x0 >= 0.0); assert_(x0 > 0.0)`` was VERIFIED
+      with ``cause=assume-narrowing basis=sound-by-construction`` and the whole
+      module ``1 passed, 1 xfailed``;
+    * **the operand NaN** scanned every element of every operand, so a NaN
+      anywhere answered for an element whose own exact reading is computable
+      and outside its box. It is asked of the operand elements the output
+      element under judgement DEPENDS ON now (:func:`_an_operand_is_nan`), and
+      it sits below ``UNEXPLAINED``. That is safe rather than lucky: an
+      aligned operand element that is a NaN makes :func:`exact_value` refuse,
+      so ``UNEXPLAINED`` — which requires an exact reading — cannot fire on
+      the cases this rule answers.
+
+    ``reduction-reassociation`` was the fourth: PROVED from the primitive's
+    identity alone. :func:`_left_to_right_fold` is the missing half.
+
     THE ORDER, AND WHAT EACH STEP EXCLUDES:
 
-    1. the violation does not exist against the UN-NARROWED box — the assume
-       narrowed past a point the compiled program admits (:data:`NARROWING`,
-       sound by construction: it is a comparison of two boxes);
-    2. NaN, then an infinity a finite box excludes — sound by construction:
-       no box contains either;
-    3. every PROVED rule: the physical band, the narrow format, the operand
-       flush, the reduction. Each requires an exact rational reading of this
-       equation on the values it ran on, and each requires that reading to be
-       INSIDE the box — the box is right about ℝ and an IEEE difference moved
-       the float out;
+    1. a NaN — sound by construction: no box contains one, ⊤ included;
+    2. the violation does not exist against the UN-NARROWED box AND an
+       ``assume`` is exactly false at this point over ℝ (:data:`NARROWING`,
+       proved);
+    3. every other PROVED rule, each of which requires an exact rational
+       reading of this equation on the values it ran on to be INSIDE the box —
+       the box is right about ℝ and an IEEE difference moved the float out:
+       the overflow, the physical band, the narrow format, the operand flush,
+       the reduction;
     4. :data:`UNEXPLAINED` — an exact reading exists and is OUTSIDE the box.
        The box is wrong about the reals. This is the only answer the residual
        leg forbids, and it is a proof;
-    5. the HEURISTIC rules, reachable only where no exact reading exists: the
-       physical band and the one-ulp window, each naming a plausible cause
-       and proving nothing. They are counted as their own row.
+    5. the HEURISTIC rules, reachable only where no exact reading exists: an
+       undecided narrowing, an operand NaN, the overflow, the physical band
+       and the one-ulp window. Each names a plausible cause and proves
+       nothing, and they are counted as their own row.
     """
-    if inert is not None:
-        ilo, ihi = inert
-        if ilo <= v <= ihi:
-            # THE VIOLATION IS CREATED BY THE NARROWING, NOT BY THE
-            # ARITHMETIC. Against the declared box this value is inside; it is
-            # outside only the box the assume tightened. That is a real
-            # finding — an obligation discharged over a set the program's own
-            # precondition does not exclude — and it is not the same finding
-            # as an IEEE difference, so it is not counted as one.
-            return NARROWING, STRUCTURAL
     if v != v:
         # No box contains a NaN, ⊤ included. The one cause that survives a
         # declined equation, and the reason the ⊤ count does not bound this
-        # instrument's whole reach.
+        # instrument's whole reach. FIRST, and above the narrowing: an
+        # `ilo <= nan <= ihi` test is False for every box, so no inert reading
+        # could answer this one anyway.
         return NAN, STRUCTURAL
-    if math.isinf(v) and math.isfinite(lo) and math.isfinite(hi):
-        # An infinity the analysis said could not happen. Where the box is
-        # already unbounded on that side there is no violation to classify.
-        return OVERFLOW, STRUCTURAL
 
-    exact = exact_value(primitive, inputs, element, n_out)
+    if inert is not None and inert[0] <= v <= inert[1]:
+        # THE VIOLATION IS CREATED BY THE NARROWING, AND WHICH FINDING THAT IS
+        # DEPENDS ON A THIRD FACT. Against the DECLARED box this value is
+        # inside; it is outside only the box the assume tightened. Two
+        # completely different things do that, and the box comparison alone
+        # cannot tell them apart:
+        if assumes is False:
+            # the harness's own precondition is EXACTLY FALSE at this point
+            # over ℝ, so the analysis was RIGHT to drop it and the compiled
+            # program admitted it anyway. The disclosed posture, and what
+            # `assume-narrows-past-the-program` is. Proved, not asserted.
+            return NARROWING, PROVED
+        if assumes is None:
+            # No assume in this harness is provably false here and at least
+            # one has no exact reading — a connective, `jnp.all`, a `sqrt`.
+            # PLAUSIBLE AND UNPROVED, and it returns HERE rather than falling
+            # through on purpose: every rule below reads the NARROWED box, so
+            # an `UNEXPLAINED` derived from it would be a proof about a
+            # narrowing this function has just failed to justify. A narrowing
+            # that is WRONG about ℝ lands in this row too. It is 0 on this
+            # tree and it is the honest place for it to be.
+            return NARROWING, HEURISTIC
+        # `assumes is True`: the point satisfies every assume over ℝ and the
+        # narrowing dropped it anyway — so the narrowed box is wrong about the
+        # reals, and the ladder below proves it. Fall through.
+
+    exact = _exact_of_equation(primitive, inputs, element, n_out, v)
     in_box = exact is not None and _exact_in_box(exact, lo, hi)
     mn = MIN_NORMAL.get(dtype)
     T = FLOAT_TYPES.get(dtype)
 
     if in_box:
+        if math.isinf(v) and math.isfinite(lo) and math.isfinite(hi):
+            # PROVED overflow: the box is right about ℝ — the exact real value
+            # of this equation is inside it — and the program's arithmetic
+            # left the format's range anyway. FIRST inside this block, because
+            # every rule below it would also fire on an infinity and the
+            # infinity is the more specific answer.
+            return OVERFLOW, PROVED
         if mn is not None and abs(v) <= mn and abs(float_or_inf(exact)) <= mn:
             # PROVED underflow: the box is right about ℝ, the true value is
             # itself inside the format's subnormal band, and the executed
@@ -1252,17 +1737,35 @@ def classify(primitive: str, dtype: str, v: float, lo: float, hi: float,
             # can be explained at all: a ``bool`` output has no format and no
             # subnormal band of its own.
             return FLUSH, PROVED
-        if primitive == "reduce_sum":
-            # PROVED reassociation: the box is right about the real value of
-            # this reduction, the executed float is not it, and no narrower
-            # rule applied — the compiler chose an association order the
-            # interval domain does not model.
-            return REASSOCIATION, PROVED
-
-    if _an_operand_is_nan(inputs):
-        # A comparison against a NaN is a bool, not a NaN, so it would
-        # otherwise arrive below unexplained.
-        return NAN, STRUCTURAL
+        if primitive == "reduce_sum" and len(inputs) == 1:
+            # THE ATTRIBUTION, PROVED, AND IT USED TO BE READ OFF THE
+            # PRIMITIVE'S NAME. The box being right about ℝ and the executed
+            # float not being the real sum says a reduction rounded; it does
+            # NOT say the compiler reassociated. Driven at the classifier:
+            # `classify("reduce_sum", "float64", 0.0, [1.0, 1e100, -1e100])`
+            # answered `('reduction-reassociation', 'proved')`, while a plain
+            # left-to-right float64 fold of that vector is 0.0 as well — the
+            # naive order explains the value and no reassociation is needed.
+            # 46 events and 30 programs sat in the "303 proved" row on that
+            # reading. So the rule asks for the order it can name:
+            folded = _left_to_right_fold(inputs[0], dtype)
+            if folded is None:
+                # No format to accumulate in. Plausible, unproved, censused.
+                return REASSOCIATION, HEURISTIC
+            if folded != v:  # `v` is not a NaN: that is answered at the top
+                # PROVED: the box is right about the real value of this
+                # reduction, and the executed float is not what summing the
+                # operand IN ORDER produces either — so some other association
+                # order ran, which is the one the interval domain does not
+                # model.
+                return REASSOCIATION, PROVED
+            # The in-order fold reproduces the executed value exactly. The box
+            # is right about ℝ and the miss is the ordinary accumulated
+            # rounding of a reduction, which is none of the five named causes.
+            # A refusal, censused — this is the second shape of UNCLASSIFIED
+            # that :data:`CAUSES` describes, and it is 0 on this tree because
+            # every reassociation violation found so far is an n >= 33 draw.
+            return UNCLASSIFIED, HEURISTIC
 
     if exact is not None and not in_box:
         # PROVED: the exact real value of this equation on the values it ran
@@ -1271,6 +1774,19 @@ def classify(primitive: str, dtype: str, v: float, lo: float, hi: float,
         return UNEXPLAINED, PROVED
 
     # ── below here nothing is proved, and the count of it is a disclosure ──
+    if _an_operand_is_nan(primitive, inputs, element, n_out):
+        # A comparison against a NaN is a bool, not a NaN, so it would
+        # otherwise arrive below unexplained. Sound by construction for the
+        # same reason the output-NaN rule is: the operand this element depends
+        # on is not a real number, so no box computed over ℝ says anything
+        # about it.
+        return NAN, STRUCTURAL
+    if math.isinf(v) and math.isfinite(lo) and math.isfinite(hi):
+        # An infinity the analysis said could not happen, with no exact
+        # reading to say whether the box was right about ℝ in the first place.
+        # PLAUSIBLE AND UNPROVED. Where the box is already unbounded on that
+        # side there is no violation to classify.
+        return OVERFLOW, HEURISTIC
     if mn is not None and min(abs(lo), abs(hi)) <= mn and abs(v) <= mn:
         # The box comes into the format's subnormal band and the executed
         # value is in it too. PLAUSIBLE AND UNPROVED: with no exact reading of
@@ -1299,25 +1815,45 @@ def float_or_inf(exact) -> float:
         return math.inf if exact > 0 else -math.inf
 
 
-def _float_elements(inputs):
-    """Every float element of an equation's operands, with its format name.
+def _an_operand_is_nan(primitive: str, inputs, idx: int, n_out: int) -> bool:
+    """Is one of the operand elements THIS OUTPUT ELEMENT DEPENDS ON a NaN?
 
-    NaNs and infinities included — :func:`_an_operand_is_nan` is a reader and
-    would see nothing without them.
+    IT ASKED OF THE WHOLE OPERAND AND THAT IS A DIFFERENT QUESTION. The rule
+    read *"a NaN is present anywhere in any operand"*, so element 0 of a
+    two-element ``add`` whose element 1 is a NaN answered ``NAN`` — for a
+    violation whose own exact reading is computable and outside its box, i.e.
+    for a box that is wrong about ℝ. 0 of the 563 violations in the shipped
+    run took that path, so it was latent rather than live; a latent
+    misattribution in the rule that stands between a violation and
+    ``UNEXPLAINED`` is not one to leave.
+
+    THE ALIGNMENT IS :meth:`_Exact.element`'S, plus reductions. An operand of
+    size 1 broadcasts, an operand of size ``n_out`` is element-wise, and every
+    element of a full reduction's operand reaches its single output. Any other
+    shape is a REFUSAL: this reader does not guess which elements fed which,
+    and a NaN it cannot align contributes nothing rather than answering for a
+    neighbour. That refusal costs evidence and never soundness — the caller's
+    next step is ``UNCLASSIFIED``, which is censused.
     """
+    reducing = primitive.startswith("reduce_")
     for operand in inputs:
         if operand is None:
             continue
         arr = np.asarray(operand)
-        name = str(arr.dtype)
-        if name not in FLOAT_TYPES:
+        if str(arr.dtype) not in FLOAT_TYPES:
             continue
-        for w in arr.reshape(-1):
-            yield name, float(w)
-
-
-def _an_operand_is_nan(inputs) -> bool:
-    return any(w != w for _, w in _float_elements(inputs))
+        flat = arr.reshape(-1)
+        if reducing:
+            here = flat
+        elif flat.size == 1:
+            here = flat[:1]
+        elif flat.size == n_out and idx < flat.size:
+            here = flat[idx:idx + 1]
+        else:
+            continue
+        if any(float(w) != float(w) for w in here):
+            return True
+    return False
 
 
 # ── one reading ──────────────────────────────────────────────────────────────
@@ -1519,7 +2055,7 @@ def _violating_elements(boxes, values, reading, count_boxes):
             reading.boxes_read += 1
             if box.size == 0:
                 reading.empty_boxes += 1
-            elif is_top(box):
+            elif is_top(box, dtype):
                 reading.top_boxes += 1
             elif dtype in INT_DTYPES:
                 # A box endpoint is a binary64 float and an int64 above 2**53
@@ -1628,6 +2164,18 @@ def _compare(reading, boxes, values, operands, points, count_boxes, jax_closed,
         else:  # pragma: no cover - a refusal inside the compiled route
             reading.route_unavailable += 1
             candidates = [c + (operands.get(c[0], ()),) for c in candidates]
+    # THE EXACT READING OF THE HARNESS'S ASSUMES, AT MOST ONCE PER POINT AND
+    # ONLY WHERE A NARROWING IS ACTUALLY IN QUESTION. It is a whole-jaxpr walk
+    # in rationals, so it is paid for on the same terms as the inert boxes and
+    # the compiled route: after a violation, and only for the violations that
+    # need it. :func:`classify` reads it as :data:`NARROWING`'s third fact.
+    memo: list = []
+
+    def assumes_over_reals():
+        if not memo:
+            memo.append(assumes_hold_over_reals(jax_closed, points))
+        return memo[0]
+
     for (i, j, prim, dtype, idx, x, lo, hi, n_out, ins) in candidates:
         inert = None
         if inert_boxes is not None:
@@ -1644,9 +2192,27 @@ def _compare(reading, boxes, values, operands, points, count_boxes, jax_closed,
             # the leg is GREEN, and 172 of 1206 read programs were exempt on
             # that reading. Comparing the inert and constrained boxes for
             # THIS declaration answers the question that was being asked.
+            #
+            # IT IS NO LONGER THE ONLY GUARD, AND IT WAS NEVER THE RIGHT
+            # PLACE. This one can only fire on a VIOLATION at `stelling_any`,
+            # and an unbounded declaration's own box is ⊤ — so ±inf was inside
+            # it, there was no violation to fire on, and this counter was
+            # structurally blind to the very class it had just been extended
+            # for. `sample_points` asserts membership where the point is BUILT
+            # now (`_assert_points_of`), which is the check that can see it.
+            # What survives here is the OTHER half: a declaration whose box
+            # the propagator computed differently from the set the harness
+            # declared. Same-seed A/B at STELLING_PROPERTY_SCALE=12.5 with the
+            # ±inf clamp removed AND the membership assertion removed (without
+            # which the run cannot finish): `nan` 162 -> 164 events and 30 ->
+            # 35 distinct uniform programs, every other cause identical, and
+            # **`sampler_artefacts` 0 in BOTH**.
             reading.sampler_artefacts += 1
-        cause, basis = classify(prim, dtype, x, lo, hi, ins, idx, n_out,
-                                inert)
+        narrowed_away = inert is not None and inert[0] <= x <= inert[1]
+        cause, basis = classify(
+            prim, dtype, x, lo, hi, ins, idx, n_out, inert,
+            assumes_over_reals() if narrowed_away else None,
+        )
         reading.violations.append(
             Violation(
                 eqn=i, primitive=prim, dtype=dtype, element=idx,
@@ -1655,16 +2221,26 @@ def _compare(reading, boxes, values, operands, points, count_boxes, jax_closed,
             )
         )
     # READ FROM THE COMPILED ROUTE WHEREVER IT RAN, because the claim these
-    # two numbers make is about the program the user compiles. **THE TWO
-    # ROUTES DO DISAGREE HERE**, and the disagreement is not rare on the
-    # points that matter: measured over 1500 examples, 17 of the 537
-    # obligation readings taken at a violating point differ between the eager
-    # walk and one compiled region. That is a biased sample by construction —
-    # the second route is consulted only where the first found a violation,
-    # which is exactly where granularity bites — and it is why this cannot be
-    # left on the eager reading. Where no violation was found the two agree by
-    # construction: a falsified discharge IS a violation at the obligation's
-    # own equation, so the compiled route has run wherever one exists.
+    # two numbers make is about the program the user COMPILES, and that is the
+    # whole of the reason. **THE SENTENCE HERE USED TO REST ON A NUMBER AND
+    # THE NUMBER IS NOW ZERO.** It read *"the two routes DO disagree here, and
+    # the disagreement is not rare on the points that matter: measured over
+    # 1500 examples, 17 of the 537 obligation readings taken at a violating
+    # point differ between the eager walk and one compiled region … it is why
+    # this cannot be left on the eager reading."* It was CORRECT at `03b2dbe`
+    # and is re-derived there — `git archive 03b2dbe src tests` into a scratch
+    # tree, same command: 537 compared, 17 disagreeing — but that is before
+    # the reorder and before the sampler stopped executing at ±inf, and the
+    # census on the same command at this tree reports
+    # `route_obligations_compared` and `route_obligations_disagreed` and the
+    # second of them is 0. The DESIGN choice is unchanged and does not need
+    # the number — an obligation truth read from a route the user does not run
+    # is the wrong reading whether or not the two happen to agree today — and
+    # the census carries both figures on every run, so the day they diverge
+    # again nobody has to remember this paragraph. Where no violation was
+    # found the two agree by construction: a falsified discharge IS a
+    # violation at the obligation's own equation, so the compiled route has
+    # run wherever one exists.
     d, r = _contradicted_obligations(
         boxes, values if compiled is None else compiled
     )
@@ -1851,13 +2427,31 @@ def _member(label, decls, pred):
     return Program(decls, (_assert(pred),), label, "member")
 
 
-#: ``label -> (Program, cause, what was measured)``. The properties iterate
-#: this; nothing else in this file mentions a member by name.
+#: ``label -> (Program, cause, what was measured, which verdict it
+#: contradicts)``. The properties iterate this; nothing else in this file
+#: mentions a member by name.
+#:
+#: THE FOURTH FIELD IS THE ONE A REPAIR TEAM READS FIRST, and it was a
+#: sentence in three docstrings before it was a field. "Five of them falsify a
+#: discharge" appeared in this file, in ``test_float_oracle.py`` and in
+#: ``tests/property/README.md``, was quoted from a v0.1.0 run, and was
+#: asserted nowhere — so which five was not answerable without re-running the
+#: v0.1.0 experiment. It is a per-member fact now, measured at HEAD by
+#: :func:`read` and floored on in the residual leg through
+#: :data:`DISCHARGE_FALSIFYING`, so the count in the prose is DERIVED from the
+#: registry rather than typed beside it.
 MEMBERS = {}
 
+#: ``""``, ``"discharge"`` or ``"refutation"`` — the permitted fourth field.
+#: A member that contradicts no verdict is still a box-containment violation;
+#: it just does not reach an obligation, which is the distinction
+#: :func:`_contradicted_obligations` is written around.
+CONTRADICTS = ("", "discharge", "refutation")
 
-def _register(label, program, cause, measured):
-    MEMBERS[label] = (program, cause, measured)
+
+def _register(label, program, cause, measured, contradicts=""):
+    assert contradicts in CONTRADICTS, contradicts
+    MEMBERS[label] = (program, cause, measured, contradicts)
 
 
 # (1) 1 / Σ(x·1e-200·1e-200) — the product underflows where the ℝ box does not.
@@ -1884,6 +2478,7 @@ _register(
     FLUSH,
     "mul executes 0.0 against box [1e-320, 1.000000003e-315]; the reciprocal "
     "then executes +inf",
+    "",
 )
 
 # (2) sum of two binary64 subnormals — flushed to zero by the backend.
@@ -1897,6 +2492,7 @@ _register(
     FLUSH,
     "reduce_sum executes 0.0 against box [-2e-323, -1e-323], a box that is "
     "strictly negative",
+    "discharge",
 )
 
 # (3) a float32 square underflowing through a binary64 box.
@@ -1911,6 +2507,7 @@ _register(
     FLUSH,
     "mul executes 0.0f32 against box [9.999999999999997e-41, "
     "1.0000000000000001e-20]",
+    "discharge",
 )
 
 # (4) y / y at the one point of the box where it is NaN.
@@ -1924,6 +2521,7 @@ _register(
     ),
     NAN,
     "div executes NaN at x0 = 0.0; the box is ⊤ and no box contains a NaN",
+    "",
 )
 
 # (5) reassociation at NORMAL magnitudes: n = 33, degenerate envelope,
@@ -1940,6 +2538,7 @@ _register(
     REASSOCIATION,
     "reduce_sum executes 9.0 against box [-10.0, 6.0]; the EXACT real sum is "
     "3.0 and is inside the box, so the box is right about ℝ",
+    "",
 )
 
 # (6) one float32 multiply, judged in binary64.
@@ -1954,6 +2553,7 @@ _register(
     NARROW,
     "mul executes 1.000000238418579 against the point box "
     "[1.0000002384185933, 1.0000002384185933]",
+    "discharge",
 )
 
 # (7) float32 exp on [-100, -50].
@@ -1968,6 +2568,7 @@ _register(
     "exp executes 0.0f32 at x0 = -100 against box [3.7200759760208356e-44, "
     "1.928749847963918e-22]; at x0 = -50 the same equation executes "
     "1.9287498933537385e-22, one float32 ulp above the box's upper endpoint",
+    "discharge",
 )
 
 # (8) NOT ONE OF THE SEVEN. Found by this instrument, from an unbiased draw of
@@ -1993,6 +2594,7 @@ _register(
     FLUSH,
     "ge executes True (1.0) against the box [0.0, 0.0]; the subnormal "
     "operand 5e-324 is flushed to zero before the comparison",
+    "refutation",
 )
 
 # (9) NOT ONE OF THE SEVEN EITHER, and a class the other eight do not cover:
@@ -2020,6 +2622,7 @@ _register(
     "the narrowing rather than the flush. The mechanism behind the narrowing "
     "overshooting is still a flush: the compiled comparison flushes the "
     "subnormal and admits the point the analysis removed",
+    "discharge",
 )
 
 #: The seven this module was commissioned to find, in the order they were
@@ -2040,10 +2643,49 @@ MEMBER_NAMES = tuple(MEMBERS)
 
 assert set(SEVEN) <= set(MEMBER_NAMES), sorted(set(SEVEN) - set(MEMBER_NAMES))
 
+#: The members whose box violation reaches an OBLIGATION and contradicts a
+#: VERIFIED. Derived from the registry, never typed: the residual leg floors
+#: on ``len()`` of this, so "five of them falsify a discharge" is a count the
+#: file computes rather than a numeral beside a list that moves.
+#:
+#: Measured 2026-08-28 on this tree by :func:`read` at ``interior=0.5``, one
+#: member at a time — ``ftz-subnormal-sum`` 2 discharges, ``f32-underflow``,
+#: ``f32-single-multiply``, ``f32-exp`` and ``assume-narrows-past-the-program``
+#: 1 each; ``subnormal-comparison`` 1 contradicted refutation; the other three
+#: violate box containment at an equation UPSTREAM of the obligation and
+#: contradict no verdict at all. The same five, and the same one, that the
+#: v0.1.0 re-derivation below names — so the class does not merely still
+#: exist, it still reaches the same verdicts through today's ``src/``.
+DISCHARGE_FALSIFYING = tuple(
+    name for name, entry in MEMBERS.items() if entry[3] == "discharge"
+)
+
+#: The members that contradict a REFUTED rather than a VERIFIED — the
+#: recoverable direction, counted apart for the reason
+#: :func:`_contradicted_obligations` gives.
+REFUTATION_CONTRADICTING = tuple(
+    name for name, entry in MEMBERS.items() if entry[3] == "refutation"
+)
+
 
 # ── strategies ───────────────────────────────────────────────────────────────
 
 from hypothesis import strategies as st  # noqa: E402
+
+#: The element count at which ``jnp.sum`` stops folding left to right and
+#: splits into two windows on this backend — re-derived from this instrument
+#: rather than read off a lowering, by the 200-programs-per-size table in this
+#: module's docstring (0/200 at n = 16, 30, 31 and 32; 18/200 at n = 33), and
+#: byte-identical on jax 0.10.2.
+#:
+#: WRITTEN ONCE BECAUSE THREE PLACES NEED IT AND TWO OF THEM ARE ASSERTIONS.
+#: :func:`cancelling_sum_programs` draws either side of it;
+#: :func:`uniform_float_programs` states that ``_grammar.SHAPES`` cannot reach
+#: it, which is the proof the unbiased leg's zero in the reassociation row
+#: rests on; and ``test_float_oracle.py``'s residual leg asserts that premise
+#: against ``SHAPES`` on every run, because the proof was stated in three
+#: docstrings and checked in none.
+REDUCTION_SPLIT_N = 33
 
 
 def member_programs():
@@ -2051,7 +2693,7 @@ def member_programs():
     anything else — and so the containment leg reaches one within a few
     examples instead of relying on the unbiased grammar stumbling into the
     class."""
-    return st.sampled_from([p for p, _, _ in MEMBERS.values()])
+    return st.sampled_from([entry[0] for entry in MEMBERS.values()])
 
 
 def uniform_float_programs():
@@ -2059,14 +2701,29 @@ def uniform_float_programs():
 
     UNBIASED IS THE POINT. This is the leg whose partition can be compared
     against a run of any other generator, and the leg that would catch a class
-    nobody has thought of. It reaches NaN, flush-or-subnormal and
-    narrow-format DENSELY; it reaches overflow-to-inf only BY LUCK — 0 in one
-    1500-draw derandomised run, 7 in another and 13 in the shipped one, which
-    is why ``test_float_oracle.OVERFLOW_PROBE`` is pinned; and it reaches the
+    nobody has thought of. It reaches NaN, flush-or-subnormal, narrow-format
+    and overflow DENSELY ENOUGH TO RANK — its distinct-program counts are the
+    only ones in the census that are a statement about the tool rather than
+    about a strategy someone aimed. It reaches overflow-to-inf unreliably — 0
+    in one 1500-draw derandomised run, 7 in another, which is why
+    ``test_float_oracle.OVERFLOW_PROBE`` is pinned. And it reaches the
     reassociation class **never**, because ``SHAPES`` tops out at four
-    elements and no draw of it can cross the n >= 33 boundary. The last of
-    those three is a proof about the generator rather than a zero in a table,
-    and it is stated here rather than left to be inferred.
+    elements and no draw of it can cross the n >= :data:`REDUCTION_SPLIT_N`
+    boundary. The last of those is a proof about the generator rather than a
+    zero in a table, and ``test_float_oracle.py``'s residual leg now ASSERTS
+    its premise against ``_grammar.SHAPES`` on every run — it was stated in
+    three docstrings and checked in none, while the whole weight of
+    "reassociation is second by distinct programs" rested on it.
+
+    **AND IT CONTRIBUTES NOTHING TO THE FIGURE EVERY CONSUMER QUOTES.** The
+    census crosses the falsified-discharge count with
+    :attr:`Program.source`, and this leg's cell is **0** — every discharge a
+    repair would be scoped on comes from a pinned ``@example`` or from the
+    aimed cancelling-sum strategy. That is not floorable (a floor on zero is
+    not a floor) and it is not a defect in the generator either; it is the
+    single most important thing a reader of the headline needs to know, which
+    is why it is written here and in :data:`test_float_oracle.FLOAT_ORACLE_MEASURED`
+    rather than left to be noticed.
 
     **NOTHING FLOORED THIS LEG UNTIL AN AUDIT SAID SO.** Every floor in
     ``test_float_oracle.py`` — the read count, the box count, the admitted
@@ -2074,8 +2731,17 @@ def uniform_float_programs():
     by the pinned ``@example``s alone. Driven with both unbiased generators
     replaced by one declaration stelling refuses: BOTH LEGS GREEN, on
     ``read=39`` and 29 falsified discharges, every number of them from the
-    pins. The residual leg now floors on ``read/unlabelled``, which only a
-    drawn program can raise, and the same tree fails it at ``0 < 15``.
+    pins.
+
+    THE FLOOR THAT CLOSED IT IS ``read/uniform`` AND THIS SENTENCE NAMED THE
+    WRONG ONE. It read *"the residual leg now floors on ``read/unlabelled``,
+    which only a drawn program can raise"*. Both legs floor on
+    ``read/uniform``; ``read/unlabelled`` is floored NOWHERE, and it is the
+    weaker tag in any case — it counts this generator and
+    :func:`cancelling_sum_programs` together, because that one also yields
+    ``label == ""``, which is the very conflation the ``source`` field was
+    added to undo. The floor in the tree is the right one and the sentence
+    describing it was not.
     """
     return _grammar.general_specs().map(
         lambda s: Program(s.decls, s.stmts, "", "uniform")
@@ -2124,7 +2790,10 @@ def cancelling_sum_programs(draw):
     construction, not about the boundary, and the n <= 32 rows are what
     establish the boundary.
     """
-    n = draw(st.sampled_from((33, 33, 33, 32, 34, 64)))
+    n = draw(st.sampled_from((
+        REDUCTION_SPLIT_N, REDUCTION_SPLIT_N, REDUCTION_SPLIT_N,
+        REDUCTION_SPLIT_N - 1, REDUCTION_SPLIT_N + 1, 64,
+    )))
     pairs = n // 2
     exponents = draw(st.lists(st.integers(30, 60), min_size=pairs,
                               max_size=pairs))

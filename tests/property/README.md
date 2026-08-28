@@ -265,26 +265,45 @@ Two consequences worth keeping in mind:
   is unacceptable whatever ℝ says.
 
   Measured after the argument was withdrawn and the instrument built
-  (`test_float_oracle.py`, 2026-08-28 at `03b2dbe`, 1500 examples at
-  `STELLING_PROPERTY_SCALE=12.5`): **563 violations of box containment over 90
-  distinct programs and 110 distinct sites — 231 flush-or-subnormal (12
+  (`test_float_oracle.py`, 1500 examples at `STELLING_PROPERTY_SCALE=12.5`;
+  the dated record with its commit and command is that file's
+  `FLOAT_ORACLE_MEASURED`): **563 violations of box containment over 90
+  distinct programs and 110 distinct sites — 232 flush-or-subnormal (13
   programs), 162 NaN (31), 83 narrow-format rounding (10), 46 reduction
-  reassociation (30), 25 overflow-to-inf (8), 16 assume-narrowing (1), 0
-  unexplained, 0 unclassified — of which 116, over 21 distinct programs, are
-  an obligation whose box says "definitely true for all elements" whose
-  predicate executes FALSE at an admitted point.** Nine programs are pinned as
-  regression cases; eight of the nine violate box containment against
-  `v0.1.0`'s own `src/` as well, and five of those falsify a discharge there.
-  None of them needed a float harness to be *mis*-documented to be a defect.
+  reassociation (30), 25 overflow-to-inf (8), 15 assume-narrowing (1), 0
+  unexplained, 0 unclassified — of which 116 are an obligation whose box says
+  "definitely true for all elements" whose predicate executes FALSE at an
+  admitted point.** Nine programs are pinned as regression cases; eight of the
+  nine violate box containment against `v0.1.0`'s own `src/` as well, and five
+  of those falsify a discharge there. None of them needed a float harness to
+  be *mis*-documented to be a defect.
 
   **The distinct-program column is the one a repair is scoped on**, and the
-  ranking inverts between the two: by events `flush(231) > reassoc(46)`, by
-  programs `reassoc(30) > flush(12)`, because one pinned example re-drawn
-  contributes as many events as it is re-drawn. The scope of THIS
-  file's oracle (`test_oracle.py`) is still integers, and that is now a
-  statement about the exact-oracle machinery — `_grammar.eval_pred_exact`
-  works in unbounded Python integers — rather than an argument that floats
-  should not be checked. They are checked, next door.
+  ranking inverts between the two: by events `flush(232) > reassoc(46)`, by
+  programs `reassoc(30) > flush(13)`, because one pinned example re-drawn
+  contributes as many events as it is re-drawn.
+
+  **AND THE DISTINCT COLUMN IS NOT A DENOMINATOR EITHER UNTIL IT IS CROSSED
+  WITH THE STRATEGY.** This bullet used to end the 116 with "over 21 distinct
+  programs", which is the number every consumer of that instrument quotes as
+  the scope of a repair. Crossed with the generator that drew each program:
+  **100 of the 116 events, over 5 programs, are pinned `@example`s; 16 over 16
+  are shrink neighbours of one aimed cancelling-sum construction; and the
+  unbiased grammar contributes none at all.** Six independent situations, not
+  21. "Shrink neighbours" is measured: 15 of those 16 have the same vector
+  length and 13 the same pinned envelope, and of the 69 pairs sharing both, 10
+  differ in at most 4 of their 33 elements and one pair in exactly one
+  element. The same crossing undoes the cause ranking's other headline — the 30
+  distinct reassociation programs are 29 draws of the strategy built to find
+  that class and one pinned member, against a leg that PROVABLY cannot reach
+  it — so the only column in that table which is a statement about the tool
+  rather than about a strategy someone aimed is the unbiased one: nan 30,
+  narrow 8, flush 7, overflow 7, reassociation 0.
+
+  The scope of THIS file's oracle (`test_oracle.py`) is still integers, and
+  that is now a statement about the exact-oracle machinery —
+  `_grammar.eval_pred_exact` works in unbounded Python integers — rather than
+  an argument that floats should not be checked. They are checked, next door.
 * **the box must be enumerable.** `_grammar.declared_points` returns `None`
   rather than a partial answer when the product of the declared boxes exceeds
   4096, and the caller discards the example. A refusal to answer, never a
@@ -310,8 +329,12 @@ being constant-folded in full precision the way the compiled program folds it
 (`jax.jit(lambda: jnp.sqrt(5e-324))()` is `2.2227587494850775e-162`;
 `jnp.sqrt(jnp.asarray(5e-324))` is `0.0`, and the box contains the first).
 Every candidate violation is re-checked against the same jaxpr staged into one
-`jax.jit` and declined if the compiled program does not have it — **76 of 639
-candidates** in a 1500-example run. That second route copies
+`jax.jit` and declined if the compiled program does not have it — **9 of 572
+candidates** in a 1500-example run. (That read "76 of 639". It was correct at
+`03b2dbe` — re-derived by `git archive`ing that commit into a scratch tree and
+re-running the same command: 76 declines against 563 reported violations — and
+the tree that shipped it declines 9. A figure left behind by its own tree.)
+That second route copies
 `stelling.falsify._whole_program_route`, including the two properties that
 make it safe: it is consulted only after a violation, and it can only decline.
 
@@ -321,29 +344,52 @@ equation on the values it ran on is computable and is OUTSIDE the box — the
 box is wrong about ℝ. Where no exact reading exists (`sqrt`, `exp`, `sign`,
 every reduction but `reduce_sum`) the answer is `unclassified` and is censused.
 A green residual leg therefore says *no violation was PROVED to be a box wrong
-about ℝ*, and the `unclassified` count says how much of the field that proof did
-not cover.
+about ℝ*.
+
+**And `unclassified` is NOT the measure of how much the proof did not cover**,
+which is what this paragraph used to end with. `unclassified` is 0 in the
+shipped run and it measures the wrong thing: a violation an UNPROVED rule
+names is not unclassified, it is classified on no evidence. The census carries
+`_float_oracle.BASES` — proved / sound-by-construction / heuristic — and the
+**heuristic** row is the honest answer. `sound-by-construction` was overstated
+too: it means the rule needs no ℝ reading to be right, and three rules claimed
+it while making a claim about ℝ (`overflow-to-inf`, `assume-narrowing`, and
+the operand-NaN rule, which scanned every element of every operand instead of
+the ones the element under judgement depends on). All three are proved where
+they can be and heuristic where they cannot now.
 
 **Three things it is blind to, stated here because a reader of a null result
 will look here.** They are each a mechanism in `_float_oracle.py`, not a
 warning:
 
 1. **⊤ is unfalsifiable, and it is not the only bucket that is.** Every
-   decline lands as `[-inf, inf]`, which contains every finite float, so this
-   instrument sees nothing exactly where the propagator already declined. The
-   census counts boxes in FOUR buckets, because they are unfalsifiable for
-   entirely different reasons and only the last is a place a finite value can
-   be caught outside its box. Measured over 1500 examples, of **13041** boxes
-   read: **1948 empty (15 %, a size-0 declaration), 1787 ⊤ (14 %), 1587
-   integer (12 %, never compared — a binary64 box endpoint cannot represent an
-   `int64` above 2**53), 7719 compared (59 %).** Both properties floor on the
-   last alone, and on the last **restricted to the unbiased generator** —
-   floored on the whole, the leg stayed green with a size-0 declaration
-   standing in for the whole search. **The integer bucket used to be counted
-   inside "76 % falsifiable"** and reached no census, no floor and no
-   disclosure; 41 % of the field of view is blind, not 24 %. The pass rate is
-   not a safety signal. NaN is the only cause that survives a ⊤, because no
-   box contains a NaN.
+   decline lands as a ⊤ box — one that admits every value its dtype can
+   take — so this instrument sees nothing exactly where the propagator already
+   declined. The census counts boxes in FOUR buckets, because they are
+   unfalsifiable for entirely different reasons and only the last is a place
+   an executed value can be caught outside its box. Measured over 1500
+   examples, of **13041** boxes read: **4015 ⊤ (31 %), 1948 empty (15 %, a
+   size-0 declaration), 1587 integer (12 %, never compared — a binary64 box
+   endpoint cannot represent an `int64` above 2**53), 5491 compared (42 %).**
+   Both properties floor on the last alone, and on the last **restricted to
+   the unbiased generator** — floored on the whole, the leg stayed green with
+   a size-0 declaration standing in for the whole search.
+
+   **THAT FIGURE HAS BEEN WRONG TWICE, IN THE SAME DIRECTION.** It read 24 %
+   blind while the integer bucket was counted inside "76 % falsifiable" with
+   no census, no floor and no disclosure; it then read 41 % here and 39 % in
+   the module while `_float_oracle.is_top` tested for `±inf` and therefore
+   missed **the bool lattice's own top**. A `bool` box of `[0, 1]` admits both
+   values a bool can take, so no executed bool can fall outside it — and every
+   declined comparison, connective and obligation in this grammar produces
+   one. Measured 2026-08-29 with `is_top` instrumented to report the split it
+   was hiding: of the 7719 boxes the previous table called `compared`, **2228
+   were bool `[0, 1]`**, 1777 were a definite bool and 3714 were float. `is_top`
+   asks *"does this box admit every value the executed dtype can take"* now,
+   which is one rule rather than a list of dtype spellings, and **58 % of the
+   field of view is blind**. The pass rate is not a safety signal. NaN is the
+   only cause that survives a ⊤, because no box contains a NaN — which makes a
+   float ⊤ very slightly less blind than a bool one.
 2. **The sampler's grid.** `np.float32(1e-20)` is `9.9999997e-21`, *below* a
    box declared `(1e-20, 1e-10)`; sampling there and comparing against a box
    built for `[1e-20, …]` invents violations of the identity, with no
@@ -372,6 +418,25 @@ warning:
    row. `snap_inward` clamps to the format's largest finite magnitude now, the
    way `falsify.probe`'s bool branch clamps, rather than refusing the way its
    float branch does; the note there says why the two precedents differ.
+
+   **AND THE GUARD COULD NOT SEE THE THIRD OF THE THREE, WHICH IS WHY THERE IS
+   NOW A CHECK AT THE SOURCE.** `sampler_artefacts` fires only on a *violation*
+   at `stelling_any`, and an unbounded declaration's own box is ⊤ — so ±inf is
+   inside it, there is no violation to fire on, and the counter was
+   structurally blind to the very class it had just been extended for. Same
+   seed, `STELLING_PROPERTY_SCALE=12.5`, with the ±inf clamp removed *and* the
+   membership check removed (without which the run cannot finish): `nan` goes
+   from 162 to 164 events and from 30 to 35 distinct unbiased programs, every
+   other cause is identical, and **`sampler_artefacts` is 0 in both**.
+   `_float_oracle.sample_points` now asserts, where each point is BUILT, that
+   every element of every array it returns is a finite member of the declared
+   `(lo, hi)` — an `AssertionError`, not a counted violation, because a
+   sampler outside its own declared box is this module being wrong rather than
+   a finding about stelling. Also repaired there: an integer declaration of
+   `(inf, inf)` used to leave `snap_inward` as an `OverflowError` from
+   `math.ceil` rather than as a refusal; 8000 hypothesis examples over all 13
+   dtypes and all seven `SHAPES` find it, and none of the shipped generators
+   can.
    (**Reported, not repaired here:**
    the declared endpoints stelling stores are binary64 images and are *not*
    snapped to the program's dtype grid, so a float32 box can have endpoints no
@@ -380,7 +445,12 @@ warning:
 3. **What the generator cannot reach.** The unbiased grammar cannot build the
    reassociation class *at all* — `_grammar.SHAPES` tops out at four elements
    and `jnp.sum` only splits into two windows at n ≥ 33 — so that is a proof
-   about the generator and not a zero in a table.
+   about the generator and not a zero in a table. **The premise of that proof
+   was stated in three docstrings and checked in none**; the residual leg
+   asserts it against `_grammar.SHAPES` on every run now, because the whole
+   weight of "reassociation is second by distinct programs" rests on the
+   unbiased leg being unable to reach the class rather than merely having
+   missed it.
    `_float_oracle.cancelling_sum_programs` builds the shape deliberately, and
    needs all three of a degenerate envelope, per-element constants and forced
    cancellation at once. Measured, 200 programs of that construction per size:
@@ -416,13 +486,14 @@ are counted but not compared (a box endpoint is a binary64 float and an
 its own rounding). The wrap class those dtypes carry is `test_oracle.py`'s
 subject and is judged there exactly.
 
-**Cost, and how it runs.** 28 ms per example: a 1500-example run of the
-residual leg takes 42.3 s at load average 3 on a 24-core box. The cost is
+**Cost, and how it runs.** 31 ms per example: a 1500-example run of the
+residual leg takes 46.2 s at load average 2.4 on a 24-core box. The cost is
 dominated by jax dispatch — the op-by-op walk always, one `jax.jit` compile
-for each program whose first route found a violation, and a second forward
-propagation for the same programs to read their un-narrowed boxes. At the
-`ci` profile the whole module costs **13.0-13.1 s**, three runs at load
-average 3 (`pytest -q -ra tests/property/test_float_oracle.py`, `1 passed,
+for each program whose first route found a violation, a second forward
+propagation for the same programs to read their un-narrowed boxes, and a third
+walk in exact rationals for the ones where an `assume` narrowed the box. At
+the `ci` profile the whole module costs **12.89-12.90 s**, three runs at load
+average 2.1 (`pytest -q -ra tests/property/test_float_oracle.py`, `1 passed,
 1 xfailed`, zero warnings) —
 the containment leg stops at its first violation and then shrinks, and the
 residual leg runs its full 120 examples plus 11 pinned ones.

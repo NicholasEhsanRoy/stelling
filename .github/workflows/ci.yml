@@ -1774,18 +1774,29 @@ jobs:
             * the cvc5 record protocol, flat and stateful: a definite answer
               requires exit 0, no truncation, and a harvested model equal to the
               value records in the bytes actually read
-            * every violation of BOX CONTAINMENT that the float oracle finds
-              has one of five IEEE causes — NaN, overflow to infinity,
-              rounding into a format narrower than the binary64 the box was
-              computed in, a flush or gradual underflow, or a reduction the
-              compiler reassociated. A sixth kind would mean the box is
-              wrong about the REALS  (this one must be green)
+            * no violation of BOX CONTAINMENT that the float oracle finds is
+              PROVED to be a box wrong about the REALS. Five of the answers it
+              permits are IEEE causes — NaN, overflow to infinity, rounding
+              into a format narrower than the binary64 the box was computed
+              in, a flush or gradual underflow, or a reduction the compiler
+              reassociated; two more are not — `assume-narrowing`, which is a
+              finding about the precondition, and `unclassified`, which is a
+              refusal. `UNEXPLAINED` is the one that reddens it
+              (this one must be green)
             * nine pinned programs where the executed value IS outside the
               box are each re-run and each still found, with its registered
-              cause  (asserted as a census floor inside that property)
-            * the search itself contributed something: the residual leg floors
-              on readings from a DRAWN program, which no pinned example can
-              raise
+              cause  (asserted as a census floor inside that property), and
+              the FIVE of them whose violation reaches an obligation and
+              falsifies a VERIFIED are floored as a crossed count, so the
+              sentence "five of them falsify a discharge" is derived from the
+              registry rather than typed beside it
+            * the search itself contributed something: both legs floor on
+              boxes read from a program the UNBIASED grammar drew, which no
+              pinned example and no aimed strategy can raise
+            * the premise the reassociation ranking rests on: `_grammar.SHAPES`
+              still admits no array big enough to reach `jnp.sum`'s two-window
+              split, so the unbiased leg's zero in that row is a proof about
+              the generator rather than an under-sampled cell
             * the strategies still draw their boundary classes (generator floor)
             * every property is registered with a positive control, every
               control names a property that exists, every mutation still applies
@@ -1803,21 +1814,36 @@ jobs:
               raises=ExecutedValueOutsideBox). This job is GREEN while the
               value the compiled program computes falls outside the box the
               propagator computed for it, in nine pinned programs, and 116
-              of the 563 violations one 1500-example run found — over 21
-              DISTINCT PROGRAMS, which is the denominator a repair is scoped
-              on — are an obligation whose box says `definitely true for all
-              elements` executing FALSE at an admitted point of its own
-              declared box.
+              of the 563 violations one 1500-example run found are an
+              obligation whose box says `definitely true for all elements`
+              executing FALSE at an admitted point of its own declared box.
+            * AND THAT 116 IS NOT 21 INDEPENDENT SITUATIONS, which is what
+              this block used to say ("over 21 DISTINCT PROGRAMS, which is the
+              denominator a repair is scoped on"). Crossed with the strategy
+              that drew each program — the crossing is in
+              `tests/property/test_float_oracle.py`'s `_record` and the table
+              is in its `FLOAT_ORACLE_MEASURED` — it is 100 events over 5
+              programs from pinned `@example`s, 16 over 16 shrink neighbours
+              of ONE aimed cancelling-sum construction, and NOTHING AT ALL
+              from the unbiased leg. Six independent situations. A repair
+              scoped on 21 would be scoped on how often an example was
+              re-drawn.
             * WHAT A GREEN FLOAT-ORACLE LEG DOES NOT SAY. Of 13041 boxes read
-              in a 1500-example run, only 7719 (59 %) are compared at all:
-              1948 are EMPTY (a size-0 declaration), 1787 are TOP (which
-              contains every finite float) and 1587 are INTEGER (a binary64
-              box endpoint cannot represent an int64 above 2**53). 41 % of its
+              in a 1500-example run, only 5491 (42 %) are compared at all:
+              4015 are TOP (a box that admits every value its dtype can take —
+              [-inf, inf] for a float and [0, 1] for a bool), 1948 are EMPTY
+              (a size-0 declaration) and 1587 are INTEGER (a binary64 box
+              endpoint cannot represent an int64 above 2**53). 58 % of its
               field of view is blind, for three different reasons, one of them
-              being that the propagator already declined. It samples at most
-              six dtype-representable points of each declared box; 57 of its
-              563 violations are named by a rule that PROVES NOTHING (the
-              census carries proved / sound-by-construction / heuristic, and
+              being that the propagator already declined. THAT FIGURE READ
+              41 % HERE and 39 % in the module itself, because `is_top` tested
+              for ±inf and so counted the bool lattice's own top — which every
+              declined comparison in the grammar produces — as a place a
+              violation could be found. It samples at most six
+              dtype-representable points of each declared box, and knows
+              nothing about where an assume's boundary is; 57 of its 563
+              violations are named by a rule that PROVES NOTHING (the census
+              carries proved / sound-by-construction / heuristic, and
               `0 unclassified` is not the measure of that); the 563 events
               stand on 90 distinct programs, and the class ranking INVERTS
               between the two columns; and neither of its generators reaches
