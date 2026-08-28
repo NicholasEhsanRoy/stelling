@@ -6,7 +6,7 @@
 # disable them. Requires a (pending) Trusted Publisher configured on PyPI
 # for this repository + workflow + environment.
 #
-# FOURTEEN REFUSAL POINTS STAND BETWEEN A TAG AND PyPI — twelve `exit 1` sites
+# FIFTEEN REFUSAL POINTS STAND BETWEEN A TAG AND PyPI — thirteen `exit 1` sites
 # written below, plus two steps that refuse by their own exit code — because
 # this is the one workflow whose mistakes are immutable: a release on PyPI
 # cannot be unpublished, only yanked, and a yanked file still resolves for
@@ -24,7 +24,11 @@
 # said THIRTEEN until the sdist step stopped dying on `tar`'s own exit code
 # when the tarball cannot be read — see "THE FOURTEENTH" at the end of this
 # header, and the EXCUSE that replaced, which was this file's own argument
-# used against it.
+# used against it. It said FOURTEEN until the CHANGELOG HEADING that ships
+# beside those artefacts had to name this release and this date — see "THE
+# FIFTEENTH" at the end of this header, and the ROUTED RECOMMENDATION that
+# replaced, which had been standing in a test module against a workflow that
+# did not carry it.
 #
 # AND UNTIL `tests/test_release_gates.py` LANDED, NOTHING IN THIS REPOSITORY
 # READ THIS FILE. One test opened a workflow at all — `tests/test_reuse_pins.py`,
@@ -53,7 +57,7 @@
 #      whose contents this file spends three steps on, and its filename was
 #      never compared to anything. Both filenames are compared now.
 #
-# SEVEN OF THE FOURTEEN WERE DRIVEN IN BOTH DIRECTIONS at a61c01f, step body by
+# SEVEN OF THE FIFTEEN WERE DRIVEN IN BOTH DIRECTIONS at a61c01f, step body by
 # step body under `bash -e` with the runner environment faked, in a venv built
 # by this job's own install step (CPython 3.11.15, jax/jaxlib 0.10.2, numpy
 # 2.4.6, cvc5 1.3.4, z3-solver 5.0.0.0, pytest 9.1.1). A refusal never observed
@@ -149,6 +153,23 @@
 # and the twelfth of its fourteen refusals read in file order. So "the TWELFTH
 # refusal" here and "the twelfth" four paragraphs above are two different
 # refusals in two different orders, and each of them now says which.
+#
+# AND IT HAS MOVED NOW — the first time a refusal has been inserted ABOVE it
+# from another STEP rather than from its own. RE-DERIVED A FOURTH TIME,
+# mechanically, on the file THIS commit ships: every `exit 1` site walked in
+# file order with the `- name:` it falls under read off beside it, rather
+# than by trusting any sentence here. THIRTEEN sites; the "examined nothing"
+# one is the ELEVENTH of them; and with the two implicit refusals counted
+# WHERE THEY STAND it is the THIRTEENTH of fifteen refusals in file order.
+# THE TWO FIGURES IN THE SENTENCE IMMEDIATELY ABOVE — "the tenth of the
+# file's twelve sites and the twelfth of its fourteen refusals" — ARE A DATED
+# RECORD OF THE FILE AT `9b5b496` AND ARE FALSE OF THIS ONE. That is the
+# silent falsification the paragraph below warns the next writer about,
+# arriving on the paragraph that warns about it, and it is corrected here
+# rather than deleted so the warning keeps its own worked example. The
+# pairing that closes that sentence survives the move: "the THIRTEENTH
+# refusal" in FILE ORDER and "the twelfth" in ARRIVAL order four paragraphs
+# above are still two different refusals in two different orders.
 #
 # SO THE ORDINAL IS NOT A PROPERTY OF THE THING IT NUMBERS. It is a property of
 # how many refusals happen to be spelled above it, and any commit that adds one
@@ -250,6 +271,22 @@
 # files, in the same commit that moves a site — or the reader after you is
 # misled the way this one was.
 #
+# AND THIS COMMIT IS ONE OF THOSE COMMITS, so what it re-derived is written
+# down rather than left to be assumed of it. POSITION IN THE FILE: re-derived
+# mechanically, four paragraphs up, by walking the `exit 1` sites and reading
+# off each one's `- name:` — the "examined nothing" figures moved and are
+# corrected there. ARRIVAL RANK AMONG ALL REFUSALS: one refusal added, alone,
+# so it is the count PLUS ONE and it is the FIFTEENTH; the "adding a <Nth>"
+# sentence moves to SIXTEENTH with it, and the pin is what caught that rather
+# than a proof-read. ARRIVAL RANK AMONG ONE STEP'S OWN SITES: the new step
+# holds exactly ONE `exit 1` site, deliberately, so the third order is not in
+# play for it at all, and the sdist step's "fifth site to arrive in THIS
+# STEP" is untouched. WHICH STEP A REFUSAL IS IN: the new site stands under
+# `- name: the tag and the changelog heading must agree`, in the `build` job,
+# and no other refusal changed step. All four kinds, in both files, in the
+# commit that moved the site — which is what the paragraph above asks for and
+# has never before been able to point at an instance of.
+#
 # THE BREAKDOWN AT THE TOP OF THIS HEADER IS READ BY AN ANCHORED SCAN, AND
 # FOR ONE COMMIT IT WAS NOT. The count pin's second half reads the clause
 # "twelve `exit 1` sites" of the first sentence above through an `^`-anchored,
@@ -306,7 +343,7 @@
 #
 # WHAT CATCHES IT NOW is not a step here, and that is deliberate: it is three
 # tests in `tests/test_sdist_contents.py`, which run inside the suite above and
-# therefore refuse through refusal point 1 rather than adding a FIFTEENTH —
+# therefore refuse through refusal point 1 rather than adding a SIXTEENTH —
 # this sentence said "a tenth" when the count was nine and "a FOURTEENTH" when
 # it was thirteen, and the count is what moves. IT DID NOT MOVE when the count
 # went to fourteen, and the two names then COLLIDED: "THE FOURTEENTH" is what
@@ -323,6 +360,23 @@
 # Driven RED against exactly the mutation above: "in the tree and NOT in the
 # wheel: ['stelling/contracts.py', 'stelling/solvers.py']" and "these modules
 # of it do not resolve: ['contracts', 'solvers']".
+#
+# THE ORDINAL IN THAT PARAGRAPH READ "adding a FIFTEENTH" UNTIL THIS COMMIT,
+# AND THE COLLISION IT RECORDS WAS ONE EDIT FROM RECURRING — the identical
+# shape, one round later. This commit adds a refusal and calls it "THE
+# FIFTEENTH", so a sentence about a refusal deliberately NOT added would have
+# been handing its name to one that WAS, which is exactly what that paragraph
+# says went wrong at FOURTEEN. IT WAS NOT CAUGHT BY A PROOF-READ. DRIVEN on
+# this branch with the header moved to FIFTEEN and that sentence left at
+# FIFTEENTH: `tests/test_release_gates.py` is `1 failed`, the failure is
+# `test_the_counts_DERIVED_from_the_header_move_with_it`, and its message
+# reads *"'adding a FIFTEENTH' (15) names the refusal that was deliberately
+# NOT added, and with 15 refusal points the next one would be number 16 …
+# An ordinal one short also COLLIDES"*. (No pass count is quoted with it:
+# the module grows a test in this same commit, so a total written here would
+# be false by the end of it.) The rule was already written down — the
+# ordinal is the header's count PLUS ONE — and last round is the evidence
+# that a written rule is not an instrument.
 #
 # THE THIRTEENTH IS THE DIRECTORY ITSELF, AND THE SENTENCE IT REPLACED WAS AN
 # ESCAPE HATCH IN SOMEBODY ELSE'S CODE THAT IS MEASURABLY OPEN. What stood here
@@ -422,6 +476,58 @@
 # that step — because it reads FILENAMES and never opens either file. A corrupt tarball reached a step that dies
 # without speaking THROUGH A GREEN GATE. See beside that step for the table and
 # for what `pipefail` does and does not catch.
+#
+# THE FIFTEENTH IS THE CHANGELOG HEADING, AND WHAT IT REPLACED WAS A
+# RECOMMENDATION IN SOMEBODY ELSE'S FILE. `tests/test_changelog_names_the_version.py`
+# ties `CHANGELOG.md`'s newest heading to `stelling.__version__` and then
+# declines, correctly, to check the DATE: the tag does not exist while that
+# suite runs, so the only date available there is the reader's own clock. Its
+# next paragraph ROUTED the check here, by name and with a command — *"in the
+# release job, after the tag is resolved, assert that the newest
+# `## <version> — <date>` heading in `CHANGELOG.md` carries the tag's own
+# committer date … and that its version equals the tag minus the leading
+# `v`"* — AND THIS FILE DID NOT HAVE IT. Nothing in the tree read that
+# sentence either, which is the half that matters more than the missing gate:
+# a present-tense claim about another file, with no instrument on it, is the
+# specific defect 0.2.0 shipped. Measured on this repository's history: the
+# routing paragraph arrived at `0e79ede` (committed 2026-08-25T00:32:48+02:00)
+# and `git rev-list --count 0e79ede..9b5b496` is 47, so it stood over 47
+# commits describing a check that was never written.
+#
+# WHAT IT REFUSES: a heading whose version is not the tag's, a heading that
+# says *unreleased* under a final tag, a heading whose date is not the tag's,
+# and each of the ways it cannot READ one of those — no `CHANGELOG.md`, no
+# `## ` heading, a newest heading that does not parse, no tag ref, a
+# LIGHTWEIGHT tag (which has no tagger date at all), a `GITHUB_REF_NAME`
+# that is empty and one that is UNSET. ONE `exit 1` SITE, not eight: every
+# complaint is
+# collected and reported together, so this is one refusal point and the
+# arithmetic above moves by one.
+#
+# WHICH DATE IS A DECISION AND THE EVIDENCE CANNOT DISCRIMINATE — the routed
+# command names the tag's COMMITTER date and this step reads the TAG OBJECT's
+# tagger date instead. Measured 2026-08-28 at `9b5b496`: `v0.1.0` reads
+# `2026-08-12` both ways and `v0.2.0` reads `2026-08-25` both ways, so the
+# two releases this project has cut do not decide between the readings, and
+# the choice is made on the argument. The argument, the rejected hybrid, the
+# lightweight-tag cost and what the step cannot see are beside the step.
+#
+# IT IS DRIVEN IN BOTH DIRECTIONS AND INSIDE THE SUITE, like the ninth
+# through the fourteenth and unlike the seven driven by hand at a61c01f — the
+# "SEVEN OF THE FIFTEEN" above is a dated record of THAT session and does not
+# move when a refusal lands.
+# `tests/test_release_gates.py::test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry`
+# extracts this body and runs it against planted checkouts carrying real
+# annotated tags with chosen tagger dates: green on both shapes this project
+# has released, on the same tags spelled without the leading `v`, and on a
+# CRLF changelog; red on every row of the table in that test's own docstring,
+# which is where the rows are written down — and that table is HELD to them by
+# the test itself, so no count here has to move when a row is added.
+# `::test_the_changelog_gate_reads_the_NEWEST_heading_by_POSITION` is the
+# separate half — a changelog holding BOTH releases' headings, green under
+# the tag its newest heading names and RED under the tag its second one
+# does — because "the newest heading" is a position and a version scan over
+# the file would pass both.
 #
 # ── BOTH CHECKOUTS TAKE THE WHOLE HISTORY NOW, AND THAT IS A BEHAVIOUR ──────
 # ── CHANGE ─────────────────────────────────────────────────────────────────
@@ -700,11 +806,26 @@ jobs:
           # FULL HISTORY HERE TOO, AND NOT BECAUSE THIS JOB NEEDS IT TODAY.
           # That is said plainly rather than implied, because a line justified
           # by a reason that is not its own is a line the next reader deletes.
-          # Every git call in this job is `git ls-files` — the INDEX, which a
-          # depth-1 checkout has in full — and the version hatchling stamps
-          # into both artefacts is read from `[tool.hatch.version]`'s path,
-          # never from a tag or a `git describe`. Nothing here is measurably
-          # different with it or without it, TODAY.
+          # THAT SENTENCE READ *"Every git call in this job is `git ls-files`
+          # — the INDEX, which a depth-1 checkout has in full"* AND THIS
+          # COMMIT MAKES IT FALSE: the step immediately below calls
+          # `git for-each-ref refs/tags/<tag>`, which reads a REF and the tag
+          # OBJECT under it, neither of which is the index. THE CONCLUSION
+          # SURVIVES, RE-MEASURED RATHER THAN RE-ASSERTED. Sandbox built the
+          # way `actions/checkout@v4` builds one (`git init`; `git remote
+          # add`; ONE `git fetch` with the depth under test) over a mirror of
+          # this repository, 2026-08-28: with `--depth=1
+          # +refs/tags/v0.2.0:refs/tags/v0.2.0` the clone is shallow
+          # (`git rev-parse --is-shallow-repository` = true) and
+          # `%(objecttype)` / `%(taggerdate:short)` still read `tag` /
+          # `2026-08-25`. The tag OBJECT arrives WITH the tag REF; what a
+          # depth-1 clone lacks is history, and the step below reads none.
+          # The version hatchling stamps into both artefacts is still read
+          # from `[tool.hatch.version]`'s path, never from a tag or a `git
+          # describe`. So nothing in this job is measurably different with
+          # this line or without it, TODAY — but it is true for one reason
+          # fewer than it was, and the sentence that made it true of every
+          # git call in the job is retracted above rather than deleted.
           #
           # What it buys is that history is a property of THIS FILE rather
           # than of one step in it. The asymmetry this line closes went
@@ -716,6 +837,313 @@ jobs:
           # checkouts that agree cannot be half-fixed by a grep that cannot
           # tell them apart. Same clone, same cost as the job above.
           fetch-depth: 0
+      # ── THE FIFTEENTH: THE CHANGELOG HEADING MUST NAME THIS RELEASE, ────
+      # ── AND THIS DATE ───────────────────────────────────────────────────
+      #
+      # ROUTED HERE BY NAME, AND NEVER BUILT HERE, which is the half that
+      # matters more than the missing gate.
+      # `tests/test_changelog_names_the_version.py` ties `CHANGELOG.md`'s
+      # newest heading to `stelling.__version__` and then declines to check
+      # the DATE, correctly: the tag does not exist while that suite runs, so
+      # the only date a check there could compare against is
+      # `datetime.date.today()` — the developer's clock, which is the
+      # environment-dependence class that produced four of five recent CI
+      # reds. Its next paragraph routed the check HERE, with the command:
+      # *"in the release job, after the tag is resolved, assert that the
+      # newest `## <version> — <date>` heading in `CHANGELOG.md` carries the
+      # tag's own committer date — `git log -1 --format=%cd --date=short
+      # "$GITHUB_REF_NAME"` — and that its version equals the tag minus the
+      # leading `v`."* THIS FILE DID NOT HAVE IT. Measured on this
+      # repository's own history: that paragraph arrived at `0e79ede`
+      # (committed 2026-08-25T00:32:48+02:00) and this step lands 47 commits
+      # later (`git rev-list --count 0e79ede..9b5b496` = 47), and for every
+      # one of those commits it was a present-tense claim about a workflow
+      # that did not carry the check, with nothing in the tree reading it.
+      # Prose asserting a check that does not exist is the same defect as the
+      # missing check. The paragraph is rewritten there — what it used to say
+      # is kept, not deleted — and
+      # `tests/test_changelog_names_the_version.py::test_the_routed_date_check_is_in_this_workflow`
+      # holds it now, so it cannot go stale the way it just did.
+      #
+      # WHICH DATE — A DECISION, ARGUED, AND TAKEN WHERE THE EVIDENCE CANNOT
+      # DISCRIMINATE. Two readings of "the tag's date" were available:
+      #
+      #   git log -1 --format=%cd --date=short "$TAG"
+      #       the COMMITTER date of the commit the tag resolves to; what the
+      #       routing paragraph named
+      #   git for-each-ref --format='%(taggerdate:short)' refs/tags/"$TAG"
+      #       the date the TAG OBJECT was made; empty for a lightweight tag
+      #
+      # MEASURED 2026-08-28 at `9b5b496`, on both real tags in this
+      # repository: `v0.1.0` reads `2026-08-12` both ways and `v0.2.0` reads
+      # `2026-08-25` both ways, and `%(objecttype)` is `tag` for each. So the
+      # two releases this project has actually cut DO NOT DISCRIMINATE
+      # between the two readings at all, and that is said out loud because a
+      # choice made where the evidence cannot decide is a choice that has to
+      # be labelled as one rather than presented as a finding.
+      #
+      # THE TAGGER DATE IS WHAT THIS STEP READS, on the argument. A heading's
+      # date is a claim about when the RELEASE happened; the tag object is
+      # the act of releasing, and a committer date is when the last change
+      # was written. The two coincide only when the tag is cut on the day of
+      # the last commit. On a release cut later — a freeze, a review, a
+      # weekend — the committer reading refuses a heading that is CORRECT,
+      # and the only way past it is to write a date into `CHANGELOG.md` that
+      # is not the release date. A gate whose refusal is answered by making
+      # the document false is worse than no gate, and that is the whole of
+      # why the routed command is not the one below.
+      #
+      # AND IT IS NOT A READING OF ANY CLOCK IN THIS JOB, which is the
+      # property the whole routing argument turns on: the check was moved out
+      # of the suite precisely because the only date THERE is the reader's.
+      # `%(taggerdate:short)` renders in the TAGGER'S OWN recorded zone and
+      # not the reader's — driven on a tag whose tagger line carries `+1300`,
+      # it is `2026-08-25` under this box's zone and `2026-08-25` under
+      # `TZ=UTC`. Two runners in two zones read one tag the same way, and no
+      # runner reads `today`.
+      #
+      # WHAT IT COSTS, NAMED, AND IT FAILS CLOSED. A LIGHTWEIGHT tag has no
+      # tag object and therefore no tagger date at all, and
+      # `%(taggerdate:short)` is EMPTY for one. That is a refusal here, by
+      # name, with the remedy in the message. The hybrid — tagger date,
+      # falling back to the committer date when empty — was considered and
+      # rejected: it is a can't-tell resolving to the permissive answer,
+      # which `tests/_lanes.py` spends a paragraph on (*"A can't-tell that
+      # resolves to the permissive answer is not a reading"*), and it would
+      # compare the heading against a different quantity than the one this
+      # comment says it compares, silently, on exactly the releases where the
+      # two readings differ.
+      #
+      # ONE `exit 1` SITE AND EVERY COMPLAINT REPORTED, which is why this is
+      # ONE refusal point and not eight. Everything below appends to a list
+      # and the step refuses once, printing all of it. A heading that is
+      # wrong in the version AND in the date is two edits from correct, and a
+      # gate that names only the first sends a human back to a job that takes
+      # minutes to reach this step again;
+      # `tests/test_release_gates.py::test_the_counts_DERIVED_from_the_header_move_with_it`
+      # makes the same argument about its own two sentences, in this file.
+      #
+      # WHERE IT STANDS, AND WHY. In `build` and not in `publish`, because
+      # `publish` is where the upload happens and a refusal after an upload
+      # is not a refusal. In `build` and not in `test`, because `build` is
+      # where this file already resolves the tag and refuses on it, and one
+      # release's version claims are better decided in one place than in two.
+      # FIRST AFTER THE CHECKOUT, before `setup-uv` and `uv build`, because
+      # it needs nothing either of them produces — a checkout and `git` — so a
+      # changelog that names the wrong release costs no build. The cost is
+      # named rather than hidden: `build` needs `test`, so this runs AFTER
+      # the suite and a wrong heading is not found until the suite has
+      # passed.
+      #
+      # `GITHUB_REF_NAME` AND NOT `github.event.release.tag_name`, AND NO
+      # `env:` BLOCK, because the runner already puts it in the environment:
+      # nothing whatever is interpolated into this shell. The step below
+      # takes `tag_name` through `env:` for the reason written there — it is
+      # attacker-influenced in the general case — and this one takes the
+      # shorter route to the same property. It is also the ref this job's own
+      # checkout resolved, so the tag object read here is the one the tree in
+      # the workspace came from.
+      #
+      # THE TAG OBJECT IS READABLE WITHOUT `fetch-depth: 0`, MEASURED, so
+      # this step is NOT a new reason for the line above it and does not get
+      # to claim one. Sandbox built the way `actions/checkout@v4` builds one
+      # (`git init`; `git remote add`; ONE `git fetch` with the depth under
+      # test) against a mirror of this repository, 2026-08-28: with
+      # `--depth=1 +refs/tags/v0.2.0:refs/tags/v0.2.0` the clone is shallow
+      # and `%(objecttype)`/`%(taggerdate:short)` still read `tag` /
+      # `2026-08-25`. The tag OBJECT arrives with the tag REF; what a depth-1
+      # clone lacks is history, which this step does not read.
+      #
+      # WHAT THIS STEP CANNOT SEE, said because an instrument that does not
+      # declare its scope reports absence of evidence as evidence of absence:
+      #
+      #   * anything BELOW the heading. It reads one line — a version, and
+      #     the word or date after the em dash — so a heading that agrees
+      #     with the tag in BOTH its version and its date, standing over the
+      #     PREVIOUS release's notes, is invisible to it.
+      #   * whether the newest heading IN FILE ORDER is the newest RELEASE.
+      #     Position is the definition on purpose, the same one `headings()`
+      #     in `tests/test_changelog_names_the_version.py` uses: sorting
+      #     would quietly accept a file whose newest entry was inserted in
+      #     the wrong place. A changelog written oldest-first is read
+      #     backwards here and refused, loudly.
+      #   * the tag's signature, its tagger, or whether either is anyone in
+      #     particular. `%(objecttype)` is `tag`, and that is the whole of
+      #     what it asks about the object.
+      #   * a heading grammar this repository does not use. The em dash is
+      #     required, as it is in `_HEADING` in
+      #     `tests/test_changelog_names_the_version.py`; the two grammars
+      #     are written twice in two languages and NOTHING
+      #     holds them to each other, which is declared here rather than
+      #     left for the next reader to discover from a red release.
+      #   * WHERE `CHANGELOG.md` IS. The path is relative, so it is read
+      #     from this step's working directory, which is the checkout root
+      #     because nothing here sets `working-directory:`. That is the same
+      #     assumption every `dist/`-reading step in this file makes and it
+      #     is stated once, here, rather than assumed three times.
+      #   * whether this step RAN. It is a step like any other, and the
+      #     attributes that would switch it off — `if:`,
+      #     `continue-on-error:` — are held for the whole file by
+      #     `tests/test_release_gates.py::test_the_attributes_that_decide_whether_a_refusal_refuses`,
+      #     which reads `continue-on-error` and not `if:`.
+      #
+      # IT USES TWO BASH-4 CONSTRUCTS AND THAT IS DECLARED RATHER THAN
+      # DISCOVERED: `mapfile` and `${var,,}`. This job says `runs-on:
+      # ubuntu-latest`, whose image ships bash 5, so the GATE's requirement
+      # is settled by the line that chooses the runner. What is NOT settled
+      # is the DRIVE below, which runs on whatever `bash` a contributor has:
+      # on a bash 3.2 (Apple's system shell) the drive would go RED with a
+      # shell diagnostic rather than the gate going quiet. That is the safe
+      # direction — a false red, not a false green — and it is written down
+      # so the next reader meets it here instead of in a confusing failure.
+      # Measured on this box, which is where the drive was taken: GNU bash
+      # 5.2.21(1)-release.
+      #
+      # DRIVEN IN BOTH DIRECTIONS, INSIDE THE SUITE, on the body this file
+      # ships:
+      # `tests/test_release_gates.py::test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry`
+      # extracts this step and runs it under `bash -e` against planted trees
+      # carrying real annotated tags with chosen tagger dates. GREEN on the
+      # two shapes this repository has actually released — `v0.2.0` over
+      # `## 0.2.0 — 2026-08-25` and `v0.1.0` over `## 0.1.0 — 2026-08-12` —
+      # and on the same tags spelled without the leading `v`; RED on a
+      # heading naming another version, on `unreleased`, on a date one day
+      # off, on a `CHANGELOG.md` that is absent, on one with no heading at
+      # all, on one whose newest heading does not parse, on a lightweight
+      # tag, on a tag ref that is not in the checkout, and on a
+      # `GITHUB_REF_NAME` that is empty and on one that is unset (two
+      # different shell conditions, and only the second is `set -u`'s). The
+      # green rows are not decoration: a gate driven only red is not known to
+      # let a real release through, and this workflow's mistakes are
+      # immutable.
+      #
+      # AND A CRLF `CHANGELOG.md` IS GREEN, MEASURED AND THEN DRIVEN. Every
+      # `^`-anchored reader this repository has written over a workflow or a
+      # markdown page has met a carriage return eventually — see
+      # `_one_line_break` in `tests/test_release_gates.py`, and the three
+      # times `tests/test_tripwire_record.py` met it — so it is not left to
+      # chance here: `read -r` keeps the `\r` on the line and the trailing
+      # `[[:space:]]*` of the heading pattern absorbs it, so a checkout with
+      # `core.autocrlf` on reads the same date as one without. rc=0 on a
+      # `## 0.2.0 — 2026-08-25\r\n` changelog, and that row is in the drive
+      # named above rather than only in this sentence.
+      - name: the tag and the changelog heading must agree
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          # ONE LIST, ONE REFUSAL. Nothing below exits; everything appends.
+          problems=()
+
+          # THE TAG. `${VAR:-}` and not `${VAR}`: `set -u` on an unset one is
+          # rc=1 with NO annotation, which is the state the `tar` refusal in
+          # `- name: every sdist member is a committed file of the tagged
+          # tree` was repaired out of. NAMED and not numbered: an ordinal or
+          # a "two steps below" is a property of how many steps happen to be
+          # written in between, and this file's header has a section on what
+          # that costs.
+          tag="${GITHUB_REF_NAME:-}"
+          tag_version=""
+          tag_date=""
+          if [ -z "${tag}" ]; then
+            problems+=("GITHUB_REF_NAME is empty or unset, so this step has no tag to compare anything to. On a 'release: published' event the runner sets it to the tag's own short name.")
+          else
+            tag_version="${tag#v}"
+            ref="refs/tags/${tag}"
+            # STDOUT ONLY — git's stderr goes to this step's log and never
+            # into the value, for the reason the manifest step below gives
+            # about tar's warnings — and the EXIT CODE is captured rather
+            # than left to `set -e`, so a git that fails says so here
+            # instead of killing the step with nothing said.
+            ref_status=0
+            ref_rows="$(git for-each-ref --format='%(refname) %(objecttype) %(taggerdate:short)' "${ref}")" || ref_status=$?
+            if [ "${ref_status}" -ne 0 ]; then
+              problems+=("git for-each-ref exited ${ref_status} looking for ${ref}, and what it said is in this step's log above. Without it this step cannot read the tag's date at all.")
+            else
+              rows=()
+              if [ -n "${ref_rows}" ]; then
+                mapfile -t rows <<<"${ref_rows}"
+              fi
+              if [ "${#rows[@]}" -eq 0 ]; then
+                problems+=("there is no ${ref} in this checkout, so the tag carries no date this step can read. actions/checkout fetches the tag ref for a release event; a workspace without it is not the tagged tree.")
+              elif [ "${#rows[@]}" -ne 1 ]; then
+                problems+=("${ref} matched ${#rows[@]} refs, so this step cannot tell which tag it is being asked about.")
+              else
+                got_ref=""
+                got_type=""
+                got_date=""
+                # A here-string ends in a newline, so `read` returns 0 on
+                # any non-empty row; `|| true` is there so that a shape which
+                # somehow makes it return non-zero cannot kill the step under
+                # `set -e` with nothing said. The three variables are
+                # pre-initialised empty, so a `read` that assigned nothing
+                # falls into the refname mismatch below and is refused.
+                read -r got_ref got_type got_date <<<"${rows[0]}" || true
+                if [ "${got_ref}" != "${ref}" ]; then
+                  problems+=("asked git about ${ref} and it answered about ${got_ref}. The name comes from the environment, so a name git would read as a PATTERN is refused here rather than followed.")
+                elif [ "${got_type}" != "tag" ]; then
+                  problems+=("${ref} is a ${got_type} object and not an annotated tag, so it carries no tagger date at all: a lightweight tag has no release date for the heading to agree with. Cut the release with 'git tag -a' -- a GitHub release created from the web UI writes an annotated tag -- and re-run.")
+                elif [ -z "${got_date}" ]; then
+                  problems+=("${ref} is a tag object whose tagger date is empty, so there is nothing to compare the heading's date against.")
+                else
+                  tag_date="${got_date}"
+                fi
+              fi
+            fi
+          fi
+
+          # THE HEADING. Newest is a POSITION in the document: the first
+          # '## ' line in file order, whatever it then turns out to say.
+          # FOUND first and PARSED second, deliberately -- one combined
+          # pattern would step PAST a malformed newest heading and take an
+          # older one for the newest, which is a guard reading the absence of
+          # a match as the absence of a problem.
+          heading_any='^##[[:space:]]'
+          heading_re='^##[[:space:]]+([0-9][0-9A-Za-z._+!-]*)[[:space:]]+—[[:space:]]+([^[:space:]].*[^[:space:]]|[^[:space:]])[[:space:]]*$'
+          heading=""
+          heading_version=""
+          heading_rest=""
+          if [ ! -f CHANGELOG.md ] || [ ! -r CHANGELOG.md ]; then
+            problems+=("there is no readable regular file called CHANGELOG.md at the root of the tagged tree, so the release note this tag claims to carry cannot be read at all.")
+          else
+            while IFS= read -r line || [ -n "${line}" ]; do
+              if [[ "${line}" =~ $heading_any ]]; then
+                heading="${line}"
+                break
+              fi
+            done < CHANGELOG.md
+            if [ -z "${heading}" ]; then
+              problems+=("CHANGELOG.md holds no '## ' heading at all, so there is no newest release heading for this tag to agree with.")
+            elif [[ "${heading}" =~ $heading_re ]]; then
+              heading_version="${BASH_REMATCH[1]}"
+              heading_rest="${BASH_REMATCH[2]}"
+            else
+              problems+=("the newest heading in CHANGELOG.md is [${heading}] and it does not parse as '## <version> - <date or unreleased>' with an em dash. This step refuses it rather than reading past it to an older heading it can parse.")
+            fi
+          fi
+
+          # THE COMPARISONS, each made only where BOTH sides were read: an
+          # unreadable side has already put its own complaint in the list,
+          # and comparing against an empty string would add a second and more
+          # confident-sounding one about the same absence.
+          if [ -n "${tag_version}" ] && [ -n "${heading_version}" ] \
+             && [ "${heading_version}" != "${tag_version}" ]; then
+            problems+=("the newest CHANGELOG.md heading names version ${heading_version} and the tag ${tag} names version ${tag_version}. A release note whose heading names a different release is the wrong release note, beside an artefact that cannot be unpublished.")
+          fi
+          if [ -n "${heading_rest}" ]; then
+            if [ "${heading_rest,,}" = "unreleased" ]; then
+              problems+=("the newest CHANGELOG.md heading says '${heading_rest}'. A final tag over an unreleased heading is a release note describing a release that has not happened. Put the tag's own date on it: ${tag_date:-(this tag has no readable date -- see above)}.")
+            elif [ -n "${tag_date}" ] && [ "${heading_rest}" != "${tag_date}" ]; then
+              problems+=("the newest CHANGELOG.md heading is dated '${heading_rest}' and the tag object ${tag} was made on ${tag_date}. The date on a release heading is a claim about when the release happened, and this one is not that date.")
+            fi
+          fi
+
+          if [ "${#problems[@]}" -ne 0 ]; then
+            printf 'the tag and CHANGELOG.md do not agree:\n'
+            printf '  %s\n' "${problems[@]}"
+            echo "::error title=the tag and the changelog heading disagree::${#problems[@]} thing(s) stand between this tag and its release note, printed above -- and they are ALL of them, because this step reports every complaint rather than the first. A release on PyPI cannot be unpublished, only yanked, and the changelog that ships beside it is the document a reader uses to find out what they got. Fix CHANGELOG.md, or the tag, and do not re-run this job until they agree."
+            exit 1
+          fi
+          echo "tag=${tag} version=${tag_version} tagged=${tag_date}; CHANGELOG.md newest heading: ${heading_version} — ${heading_rest}"
       - uses: astral-sh/setup-uv@v6
       # Driven for real at a61c01f (no tag, nothing uploaded): 279-member
       # `stelling-0.1.0.tar.gz` and 28-member `stelling-0.1.0-py3-none-any.whl`.

@@ -55,22 +55,34 @@ reads the file and asserts the load-bearing literals are still there. That is
 enough to kill all six mutations above, and it is measured against them below
 rather than argued.
 
-The second is a DRIVE. Three gate bodies — the tag step, the sdist step and
-the manifest step — are EXTRACTED from `release.yml` and EXECUTED here against
-planted trees, and asserted on their exit code, their annotation and, for the
-one that only prints, on the record it writes. Extracted, not copied: a test
-that runs its own transcription of a step body is a test of the transcription,
-and the rewrite it has to catch lands in `release.yml`.
+The second is a DRIVE. FOUR gate bodies — the tag step, the sdist step, the
+manifest step and the changelog-heading step — are EXTRACTED from
+`release.yml` and EXECUTED here against planted trees, and asserted on their
+exit code, their annotation and, for the one that only prints, on the record
+it writes. Extracted, not copied: a test that runs its own transcription of a
+step body is a test of the transcription, and the rewrite it has to catch
+lands in `release.yml`.
+
+THIS PARAGRAPH SAID **THREE** AND NAMED THREE STEPS, AND IT WAS TRUE UNTIL
+THE FIFTEENTH REFUSAL LANDED. The changelog-heading step is the fourth, and
+what it plants is not a `dist/` — it is a git checkout carrying an ANNOTATED
+TAG with a chosen tagger date, which is one more thing a test can plant and a
+runner does not have to supply. Corrected here rather than left to be
+inferred from the count of `_step_body` calls below.
 
 THE SENTENCE THAT USED TO STAND HERE WAS FALSE, and how it was false is worth
 writing down, because it is what licensed the gap. It read: this is "NOT a
 check that the gates WORK — nothing in this repository can be, because a
 gate's behaviour is a property of a runner". The premise does not hold for
-these three bodies. None of them contains one thing a runner supplies: they
-are `tar`, `git ls-files`, `sort`, `comm`, `basename`, `cut` and `mktemp`, over
-a `dist/` directory and a git index, both of which a test can plant. (The
-manifest body wants `GITHUB_STEP_SUMMARY`, which is one environment variable
-and a file this test writes.) And `release.yml`'s own comments record driving
+these four bodies. None of them contains one thing a runner supplies: they
+are `tar`, `git ls-files`, `git for-each-ref`, `sort`, `comm`, `basename`,
+`cut` and `mktemp`, over a `dist/` directory, a git index and a git TAG
+OBJECT, all of which a test can plant. (The manifest body wants
+`GITHUB_STEP_SUMMARY` and the changelog body wants `GITHUB_REF_NAME`, which
+are two environment variables and a file this test writes.) THAT LIST READ
+"these three bodies" AND STOPPED AT `mktemp` until the changelog step
+arrived; a list of what a body needs is exactly the kind of sentence a fourth
+body falsifies in silence. And `release.yml`'s own comments record driving
 these same bodies by hand at
 a61c01f — so the file already knew they were drivable, and the impossibility
 claim was contradicted a few lines from where it was written.
@@ -120,7 +132,11 @@ now a shorter list than the argument that used to stand for it:
 * the OTHER gate bodies. `-ra` being present still says nothing about what
   pytest prints. The two verdict refusals are pinned as literals and, below,
   as a PATH-COHERENCE check — but the recorder itself is not driven here.
-  What is driven is the three `dist/`-reading bodies and nothing else.
+  What is driven is the three `dist/`-reading bodies and the changelog step,
+  and nothing else. (This bullet said "the three `dist/`-reading bodies and
+  nothing else" while three was the whole list; the changelog step reads no
+  `dist/` at all, so the phrase that used to be a complete description is now
+  only half of one.)
 * the sdist drive's plant is keyed on the allowlist's DIRECTORY roots, so a
   member filter keyed on anything else is outside it, as the paragraph above
   says.
@@ -2514,9 +2530,415 @@ def test_the_tag_gate_takes_the_gitignore_exception_on_content(tmp_path):
     )
 
 
+# THE CHANGELOG DATE GATE — the fifteenth refusal point, and the one that was
+# WRITTEN DOWN IN ANOTHER FILE BEFORE IT EXISTED HERE.
+# `tests/test_changelog_names_the_version.py` routed it to `release.yml` by
+# name and with a command, and `release.yml` did not have it for the 47
+# commits between `0e79ede` and `9b5b496` (`git rev-list --count`). Prose
+# asserting a check that does not exist is the same defect as the missing
+# check; these drives are the half that makes the check a fact rather than a
+# recommendation, and
+# `tests/test_changelog_names_the_version.py::test_the_routed_date_check_is_in_this_workflow`
+# is the half that makes the ROUTING a fact.
+_CHANGELOG_STEP = "the tag and the changelog heading must agree"
+
+#: The two releases this project has actually cut, with the TAGGER date of
+#: each — `git for-each-ref --format='%(taggerdate:short)' refs/tags/vX`, read
+#: 2026-08-28 at `9b5b496`, where `git log -1 --format=%cd --date=short` gives
+#: the same answer for both. PLANTED here and not read out of the checkout
+#: this test runs in: a drive that resolved them from its own tree would be
+#: green in an unpacked sdist with no `.git` at all (`tests/` is in the sdist
+#: allowlist, so this module runs there), and would move under anyone who
+#: re-cut a tag. They are a dated record of two tags, which is what the green
+#: rows need.
+_REAL_RELEASES = (("v0.2.0", "2026-08-25"), ("v0.1.0", "2026-08-12"))
+
+
+def _tagged_tree(base: pathlib.Path, name: str, *, tag: str = "v0.2.0",
+                 tagger_date: str = "2026-08-25", annotated: bool = True,
+                 tagged: bool = True,
+                 changelog: str | None = "## 0.2.0 — 2026-08-25\n") -> pathlib.Path:
+    """A checkout carrying one tag and one `CHANGELOG.md`, as the tagged tree has.
+
+    The tagger date is the thing being planted, so it is set the way git sets
+    it — `GIT_COMMITTER_DATE` is what `git tag -a` writes into the tagger
+    line — rather than by writing a tag object by hand. `annotated=False`
+    gives the LIGHTWEIGHT shape, whose `%(taggerdate:short)` is empty and
+    which this gate refuses by name; `tagged=False` gives a checkout with no
+    such ref at all; `changelog=None` gives one with no `CHANGELOG.md`.
+
+    Nothing else is planted. The step reads a ref, a tag object and one line
+    of one file, so a `dist/`, an index or a second commit would be furniture
+    the drive could not learn anything from.
+    """
+    tree = base / name
+    tree.mkdir(parents=True)
+    # THE IDENTITY AND THE TWO SETTINGS THAT WOULD MAKE THIS READER'S VERDICT
+    # A PROPERTY OF WHOEVER RAN IT. A global `commit.gpgsign` / `tag.gpgSign`
+    # turns the two commands below into a signing prompt, and a global
+    # `core.hooksPath` runs somebody's hooks over a scratch commit — so the
+    # commit is `--no-verify` and both signing settings are pinned off HERE
+    # rather than inherited. A check whose input includes the developer's
+    # environment reports a different truth to different people, which is the
+    # class the gate under test exists to keep OUT of the release path.
+    ident = ("-c", "user.name=release gates",
+             "-c", "user.email=gates@example.invalid",
+             "-c", "commit.gpgsign=false",
+             "-c", "tag.gpgSign=false")
+
+    def git(*args, **kwargs):
+        return subprocess.run(
+            ["git", *args], cwd=tree, check=True, capture_output=True, **kwargs
+        )
+
+    git("-c", "init.defaultBranch=main", "init", "-q")
+    git(*ident, "commit", "-q", "--no-verify", "--allow-empty",
+        "-m", "the tagged tree")
+    if tagged:
+        if annotated:
+            git(*ident, "tag", "-a", tag, "-m", f"release {tag}",
+                env=dict(os.environ,
+                         GIT_COMMITTER_DATE=f"{tagger_date}T12:00:00+00:00"))
+        else:
+            git("tag", tag)
+    if changelog is not None:
+        (tree / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    return tree
+
+
+@_needs_a_shell
+def test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry(tmp_path):
+    """THE FIFTEENTH REFUSAL POINT, DRIVEN IN BOTH DIRECTIONS on the body
+    `release.yml` ships — greens included, because a gate driven only red is
+    not known to let a real release through and this workflow's mistakes are
+    immutable.
+
+    THE GREEN ROWS ARE THE TWO RELEASES THIS PROJECT HAS ACTUALLY CUT, tag and
+    tagger date and heading, plus the same tags spelled without the leading
+    `v` (the step beside this one accepts both spellings and this one must
+    agree with it, or a release that satisfies one gate is refused by the
+    other). They are planted from :data:`_REAL_RELEASES` rather than read from
+    the checkout — see its comment.
+
+    AND THE GREENS REFUTE A CLOCK, which is the whole reason the check is here
+    and not in the suite that routed it. Their dates are fixed in the past, so
+    a gate that compared the heading against `date +%F` — the environment
+    dependence
+    `tests/test_changelog_names_the_version.py::test_this_gate_does_not_read_the_clock`
+    exists to keep out of that module — is RED on every one of them for any
+    reader whose clock is not exactly 2026-08-25. That is weaker than a pin
+    and is why :func:`test_the_drives_are_reading_the_real_step_bodies` also
+    asserts the construct absent; it is stronger than nothing, and it is the
+    direction a text pin cannot reach.
+
+    THE RED ROWS ARE THE SPEC'S, plus the ways the step cannot READ what it
+    compares — each of which is a refusal here rather than a pass, because an
+    instrument that cannot see is not an instrument that saw nothing:
+
+        planted (row label)                          expected
+        ───────────────────────────────────────────  ────────────────────────
+        v0.2.0 / 2026-08-25 / `## 0.2.0 — …`         GREEN
+        v0.1.0 / 2026-08-12 / `## 0.1.0 — …`         GREEN
+        the same two, tag spelled without the `v`    GREEN
+        the same, changelog written CRLF             GREEN
+        wrong-version: `## 0.1.0 …` under v0.2.0     red, names both versions
+        unreleased: `## 0.2.0 — unreleased`          red, on that branch's own
+                                                     sentence and not on the
+                                                     word, which the DATE
+                                                     complaint also echoes
+        unreleased-cased: `— Unreleased`             red, on the same branch
+        date-off-by-one: a day before the tag        red, names both dates
+        no-changelog: no `CHANGELOG.md` at all       red, names the file
+        no-heading: no `## ` line in it              red, says so
+        unparseable-newest: `## 0.2.0 = …` above a
+          well-formed `## 0.1.0 — …`                 red, and does NOT read
+                                                     past it to the older one
+        lightweight-tag: no tag object               red, names the shape
+        no-such-tag: no such ref in the checkout     red, names the ref
+
+    THE TABLE IS HELD TO THE ROWS BELOW rather than being prose about them —
+    every label in `rows` must appear in this docstring, asserted at the end
+    of the test. WHAT THAT DOES NOT REACH, said rather than implied: the three
+    drives written out AFTER the loop — the empty and unset `GITHUB_REF_NAME`,
+    the heading wrong in the version AND the date, and the unreadable tag
+    beside a disagreeing heading — are not in `rows` and are described in
+    their own comments beside themselves. And under `python -OO` there is no
+    docstring at all, so the check has nothing to hold and says so instead of
+    reporting every row missing.
+
+    ONE REFUSAL, EVERY COMPLAINT — the drive after the loop plants a heading
+    that is wrong in the version AND in the date and asserts BOTH are in the
+    output. `release.yml` spends a paragraph on why that is one `exit 1` site
+    and not eight, and this is what holds it: a step rewritten to `exit 1` on
+    the first complaint passes every other row here.
+
+    WHAT THE DRIVE BUYS OVER THE TEXT PIN BESIDE IT, measured on this branch
+    rather than argued — two rewrites of `release.yml`, each ONE token, each
+    leaving every needle in
+    :func:`test_the_drives_are_reading_the_real_step_bodies` and every scan in
+    this module green:
+
+    * the date comparison's right-hand side, `"${tag_date}"` ->
+      `"${heading_rest}"`, so the heading is compared with itself and the date
+      half of this gate cannot fire. Driven: the `date-off-by-one` row goes
+      from red to `rc=0` reporting *"tag=v0.2.0 version=0.2.0
+      tagged=2026-08-25; CHANGELOG.md newest heading: 0.2.0 — 2026-08-24"*,
+      and this test is the only thing in the repository that reddens.
+    * the heading scan's condition, `=~ $heading_any` ->
+      `=~ $heading_re` with a version equality on the capture, which is the
+      obvious "simplification": look for A heading naming the tag's version
+      instead of THE newest one. Driven: this test and
+      :func:`test_the_changelog_gate_reads_the_NEWEST_heading_by_POSITION` go
+      red together, the second one on a tree tagged `v0.1.0` whose changelog
+      leads with `## 0.2.0` and which the mutant passes at rc=0.
+
+    Neither is a spelling a pin was written for, and that is the point:
+    a pin catches the mutation it names, a drive catches the one nobody did.
+    """
+    body = _step_body(_CHANGELOG_STEP)
+
+    for tag, date in _REAL_RELEASES:
+        version = tag.lstrip("v")
+        for spelling in (tag, version):
+            # THE TAG IS PLANTED UNDER THE SPELLING BEING DRIVEN, because
+            # `GITHUB_REF_NAME` IS a ref name: a project that tags `0.2.0`
+            # has `refs/tags/0.2.0` and no `refs/tags/v0.2.0`. Planting
+            # `v0.2.0` and asking about `0.2.0` drives the missing-ref
+            # refusal instead, which is a different row of this table.
+            tree = _tagged_tree(
+                tmp_path, f"green-{spelling}", tag=spelling, tagger_date=date,
+                changelog=f"## {version} — {date}\n\n- a release note\n",
+            )
+            ok = _drive(body, tree, GITHUB_REF_NAME=spelling)
+            assert ok.returncode == 0, (
+                f"the changelog gate REFUSES the real {tag} shape spelled "
+                f"{spelling!r} — tag dated {date}, heading `## {version} — "
+                f"{date}` — so it would refuse a correct release.\n"
+                f"{ok.stdout}\n{ok.stderr}"
+            )
+            assert f"tagged={date}" in ok.stdout, (
+                f"the step no longer prints the tag date it compared, so a "
+                f"release log cannot show what was checked:\n{ok.stdout}"
+            )
+            assert f"{version} — {date}" in ok.stdout, (
+                f"the step no longer prints the heading it read:\n{ok.stdout}"
+            )
+
+    # A CRLF CHANGELOG IS THE SAME GREEN, and it is driven rather than
+    # reasoned about. Every `^`-anchored reader in this repository has met a
+    # carriage return eventually — `_one_line_break` above exists for it, and
+    # `tests/test_tripwire_record.py` met it three times — so the one reader
+    # that decides a release's date does not get to be correct by accident of
+    # how the file was written. `read -r` keeps the `\r` on the line; the
+    # heading pattern's trailing `[[:space:]]*` is what absorbs it. Without
+    # that trailing class the date would read `2026-08-25\r`, match nothing,
+    # and refuse a correct release on a Windows checkout.
+    crlf = _tagged_tree(
+        tmp_path, "green-crlf", tag="v0.2.0", tagger_date="2026-08-25",
+        changelog="## 0.2.0 — 2026-08-25\r\n\r\n- a release note\r\n",
+    )
+    ok = _drive(body, crlf, GITHUB_REF_NAME="v0.2.0")
+    assert ok.returncode == 0, (
+        "the changelog gate refuses a CRLF `CHANGELOG.md` whose heading is "
+        f"correct.\n{ok.stdout}\n{ok.stderr}"
+    )
+    assert "0.2.0 — 2026-08-25" in ok.stdout, (
+        f"the heading read out of a CRLF file carries its carriage return "
+        f"into the comparison:\n{ok.stdout!r}"
+    )
+
+    rows = (
+        ("wrong-version", dict(changelog="## 0.1.0 — 2026-08-25\n"),
+         ("names version 0.1.0", "names version 0.2.0"),
+         "a heading naming the PREVIOUS release under this tag is the shape a "
+         "forgotten changelog bump has, and it is the one the routed "
+         "recommendation was written for"),
+        # THE NEEDLE IS THE BRANCH'S OWN SENTENCE AND NOT THE WORD. `'${rest}'`
+        # is echoed by the DATE complaint too, so a row asserting only
+        # `unreleased` would be satisfied by the gate taking the wrong branch
+        # and refusing for the wrong reason — a check that its claim is
+        # well-formed rather than true.
+        ("unreleased", dict(changelog="## 0.2.0 — unreleased\n"),
+         ("a release that has not happened",),
+         "a final tag over an `unreleased` heading is a release note "
+         "describing a release that has not happened"),
+        ("unreleased-cased", dict(changelog="## 0.2.0 — Unreleased\n"),
+         ("a release that has not happened", "Unreleased"),
+         "the `unreleased` test is case-sensitive, so a capitalised heading "
+         "falls through to the date comparison and is refused for the wrong "
+         "reason"),
+        ("date-off-by-one", dict(changelog="## 0.2.0 — 2026-08-24\n"),
+         ("is dated '2026-08-24'", "was made on 2026-08-25"),
+         "a heading one day off the tag is the whole subject of this gate"),
+        ("no-changelog", dict(changelog=None),
+         ("no readable regular file called CHANGELOG.md",),
+         "a tagged tree with no changelog is a release with no release note, "
+         "and this step must refuse rather than find nothing to compare"),
+        ("no-heading", dict(changelog="# Changelog\n\nnothing yet.\n"),
+         ("no '## ' heading",),
+         "a changelog whose headings stopped parsing is a changelog a "
+         "version-scanning gate reads as satisfied"),
+        ("unparseable-newest",
+         dict(changelog="## 0.2.0 = 2026-08-25\n\n## 0.1.0 — 2026-08-12\n"),
+         ("does not parse",),
+         "a MALFORMED newest heading must be refused, not stepped over to an "
+         "older one the gate can parse — reading past it is how the wrong "
+         "heading gets compared"),
+        ("lightweight-tag", dict(annotated=False),
+         ("not an annotated tag", "git tag -a"),
+         "a lightweight tag carries no tagger date at all, and the reading "
+         "this gate chose is the tagger date. Falling back to the committer "
+         "date here would be a can't-tell resolving to the permissive answer"),
+        ("no-such-tag", dict(tagged=False),
+         ("there is no refs/tags/v0.2.0 in this checkout",),
+         "a checkout without the tag ref cannot answer what date the tag "
+         "carries, and a step that cannot read its input does not vouch for "
+         "it"),
+    )
+    for label, plant, needles, why in rows:
+        tree = _tagged_tree(tmp_path, f"red-{label}", **plant)
+        red = _drive(body, tree, GITHUB_REF_NAME="v0.2.0")
+        assert red.returncode != 0, (
+            f"THE CHANGELOG GATE PASSED the {label!r} shape: {why}. It "
+            f"reported:\n{red.stdout}\n{red.stderr}"
+        )
+        assert "the tag and the changelog heading disagree" in red.stdout, (
+            f"{label}: the step went red without its own annotation, which is "
+            f"the state the sdist step's `tar` refusal was repaired out of — "
+            f"red, but not by this gate.\n{red.stdout}\n{red.stderr}"
+        )
+        for needle in needles:
+            assert needle in red.stdout, (
+                f"{label}: the refusal does not say {needle!r}, so the "
+                f"release log does not name what to fix:\n{red.stdout}"
+            )
+
+    # THE ENVIRONMENT ITSELF, in both of its absent spellings. `set -u` on a
+    # bare `${GITHUB_REF_NAME}` is rc=1 with NO annotation, which is a red
+    # this gate does not own; `${GITHUB_REF_NAME:-}` plus a named complaint is
+    # what makes it one. EMPTY and UNSET are driven separately because they
+    # are different shell conditions and only one of them is `set -u`'s.
+    tree = _tagged_tree(tmp_path, "red-no-refname")
+    for label, env in (("empty", {"GITHUB_REF_NAME": ""}), ("unset", {})):
+        red = _drive(body, tree, **env)
+        assert red.returncode != 0, f"{label} GITHUB_REF_NAME: {red.stdout}"
+        assert "the tag and the changelog heading disagree" in red.stdout, (
+            f"{label} GITHUB_REF_NAME: the step died without an annotation of "
+            f"its own — `set -u`'s 'unbound variable' is not this gate "
+            f"refusing.\n{red.stdout}\n{red.stderr}"
+        )
+        assert "GITHUB_REF_NAME is empty or unset" in red.stdout, red.stdout
+
+    # ONE REFUSAL, EVERY COMPLAINT.
+    both = _tagged_tree(tmp_path, "red-both",
+                        changelog="## 0.1.0 — 2026-08-24\n")
+    red = _drive(body, both, GITHUB_REF_NAME="v0.2.0")
+    assert red.returncode != 0, red.stdout
+    assert "names version 0.1.0" in red.stdout and "2026-08-24" in red.stdout, (
+        "a heading wrong in BOTH the version and the date is reported with "
+        "only one of them, so this step exits on the first complaint. It is "
+        "one `exit 1` site and the header's arithmetic counts it as one "
+        f"refusal precisely because it reports all of them:\n{red.stdout}"
+    )
+    assert "2 thing(s)" in red.stdout, (
+        f"the annotation no longer counts the complaints it printed:\n"
+        f"{red.stdout}"
+    )
+
+    # AND ONE UNREADABLE SIDE BESIDE ONE DISAGREEMENT, which is the shape that
+    # exercises the fallback text in the `unreleased` message: it offers the
+    # tag's date as the fix, and there ISN'T one on a lightweight tag. A bare
+    # `${tag_date}` there would print an empty string and tell a human to put
+    # nothing on the heading.
+    lw = _tagged_tree(tmp_path, "red-lightweight-unreleased", annotated=False,
+                      changelog="## 0.2.0 — unreleased\n")
+    red = _drive(body, lw, GITHUB_REF_NAME="v0.2.0")
+    assert red.returncode != 0, red.stdout
+    assert "not an annotated tag" in red.stdout and "unreleased" in red.stdout, (
+        f"an unreadable tag beside a disagreeing heading is reported as one "
+        f"complaint, not two:\n{red.stdout}"
+    )
+    assert "no readable date" in red.stdout, (
+        f"the `unreleased` refusal offers the tag's date as the remedy and "
+        f"there is no date to offer, so it must say so rather than print an "
+        f"empty string:\n{red.stdout}"
+    )
+
+    # THE DOCSTRING'S TABLE, HELD TO THE ROWS IT DESCRIBES. A table of drives
+    # is prose about code and goes stale the moment a row is added — which is
+    # the defect this module exists to catch one file over, so it is not left
+    # to a proof-read here. Scoped to `rows`: the three drives above this line
+    # are not in it and say so in the docstring.
+    doc = test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry.__doc__
+    if doc:  # `python -OO` strips docstrings; there is then nothing to hold
+        undescribed = [label for label, *_ in rows if label not in doc]
+        assert not undescribed, (
+            f"{undescribed} are driven below and named nowhere in this test's "
+            f"own table. A row added without a line in the table leaves the "
+            f"docstring describing a drive that is no longer what runs."
+        )
+
+
+@_needs_a_shell
+def test_the_changelog_gate_reads_the_NEWEST_heading_by_POSITION(tmp_path):
+    """Newest is a POSITION in the document, and this is what says so.
+
+    A gate that scanned `CHANGELOG.md` for *a* heading naming the tag's
+    version would be green on a file that still leads with the PREVIOUS
+    release — the exact shape a forgotten changelog bump leaves, and the shape
+    the routed recommendation named. So the file here holds BOTH headings,
+    newest-first, and the verdict has to depend on which one is first:
+
+        `## 0.2.0 — …` then `## 0.1.0 — …`, tag v0.2.0   GREEN
+        the same file,                       tag v0.1.0  RED, and the refusal
+                                                         names 0.2.0 as what
+                                                         it read
+
+    The second row is the one a whole-file scan cannot fail: `## 0.1.0 —
+    2026-08-12` is in that file, verbatim, and the tag is `v0.1.0`.
+
+    `headings()` in `tests/test_changelog_names_the_version.py` takes the same
+    definition for the same reason, and says so in the same words. The two
+    readers are written twice in two languages with nothing holding them to
+    each other — declared here and beside the step, rather than left for a
+    release to discover.
+    """
+    body = _step_body(_CHANGELOG_STEP)
+    both = "## 0.2.0 — 2026-08-25\n\n- newer\n\n## 0.1.0 — 2026-08-12\n\n- older\n"
+
+    newest = _tagged_tree(tmp_path, "position-newest", tag="v0.2.0",
+                          tagger_date="2026-08-25", changelog=both)
+    ok = _drive(body, newest, GITHUB_REF_NAME="v0.2.0")
+    assert ok.returncode == 0, (
+        f"the gate refuses a changelog whose NEWEST heading is this "
+        f"release's, with an older release below it — which is every "
+        f"changelog this project has ever had.\n{ok.stdout}\n{ok.stderr}"
+    )
+
+    older = _tagged_tree(tmp_path, "position-older", tag="v0.1.0",
+                         tagger_date="2026-08-12", changelog=both)
+    red = _drive(body, older, GITHUB_REF_NAME="v0.1.0")
+    assert red.returncode != 0, (
+        "THE CHANGELOG GATE PASSED a tree tagged v0.1.0 whose changelog leads "
+        "with `## 0.2.0`. It found `## 0.1.0 — 2026-08-12` somewhere in the "
+        "file and was satisfied, which is a scan and not a reading of the "
+        f"NEWEST heading.\n{red.stdout}"
+    )
+    assert "names version 0.2.0" in red.stdout, (
+        f"the refusal does not name the heading it actually read:\n"
+        f"{red.stdout}"
+    )
+
+
 @_needs_a_shell
 def test_the_drives_are_reading_the_real_step_bodies():
-    """Anti-vacuity for the three drives, in the shape this file already uses.
+    """Anti-vacuity for the four drives, in the shape this file already uses.
+
+    THIS SAID "the three drives" AND WAS RIGHT UNTIL THE CHANGELOG STEP
+    LANDED. A count of the drives, written in the docstring of the test whose
+    job is to notice when a drive stops driving anything, is the same defect
+    this module holds `release.yml` to; it is corrected rather than deleted so
+    the next reader can see it happened here too.
 
     The drives assert on exit codes of a script this file did not write. Three
     ways that goes quietly wrong — a step name that no longer resolves, a
@@ -2535,6 +2957,7 @@ def test_the_drives_are_reading_the_real_step_bodies():
     sdist = _step_body(_SDIST_STEP)
     tag = _step_body(_TAG_STEP)
     manifest = _step_body(_MANIFEST_STEP)
+    changelog = _step_body(_CHANGELOG_STEP)
     for needle in ("tar tzf", "git ls-files", "comm -23", "explained.txt",
                    "dist/*.tar.gz", "${#sdists[@]}",
                    "shopt -s nullglob dotglob", "mktemp -d", "trap "):
@@ -2642,8 +3065,60 @@ def test_the_drives_are_reading_the_real_step_bodies():
         "driven in `test_the_tag_gate_refuses_a_dist_it_cannot_reason_about` "
         "and `test_the_sdist_gate_refuses_a_dist_it_cannot_read`."
     )
+    # THE CHANGELOG STEP. `taggerdate:short` is the DECISION this file argues
+    # beside that step — the tag OBJECT's date and not the committer date the
+    # routing paragraph named — and `%(objecttype)` is what makes the
+    # lightweight case a named refusal instead of an empty string compared to
+    # a heading. `GITHUB_REF_NAME` rather than an `env:` block is the other
+    # half: nothing is interpolated into that shell at all.
+    for needle in ("CHANGELOG.md", "git for-each-ref", "%(taggerdate:short)",
+                   "%(objecttype)", "GITHUB_REF_NAME", "problems+=",
+                   "refs/tags/"):
+        assert needle in changelog, (
+            f"{needle!r} is gone from the changelog step body. The date this "
+            "gate compares against is the TAG OBJECT's tagger date, chosen "
+            "over the commit's committer date on the argument beside the "
+            "step; a rewrite to `git log -1 --format=%cd` refuses a release "
+            "cut on any day but its last commit's, and the only way past THAT "
+            "is to write a false date into CHANGELOG.md."
+        )
+    # AND THIS IS THE PIN CATCHING WHAT THE DRIVE CANNOT SEE, which is the
+    # half of the argument the paragraph above usually gets to skip. MEASURED
+    # on this branch: `%(taggerdate:short)` -> `%(creatordate:short)` leaves
+    # every row of the drive unchanged — `%(creatordate)` IS the tagger date
+    # for an annotated tag, and the lightweight row is refused by the
+    # `%(objecttype)` test before any date is read — so the drive is green on
+    # the mutant and only the needle above reddens. It is not a cosmetic
+    # difference: `%(creatordate)` falls back to the COMMITTER date for a
+    # lightweight tag (measured: a lightweight tag reads `creator=2026-08-28`
+    # and `tagger=` empty), which is precisely the hybrid `release.yml`
+    # rejects beside the step as a can't-tell resolving to the permissive
+    # answer. A drive catches the rewrite nobody named; a pin catches the one
+    # a drive is blind to, and this is the instance.
+    # THE ABSENT CONSTRUCT, and it is the one the whole routing argument is
+    # about: a clock. `tests/test_changelog_names_the_version.py` moved this
+    # check out of the suite precisely because the only date available there
+    # is `date.today()`, so a `$(date …)` arriving HERE would be the same
+    # defect one file over — and it would be invisible to every text pin that
+    # only asserts what IS present. Read on CODE lines: the paragraphs beside
+    # the step have to be able to say what they refuse.
+    changelog_code = "\n".join(
+        line for line in changelog.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    for construct in ("$(date", "`date ", "date +%"):
+        assert construct not in changelog_code, (
+            f"{construct!r} has appeared in the changelog step. The date this "
+            "step compares must come from the TAG, never from the runner: a "
+            "clock is the environment-dependence class that produced four of "
+            "five recent CI reds, and moving this check out of the suite was "
+            "the repair. The drives are the other half — the green rows plant "
+            "dates fixed in the past, so a clock reading is red on them for "
+            "any reader whose clock is not exactly that day."
+        )
     # the bodies are scripts, not one-liners: a body that shrank to nothing
     # would still start with `set -euo pipefail` and pass the extractor's check
     assert len(sdist.splitlines()) > 20, sdist
     assert len(tag.splitlines()) > 5, tag
     assert len(manifest.splitlines()) > 5, manifest
+    assert len(changelog.splitlines()) > 20, changelog

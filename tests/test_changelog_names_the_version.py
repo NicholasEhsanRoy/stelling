@@ -54,13 +54,57 @@ environment-dependence class that produced four of five recent CI reds on
 `main`, arriving in a new place, and it would red every checkout whose author
 wrote the heading yesterday. There is no version of it that is right.
 
-**THE DATE CHECK BELONGS IN `release.yml`, WHERE THE TAG EXISTS**, and this
-file does not own that workflow. The recommendation, written down so it is
-routable rather than remembered: in the release job, after the tag is
-resolved, assert that the newest `## <version> — <date>` heading in
-`CHANGELOG.md` carries the tag's own committer date — `git log -1
---format=%cd --date=short "$GITHUB_REF_NAME"` — and that its version equals
-the tag minus the leading `v`. That check has the tag; this one cannot.
+**THE DATE CHECK IS IN `release.yml`, WHERE THE TAG EXISTS.** It is the step
+*"the tag and the changelog heading must agree"*, in the `build` job, before
+anything is uploaded — the fifteenth refusal point between a tag and PyPI, and
+that file's header numbers and argues it. This check does not have the tag;
+that one does.
+
+**AND UNTIL THE COMMIT THAT ADDED IT, THIS PARAGRAPH WAS A RECOMMENDATION
+STANDING AGAINST A FILE THAT DID NOT CARRY IT.** What stood here, verbatim:
+*"THE DATE CHECK BELONGS IN `release.yml`, WHERE THE TAG EXISTS, and this file
+does not own that workflow. The recommendation, written down so it is routable
+rather than remembered: in the release job, after the tag is resolved, assert
+that the newest `## <version> — <date>` heading in `CHANGELOG.md` carries the
+tag's own committer date — `git log -1 --format=%cd --date=short
+"$GITHUB_REF_NAME"` — and that its version equals the tag minus the leading
+`v`. That check has the tag; this one cannot."* Every word of that was a
+present-tense claim about another file, `.github/workflows/release.yml` did
+not have the check, and **nothing in this repository read the sentence** — so
+it could not go red, only stale. Measured: this module arrived at `0e79ede`
+(committed 2026-08-25T00:32:48+02:00) and `git rev-list --count
+0e79ede..9b5b496` is 47, so the recommendation stood over 47 commits
+describing a gate that was never written. Prose asserting a check that does
+not exist is the same defect as the missing check.
+
+**WHAT HOLDS IT NOW, so it cannot go stale the way it just did.**
+:func:`test_the_routed_date_check_is_in_this_workflow` below reads
+`.github/workflows/release.yml` and refuses a tree in which the routed step is
+gone, renamed, moved into `publish`, moved into a job the upload does not wait
+for, or no longer reading the DOCUMENT, the TAG and the DATE this paragraph
+names — and refuses one in which it has stopped carrying an `exit 1` at all,
+because a step that reads all three and never refuses is a routing target in
+name only. What it can and cannot see is in its own docstring, because a
+text reader over a workflow file that does not declare its blindness is the
+defect `tests/_lanes.py` spends a section on. The step's BEHAVIOUR is a
+separate question and a separate instrument:
+`tests/test_release_gates.py::test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry`
+extracts that step's own body and drives it against planted trees carrying
+real annotated tags, red and green.
+
+**AND THE GATE READS A DIFFERENT DATE FROM THE ONE THIS PARAGRAPH ASKED FOR**,
+recorded here and not only there. The recommendation named the tag's COMMITTER
+date; the gate reads the TAG OBJECT's tagger date —
+`git for-each-ref --format='%(taggerdate:short)' refs/tags/"$GITHUB_REF_NAME"`.
+Measured 2026-08-28 at `9b5b496`, the two readings AGREE on both of this
+repository's real tags — `v0.1.0` 2026-08-12 and `v0.2.0` 2026-08-25, both
+ways — so the data cannot discriminate between them and the choice was made on
+the argument, which is written beside the step: a heading's date is a claim
+about when the RELEASE happened, and a release cut later than its last commit
+has a committer date that is not that date, so the committer reading refuses a
+correct heading and the only way past it is to write a false one. The
+lightweight-tag case, which carries no tagger date at all, is a named refusal
+there rather than a fallback.
 """
 
 from __future__ import annotations
@@ -68,11 +112,30 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
+import sys
 
 import stelling
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+# THE WORKFLOW EXTRACTOR, BORROWED AND NOT RE-WRITTEN. `_step_lines` /
+# `_step_body` / `_release_text` are the readers `tests/test_release_gates.py`
+# already applies to `release.yml`, with the carriage-return normalisation
+# that module had to learn the hard way and an anti-vacuity assertion on the
+# extracted block. A second implementation of one file-reading rule is the
+# defect `tests/test_workflows_make_no_silent_pick.py` refuses one directory
+# over, and it would be a worse one here: two readers could disagree about
+# what "the step" is, and this file's whole claim is that the step the OTHER
+# module drives is the step this module routes to.
+from test_release_gates import _code_lines, _release_text, _step_body  # noqa: E402
+
 REPO = pathlib.Path(__file__).resolve().parents[1]
 CHANGELOG = REPO / "CHANGELOG.md"
+
+#: The step `release.yml` carries the routed check in. Named ONCE, here, and
+#: used by the check below: the name is what `_step_body` addresses the step
+#: by, so a rename must move one literal and not two.
+ROUTED_STEP = "the tag and the changelog heading must agree"
 
 #: A release heading. `## <version> — <rest>`, em dash, which is the shape
 #: every heading in the file uses. `rest` is either `unreleased` or a date,
@@ -215,6 +278,152 @@ def test_this_gate_does_not_read_the_clock():
     # first draft of this test scanned the file's lines and failed on its own
     # docstring, which is the same defect one layer down.
 
+
+def test_the_routed_date_check_is_in_this_workflow():
+    """The paragraph above ROUTES a check to another file. This reads that file.
+
+    THE DEFECT IT CLOSES IS ITS OWN HISTORY. That paragraph was a
+    recommendation for 47 commits — a present-tense claim about
+    `.github/workflows/release.yml`, naming a check that file did not carry,
+    with nothing in the tree reading it. It could not go red; it could only go
+    stale, and it did. So the claim is now an assertion: the routed step is
+    HERE, in a job the upload waits for and is not, reading the three things
+    the routing names, and still carrying a refusal.
+
+    WHAT "ACTUALLY THERE" MEANS TO A TEXT READER, and it is four things and not
+    one:
+
+    * the STEP resolves, exactly once, by the name this module routes to.
+      `_step_lines` refuses zero matches and two matches alike, so a rename is
+      a red rather than a scan that finds nothing and is satisfied.
+    * its BODY is a real script — `_step_body` refuses a block that does not
+      open with the step's own `set -euo pipefail`, so a `run:` read as empty
+      cannot satisfy the needles below by containing nothing.
+    * that body names `CHANGELOG.md`, `GITHUB_REF_NAME` and
+      `%(taggerdate:short)` — the document, the tag and the date, which are
+      the three nouns the routing paragraph is made of — and still carries an
+      `exit 1`. A step that stopped reading any one of the three is not the
+      routed check under its own name, and one that reads all three and
+      refuses nothing is a routing target in name only.
+    * the step is in a job that `publish` WAITS FOR and is not `publish`
+      itself. A refusal that runs beside the upload is not a refusal, and one
+      in a job nothing waits for is not in the release path at all.
+
+    **WHAT THIS CHECK CANNOT SEE.** `tests/_lanes.py`'s docstring is the
+    reason this paragraph exists: a line-anchored text reader over
+    `.github/workflows/nightly-jax-canary.yml` went past NINE legal spellings
+    of the thing it was looking for — a quoted key, a flow mapping, an alias,
+    `matrix.exclude`, a job-level `if:`, a `defaults:` block, `set -a` with a
+    sourced file, `continue-on-error: true`, and `runs-on:` written before
+    `name:` — and reported "no setting" for each. This reader is the same kind
+    of instrument over a different file, and:
+
+    * IT IS BLIND TO EVERY RESPELLING OF THE STEP — `- {name: …, run: …}`,
+      `"name": …`, an anchor and alias, `run: >` instead of `run: |` — but it
+      fails LOUDLY on all of them rather than quietly: each one takes
+      `_step_lines` or `_step_body` to zero matches, which is an assertion
+      error naming the step. That is the difference between this and the
+      nightly reader, and it is a property of `_step_lines`, not of this test.
+      Measured with PyYAML on the `release.yml` this commit ships,
+      2026-08-28: it carries 0 anchors, 0 aliases and 0 merge keys, its jobs
+      are `build`, `publish` and `test`, and the routed step parses as
+      `jobs.build.steps[1]` with the checkout still `steps[0]`. That is a
+      dated reading of one file and not a guarantee about the next edit of
+      it — and PyYAML is not a dependency of this project, so the reading
+      could be taken but not kept: `tests/_lanes.py` explains why neither
+      module parses.
+    * IT CANNOT SEE WHETHER THE STEP RUNS. A step-level or job-level `if:`
+      switches it off and nothing in this repository reads `if:` at all —
+      said plainly because the sibling attribute IS covered:
+      `tests/test_release_gates.py::test_the_attributes_that_decide_whether_a_refusal_refuses`
+      holds `continue-on-error` absent for the whole file, and
+      `::test_the_publish_job_still_needs_the_suite` holds `needs`. `if:` is
+      the hole, and it is a hole in `release.yml`'s coverage generally rather
+      than one this check introduces.
+    * IT CANNOT SEE WHETHER THE CHECK WORKS. Four needles in a script are not
+      a verdict about what the script does: a body that names all four and
+      never reaches its `exit 1` satisfies every assertion here. What decides
+      that is
+      `tests/test_release_gates.py::test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry`,
+      which runs this same extracted body against planted trees, and
+      `::test_the_changelog_gate_reads_the_NEWEST_heading_by_POSITION`.
+    * IT CANNOT SEE WHETHER THE WORKFLOW RUNS AT ALL — the `on:` trigger, the
+      repository's own branch protection, whether the `pypi` environment
+      exists. That is the runner's furniture and no test here reaches it.
+    """
+    body = _step_body(ROUTED_STEP)
+
+    missing = [
+        needle for needle in ("CHANGELOG.md", "GITHUB_REF_NAME",
+                              "%(taggerdate:short)", "exit 1")
+        if needle not in body
+    ]
+    assert not missing, (
+        f"the step {ROUTED_STEP!r} in `.github/workflows/release.yml` no "
+        f"longer reads {missing}. This module routes the changelog DATE check "
+        f"there — it cannot make it here, because the tag that carries the "
+        f"real date does not exist while this suite runs — and a routing "
+        f"paragraph whose target has stopped carrying the check is the exact "
+        f"defect this test was written for: it stood as a recommendation for "
+        f"47 commits and nothing could see it. Either restore the check or "
+        f"rewrite the paragraph above to say where it went."
+    )
+
+    # THE JOB IT STANDS IN, because a refusal that runs beside the upload is
+    # not a refusal. Read off the code lines: job headers are the only thing
+    # in this file at indent 2 that ends in a colon.
+    lines = _code_lines(_release_text())
+    at = [i for i, line in enumerate(lines)
+          if line.strip() == f"- name: {ROUTED_STEP}"]
+    assert len(at) == 1, (
+        f"expected exactly one step named {ROUTED_STEP!r}; found {len(at)}. "
+        f"(`_step_body` above addresses the step by that name, so this cannot "
+        f"normally be reached — it is here so that a divergence between the "
+        f"two readers is a red rather than a silent disagreement about which "
+        f"step is being spoken of.)"
+    )
+    header = re.compile(r"^  ([a-z][a-z0-9-]*):\s*$")
+    job = next((m.group(1) for m in
+                (header.match(line) for line in reversed(lines[:at[0]])) if m),
+               None)
+    assert job is not None, (
+        "could not tell which job the routed step is in, so this check cannot "
+        "say whether it runs before the upload. The job-header shape this "
+        "reads — a name at indent 2 — has changed."
+    )
+    assert job != "publish", (
+        f"the routed changelog check is in the `{job}` job, which is the job "
+        f"that uploads to PyPI. A refusal that runs beside the upload it is "
+        f"meant to prevent is not a refusal."
+    )
+    publish = [i for i, line in enumerate(lines) if line.strip() == "publish:"]
+    assert len(publish) == 1, (
+        f"expected exactly one `publish:` job in `release.yml`, found "
+        f"{len(publish)}; this check cannot say what waits for what."
+    )
+    # BOUNDED TO THAT JOB, and PARSED rather than substring-tested. Scanning
+    # to the end of the file would read some LATER job's `needs:` if the job
+    # order ever changed, and `job in needs` over the whole line is true for
+    # any job whose name is a substring of anything else on it — a check that
+    # a claim is well-formed rather than that it is true, which is the defect
+    # class this whole branch is about.
+    tail = lines[publish[0] + 1:]
+    for stop, line in enumerate(tail):
+        if header.match(line):
+            after = tail[:stop]
+            break
+    else:
+        after = tail
+    needs = next((line for line in after
+                  if line.strip().startswith("needs:")), None)
+    waits_for = re.findall(r"[A-Za-z0-9_-]+",
+                           "" if needs is None else needs.split(":", 1)[1])
+    assert job in waits_for, (
+        f"`publish` waits for {waits_for} and the routed changelog check "
+        f"stands in the `{job}` job (`needs:` line read as {needs!r}). A gate "
+        f"in a job the upload does not depend on is a gate the upload does "
+        f"not pass through: it goes red beside a green publish."
+    )
 
 def test_both_halves_of_the_coupling_are_driven():
     """The rule, observed to fire, on planted changelogs.
