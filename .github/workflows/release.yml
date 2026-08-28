@@ -576,8 +576,10 @@
 #   a19b736  314  1a3591e0…   the tag ref re-fetched from `origin`
 #   fd03c02  361  b00fc827…   `origin` asked first, object store as fallback
 #   f39c35e  377  ea01463a…   the fallback rebuilt on three filters
-#   THIS     327  5b611d79…   the fallback DELETED; the checkout stops
+#   2b2607a  327  5b611d79…   the fallback DELETED; the checkout stops
 #                             overwriting the ref instead
+#   THIS     330  23e97fc3…   the pins under it derived from parsed
+#                             structure rather than from spellings
 #
 # NOTHING READS ANY OF THESE — `grep -rn` over `tests/` and `src/` for every
 # digest, 2026-08-28, finds no hit outside this comment — so they are a
@@ -724,14 +726,26 @@
 # AND IT IS PINNED NOW, because a line whose absence is silent is a line that
 # comes back off.
 # `tests/test_release_gates.py::test_every_checkout_in_this_file_takes_the_WHOLE_history`
-# derives the checkout steps FROM THIS FILE — matching `actions/checkout@` and
-# not `actions/`, for the reason the count paragraph above gives — and fails
-# if any of them lacks `fetch-depth: 0`. Driven RED five ways, each alone:
-# either line deleted; both deleted, which is this file at `6fa2e7f`;
-# `fetch-depth: 0` rewritten to `fetch-depth: 1`; and a NEW `actions/checkout`
-# step added to `publish` without the key. It types no count, so a checkout
-# added later is covered without a re-derivation — which the header count and
-# the four kinds of ordinal above still are not.
+# derives the checkout steps FROM THIS FILE and fails if any of them lacks
+# `fetch-depth: 0`. Driven RED five ways, each alone: either line deleted;
+# both deleted, which is this file at `6fa2e7f`; `fetch-depth: 0` rewritten to
+# `fetch-depth: 1`; and a NEW `actions/checkout` step added to `publish`
+# without the key. It types no count, so a checkout added later is covered
+# without a re-derivation — which the header count and the four kinds of
+# ordinal above still are not.
+#
+# AND "DERIVES" WAS AN OVERSTATEMENT UNTIL RECENTLY, WHICH IS WORTH LEAVING
+# HERE BECAUSE THIS PARAGRAPH ASSERTED IT FOR SEVERAL COMMITS. The scan
+# matched the LITERAL `- uses: actions/checkout@` at the head of a code line,
+# so a step written in the ordinary alternative order — `- name:` first,
+# `uses:` second — was invisible to it, and because it then asserted only that
+# it had found SOME checkout, a file mixing the two orders was silently
+# half-held. Driven: the `build` checkout rewritten that way with both of its
+# inputs deleted left thirteen modules that read this file at `240 passed, 1
+# skipped`. The steps are located by their position as block-sequence items
+# under `steps:` now, and their keys by indentation, with a count cross-check
+# against the `uses:` assignments naming the action so that a shape the reader
+# cannot parse is a red rather than a shorter list.
 
 name: release
 on:
@@ -894,14 +908,31 @@ jobs:
           # step below keeps its own re-fetch anyway, because it cannot verify
           # what its job's checkout was configured with.
           #
-          # IT IS SHA-1-SPECIFIC AND THAT IS DECLARED RATHER THAN DISCOVERED.
-          # The reclassification is a `^[0-9a-fA-F]{40}$` test; in a SHA-256
-          # repository `github.sha` is 64 hex characters, does not match, and
-          # is treated as an unqualified REF name — at which point the second
-          # fetch is back and the step below is carried by its own re-fetch.
-          # This repository is SHA-1 today. Nothing here detects the day it
-          # is not, and the failure is fail-closed rather than silent: the
-          # step refuses on a lightweight-looking ref it cannot re-fetch.
+          # IT IS SHA-1-SPECIFIC AND THAT IS DECLARED RATHER THAN DISCOVERED
+          # — AND THE MECHANISM WRITTEN HERE FIRST WAS WRONG IN THE PERMISSIVE
+          # DIRECTION, WHICH IS WORSE THAN THE CAVEAT ITSELF. It read: *"in a
+          # SHA-256 repository `github.sha` is 64 hex characters, does not
+          # match, and is treated as an unqualified REF name — at which point
+          # the second fetch is back and the step below is carried by its own
+          # re-fetch … the step refuses on a lightweight-looking ref it cannot
+          # re-fetch."* BOTH CLAUSES ARE FALSE. `input-helper` assigns
+          # `result.commit` only inside the 40-hex branch, so with a 64-hex
+          # `ref` it is left UNDEFINED — and `testRef` returns true at its
+          # very first line, `if (!commit) return true`. So there is no second
+          # fetch and `refs/tags/<tag>` stays INTACT. What happens instead is
+          # that `getCheckoutInfo` reaches its unqualified-ref branch, finds
+          # neither a branch nor a tag by that name, and THROWS: the job dies
+          # at the checkout step and the step below never runs at all.
+          #
+          # Driven at the git level against a mirror of this repository,
+          # 2026-08-28: after the all-history fetch `refs/tags/v0.2.1` reads
+          # `tag` / `2026-08-28`, and `git checkout --force <64 hex>` is rc=1
+          # (*"did not match any file(s) known to git"*) leaving NO HEAD and
+          # the tag ref untouched. The conclusion the old sentence reached is
+          # still right — this fails closed — but a reader reasoning from the
+          # mechanism it gave would expect a refusal from the step below, and
+          # what they would actually see is a red checkout. This repository is
+          # SHA-1 today and nothing here detects the day it is not.
           #
           # AND `fetch-depth: 0` IS STILL LOAD-BEARING, for a second reason
           # now. At depth 1 the refspec is `[commit]` and NO tag ref is
@@ -1356,17 +1387,22 @@ jobs:
       #     `continue-on-error:` — are held for the whole file by
       #     `tests/test_release_gates.py::test_the_attributes_that_decide_whether_a_refusal_refuses`,
       #     which reads `continue-on-error` and not `if:`.
-      #   * WHETHER `origin` CAN BE REACHED — ON THE FALLBACK ROUTE ONLY.
-      #     This bullet used to say the reachability of `origin` was "a NEW
-      #     dependency this step did not have"; that was true when the
-      #     re-fetch was the only route, and the first route added since needs
-      #     no network at all. What remains true is the fallback's shape:
-      #     both checkouts in this file say `persist-credentials: false`, so
-      #     the auth header is gone by the time this runs and the re-fetch is
-      #     ANONYMOUS. Fine while this repository is public — checked
-      #     2026-08-28, `GET /repos/NicholasEhsanRoy/stelling` reads
-      #     `"private": false`, and an https fetch of `refs/tags/v0.2.1` with
-      #     every credential helper disabled came back `tag` / `2026-08-28`.
+      #   * WHETHER `origin` CAN BE REACHED — AND IT NO LONGER HAS TO BE.
+      #     THIS BULLET HAS BEEN WRONG TWICE AND BOTH SPELLINGS ARE KEPT. It
+      #     first said the reachability of `origin` was "a NEW dependency this
+      #     step did not have", which was true while the re-fetch was the only
+      #     way to read the tag. It was then retitled "ON THE FALLBACK ROUTE
+      #     ONLY" and spoke of "the fallback's shape" — and that fallback was
+      #     deleted in the same commit that added `ref: ${{ github.sha }}`
+      #     above, so the heading described a route the body underneath it no
+      #     longer had. What is true now: both checkouts say
+      #     `persist-credentials: false`, so the re-fetch is ANONYMOUS, and it
+      #     is a REFRESH of a ref the checkout already brought intact rather
+      #     than a repair of one it overwrote. Fine while this repository is
+      #     public — checked 2026-08-28,
+      #     `GET /repos/NicholasEhsanRoy/stelling` reads `"private": false`,
+      #     and an https fetch of `refs/tags/v0.2.1` with every credential
+      #     helper disabled came back `tag` / `2026-08-28`.
       #     On a private repository it can never succeed, and the step is
       #     then carried entirely by the ref `fetch-depth: 0` already brought
       #     — which is why that line is load-bearing for this step now.
@@ -1458,6 +1494,19 @@ jobs:
             problems+=("GITHUB_REF_NAME is empty or unset, so this step has no tag to compare anything to. On a 'release: published' event the runner sets it to the tag's own short name.")
           else
             tag_version="${tag#v}"
+            # A TAG NAMED EXACTLY `v` STRIPS TO NOTHING, and an empty
+            # `tag_version` makes the `[ -n "${tag_version}" ]` guard at the
+            # bottom SKIP the version comparison — so the heading could name
+            # any version at all and only the DATE half would decide. This
+            # predates the tag-reading repairs and was found by neutralising
+            # each refusal in turn: rc=0 against a heading naming 9.9.9. It is
+            # bounded rather than open — the step beside this one compares the
+            # tag against the built artefacts' versions independently, and
+            # `v` matches neither — but a guard whose absence is a silent
+            # skip is the shape this file refuses everywhere else.
+            if [ -z "${tag_version}" ]; then
+              problems+=("the tag is named '${tag}', so stripping the leading 'v' leaves no version at all and there is nothing for the heading's version to agree with. A release tag names a version; this one names the prefix and nothing else.")
+            fi
             ref="refs/tags/${tag}"
             # ── THE TAG THIS STEP READS MUST BE ORIGIN'S `refs/tags/<tag>`, ─
             # ── AND IT MUST NAME THE TREE THIS JOB IS BUILDING ──────────────
@@ -1507,15 +1556,21 @@ jobs:
             #   re-cut LIGHTWEIGHT the old body resolved that decoy and exited
             #   0 on the shape this whole gate exists to refuse.
             #
-            # SO THE ORDER IS REVERSED: ORIGIN FIRST. Origin's ref is the only
-            # thing that establishes identity; the object store can only
-            # support an INFERENCE about it, and an inference is what the two
-            # shapes above defeat. The store route is kept as a FALLBACK
+            # THE ANSWER TO BOTH WAS FIRST TO REORDER THE ROUTES AND THEN TO
+            # DELETE ONE, AND THE FIRST HALF IS RECORDED BECAUSE THE SECOND
+            # ONLY MAKES SENSE AFTER IT. This paragraph read: *"SO THE ORDER
+            # IS REVERSED: ORIGIN FIRST. Origin's ref is the only thing that
+            # establishes identity; the object store can only support an
+            # INFERENCE about it ... The store route is kept as a FALLBACK
             # because both checkouts here say `persist-credentials: false`, so
             # the fetch is anonymous and on a private repository it can never
-            # succeed -- without a fallback this step would refuse every
-            # release forever, which is the unrepaired gate's behaviour with a
-            # better message.
+            # succeed."* The first clause is still the reason this step reads
+            # a REF and not an object: only origin's ref says which object the
+            # tag is. The second stopped being a reason to keep anything, the
+            # moment the checkout stopped un-naming the tag -- a private
+            # repository does not need the fetch, because the ref the first
+            # fetch brought is already correct. So there is no store route at
+            # all now; see below.
             #
             # THE BUILD SUBJECT IS `HEAD`, read first because everything under
             # it is a comparison against it. This job's checkout resolved
