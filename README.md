@@ -227,15 +227,20 @@ Both, measured:
   dependency reason: jaxfluids requires ≥3.11 while stelling declares
   ≥3.10, so the two projects disagree about what a valid interpreter is.
   **Every other job takes whatever interpreter the runner image provides**,
-  and nothing here pins it, asserts it or records it.
+  and nothing here pins it or asserts it. Exactly one job records it —
+  `random-order`, which prints the interpreter and the jax it resolved into
+  its own log, because it is the lane whose whole configuration is decided
+  elsewhere and a shuffle seed is not a reproducer without it. (This sentence
+  ended *"and nothing here pins it, asserts it or records it"*; the last third
+  stopped being true when that step was added.)
 
 So a badge saying some version is *tested* would be a claim about the runner
 image, which this repository does not hold and cannot promise. It says
 `>=3.10 declared` instead, and both bullets above are read back off
 `pyproject.toml` and `.github/workflows/` by
-`tests/test_readme_claims.py`: a lane that starts or stops pinning, a pin
-that moves, or a floor that moves reddens this section rather than leaving
-it quietly false.
+`tests/test_readme_claims.py`: a lane that starts or stops pinning, a lane
+that starts or stops recording, a pin that moves, or a floor that moves
+reddens this section rather than leaving it quietly false.
 
 ### cvc5: wheel vs external binary
 

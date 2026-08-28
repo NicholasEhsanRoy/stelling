@@ -480,7 +480,10 @@ jobs:
   # the inventory missed anybody.
   #
   # HOW A RED RUN IS MADE ACTIONABLE, which is the whole difference between
-  # this job and noise. Three things, in this order:
+  # this job and noise. FOUR things, in this order. (This read *"Three
+  # things"* and listed four; the numeral was wrong, not the list. A fifth is
+  # in its own block below, because unlike these it is in the log on a GREEN
+  # run too.)
   #
   #   1. THE SEED IS PRINTED AND IT IS THE REPRODUCER. `pytest-randomly` puts
   #      `Using --randomly-seed=NNN` in the header; the step below lifts it
@@ -512,6 +515,35 @@ jobs:
   # is a module finalizer now, which cannot run before the tests it measures.
   # Nothing else in the suite moved.
   #
+  # AND THE FIFTH: THE CONFIGURATION IT SHUFFLED IS IN THE LOG, WHICH IT WAS
+  # NOT. This job's `uv venv` names no interpreter and its `.[solvers,jax]`
+  # carries no ceiling, so BOTH halves of what it runs are decided elsewhere:
+  # the interpreter by whatever the runner image ships that day, the jax by
+  # whatever PyPI resolves newest. Every other jax lane in this file prints its
+  # resolved jax — `RESOLVED jax (floating — whatever is newest)` in `test-jax`
+  # is the same idiom — and this one printed neither, so a red run said which
+  # SEED it had shuffled and nothing at all about which configuration. A seed
+  # is only a reproducer together with the environment it was drawn against.
+  #
+  # NOT PINNED, AND THIS IS NOT A STEP TOWARDS PINNING. Floating is how a new
+  # interpreter or a new jax that breaks the suite is met on the next push, and
+  # `test-jax`'s block above says why that is worth having; pinning here would
+  # buy reproducibility by giving that up. What was missing was never the pin.
+  # It was the RECORD, which costs one step and takes nothing away.
+  #
+  # The same line is `tee`d to `${RUNNER_TEMP}` and quoted into both of the
+  # `::error` annotations below, because the annotation is what a reader sees
+  # in the checks UI without opening the log — and the log is where this
+  # information used to be absent.
+  #
+  # `tests/_lanes.py` READS THIS STEP, and it had to be taught how. Its
+  # interpreter scan recorded any line matching `python --version` or
+  # `sys.version_info` as a selection it could not parse — `unreadable:` —
+  # which reddens the declared/measured pin in `EXPECTED_PYTHON`. Selection
+  # and reporting are different acts and it now tells them apart; see
+  # `_INTERPRETER_QUERY` there for the rule and for the direction it still
+  # fails closed in.
+  #
   # `pytest-randomly` IS INSTALLED IN THIS LANE AND NOWHERE ELSE, exactly as
   # `pytest-xdist` is installed only in `test-jax`. It is a CI-only tool, not
   # a dev-group dependency: a contributor whose local suite reordered itself
@@ -534,9 +566,25 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
       - run: uv pip install -e ".[solvers,jax]" pytest pytest-randomly
+      # WHAT THIS LANE SHUFFLED. See the block above the job: neither half of
+      # this configuration is decided by this file, and until this step neither
+      # was written down anywhere. `set -o pipefail` is why this is a block —
+      # GitHub's default shell is `bash -e {0}`, errexit and NO pipefail, so in
+      # a one-line `python -c … | tee file` the status is tee's, a failing
+      # import exits 0, and the step passes having written an EMPTY file, which
+      # is the shape the two annotations below would then quote.
+      - name: RESOLVED interpreter and jax (both floating — this lane pins neither)
+        run: |
+          set -euo pipefail
+          .venv/bin/python -c "import sys, jax, jaxlib; print('python', '.'.join(str(part) for part in sys.version_info[:3]), 'jax', jax.__version__, 'jaxlib', jaxlib.__version__)" \
+            | tee "${RUNNER_TEMP}/configuration.txt"
       - name: the suite, shuffled — and the seed, which is the reproducer
         run: |
           set -euo pipefail
+          # The configuration the step above resolved, quoted into whichever
+          # annotation fires. A seed without it names an order in an
+          # environment nobody recorded.
+          configuration="$(cat "${RUNNER_TEMP}/configuration.txt")"
           # THE SEED IS CHOSEN HERE, NOT SCRAPED. `pytest-randomly` prints
           # `Using --randomly-seed=N` in the report HEADER, and `-q` suppresses
           # the header — measured: no seed line anywhere in a `-q -ra` log. A
@@ -555,9 +603,9 @@ jobs:
           fi
           echo "the shuffled run failed; re-running the SAME commit in file order to say which kind of failure this is"
           if .venv/bin/python -m pytest -q -ra -p no:randomly > "${RUNNER_TEMP}/file-order.txt" 2>&1; then
-            echo "::error title=order-dependent failure (seed ${seed})::The suite passed in file order and failed shuffled, so this is a test depending on another test having run. Reproduce exactly with: pytest -q -ra -p randomly --randomly-seed=${seed}. tests/_state_guard.py names a test that leaves declared process-global state changed; a failure it did NOT name is state outside that inventory, and the inventory's own docstring lists what it does not watch."
+            echo "::error title=order-dependent failure (seed ${seed})::The suite passed in file order and failed shuffled, so this is a test depending on another test having run. The configuration this run shuffled was: ${configuration} — neither half is pinned by this file, so reproduce against THAT and not against whatever resolves today. Reproduce exactly with: pytest -q -ra -p randomly --randomly-seed=${seed}. tests/_state_guard.py names a test that leaves declared process-global state changed; a failure it did NOT name is state outside that inventory, and the inventory's own docstring lists what it does not watch."
           else
-            echo "::error title=the suite is red in file order too (seed ${seed})::This is not an ordering problem — the same failures are in the merge-bearing lanes. Fix those first; this job has nothing to add until they are green."
+            echo "::error title=the suite is red in file order too (seed ${seed})::This is not an ordering problem — the same failures are in the merge-bearing lanes. Fix those first; this job has nothing to add until they are green. The configuration was: ${configuration}."
             tail -40 "${RUNNER_TEMP}/file-order.txt"
           fi
           exit 1
@@ -1829,3 +1877,389 @@ jobs:
             --control cvc5-flat \
             --control cvc5-exit-tell \
             --control cvc5-phantom-model
+
+  # ── TWO SHAPES OF WORKING TREE THAT WERE CHECKED BY HAND AND BY NOTHING ELSE ─
+  #
+  # ADDED AS TWO NEW JOBS AT THE END, deliberately, so the diff against a
+  # concurrently edited `ci.yml` is an append. Nothing above is touched except
+  # the `random-order` lane's own reporting step.
+  #
+  # Both of these were run by a person during the 0.2.0 release and by no
+  # standing lane, and both are properties of the TREE rather than of the
+  # package set — so neither is expressible as one more install line, and
+  # neither is answerable by a green tick. What each one needs is a COMPARISON
+  # BETWEEN TWO RUNS OF ONE COMMIT in one environment, changing only the tree.
+  # That is the instrument the block above `jobs:` asks for one level up
+  # ("a comparison between runs of ONE commit rather than against a constant
+  # written here"), and it is why neither job below carries a pass count.
+  #
+  # The comparison itself is `tests/_lanes.py`'s — `run_report`,
+  # `outcome_differences`, `shallow_clone_differences` — so that it is a thing
+  # with unit tests in `tests/test_lanes.py` rather than a `diff` in a shell
+  # script nobody can drive. What runs here is the experiment; what decides it
+  # is code the suite already checks both ways.
+  #
+  # THE COST, stated because it is the argument against them: two whole-suite
+  # runs each, both in the cheapest environment this file has (solvers, no jax
+  # — the `test-no-jax` package set), because neither subject has anything to
+  # do with jax. No count of the file's other whole-suite runs is written here:
+  # it moves every time a lane is added, and the comparison a reader wants is
+  # against the jobs above, which are on the same page.
+
+  # ── A VENV IN THE WORKING TREE ──────────────────────────────────────────────
+  #
+  # THE DEFECT THIS ANSWERS, measured rather than imagined.
+  # `tests/test_sdist_reference_hygiene.py`'s header records a check whose
+  # answer moved with whether somebody had run `uv venv` in the checkout: one
+  # `mkdir` apart at `f00a28e`, no file changed, `17 passed` became `2 failed,
+  # 15 passed`. That file's own words for the class are the rule this job
+  # holds — A CHECK WHOSE INPUT INCLUDES THE DEVELOPER'S ENVIRONMENT IS A CHECK
+  # THAT REPORTS A DIFFERENT TRUTH TO DIFFERENT PEOPLE — and it was the third
+  # of that shape to redden `main` in three merges.
+  #
+  # WHY A LANE THAT MERELY RAN THE SUITE WITH A `.venv` PRESENT WOULD MEASURE
+  # NOTHING, which is the reason this job is shaped the way it is. Every other
+  # job in this file runs `uv venv` with no path argument, and a `run:` step's
+  # working directory is `$GITHUB_WORKSPACE`, which is where
+  # `actions/checkout` puts the repository — so every existing lane ALREADY
+  # runs the suite with a `.venv` in the working tree. One more of them would
+  # be another copy of a reading this file has several of. What NO lane has is
+  # the other half: this suite run in a tree with no venv in it at all, which
+  # is the only thing the first half can be compared against.
+  #
+  # SO THE ENVIRONMENT LIVES OUTSIDE THE CHECKOUT, in `${RUNNER_TEMP}`, and the
+  # tree is the only thing that differs between the two runs. The interpreter,
+  # the package set and the commit are identical; a difference of any kind is
+  # therefore the defect, and equality at any value is the pass.
+  #
+  # A REAL VENV, NOT AN EMPTY DIRECTORY. The guard this is about looks for an
+  # INTERPRETER, so `mkdir -p .venv/bin` would let a broken guard pass by
+  # finding nothing where a developer's tree has something. `uv venv .venv`
+  # builds a real one and the step asserts `.venv/bin/python` runs.
+  #
+  # A REQUIRED CHECK — this file distinguishes the two and here is the
+  # argument. Nothing outside this repository can redden this job: it installs
+  # what `test-no-jax` installs and fetches nothing else, so unlike
+  # `acceptance-any-pytree` and `acceptance-reproducer` there is no third-party
+  # library or upstream repository whose bad day becomes this job's red. And a
+  # red here is a live soundness defect of exactly the kind that has reached
+  # `main` three times: a check answering a question about the repository with
+  # a fact about somebody's disk. It belongs in the required list. (Branch
+  # protection is a repo setting and this file neither grants nor withholds it;
+  # this is policy, like every other such sentence here.)
+  #
+  # WHAT IT DOES NOT REACH, so the tick cannot be over-read. The comparison is
+  # over the WHOLE suite in the solvers-only environment, so a check that reads
+  # the working directory AND needs jax to run is not covered by it — such a
+  # check is not known to exist, and this job is not evidence that none does.
+  # The venv it plants is `.venv`, the name `uv` chooses and the one the
+  # historical defect was found on; `tests/test_sdist_reference_hygiene.py`'s
+  # own control drives the whole class of transient roots statically, which is
+  # the half this cannot do by planting one.
+  venv-in-the-working-tree:
+    name: whole suite, with and without a venv in the checkout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, for the reason every other checkout in this file
+          # carries: a depth-1 clone turns the git-gated checks into skips, and
+          # a run whose skip set moved for a second reason cannot be compared
+          # against one whose skip set moved for the first. The `shallow-clone`
+          # job below is the one that WANTS that difference.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+      # OUTSIDE THE CHECKOUT. This is the whole design: `uv venv` with no path
+      # would put the environment in the tree and destroy the control.
+      - run: uv venv "${RUNNER_TEMP}/venv"
+      # `--python`, because the environment is not the one `uv` would find on
+      # its own. `uv pip install` provisions no interpreter — it installs into
+      # one that already exists — which is why `tests/_lanes.py` does not read
+      # this line as an interpreter selection.
+      - run: uv pip install --python "${RUNNER_TEMP}/venv/bin/python" -e ".[solvers]" pytest
+      # So that the two pytest invocations below are the same command, and the
+      # same command `tests/_lanes.py` reads out of every other lane.
+      - run: echo "${RUNNER_TEMP}/venv/bin" >> "$GITHUB_PATH"
+      # `--python` again: there is no `.venv` in the working directory to find
+      # and `VIRTUAL_ENV` is not set, which is the whole point of this job.
+      - run: uv pip list --python "${RUNNER_TEMP}/venv/bin/python"
+      - name: the working tree carries no venv — the control's precondition
+        # Without this the "before" run is only a before-run by assumption, and
+        # a step above that quietly created one in the checkout would make the
+        # two runs identical and the comparison vacuous.
+        run: |
+          set -euo pipefail
+          if [ -e .venv ]; then
+            echo "::error title=the checkout already carries a .venv::This job's first run is the CONTROL — the suite in a tree with no venv in it — and something has already put one there. The comparison below would then be between two runs of the same shape and would pass having measured nothing."
+            exit 1
+          fi
+      - name: run 1 of 2 — the suite in a clean tree, verdict asserted
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/verdict-clean.txt
+          # `PY_COLORS: 0` FROM THE START. The block above `jobs:` records six
+          # line-anchored greps over colour-capable logs as known-open, safe
+          # only because the runner does not set `FORCE_COLOR`. The reader
+          # below is `^`-anchored too, and a step written today can simply not
+          # have the exposure.
+          PY_COLORS: 0
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/verdict-clean.txt"
+          python -m pytest -q -ra | tee "${RUNNER_TEMP}/clean.log"
+          verdict="${RUNNER_TEMP}/verdict-clean.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. An unnarrowed CI run must be entitled to claim the suite."
+            exit 1
+          fi
+      - name: plant a REAL venv in the checkout, and prove it holds an interpreter
+        run: |
+          set -euo pipefail
+          uv venv .venv
+          if [ ! -x .venv/bin/python ]; then
+            echo "::error title=the planted venv holds no interpreter::The guard this job exists for looks for an INTERPRETER in the tree. A directory without one is not the shape that reddened main, and the run below would measure nothing."
+            exit 1
+          fi
+          .venv/bin/python -c "import sys; print('the planted venv is', sys.executable)"
+      - name: run 2 of 2 — the same suite, same commit, a venv in the tree
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/verdict-stray.txt
+          PY_COLORS: 0
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/verdict-stray.txt"
+          python -m pytest -q -ra | tee "${RUNNER_TEMP}/stray.log"
+          verdict="${RUNNER_TEMP}/verdict-stray.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. An unnarrowed CI run must be entitled to claim the suite."
+            exit 1
+          fi
+      - name: the two runs must report the same thing
+        # The assertion this job exists for, and it is not an exit code: both
+        # runs can exit 0 and still disagree about which tests SKIPPED, which
+        # is exactly the shape of the defect being guarded against.
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/clean.log" "${RUNNER_TEMP}/stray.log" <<'PY'
+          import pathlib
+          import sys
+
+          sys.path.insert(0, "tests")
+          import _lanes
+
+          clean = _lanes.run_report(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          stray = _lanes.run_report(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+          bad = _lanes.outcome_differences(
+              "a tree with no venv in it", clean, "a tree carrying a real .venv", stray
+          )
+          if bad:
+              print(
+                  "::error title=a verdict moved with what the tooling left in the "
+                  "tree::The same commit, the same interpreter and the same package "
+                  "set were run twice; the only difference was a .venv in the "
+                  "checkout. A check whose SUBJECT is the repository may not depend "
+                  "on it. " + " | ".join(bad)
+              )
+              sys.exit(1)
+          print("the two runs agree:", dict(clean.counts))
+          PY
+
+  # ── A `--depth 1` CLONE ─────────────────────────────────────────────────────
+  #
+  # THE DEFECT THIS ANSWERS. Every `actions/checkout` above this job carries
+  # `fetch-depth: 0` and the same paragraph saying why: the routing
+  # verification reads `CHANGELOG.md` AT THE COMMIT THE MANIFEST NAMES, a
+  # depth-1 clone cannot reach it, and those checks then SKIP. The paragraph is
+  # repeated at every checkout because the failure is SILENT — pytest exits 0
+  # on a skip — and yet no job in this file had ever run the suite in the shape
+  # the paragraph is about. It was checked by hand at the 0.2.0 release and by
+  # nothing since. An instrument whose absence of evidence is read as evidence
+  # of absence is the class; a comment repeated at checkout after checkout is
+  # not the instrument. (Counted rather than remembered: that paragraph stands
+  # at EIGHT of this file's twelve `actions/checkout` steps at the commit this
+  # job was added — `grep -c` on its first line, and `grep -c` on
+  # `uses: actions/checkout@v4`.)
+  #
+  # WHY THIS IS NOT `pytest; echo ok`. A depth-1 clone is GREEN. Measured
+  # 2026-08-28 at 9b5b496 on the zero-dep interpreter: the whole suite exits 0
+  # and writes `verdict=made` in a depth-1 clone exactly as it does in a full
+  # one, because every skip a shallow clone causes is DISCLOSED in
+  # `tests/test_skip_inventory.py`'s rules — which is the system working. So
+  # the exit code says nothing here and the verdict says nothing here. The
+  # interesting property is WHICH checks skipped: a shallow clone is ALLOWED to
+  # skip the git-gated set and is not allowed to skip anything else, and
+  # neither half of that is visible in one run's exit status.
+  #
+  # SO THE JOB RUNS THE SUITE AT DEPTH 1, THEN FETCHES THE REST OF THE HISTORY
+  # AND RUNS IT AGAIN, and compares the two by the REASON each skip carries.
+  # One commit, one environment, one variable. The declaration it is compared
+  # against is `tests/_lanes.SHALLOW_CLONE_LOSES`, and both directions are
+  # refused there: a guarantee newly lost to a shallow clone is a red, and a
+  # declared loss that did NOT happen is a red too — the second is what a
+  # checkout that quietly stopped being shallow looks like, and without it this
+  # job would pass by having nothing to compare.
+  #
+  # MEASURED 2026-08-28 at 9b5b496, a `git clone --depth 1` of this repository
+  # against a full clone of the same ref, whole suite, neither jax nor a solver
+  # wheel: the shallow run skipped 13 tests the full run did not, in four
+  # reasons, all of them git-gated — 8 in `tests/test_soundness_routing.py`,
+  # 3 in `tests/test_prerelease_scope_from_the_tag.py`, 1 in
+  # `tests/test_proposed_page_headers.py` and 1 in
+  # `tests/test_soundness_log_reach.py`. Both runs exited 0.
+  #
+  # AND THE FIGURE EVERY ONE OF THOSE COPIES CARRIES HAS MOVED. Each says
+  # `19 passed, 8 skipped` for `tests/test_soundness_routing.py` on a depth-1
+  # clone. Re-measured the same way at 9b5b496 — `git clone --depth 1` of this
+  # repository, that module alone, no jax: **21 passed, 8 skipped**. The eight
+  # are still the whole git-gated set of that module, which is the half of the
+  # sentence that was ever the point; the pass count moved because two tests
+  # were added to the file. Those copies are not edited here — a branch that
+  # rewrote a paragraph standing in eight places would conflict with every
+  # other branch touching this file — and this job is the thing that makes the
+  # count unnecessary: it compares two runs of one commit instead of one run
+  # against a number written down.
+  #
+  # NOT A REQUIRED CHECK, by this file's own rule for the two acceptance jobs.
+  # The second half of this job fetches the rest of the history from GitHub
+  # mid-run, so a transport failure, a rate limit or an outage can redden it on
+  # a day stelling did not change. Loud — no `continue-on-error`, which would
+  # bury a real finding as a warning on a green run — but leave it OUT of the
+  # required list (branch protection is a repo setting, not this file). The
+  # first half of the job, the depth-1 run itself, is not exposed to that; if
+  # the fetch proves unreliable the honest move is to split the two halves and
+  # require the first, not to silence the second.
+  #
+  # WHAT IT DOES NOT REACH. It compares by skip REASON, which is the
+  # granularity a rule in `tests/test_skip_inventory.py` has, so a git-gated
+  # check that started skipping in ANOTHER MODULE under a reason already
+  # declared here would not be noticed — the reason set would be unchanged.
+  # It also cannot see a guarantee a shallow clone silently loses without
+  # skipping: a check that quietly narrows what it asserts, rather than
+  # skipping, produces no line for either run to differ on. `git fetch
+  # --unshallow` on a hosted runner is not drivable from a developer's box, so
+  # the two-clone measurement above is the evidence for the SHAPE of this job
+  # and the fetch itself has been run nowhere.
+  shallow-clone:
+    name: whole suite on a depth-1 clone, and which guarantees that costs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE ONE CHECKOUT IN THIS FILE THAT IS NOT `fetch-depth: 0`, and it
+          # is written out rather than left to the default so that the
+          # deliberateness is on the page. Every other job wants the history;
+          # this job's subject is what happens without it.
+          fetch-depth: 1
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv
+      # Solvers and no jax — the cheapest whole-suite package set in this file.
+      # The git-gated checks read `CHANGELOG.md`, `SOUNDNESS.md` and the
+      # routing manifest; none of them traces a jaxpr, so a jax lane would buy
+      # nothing here and cost the most expensive install in the file, twice.
+      - run: uv pip install -e ".[solvers]" pytest
+      - run: uv pip list
+      - name: this checkout really is shallow — the experiment's precondition
+        # Without it, a checkout action that changed its default, or a
+        # `fetch-depth` edited away, would make both runs full-depth: the
+        # difference would be empty, and an empty difference is exactly what a
+        # green run looks like unless something insists the difference is
+        # there. `tests/_lanes.shallow_clone_differences` insists; this says so
+        # earlier and in git's own words.
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse --is-shallow-repository)" != "true" ]; then
+            echo "::error title=this job's checkout is not shallow::The first run is supposed to be the depth-1 one. git says this repository is complete, so the two runs below would differ in nothing and the comparison would pass having measured nothing."
+            exit 1
+          fi
+          # `-5`, not `| head -5`: under `set -o pipefail` a `git log` killed
+          # by head closing the pipe exits 141 and fails the step, which is a
+          # red about a pipeline rather than about a checkout.
+          git log --oneline -5
+      - name: run 1 of 2 — the suite on the depth-1 clone, verdict asserted
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/verdict-shallow.txt
+          # `PY_COLORS: 0` from the start; see the same line in the job above.
+          PY_COLORS: 0
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/verdict-shallow.txt"
+          .venv/bin/python -m pytest -q -ra | tee "${RUNNER_TEMP}/shallow.log"
+          verdict="${RUNNER_TEMP}/verdict-shallow.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it."
+            exit 1
+          fi
+          cat "${verdict}"
+          # A shallow clone is entitled to make the completeness claim: every
+          # skip it causes is disclosed. Measured — `verdict=made` in a depth-1
+          # clone at 9b5b496 — which is why this is an assertion and not a
+          # concession.
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::A depth-1 clone's skips are all disclosed, so this verdict should be 'made' here as it is in every other lane. A 'failed' verdict means a shallow clone now causes a skip nobody wrote down."
+            exit 1
+          fi
+      - name: bring the history in, and prove it arrived
+        # `--tags` explicitly: one of the four declared losses is that `v0.1.0`
+        # cannot be resolved, and a fetch that restored the commits and not the
+        # tag would leave that loss in place and read as "the guarantee was
+        # never restored" rather than as "this step did half its job".
+        run: |
+          set -euo pipefail
+          git fetch --unshallow origin
+          git fetch --tags origin
+          if [ "$(git rev-parse --is-shallow-repository)" != "false" ]; then
+            echo "::error title=the clone is still shallow::'git fetch --unshallow' did not complete, so the second run below is a second depth-1 run and the comparison has no control."
+            exit 1
+          fi
+      - name: run 2 of 2 — the same suite, same commit, full history
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/verdict-full.txt
+          PY_COLORS: 0
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/verdict-full.txt"
+          .venv/bin/python -m pytest -q -ra | tee "${RUNNER_TEMP}/full.log"
+          verdict="${RUNNER_TEMP}/verdict-full.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. An unnarrowed CI run must be entitled to claim the suite."
+            exit 1
+          fi
+      - name: which guarantees the depth-1 clone cost, against the declaration
+        run: |
+          set -euo pipefail
+          .venv/bin/python - "${RUNNER_TEMP}/shallow.log" "${RUNNER_TEMP}/full.log" <<'PY'
+          import pathlib
+          import sys
+
+          sys.path.insert(0, "tests")
+          import _lanes
+
+          shallow = _lanes.run_report(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          full = _lanes.run_report(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+          bad = _lanes.shallow_clone_differences(shallow, full)
+          for reason in sorted(shallow.reasons - full.reasons):
+              print("lost to the depth-1 clone:", reason)
+          if bad:
+              print(
+                  "::error title=what a shallow clone costs has changed::"
+                  "`tests/_lanes.SHALLOW_CLONE_LOSES` declares which guarantees a "
+                  "depth-1 clone turns into skips. The two runs of this commit say "
+                  "otherwise. " + " | ".join(bad)
+              )
+              sys.exit(1)
+          print("the depth-1 clone lost exactly what _lanes.SHALLOW_CLONE_LOSES declares")
+          PY

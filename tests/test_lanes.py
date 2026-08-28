@@ -257,9 +257,14 @@ def test_the_lane_reader_reads_ONE_FILE_however_its_lines_end():
     measurement rather than a hope: every pattern here is matched against one
     line of ``_code_lines``, and ``str.splitlines()`` breaks on CR, CRLF,
     U+0085, U+2028 and U+2029 as well as on LF. Re-render `ci.yml` with each
-    of those in place of every newline and the same eleven blocks and eight
-    lanes come back. ``split("\\n")`` would pass every other test in this
-    file and fail this one.
+    of those in place of every newline and THE SAME blocks and THE SAME lanes
+    come back — which is the claim, and it is why the assertion below compares
+    each rendering against the clean read rather than against a number. (This
+    sentence said *"the same eleven blocks and eight lanes"*; re-measured
+    2026-08-28 it is 13 and 10, and it will be something else the next time a
+    lane is added. The equality is the property; the size is not.)
+    ``split("\\n")`` would pass every other test in this file and fail this
+    one.
     """
     text = _lanes.CI.read_text(encoding="utf-8")
     assert "\r" not in text, "this test re-renders the breaks and needs LF in"
@@ -598,9 +603,11 @@ def test_every_whole_suite_lane_asserts_the_verdict_channel():
     """The skip inventory's completeness verdict, off a channel the exit code
     cannot be taken from — and the one lane that does without it is NAMED.
 
-    Six of the seven whole-suite lanes set
-    ``STELLING_SKIP_INVENTORY_VERDICT`` and fail the step on anything but
-    ``verdict=made``. That the seventh does not was true and undisclosed;
+    Every whole-suite lane but one sets ``STELLING_SKIP_INVENTORY_VERDICT``
+    and fails the step on anything but ``verdict=made``. That the exception
+    does not was true and undisclosed; (this said *"six of the seven"* — see
+    ``_lanes.Lane.verdict_channel`` for why the fraction is gone rather than
+    bumped)
     :data:`_lanes.VERDICT_CHANNEL_EXEMPT` carries the argument, and this holds
     the exemption list to being a list rather than a habit.
     """
@@ -996,3 +1003,307 @@ def test_exactly_one_lane_runs_in_randomised_order():
             assert not lane.random_order, (
                 f"{lane.job} is a merge-bearing lane and must not shuffle"
             )
+
+
+# ── SELECTING an interpreter, and REPORTING which one arrived ───────────────
+
+
+def test_a_line_that_SELECTS_an_interpreter_is_still_caught_after_the_split():
+    """The fail-closed direction of ``_lanes._interpreter_reading``.
+
+    ``_OTHER_INTERPRETER_TOKEN`` used to be one pattern over two different
+    acts. A line that PROVISIONS an interpreter and a line that PRINTS which
+    one it got were both recorded as ``unreadable:``, and since no entry of
+    ``EXPECTED_PYTHON`` carries such a reading, the honest repair the
+    `random-order` lane needed — say in the log what was resolved — reddened
+    the very table that exists to catch a second pin.
+
+    Splitting the pattern is a change to a fail-closed reader, and the only
+    direction that matters is the one where it must NOT open. So every
+    selection spelling the module knows is driven here, each on its own and
+    each in combination with a query, and the query spellings are driven as
+    the control that shows the split did something.
+
+    THE ARGUMENT FOR THE LINE BEING STRUCTURAL rather than a list of the steps
+    this branch adds: the five selection alternatives name TOOLS AND KEYS THAT
+    PROVISION and the two query alternatives are EXPRESSIONS WHOSE VALUE IS
+    the running interpreter's version. Nothing here is keyed to a step's text.
+    A query cannot decide the answer on its own — something has to consume it,
+    and every consumer is itself a reading — which is the last group of
+    assertions below.
+    """
+    reading = _lanes._interpreter_reading
+
+    # SELECTION: every alternative, each still unreadable on its own.
+    for line in (
+        "      - uses: actions/setup-python@v5",
+        "          python-version: '3.13'",
+        "        run: export UV_PYTHON=3.13",
+        "        run: pyenv local 3.13",
+        "        run: sudo add-apt-repository ppa:deadsnakes/ppa",
+    ):
+        assert reading(line).startswith("unreadable:"), (
+            f"{line!r} selects an interpreter in a spelling this module does "
+            f"not parse, and must stay a named can't-tell: the README's "
+            f"'exactly one job pins' rests on nothing else noticing"
+        )
+
+    # The `uv` branch, unchanged and still in front of both.
+    assert reading("      - run: uv venv --python 3.12") == "pin:3.12"
+    assert reading("      - run: uv venv") == "runner-default"
+    assert reading('      - run: uv venv --python "${PY}"').startswith("unreadable:")
+
+    # REPORTING: the control. Without these the split above is invisible and
+    # this test would pass on the unsplit pattern.
+    assert reading("      - run: .venv/bin/python --version") == "reporting"
+    assert reading("      - run: python3 --version") == "reporting"
+    assert reading(
+        '        run: python -c "import sys; print(sys.version_info)"'
+    ) == "reporting"
+
+    # AND A LINE THAT DOES BOTH IS A SELECTION. This is the direction a
+    # permissive split would have broken, and each of these carries a query.
+    for line in (
+        '        run: export UV_PYTHON="$(python3 --version)"',
+        "        run: pyenv local 3.13 && python --version",
+        '      - run: uv venv --python "$(python --version)"',
+    ):
+        assert reading(line).startswith("unreadable:"), (
+            f"{line!r} both asks the interpreter its version and provisions "
+            f"one; a spelling that could be either has to read as the "
+            f"selection, which is the half that fails closed"
+        )
+
+    # a line with no interpreter in it at all is still nothing
+    assert reading('      - run: uv pip install -e ".[jax]" pytest') is None
+    # and a comment is not a line: the strip runs first everywhere
+    assert _lanes._code_lines("      # then run python --version by hand\n") == [""]
+
+    # THE TABLE MAY NOT CARRY A CAN'T-TELL, which is the property that makes
+    # `unreadable:` a red rather than a row. Stated in `_lanes.py`'s own block
+    # comment and held by nothing until here.
+    unreadable = sorted(
+        job
+        for job, readings in _lanes.EXPECTED_PYTHON.items()
+        for r in readings
+        if r.startswith("unreadable:")
+    )
+    assert not unreadable, (
+        f"EXPECTED_PYTHON declares an `unreadable:` reading for {unreadable}. "
+        f"That is a spelling nobody has read; declaring it makes the "
+        f"measured/declared pin agree about a can't-tell instead of reddening "
+        f"on it."
+    )
+
+
+def test_the_lane_whose_configuration_nothing_pins_is_the_lane_that_reports_it():
+    """`random-order` resolves both halves elsewhere, so it prints both.
+
+    Its `uv venv` names no interpreter and its `.[solvers,jax]` carries no
+    ceiling, so what it ran is decided by the runner image and by PyPI on the
+    day. It printed neither, and a red run named the SEED — an order in an
+    environment nobody recorded.
+
+    The reporting is held here rather than only in ``EXPECTED_PYTHON`` because
+    the table would still agree if the step were deleted from the job and the
+    row deleted from the table in the same commit; this says which job has to
+    have it and why.
+    """
+    reporting = _lanes.python_reporting()
+    assert "ci.yml:random-order" in reporting, (
+        "the `random-order` lane no longer prints the interpreter it was "
+        "given. It is the one lane in this file whose interpreter AND whose "
+        "jax are both resolved by somebody else on the day it runs, and a "
+        "seed is not a reproducer without the configuration it was drawn "
+        "against."
+    )
+    # and the jax half, which is the same defect in the other variable. Read
+    # off the job body rather than off a step name, which a rename would move.
+    body = _lanes._blocks(
+        _lanes._code_lines(_lanes.CI.read_text(encoding="utf-8"))
+    )["random-order"]
+    assert any("jax.__version__" in line for line in body), (
+        "the `random-order` lane no longer prints the jax it resolved. Every "
+        "other jax lane in ci.yml does; this one floats and is the one whose "
+        "resolved version is least predictable."
+    )
+
+
+# ── the two lanes whose subject is the shape of the working tree ────────────
+
+
+def test_every_reason_the_shallow_lane_expects_to_lose_is_disclosed():
+    """:data:`_lanes.SHALLOW_CLONE_LOSES` against the file that owns the words.
+
+    The set is REASON STRINGS, and those strings are literals in
+    ``tests/test_skip_inventory.py``'s ``RULES``. A reason reworded there and
+    not here would leave the shallow lane comparing against a set nothing can
+    ever produce — and its own "declared but not lost" half would then fail on
+    a runner, a day late and in the wrong file. This is the same check a
+    commit ahead of the lane.
+
+    Each of these is also a rule whose CONDITION is computable, which is what
+    makes the skip legitimate rather than merely disclosed: a rule with
+    ``legitimate=None`` discloses a skip it cannot check the direction of, and
+    a shallow clone's losses are exactly the ones git can be asked about.
+    """
+    import test_skip_inventory as inventory
+
+    assert _lanes.SHALLOW_CLONE_LOSES, (
+        "nothing is declared lost to a `--depth 1` clone, so the shallow lane "
+        "compares against an empty set and passes for free"
+    )
+    for reason in sorted(_lanes.SHALLOW_CLONE_LOSES):
+        rules = [rule for rule in inventory.RULES if rule.matches(reason)]
+        assert len(rules) == 1, (
+            f"{reason!r} is declared as a guarantee a shallow clone costs, and "
+            f"tests/test_skip_inventory.py's RULES disclose it {len(rules)} "
+            f"times. Zero means the wording moved and the shallow lane is now "
+            f"waiting for a reason nothing emits."
+        )
+        assert rules[0].legitimate is not None, (
+            f"the rule disclosing {reason!r} cannot check its own condition, "
+            f"so a skip carrying it is disclosed but never held to being "
+            f"legitimate. A shallow clone's losses are all git questions and "
+            f"git can be asked."
+        )
+
+
+#: A `pytest -q -ra` log, trimmed to what :func:`_lanes.run_report` reads. The
+#: real ones are two whole-suite runs on a runner; these are the shape.
+_LOG = """\
+....s.......s...
+{skips}
+{counts} in 12.34s (0:00:12)
+"""
+
+
+def _log(counts: str, skips: tuple[str, ...] = ()) -> str:
+    return _LOG.format(counts=counts, skips="\n".join(skips))
+
+
+_GIT_GATED = tuple(sorted(_lanes.SHALLOW_CLONE_LOSES))
+
+
+def test_a_run_report_is_READ_and_a_log_it_cannot_read_is_not_agreement():
+    """:func:`_lanes.run_report`, and the one way it must not fail.
+
+    A log with no summary counts in it is a run that did not finish, a
+    truncated file, or an invocation this function does not know. Answering
+    "nothing" for any of those would make two such logs compare EQUAL, and
+    both lanes that use this decide by comparing two logs — so the permissive
+    answer is a green tick on an experiment that did not happen.
+    """
+    report = _lanes.run_report(
+        _log("2394 passed, 191 skipped, 10 warnings",
+             ("SKIPPED [8] tests/test_soundness_routing.py:897: " + _GIT_GATED[3],))
+    )
+    assert dict(report.counts) == {"passed": 2394, "skipped": 191, "warnings": 10}
+    assert report.skipped == (
+        (8, "tests/test_soundness_routing.py:897", _GIT_GATED[3]),
+    )
+    assert report.reasons == frozenset({_GIT_GATED[3]})
+
+    with pytest.raises(ValueError, match="no pytest summary counts"):
+        _lanes.run_report("this is not a pytest log\n")
+    with pytest.raises(ValueError, match="no pytest summary counts"):
+        _lanes.run_report("2394 passed, 191 skipped\n")  # no ` in <duration>`
+    # a sentence that merely CONTAINS a count is not the summary line
+    with pytest.raises(ValueError, match="no pytest summary counts"):
+        _lanes.run_report("we saw 12 passed in that run, which was wrong\n")
+
+
+def test_two_runs_of_one_commit_are_compared_by_OUTCOME_and_by_WHICH_SKIPPED():
+    """:func:`_lanes.outcome_differences` — the venv lane's assertion.
+
+    Both directions, because the whole point is that the two runs are supposed
+    to be identical: a comparison that could only report a difference and
+    never report agreement would fail the lane on every push, and one that
+    could only report agreement is not a comparison.
+
+    THE SKIP LINES ARE COMPARED AS WELL AS THE COUNTS, and that is not
+    belt-and-braces. Two runs can report the same `N skipped` while skipping a
+    DIFFERENT N tests, which is exactly the shape a working-directory-sensitive
+    guard produces when one check starts skipping and another stops.
+    """
+    a_skip = "SKIPPED [1] tests/test_lanes.py:1: something"
+    b_skip = "SKIPPED [1] tests/test_optional.py:1: something else"
+
+    same = _log("10 passed, 1 skipped", (a_skip,))
+    assert _lanes.outcome_differences(
+        "clean", _lanes.run_report(same), "stray", _lanes.run_report(same)
+    ) == []
+
+    moved = _lanes.outcome_differences(
+        "clean", _lanes.run_report(_log("10 passed, 1 skipped", (a_skip,))),
+        "stray", _lanes.run_report(_log("9 passed, 2 skipped", (a_skip, b_skip))),
+    )
+    assert any("different outcomes" in line for line in moved), moved
+    assert any(b_skip.split("] ")[1] in line for line in moved), moved
+
+    # SAME COUNTS, DIFFERENT TESTS — the case the counts alone cannot see.
+    swapped = _lanes.outcome_differences(
+        "clean", _lanes.run_report(_log("10 passed, 1 skipped", (a_skip,))),
+        "stray", _lanes.run_report(_log("10 passed, 1 skipped", (b_skip,))),
+    )
+    assert not any("different outcomes" in line for line in swapped), swapped
+    assert len(swapped) == 2, swapped
+
+    # `warnings` is the one word not compared, and it is measured that two
+    # runs of one commit really do differ in it: the git-gated tests disclose
+    # what they could not check by emitting one. See `_lanes._NOT_AN_OUTCOME`.
+    assert _lanes.outcome_differences(
+        "clean", _lanes.run_report(_log("10 passed, 1 skipped", (a_skip,))),
+        "stray", _lanes.run_report(_log("10 passed, 1 skipped, 3 warnings", (a_skip,))),
+    ) == []
+
+
+def test_the_shallow_lane_refuses_a_loss_it_does_not_declare_AND_one_that_vanishes():
+    """:func:`_lanes.shallow_clone_differences` — the shallow lane's assertion.
+
+    Three legs, and the middle one is the anti-vacuity half a lane like this
+    stands or falls on. A `--depth 1` clone is GREEN: it exits 0 and writes
+    `verdict=made`, because every skip it causes is disclosed. So a lane that
+    asserted an exit code would pass whether or not the checkout was shallow
+    at all — and the failure mode of "the checkout quietly stopped being
+    shallow" is that the declared losses stop happening, which is what the
+    second leg refuses.
+    """
+    lost = tuple(
+        f"SKIPPED [1] tests/test_soundness_routing.py:{n}: {reason}"
+        for n, reason in enumerate(_GIT_GATED, start=1)
+    )
+    shallow = _lanes.run_report(_log("2394 passed, 191 skipped", lost))
+    full = _lanes.run_report(_log("2407 passed, 178 skipped"))
+    assert _lanes.shallow_clone_differences(shallow, full) == []
+
+    # 1 — a loss nothing declares
+    extra = _lanes.run_report(
+        _log("2393 passed, 192 skipped",
+             lost + ("SKIPPED [1] tests/test_lanes.py:1: needs a runner",))
+    )
+    bad = _lanes.shallow_clone_differences(extra, full)
+    assert bad and all("needs a runner" in line for line in bad), bad
+
+    # 2 — a declared loss that did NOT happen, which is what a checkout that
+    #     stopped being shallow looks like from here
+    bad = _lanes.shallow_clone_differences(full, full)
+    assert len(bad) == len(_GIT_GATED), bad
+    assert all("nothing was lost" in line for line in bad), bad
+
+    # 3 — deepening the clone CREATED a skip, so the two runs differ in
+    #     something the experiment does not control
+    bad = _lanes.shallow_clone_differences(
+        shallow,
+        _lanes.run_report(
+            _log("2406 passed, 179 skipped",
+                 ("SKIPPED [1] tests/test_lanes.py:1: needs a runner",))
+        ),
+    )
+    assert any("CREATED a skip" in line for line in bad), bad
+
+    # and the counts are deliberately NOT compared here: these two runs are
+    # SUPPOSED to disagree about how many tests ran.
+    assert _lanes.shallow_clone_differences(
+        _lanes.run_report(_log("1 passed, 400 skipped", lost)), full
+    ) == []

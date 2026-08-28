@@ -51,11 +51,15 @@ paragraph is not a claim that it is safe from the same thing.** What it has
 that the nightly reader did not is :func:`_agreed` and the four-link
 ``${EXTRAS}`` chain, which produce a NAMED can't-tell rather than a
 permissive default — so what is exposed here is the FIND layer, not the
-value layer. Measured at this commit, off PyYAML's own event stream rather
-than off a regex for `&` and `*`: `ci.yml` carries no anchor, no alias and
-no merge key, and :data:`_JOB` finds all ten jobs a real parse finds (and
-`push:` from under `on:`, which :func:`_classify` drops for having no
-``python -m pytest`` line). That gap is written down in
+value layer. Re-measured 2026-08-28 at the commit that added the two
+working-tree lanes, off PyYAML's own event stream rather than off a regex
+for `&` and `*`: `ci.yml` carries **0 anchors, 0 aliases and 0 merge keys**,
+and :data:`_JOB` finds EVERY job a real parse finds — 12 of them then, where
+this sentence said *"all ten"* — plus `push:` from under `on:`, which
+:func:`_classify` drops for having no ``python -m pytest`` line. The figure
+is the rotting half and the AGREEMENT is the claim: what matters is that the
+two enumerations differ by that one known extra and by nothing else, at
+whatever size the file has reached. That gap is written down in
 `SWEEP-CARRY-FORWARD.md` rather than closed here.
 
 **AND THE MEASUREMENT NAMED TWO FILES AND COVERED ONE.** The paragraph
@@ -270,9 +274,12 @@ class Lane:
     #: exit code. BOTH HALVES ARE MEASURED — the ``env:`` binding that makes
     #: the file get written, and a ``verdict=made`` assertion in the same job
     #: that fails the step on anything else — because a job with the binding
-    #: alone writes a file nobody reads. Six of the seven whole-suite lanes
-    #: have both; the seventh is named in :data:`VERDICT_CHANNEL_EXEMPT` with
-    #: its reason.
+    #: alone writes a file nobody reads. EVERY whole-suite lane BUT ONE has
+    #: both, and the exception is named in :data:`VERDICT_CHANNEL_EXEMPT`
+    #: with its reason. (This said *"six of the seven"*, and two lanes have
+    #: been added since. A fraction of a population that grows every time a
+    #: lane is added is a numeral beside something that moves; the fact it
+    #: was standing for — all but the named one — does not.)
     verdict_channel: bool
 
 
@@ -320,10 +327,18 @@ def _code_lines(text: str) -> list[str]:
     check was `^`-anchored under ``re.M``, where Python's ``^`` matches after
     a newline and NOT after a carriage return. Every pattern in this module
     is matched against ONE LINE of this list instead, and ``splitlines()``
-    breaks on CR, CRLF, U+0085, U+2028 and U+2029 as well as on LF. Measured
-    on this repository's own ``ci.yml``, re-rendered with each of those in
-    place of every newline: 11 job blocks and 8 pytest lanes, identical
-    tuples, in all four renderings. So the ``read_text()`` above does not
+    breaks on CR, CRLF, U+0085, U+2028 and U+2029 as well as on LF.
+    Re-measured 2026-08-28 on this repository's own ``ci.yml``, re-rendered
+    with each of those five in place of every newline: **13 job blocks and 10
+    pytest lanes, identical tuples, in all five renderings**. (This read
+    *"11 job blocks and 8 pytest lanes … in all four renderings"*. The first
+    two figures moved when two lanes were added, which is what a count of a
+    growing file does; the *"four"* was wrong when it was written — there are
+    five break characters in the list it is counting, and
+    ``test_the_lane_reader_reads_ONE_FILE_however_its_lines_end`` drives all
+    five.) The counts are a record of a run. What does not rot is the
+    EQUALITY: the same tuples come back however the lines end. So the
+    ``read_text()`` above does not
     have to translate anything for this reader to be right, which is exactly
     what could not be said of the nightly reader's scans;
     ``test_the_lane_reader_reads_ONE_FILE_however_its_lines_end`` holds it,
@@ -576,15 +591,27 @@ EXPECTED_LANES: dict[str, tuple[str, bool | None, bool, bool, bool]] = {
     "acceptance-reproducer": ("matrix", True, True, False, True),
     "property": ("floating", False, False, False, False),
     "random-order": ("floating", True, True, True, False),
+    # THE TWO LANES WHOSE SUBJECT IS THE SHAPE OF THE WORKING TREE, and their
+    # readings are byte-identical to `test-no-jax`'s. That is expected rather
+    # than a duplicate: what distinguishes them is not the environment they
+    # provision but the TREE they provision it in — a `.venv` in the checkout,
+    # and a `--depth 1` clone — and this reading has no field for that and does
+    # not pretend to. Each also runs the suite TWICE and compares the two runs,
+    # which this table cannot see either: `whole_suite` means *some* step runs
+    # the whole tree, never *exactly one* does.
+    "shallow-clone": ("absent", True, True, False, True),
     "test-jax": ("floating", True, True, False, True),
     "test-jax-0-10": ("0.10", True, True, False, True),
     "test-jax-no-solvers": ("floating", False, True, False, True),
     "test-no-jax": ("absent", True, True, False, True),
+    "venv-in-the-working-tree": ("absent", True, True, False, True),
 }
 
 #: The whole-suite lanes that do NOT assert the skip-inventory verdict off the
-#: file channel, each with the reason. Six of the seven do; this is the
-#: seventh, and it was an undisclosed asymmetry until it was written down.
+#: file channel, each with the reason. Every other one does; this is the
+#: exception, and it was an undisclosed asymmetry until it was written down.
+#: (This read *"six of the seven"*; see :attr:`Lane.verdict_channel` for why
+#: the fraction is gone rather than bumped.)
 #:
 #: ``random-order`` is not a required check and its green gates nothing — that
 #: is the workflow's own stated policy for it — so the property the file
@@ -707,6 +734,14 @@ def lane_series() -> tuple[str, ...]:
 # unpinned `uv venv` is not in this file and this module does not pretend to
 # know it — that unknowability is the thing the README now says out loud.
 #
+# AND SINCE A LANE MAY NOW *REPORT* THE VERSION IT GOT, THERE ARE TWO ACTS
+# HERE AND NOT ONE. A step that prints `python --version` chooses nothing; it
+# writes the runner's answer into the log, which is the only place that answer
+# has ever existed. This module used to record such a line as a selection it
+# could not parse — see :data:`_OTHER_INTERPRETER_SELECTION` for what that
+# cost — and now reads it as ``reporting``. The unknowability is unchanged:
+# what is readable HERE is still only the selection.
+#
 # ALL THREE WORKFLOWS, not `ci.yml` alone. The claim being held is "exactly one
 # job pins an interpreter", and a pin added to the nightly canary or to
 # `release.yml` would falsify it just as squarely.
@@ -735,23 +770,79 @@ _UV_PYTHON_FLAG = re.compile(r"--python[= ]\s*(\S+)|(?:^|\s)-p\s+(\S+)")
 #: can't-tell and not a confident wrong answer.
 _A_VERSION = re.compile(r"\d+(?:\.\d+)*|python\d(?:\.\d+)*")
 
-#: Every OTHER way this repository could select or assert an interpreter.
-#: Recognising one is not reading it: each is recorded as unreadable, so it
-#: has to be looked at by a person before the README's count can go green
-#: again. `python-version` covers `actions/setup-python`'s key, which is how
-#: a second pin would most likely arrive.
-_OTHER_INTERPRETER_TOKEN = re.compile(
+#: Every OTHER way this repository could SELECT an interpreter. Recognising
+#: one is not reading it: each is recorded as unreadable, so it has to be
+#: looked at by a person before the README's count can go green again.
+#: `python-version` covers `actions/setup-python`'s key, which is how a second
+#: pin would most likely arrive.
+#:
+#: **THIS PATTERN USED TO CARRY TWO MORE ALTERNATIVES —
+#: ``python3?\s+--version`` AND ``sys\.version_info`` — AND THEY ARE NOT THE
+#: SAME ACT.** It was named ``_OTHER_INTERPRETER_TOKEN`` and its comment said
+#: *"select or assert"*, which is two verbs for one reading: a line that
+#: PROVISIONS an interpreter and a line that PRINTS which one it got were both
+#: recorded as ``unreadable:``. The cost was not theoretical. `ci.yml`'s
+#: `random-order` lane resolves both its interpreter and its jax by whatever
+#: the runner and PyPI hand it that day and printed NEITHER, so a red run
+#: named the seed and not the configuration it had shuffled — and the obvious
+#: fix, a step that runs `python --version`, was read here as an interpreter
+#: selection this module cannot parse and reddened
+#: :data:`EXPECTED_PYTHON`, which carries no ``unreadable:`` reading for any
+#: entry. The instrument made the repair it exists to ask for unavailable.
+_OTHER_INTERPRETER_SELECTION = re.compile(
     r"setup-python|python-version|UV_PYTHON|pyenv|deadsnakes"
-    r"|python3?\s+--version|sys\.version_info"
 )
+
+#: The other half of that pattern: the spellings whose VALUE IS the running
+#: interpreter's version. `python --version` and `sys.version_info` are
+#: QUERIES — they evaluate to the answer — where every alternative above names
+#: a TOOL OR A KEY THAT PROVISIONS: `actions/setup-python` and its
+#: `python-version:` key install one, `UV_PYTHON` is uv's own request
+#: variable, `pyenv` chooses one, `deadsnakes` is the archive a runner adds to
+#: get one. That is the structural line between the two sets, and it is a
+#: property of what each token IS rather than of any line this repository
+#: happens to write today.
+#:
+#: **WHY A QUERY CANNOT DECIDE THE ANSWER, which is the whole argument for
+#: reading it as anything other than a can't-tell.** For a queried version to
+#: change which interpreter a job GETS, something has to consume it — and
+#: every consumer this module knows about is itself a reading. `uv venv
+#: --python "${PY}"` reaches :data:`_UV_PYTHON_FLAG` with a value
+#: :data:`_A_VERSION` refuses, so it is ``unreadable:``; `UV_PYTHON=…`,
+#: `pyenv`, `setup-python` all carry a token from the set above. So capturing
+#: a query into a variable moves the fail-closed decision onto the line that
+#: USES it and does not lose it.
+#:
+#: **AND A LINE THAT DOES BOTH IS ``unreadable:``, NOT REPORTING.** The three
+#: tests below are ordered — the `uv` command first, then selection, then
+#: query — so `uv venv --python "$(python --version)"`, `export
+#: UV_PYTHON="$(python3 --version)"` and `pyenv local 3.13 && python
+#: --version` are each caught by the earlier test. A spelling that could be
+#: either is a selection here, which is the direction that fails closed.
+#: `test_a_line_that_SELECTS_an_interpreter_is_still_caught_after_the_split`
+#: drives exactly that direction.
+#:
+#: **``sys.version_info`` IS THE WEAKER OF THE TWO AND IS READ AS REPORTING
+#: ANYWAY; here is what that costs.** It is a READ of the interpreter already
+#: running, so it cannot choose one — but a `if sys.version_info < (3, 11)`
+#: GATE branches on it, and what such a branch then does is not modelled here.
+#: What it cannot do is change which interpreter the job was given, and that
+#: is the only question this section asks. A line that both branches on the
+#: version and provisions from the branch carries a selection token on the
+#: provisioning line, where this module reads it.
+_INTERPRETER_QUERY = re.compile(r"python3?\s+--version|sys\.version_info")
 
 
 def _interpreter_reading(line: str) -> str | None:
-    """This line's reading, or ``None`` if it selects no interpreter.
+    """This line's reading, or ``None`` if it neither selects nor reports one.
 
     ONE RULE, TWO CALLERS — the per-job scan and the per-file count below it.
     Written twice they could disagree, and the disagreement would read as
     "a line fell outside a job" rather than as a bug here.
+
+    THE ORDER OF THE THREE TESTS IS THE FAIL-CLOSED PROPERTY, not a style: a
+    line carrying both a selection and a query is decided by the selection.
+    See :data:`_INTERPRETER_QUERY` for the argument.
     """
     cmd = _UV_INTERPRETER_CMD.search(line)
     if cmd:
@@ -762,8 +853,10 @@ def _interpreter_reading(line: str) -> str | None:
         if _A_VERSION.fullmatch(version):
             return f"pin:{version}"
         return f"unreadable:{line.strip()}"
-    if _OTHER_INTERPRETER_TOKEN.search(line):
+    if _OTHER_INTERPRETER_SELECTION.search(line):
         return f"unreadable:{line.strip()}"
+    if _INTERPRETER_QUERY.search(line):
+        return "reporting"
     return None
 
 
@@ -776,14 +869,25 @@ def python_provisioning() -> dict[str, tuple[str, ...]]:
     * ``"pin:<version>"`` — the job names the interpreter;
     * ``"runner-default"`` — it creates an environment without naming one, so
       the version is the runner image's and is not stated anywhere here;
+    * ``"reporting"`` — it PRINTS which interpreter it got and chooses none.
+      See :data:`_INTERPRETER_QUERY` for why that is a different act from the
+      three above and for the direction in which the distinction fails closed;
     * ``"unreadable:<line>"`` — a spelling this module does not read. Never
       dropped: see the block above.
 
-    A job that provisions no interpreter at all is absent rather than empty.
-    One key is not a job: ``"<file>:<outside any job>"`` carries an
+    A job that neither provisions nor reports an interpreter is absent rather
+    than empty. One key is not a job: ``"<file>:<outside any job>"`` carries an
     ``unreadable:`` reading when the file holds interpreter lines that landed
     in no job block, which is the one way a pin could be invisible here rather
     than merely misfiled.
+
+    THE FUNCTION'S NAME IS NARROWER THAN WHAT IT NOW RETURNS, and that is said
+    here rather than repaired: a ``reporting`` reading is not a provisioning.
+    It is kept in the same tuple because the per-file accounting below counts
+    every line :func:`_interpreter_reading` answers for, and a reading dropped
+    from the map would make that count disagree with itself and report a
+    ``<outside any job>`` line that does not exist. :func:`python_pins` filters
+    on ``pin:`` and is unaffected either way.
     """
     found: dict[str, tuple[str, ...]] = {}
     # BOTH EXTENSIONS. GitHub reads `.yml` and `.yaml` alike, this repository
@@ -823,11 +927,21 @@ EXPECTED_PYTHON: dict[str, tuple[str, ...]] = {
     "ci.yml:acceptance-any-pytree": ("runner-default",),
     "ci.yml:acceptance-reproducer": ("pin:3.12",),
     "ci.yml:property": ("runner-default",),
-    "ci.yml:random-order": ("runner-default",),
+    # THE ONE JOB THAT REPORTS. It creates an environment without naming an
+    # interpreter, like almost every other, and then PRINTS which one it got —
+    # because it is the lane whose interpreter and jax are both resolved by
+    # somebody else on the day it runs, and a seed is not a reproducer without
+    # the configuration it was drawn against.
+    "ci.yml:random-order": ("runner-default", "reporting"),
+    "ci.yml:shallow-clone": ("runner-default",),
     "ci.yml:test-jax": ("runner-default",),
     "ci.yml:test-jax-0-10": ("runner-default",),
     "ci.yml:test-jax-no-solvers": ("runner-default",),
     "ci.yml:test-no-jax": ("runner-default",),
+    # TWO readings, and the second is not a duplicate line: this job builds its
+    # environment OUTSIDE the checkout and then plants a second, real venv IN
+    # it, which is the whole experiment. Both are unpinned.
+    "ci.yml:venv-in-the-working-tree": ("runner-default", "runner-default"),
     "nightly-jax-canary.yml:control": ("runner-default",),
     "nightly-jax-canary.yml:nightly": ("runner-default",),
     "release.yml:test": ("runner-default",),
@@ -842,3 +956,241 @@ def python_pins() -> dict[str, str]:
         for reading in readings
         if reading.startswith("pin:")
     }
+
+
+def python_reporting() -> tuple[str, ...]:
+    """``"<workflow>:<job>"`` for every job that PRINTS the interpreter it got.
+
+    The other half of :func:`python_pins`. A lane whose interpreter and jax are
+    both decided by somebody else's resolver on the day it runs has one honest
+    obligation — say in its own log what it was handed — and this is what the
+    README's paragraph about that is held to.
+    """
+    return tuple(
+        sorted(
+            job
+            for job, readings in python_provisioning().items()
+            if "reporting" in readings
+        )
+    )
+
+
+# ── what a lane's two runs REPORTED, compared against each other ────────────
+#
+# THE DEFECT THIS ANSWERS. Two shapes of working tree were checked by hand at
+# the 0.2.0 release and by no standing lane: a checkout carrying a `.venv`, and
+# a `--depth 1` clone. Both are properties of the TREE rather than of the
+# package set, so neither is expressible as another install line, and both are
+# the shape this repository has repeatedly got wrong in one direction —
+#
+#   * `tests/test_sdist_reference_hygiene.py`'s header records a check whose
+#     answer moved with whether somebody had run `uv venv` in the checkout: the
+#     same commit, one `mkdir` apart, `17 passed` and then `2 failed, 15
+#     passed`. A check whose SUBJECT is the repository may not depend on what a
+#     developer's tooling left lying in it.
+#   * the `fetch-depth: 0` comment standing at checkout after checkout in
+#     `ci.yml` — eight of its twelve `actions/checkout` steps at the commit
+#     that added these lanes, counted — exists because a depth-1 clone turns a
+#     set of guarantees into SKIPS, and pytest exits 0 on a skip.
+#
+# Neither question is answerable by a single green tick, and both are answerable
+# by the same instrument: RUN THE SUITE TWICE OVER ONE COMMIT IN ONE
+# ENVIRONMENT, changing only the tree, and compare the two reports. That is the
+# idiom `ci.yml`'s own header asks for one level up — *"a comparison between
+# runs of ONE commit rather than against a constant written here"* — and it is
+# why nothing below carries a pass count.
+#
+# WHAT THESE FUNCTIONS ARE NOT. They read a `pytest -q -ra` LOG, which is a
+# rendering and not a data structure, and they are as good as that rendering:
+# a pytest that changed the shape of its summary line would make
+# :func:`run_report` raise rather than answer, which is the direction that
+# fails closed, and a pytest that changed the shape of its `SKIPPED` lines
+# would make every skip invisible to :attr:`RunReport.skipped` while the counts
+# still parsed — that one does NOT fail closed, and it is why
+# :func:`outcome_differences` compares the COUNTS as well as the lines.
+
+#: One `-ra` short-summary skip line: `SKIPPED [8] tests/test_x.py:897: why`.
+_SKIPPED_LINE = re.compile(r"^SKIPPED \[(\d+)\] (\S+): (.*)$")
+#: The final counts line of a `-q` run: `2394 passed, 191 skipped, 10 warnings
+#: in 120.06s (0:02:00)`. Anchored at both ends of the count list so that a
+#: sentence merely CONTAINING `12 passed` cannot be read as the summary.
+_RUN_COUNTS = re.compile(r"^(\d+ [a-z]+(?:, \d+ [a-z]+)*) in \d")
+
+#: The one outcome word :func:`outcome_differences` does not compare, and it is
+#: named rather than described. `warnings` is not an outcome: it counts what
+#: the run PRINTED, and the git-gated tests disclose what they could not check
+#: by emitting one. Measured 2026-08-28 at 9b5b496, the whole suite on the
+#: zero-dep interpreter, one commit, two clones: the full clone reported
+#: `2407 passed, 178 skipped` with no warnings summary and the `--depth 1`
+#: clone `2394 passed, 191 skipped, 10 warnings`. Comparing it would make the
+#: shallow lane's own subject read as a difference to be refused.
+#:
+#: WHAT THAT COSTS, said rather than left to be found: a change in warning
+#: behaviour is invisible to both lanes below. The warnings themselves are in
+#: the log — `-ra` prints the warnings summary — so a reader has them; nothing
+#: compares them.
+_NOT_AN_OUTCOME = "warnings"
+
+
+@dataclass(frozen=True)
+class RunReport:
+    """What one `pytest -q -ra` log says happened, in comparable form."""
+
+    #: `(("passed", 2394), ("skipped", 191), …)`, sorted, `warnings` included
+    #: — the exclusion is made where the comparison is, not where the reading
+    #: is, so a reader of a report still sees everything the run said.
+    counts: tuple[tuple[str, int], ...]
+    #: `((8, "tests/test_soundness_routing.py:897", "git cannot read …"), …)`,
+    #: sorted.
+    skipped: tuple[tuple[int, str, str], ...]
+
+    @property
+    def reasons(self) -> frozenset[str]:
+        """The distinct skip REASONS, which is the granularity a rule has."""
+        return frozenset(reason for _, _, reason in self.skipped)
+
+
+def run_report(log: str) -> RunReport:
+    """Read a `pytest -q -ra` log. RAISES when it cannot find the counts line.
+
+    Absence is not an empty report. A log with no summary counts in it is a run
+    that did not finish, a log that was truncated, or an invocation whose output
+    this function does not know — and answering `{}` for any of those would make
+    two such logs compare EQUAL, which is the permissive answer to a question
+    nothing has answered.
+    """
+    counts: dict[str, int] | None = None
+    skipped: list[tuple[int, str, str]] = []
+    for line in log.splitlines():
+        stripped = line.strip()
+        found = _RUN_COUNTS.match(stripped)
+        if found:
+            # the LAST one: a nested session's summary can precede the outer
+            # one, and it is the outer one that describes this run.
+            counts = {}
+            for part in found.group(1).split(", "):
+                number, _, word = part.partition(" ")
+                counts[word] = int(number)
+        skip = _SKIPPED_LINE.match(stripped)
+        if skip:
+            skipped.append((int(skip.group(1)), skip.group(2), skip.group(3)))
+    if counts is None:
+        raise ValueError(
+            "this log carries no pytest summary counts line, so what the run "
+            "reported is not readable from it. A run that did not reach a "
+            "summary is not a run that reported nothing."
+        )
+    return RunReport(
+        counts=tuple(sorted(counts.items())), skipped=tuple(sorted(skipped))
+    )
+
+
+def outcome_differences(
+    label_a: str, a: RunReport, label_b: str, b: RunReport
+) -> list[str]:
+    """Every way two runs of ONE commit disagree. Empty is the pass.
+
+    Used by the lane whose subject is that a check's answer must not move with
+    what a developer's tooling left in the tree: the two runs differ in the
+    tree and in nothing else, so any difference here is the defect.
+    """
+    bad = []
+    counts_a = {w: n for w, n in a.counts if w != _NOT_AN_OUTCOME}
+    counts_b = {w: n for w, n in b.counts if w != _NOT_AN_OUTCOME}
+    if counts_a != counts_b:
+        bad.append(
+            f"the two runs report different outcomes: {label_a} {counts_a}, "
+            f"{label_b} {counts_b}"
+        )
+    only_a = sorted(set(a.skipped) - set(b.skipped))
+    only_b = sorted(set(b.skipped) - set(a.skipped))
+    for label, lines in ((label_a, only_a), (label_b, only_b)):
+        for count, where, reason in lines:
+            bad.append(f"skipped only in {label}: [{count}] {where}: {reason}")
+    return bad
+
+
+#: THE GUARANTEES A `--depth 1` CLONE TURNS INTO SKIPS, DECLARED BY THE REASON
+#: EACH SKIP CARRIES. Same idiom as :data:`EXPECTED_LANES`: the shallow lane
+#: measures the difference between a depth-1 run and a full-depth run of the
+#: SAME commit in the SAME environment, and this is the declaration that
+#: difference is compared against — so a guarantee newly lost to a shallow
+#: clone, or one that stops being lost, is a line in this diff.
+#:
+#: REASONS AND NOT COUNTS, deliberately. The strings are literals in
+#: `tests/test_skip_inventory.py`'s `RULES`, so they move only when somebody
+#: edits a disclosure; the NUMBER of tests each reason covers moves whenever
+#: anybody adds a test to one of those modules, and a numeral beside something
+#: that moves is a defect with a delay fuse.
+#: `tests/test_lanes.py::test_every_reason_the_shallow_lane_expects_to_lose_is_disclosed`
+#: holds every one of these to that file, so a reason renamed there reddens
+#: here rather than silently emptying this set.
+#:
+#: MEASURED 2026-08-28 at 9b5b496 — a `git clone --depth 1` of this repository
+#: and a full clone of the same ref, the whole suite on an interpreter with
+#: neither jax nor a solver wheel, `PY_COLORS=0`. The shallow run skipped 13
+#: tests the full run did not, in exactly these four reasons and no others:
+#: 8 in `tests/test_soundness_routing.py`, 3 in
+#: `tests/test_prerelease_scope_from_the_tag.py`, 1 in
+#: `tests/test_proposed_page_headers.py` and 1 in
+#: `tests/test_soundness_log_reach.py`. Both runs exited 0 and both wrote
+#: `verdict=made`, which is exactly why a lane that asserted only the exit code
+#: or only the verdict would have measured nothing here.
+SHALLOW_CLONE_LOSES = frozenset(
+    {
+        "git cannot read this tree's own history, so the routing manifest's "
+        "source-side columns are unverified here",
+        "git cannot read `v0.1.0:SOUNDNESS.md`, so the pre-release scope "
+        "cannot be derived from the tag",
+        "git cannot resolve `v0.1.0`, so no claim here about the tag's tree "
+        "can be decided",
+        "git cannot reach a commit a `proposed-*.md` status paragraph names, "
+        "so that header's shipped-in claim cannot be decided here",
+    }
+)
+
+
+def shallow_clone_differences(shallow: RunReport, full: RunReport) -> list[str]:
+    """The depth-1 run against the same commit at full depth. Empty is the pass.
+
+    Three claims, and the middle one is the anti-vacuity half:
+
+    * every guarantee the shallow run lost is one :data:`SHALLOW_CLONE_LOSES`
+      declares — *a shallow clone may skip the git-gated set and nothing else*;
+    * every reason declared there really was lost — a lane that measured a set
+      it had stopped producing would pass by having nothing to compare, and
+      that is the failure mode a `--depth 1` that silently was not shallow
+      produces;
+    * deepening the clone did not itself create a skip. Nothing should get
+      WORSE when the history arrives, and a difference in that direction means
+      the two runs differ in something other than the depth.
+
+    The counts are deliberately NOT compared here, which is the difference
+    between this and :func:`outcome_differences`: the two runs are supposed to
+    disagree about how many tests ran.
+    """
+    lost = shallow.reasons - full.reasons
+    gained = full.reasons - shallow.reasons
+    bad = []
+    for reason in sorted(lost - SHALLOW_CLONE_LOSES):
+        bad.append(
+            f"a `--depth 1` clone skipped for a reason nothing declares it may "
+            f"lose: {reason!r}. Either the history-gating spread to a check "
+            f"that did not have it, or this is a skip that has nothing to do "
+            f"with the depth. Add it to _lanes.SHALLOW_CLONE_LOSES with the "
+            f"measurement, or fix the gate."
+        )
+    for reason in sorted(SHALLOW_CLONE_LOSES - lost):
+        bad.append(
+            f"nothing was lost to the shallow clone for the declared reason "
+            f"{reason!r}. Either the guarantee stopped being git-gated — good "
+            f"news, and this set has to say so — or this run was not shallow, "
+            f"in which case the lane measured nothing."
+        )
+    for reason in sorted(gained):
+        bad.append(
+            f"deepening the clone CREATED a skip: {reason!r}. The two runs are "
+            f"supposed to differ in the depth of the checkout and in nothing "
+            f"else, so this is a difference the experiment does not control."
+        )
+    return bad
