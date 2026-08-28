@@ -836,7 +836,7 @@ repairing them, and the repairs are in place above and in
   swept — a paragraph naming what a sweep reached must move when the page
   grows a section the sweep never saw, or the reach statement quietly
   widens to cover text nobody drove.
-* **The `## Log` below was not read line by line.** It is **16,204 lines** as
+* **The `## Log` below was not read line by line.** It is **16,223 lines** as
   this is written — the `## Log` heading to the end of the file, and that is
   the population — and it was swept EXHAUSTIVELY BY INSTRUMENT — every
   `path::name` citation, every backticked module-qualified identifier, every
@@ -858,8 +858,8 @@ repairing them, and the repairs are in place above and in
   arithmetic were all stale by 2026-08-25 and are re-derived here rather
   than left**: measured on this tree by the same two rules — physical lines
   from the `## Log` heading to the last line of the file, and
-  `_detail_sections` over the 72 routed bodies — the Log is **16,204**
-  lines, the routed sections **3,470**, and the difference **12,734**,
+  `_detail_sections` over the 72 routed bodies — the Log is **16,223**
+  lines, the routed sections **3,470**, and the difference **12,753**,
   which is not 11,000-odd any more either. The two rules are stated because
   they are what reproduce the historical figures: they give 14,926 at
   `3fe29d3`, 14,924 at `391e50e` and 14,823 at `5ad906f`, so nothing above
@@ -8117,10 +8117,29 @@ and a count over entries that happened to say something is not a count.
   which is what the fix does.
 
   **That method was named `_classify_cmp` here until 2026-08-28, and it is
-  a pointer that was never live.** `git log --all -S "def _classify_cmp"
-  -- src/` returns no commit at any revision, so the name is not a rename
-  half-finished and correcting it destroys no record — it was broken from
-  the line it was written on. The 0.2.1 sweep found the same invented name
+  a pointer that was never live.** `git log --all --oneline -G
+  '^[[:space:]]*def _classify_cmp' -- src/` returns no commit, and the
+  same command on `def _classify_assumed_pred` returns `8106a55`, so the
+  zero is a reading and not a pattern that matches nothing. The name is
+  therefore not a rename half-finished, and correcting it destroys no
+  record — it was broken from the line it was written on.
+
+  *(That sentence read `git log --all -S "def _classify_cmp" -- src/`
+  **returns no commit at any revision** until 2026-08-29, and the release
+  that wrote it falsified it. `-S` counts occurrences of a STRING, and
+  0.2.1's correction record above `class _Propagator` in
+  `src/stelling/propagate.py` quotes the name, so from `6985594` onward
+  that command returns exactly one hit — the record itself. "At any
+  revision" made it worse, because the one revision it was false at was
+  the tree the sentence shipped in. The FINDING stands: what `-S` reports
+  is a record, not a definition. The INSTRUCTION did not, and an
+  instruction a reader is told to run is a claim like any other. It is the
+  same shape as the substring hole 0.2.1 disclosed one file over — an
+  instrument whose corpus includes the prose about the instrument — which
+  is why the repaired command is anchored and why
+  `tests/test_referenced_names_resolve.py::test_the_archaeology_this_file_
+  hands_a_reader_is_still_anchored` now checks the anchor against the tree
+  on every run rather than leaving it a promise.)* The 0.2.1 sweep found the same invented name
   at eight sites and `_Walker`, a class this repository has also never
   had, at two more; both of these were among them, and they were the last
   two repaired, because neither gate that caught the others can see this

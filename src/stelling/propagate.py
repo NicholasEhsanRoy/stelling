@@ -7784,13 +7784,46 @@ def _probe_point(k: int, shape, lo: float, hi: float, dtype: str, base: int):
 # **TWO NAMES THIS CLASS HAS NEVER HAD, AND EIGHT SENTENCES BUILT ON THEM.**
 # Prose in this file and in `src/stelling/obligation.py` called this class
 # `_Walker`, and called its `_classify_assumed_pred` below `_classify_cmp`.
-# NEITHER NAME HAS EVER BEEN DEFINED IN THIS REPOSITORY. Measured on
-# 2026-08-28: `git log --all -S "class _Walker" -- src/` and `git log --all
-# -S "def _classify_cmp" -- src/` each return no commits, while this class
-# has been `_Propagator` since the MVP commit `4f25390` (2026-07-17) and
-# `_classify_assumed_pred` was added in `8106a55` (2026-08-07). The invented
-# spellings entered the prose afterwards — `f116890` (2026-08-07) and
-# `0874dd1` (2026-08-14) — and reached six sites and two.
+# NEITHER NAME HAS EVER BEEN DEFINED IN THIS REPOSITORY. Re-derived
+# 2026-08-29, with the search anchored to a DECLARATION rather than to a
+# string, and with the control that makes a zero a reading:
+#
+#     git log --all --oneline -G '^[[:space:]]*class _Walker'     -- src/
+#     git log --all --oneline -G '^[[:space:]]*def _classify_cmp' -- src/
+#         -> no commits
+#     ... the same command on `class _Propagator`                 -> 4f25390
+#     ... the same command on `def _classify_assumed_pred`        -> 8106a55
+#
+# **THIS COMMENT HANDED A READER `-S` AND THIS COMMENT IS WHAT FALSIFIED
+# IT.** It read *"`git log --all -S "class _Walker" -- src/` and `git log
+# --all -S "def _classify_cmp" -- src/` each return no commits"*. `-S`
+# counts occurrences of a STRING, and the commit that added this paragraph
+# put both strings into this file, so from `6985594` onward each of those
+# commands returns exactly one hit: this record. The FINDING was never in
+# doubt — what `-S` reports is a record, not a definition — but the
+# instruction returned the opposite of what it promised, in `src/`, which
+# ships.
+#
+# That is this repository's recurring shape, arriving in the archaeology the
+# whole argument rests on: AN INSTRUMENT WHOSE CORPUS INCLUDES THE PROSE
+# ABOUT THE INSTRUMENT. It landed one release after the same shape was
+# disclosed, by the same author, about the substring test in
+# `tests/test_documented_names_exist.py` — which is the measure of how
+# cheaply it recurs, and why the repair below is a check and not a promise.
+# `-G` matches the regex against the diff's own lines, so the anchor asks
+# about a declaration; every mention here is inside a comment and cannot
+# match. What it does NOT survive is prose that writes a declaration at
+# column zero. What refuses that is
+# `tests/test_referenced_names_resolve.py::test_the_archaeology_this_file_
+# hands_a_reader_is_still_anchored`, which reads this tree's own text with
+# no git and no history — so it runs in an unpacked sdist and in a shallow
+# clone, the two places where a skip would read as a pass.
+#
+# This class has been `_Propagator` since the MVP commit `4f25390`
+# (2026-07-17) and `_classify_assumed_pred` was added in `8106a55`
+# (2026-08-07). The invented spellings entered the prose afterwards —
+# `f116890` (2026-08-07) and `0874dd1` (2026-08-14) — and reached six sites
+# and two.
 #
 # So this is not a rename that was half-finished. A rename leaves a trail a
 # reader can date; these were written down as if they existed. Five of the
