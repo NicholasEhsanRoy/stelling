@@ -113,6 +113,7 @@ import ast
 import pathlib
 import re
 import sys
+import pytest
 
 import stelling
 
@@ -169,15 +170,67 @@ def is_unshipped(version: str) -> bool:
     return bool(_UNSHIPPED.search(version))
 
 
+#: A release heading's POSITION, independent of whether it parses. `## ` and
+#: nothing else, because that is what makes a line a heading in this file;
+#: whether it is a WELL-FORMED heading is the next question and not this one.
+_ANY_HEADING_LINE = re.compile(r"^##\s.*$", re.M)
+
+
 def headings(text: str) -> list[tuple[str, str]]:
-    """`(version, rest)` for every release heading, newest first.
+    """`(version, rest)` for every release heading that PARSES, newest first.
 
     File order, not sorted: the changelog is written newest-first and the
     *newest heading* is a position in the document, not the largest version.
     Sorting here would quietly accept a file whose newest entry had been
     inserted in the wrong place.
+
+    **This is not the function to ask for the newest heading** — see
+    :func:`newest_heading`, and the paragraph below for why the difference is
+    a defect rather than a nicety.
     """
     return [(m.group("version"), m.group("rest")) for m in _HEADING.finditer(text)]
+
+
+def newest_heading(text: str) -> tuple[str, str] | None:
+    """The newest heading, FOUND by position and PARSED second, or `None`.
+
+    **`headings(text)[0]` WAS THE NEWEST HEADING AND IT WAS NOT**, and the
+    difference is a false GREEN rather than a confusing red.
+    :data:`_HEADING` is applied with `finditer`, which **skips** what it
+    cannot match — so a newest heading that does not parse is stepped over and
+    `[0]` becomes an OLDER one. Today that usually reds for the wrong reason,
+    naming the wrong version. On the day `stelling.__version__` happens to
+    equal that older heading's version — which is exactly the state a release
+    bump passes through — **it goes green with a malformed heading standing
+    above it**, and the one coupling this module exists to hold is not held.
+
+    Found by the branch that built the same gate in
+    `.github/workflows/release.yml`, which refuses that shape deliberately:
+    its step locates the first `## ` line and *then* parses it, so a malformed
+    newest heading is a refusal and never a step past. The two readers now
+    agree about what "newest" means, which they did not.
+
+    `None` means **no `## ` line at all**; a line that is present and does not
+    parse raises :exc:`MalformedNewestHeading`, because a can't-read resolving
+    to the same answer as a nothing-to-read is how the two stop being
+    distinguishable — and they are the two cases the caller's message has to
+    tell apart.
+    """
+    line = _ANY_HEADING_LINE.search(text)
+    if line is None:
+        return None
+    parsed = _HEADING.match(line.group(0))
+    if parsed is None:
+        raise MalformedNewestHeading(line.group(0))
+    return parsed.group("version"), parsed.group("rest")
+
+
+class MalformedNewestHeading(ValueError):
+    """The first `## ` line is not a `## <version> — <rest>` heading.
+
+    Its own exception type rather than a `None`, so that a caller cannot
+    handle it by accident with the same branch that handles an empty file.
+    """
 
 
 def test_the_newest_changelog_heading_names_this_version():
@@ -188,15 +241,24 @@ def test_the_newest_changelog_heading_names_this_version():
     that release has happened.
     """
     text = CHANGELOG.read_text(encoding="utf-8")
-    found = headings(text)
-    assert found, (
+    try:
+        found = newest_heading(text)
+    except MalformedNewestHeading as bad:
+        raise AssertionError(
+            f"{CHANGELOG.name}'s newest `## ` line does not parse as a "
+            f"release heading: {str(bad)!r}. It is NOT stepped over to reach "
+            f"an older one that does — that step is how this check went green "
+            f"over a malformed heading whenever the older one happened to "
+            f"name the current version."
+        ) from None
+    assert found is not None, (
         f"{CHANGELOG.name} has no `## <version> — <something>` heading, so "
         f"there is nothing to tie `stelling.__version__` to. A changelog "
         f"whose headings stopped parsing is a changelog this check reads as "
         f"satisfied, which is why the shape is asserted before the content."
     )
     version = stelling.__version__
-    newest, rest = found[0]
+    newest, rest = found
 
     assert newest == release_segment(version), (
         f"`CHANGELOG.md`'s newest heading names {newest!r} and "
@@ -435,10 +497,16 @@ def test_both_halves_of_the_coupling_are_driven():
     """
     def verdict(version: str, heading: str) -> str | None:
         """The complaint this rule makes about a `(version, heading)` pair."""
-        found = headings(heading)
-        if not found:
+        try:
+            found = newest_heading(heading)
+        except MalformedNewestHeading:
+            # A `## ` line that is not a heading is its OWN complaint, and the
+            # drive below plants one standing above a well-formed older
+            # heading — the shape `headings()[0]` used to step past.
+            return "malformed-newest"
+        if found is None:
             return "unparseable"
-        newest, rest = found[0]
+        newest, rest = found
         if newest != release_segment(version):
             return "version"
         if is_unshipped(version):
@@ -469,3 +537,59 @@ def test_both_halves_of_the_coupling_are_driven():
     ):
         assert release_segment(build) == release, build
         assert is_unshipped(build) == (build != release), build
+
+
+def test_a_malformed_newest_heading_is_REFUSED_and_never_stepped_past():
+    """The false GREEN `headings(text)[0]` had, driven on the shape that has it.
+
+    **THIS IS THE ONE THE OLD READER GOT WRONG, AND IT IS A GREEN RATHER THAN
+    A RED.** `_HEADING.finditer` skips what it cannot match, so a newest
+    heading that does not parse was stepped over and `[0]` became an OLDER
+    one. Usually that reds for the wrong reason — it names the wrong version.
+    But when the older heading happens to name the current release segment,
+    which is exactly the state a version bump passes through, every assertion
+    downstream is satisfied by a heading that is not the newest and the file
+    is accepted with a malformed heading standing above it.
+
+    The plant below is that state, minimally: a `## ` line with no em dash at
+    all, above a well-formed `## 0.2.0 — 2026-08-25`, read against `0.2.0`.
+    Both readings are taken here rather than described, so the difference is a
+    measurement:
+
+    * the OLD reading — `headings(plant)[0]` — is `("0.2.0", "2026-08-25")`,
+      i.e. the second heading, and every check downstream passes;
+    * the NEW reading refuses, because it locates the first `## ` line and
+      *then* parses it.
+
+    That is the same order `.github/workflows/release.yml`'s changelog step
+    uses, deliberately, and the two readers now agree about what "newest"
+    means.
+    """
+    plant = "## 0.2.0 no em dash here\n\n## 0.2.0 — 2026-08-25\n"
+
+    # THE OLD READING, taken rather than remembered. `headings` still exists
+    # and still skips; keeping it is what lets this test be a measurement of
+    # the difference instead of a story about it.
+    stepped_past = headings(plant)
+    assert stepped_past and stepped_past[0] == ("0.2.0", "2026-08-25"), (
+        "the premise of this test is that `headings()[0]` steps past a "
+        "malformed newest heading and returns an older one; it did not, so "
+        "either `_HEADING` or the plant has changed and this test is no "
+        "longer measuring what it says"
+    )
+
+    # ... and every downstream assertion is satisfied by that older heading,
+    # which is what makes the old behaviour a GREEN and not a RED.
+    older_version, older_rest = stepped_past[0]
+    assert older_version == release_segment("0.2.0")
+    assert _ISO_DATE.match(older_rest.strip())
+
+    # THE NEW READING refuses it, by its own exception type.
+    with pytest.raises(MalformedNewestHeading) as caught:
+        newest_heading(plant)
+    assert "no em dash here" in str(caught.value), caught.value
+
+    # An empty file and a headingless file are the OTHER case, and they stay
+    # distinguishable: `None`, not an exception.
+    assert newest_heading("") is None
+    assert newest_heading("nothing here\n\nnot a heading either\n") is None
