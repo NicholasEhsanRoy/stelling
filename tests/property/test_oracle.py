@@ -28,8 +28,8 @@ execution oracles in general. It is true of the wrap and of anything else that
 rewrites the program before tracing. It says nothing about a defect in the
 ANALYSIS of a faithfully traced program, where there is no second reading to be
 stronger than — see ``test_float_oracle.py``, which executes the program and
-pins eight harnesses, in five distinct IEEE causes, that this file cannot
-express at all.
+pins nine harnesses, in six distinct causes, that this file cannot express at
+all.
 
 **Why integers only — AND WHAT THAT DOES NOT MEAN ANY MORE.**
 ``SOUNDNESS.md`` records that real mode judges floats in exact real arithmetic
@@ -39,7 +39,7 @@ conclude from that *"an oracle pointed at floats would be reporting the
 documentation rather than a defect"*, and **that conclusion is withdrawn**: a
 VERIFIED the compiled program contradicts at a dtype-representable point of its
 own declared box is unacceptable whatever ℝ says, and ``test_float_oracle.py``
-pins eight of them. What survives is the narrow, mechanical reason THIS file is
+pins nine of them. What survives is the narrow, mechanical reason THIS file is
 integer-only: its ground truth is ``_grammar.eval_pred_exact``, which evaluates
 in unbounded Python integers, and there is no float it could evaluate in. The
 float question is asked next door, by executing the program.

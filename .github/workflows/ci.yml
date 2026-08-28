@@ -1802,23 +1802,27 @@ jobs:
               reason and by the same mechanism: xfail(strict,
               raises=ExecutedValueOutsideBox). This job is GREEN while the
               value the compiled program computes falls outside the box the
-              propagator computed for it, in nine pinned programs, and 95
-              of the 563 violations one 1500-example run found are an
-              obligation whose box says `definitely true for all elements`
-              executing FALSE at an admitted point of its own declared box.
-            * WHAT A GREEN FLOAT-ORACLE LEG DOES NOT SAY. Of 13727 boxes read
-              in a 1500-example run, only 8411 (61 %) are compared at all:
-              2042 are TOP (which contains every finite float), 1697 are EMPTY
-              (a size-0 declaration) and 1577 are INTEGER (a binary64 box
-              endpoint cannot represent an int64 above 2**53). 39 % of its
+              propagator computed for it, in nine pinned programs, and 116
+              of the 563 violations one 1500-example run found — over 21
+              DISTINCT PROGRAMS, which is the denominator a repair is scoped
+              on — are an obligation whose box says `definitely true for all
+              elements` executing FALSE at an admitted point of its own
+              declared box.
+            * WHAT A GREEN FLOAT-ORACLE LEG DOES NOT SAY. Of 13041 boxes read
+              in a 1500-example run, only 7719 (59 %) are compared at all:
+              1948 are EMPTY (a size-0 declaration), 1787 are TOP (which
+              contains every finite float) and 1587 are INTEGER (a binary64
+              box endpoint cannot represent an int64 above 2**53). 41 % of its
               field of view is blind, for three different reasons, one of them
               being that the propagator already declined. It samples at most
-              six dtype-representable points of each declared box; a violation
-              it cannot read exactly answers `unclassified` rather than
-              `UNEXPLAINED`, so a green leg says only that nothing was PROVED
-              to be a box wrong about the reals; and neither of its generators
-              reaches scan/while/cond, vmap, grad, the affine refinement, the
-              solver legs or semantics="ieee". Its pass rate is not a safety
+              six dtype-representable points of each declared box; 57 of its
+              563 violations are named by a rule that PROVES NOTHING (the
+              census carries proved / sound-by-construction / heuristic, and
+              `0 unclassified` is not the measure of that); the 563 events
+              stand on 90 distinct programs, and the class ranking INVERTS
+              between the two columns; and neither of its generators reaches
+              scan/while/cond, vmap, grad, the affine refinement, the solver
+              legs or semantics="ieee". Its pass rate is not a safety
               signal.
             * the two tested jax series agreeing (needs two interpreters)
             * the nightly budgets — no scheduled job exists

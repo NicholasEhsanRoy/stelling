@@ -265,15 +265,22 @@ Two consequences worth keeping in mind:
   is unacceptable whatever ℝ says.
 
   Measured after the argument was withdrawn and the instrument built
-  (`test_float_oracle.py`, 2026-08-28 at `874d8ba`, 1500 examples at
-  `STELLING_PROPERTY_SCALE=12.5`): **563 violations of box containment — 316
-  NaN, 175 flush-or-subnormal, 29 narrow-format rounding, 27 reduction
-  reassociation, 16 overflow-to-inf, 0 unexplained and 0 unclassified — of which
-  95 are an obligation whose box says "definitely true for all elements" whose
+  (`test_float_oracle.py`, 2026-08-28 at `03b2dbe`, 1500 examples at
+  `STELLING_PROPERTY_SCALE=12.5`): **563 violations of box containment over 90
+  distinct programs and 110 distinct sites — 231 flush-or-subnormal (12
+  programs), 162 NaN (31), 83 narrow-format rounding (10), 46 reduction
+  reassociation (30), 25 overflow-to-inf (8), 16 assume-narrowing (1), 0
+  unexplained, 0 unclassified — of which 116, over 21 distinct programs, are
+  an obligation whose box says "definitely true for all elements" whose
   predicate executes FALSE at an admitted point.** Nine programs are pinned as
   regression cases; eight of the nine violate box containment against
   `v0.1.0`'s own `src/` as well, and five of those falsify a discharge there.
-  None of them needed a float harness to be *mis*-documented to be a defect. The scope of THIS
+  None of them needed a float harness to be *mis*-documented to be a defect.
+
+  **The distinct-program column is the one a repair is scoped on**, and the
+  ranking inverts between the two: by events `flush(231) > reassoc(46)`, by
+  programs `reassoc(30) > flush(12)`, because one pinned example re-drawn
+  contributes as many events as it is re-drawn. The scope of THIS
   file's oracle (`test_oracle.py`) is still integers, and that is now a
   statement about the exact-oracle machinery — `_grammar.eval_pred_exact`
   works in unbounded Python integers — rather than an argument that floats
@@ -326,14 +333,17 @@ warning:
    instrument sees nothing exactly where the propagator already declined. The
    census counts boxes in FOUR buckets, because they are unfalsifiable for
    entirely different reasons and only the last is a place a finite value can
-   be caught outside its box. Measured over 1500 examples, of **13727** boxes
-   read: **2042 ⊤ (15 %), 1697 empty (12 %, a size-0 declaration), 1577
-   integer (11 %, never compared — a binary64 box endpoint cannot represent an
-   `int64` above 2**53), 8411 compared (61 %).** Both properties floor on the
-   last alone. **The integer bucket used to be counted inside "76 %
-   falsifiable"** and reached no census, no floor and no disclosure; 39 % of
-   the field of view is blind, not 24 %. The pass rate is not a safety signal.
-   NaN is the only cause that survives a ⊤, because no box contains a NaN.
+   be caught outside its box. Measured over 1500 examples, of **13041** boxes
+   read: **1948 empty (15 %, a size-0 declaration), 1787 ⊤ (14 %), 1587
+   integer (12 %, never compared — a binary64 box endpoint cannot represent an
+   `int64` above 2**53), 7719 compared (59 %).** Both properties floor on the
+   last alone, and on the last **restricted to the unbiased generator** —
+   floored on the whole, the leg stayed green with a size-0 declaration
+   standing in for the whole search. **The integer bucket used to be counted
+   inside "76 % falsifiable"** and reached no census, no floor and no
+   disclosure; 41 % of the field of view is blind, not 24 %. The pass rate is
+   not a safety signal. NaN is the only cause that survives a ⊤, because no
+   box contains a NaN.
 2. **The sampler's grid.** `np.float32(1e-20)` is `9.9999997e-21`, *below* a
    box declared `(1e-20, 1e-10)`; sampling there and comparing against a box
    built for `[1e-20, …]` invents violations of the identity, with no
@@ -347,14 +357,22 @@ warning:
    what an unsnapped instrument finds is its own sampler's rounding — and
    nothing asserted that until an audit said so, because with the snap deleted
    the containment leg still XFAILed and the residual leg failed only
-   incidentally. The guard is explicit now, and it is not a blanket ban: a
-   `stelling_any` violation under a NARROWING ASSUME is a genuine member
-   (`assume-narrows-past-the-program`, the ninth). **The same mistake, one
-   dtype over, was live in this file**: integer candidates went through
-   `float`, so `any_array((), "int64", (1, 2**63 - 1))` sampled
-   `-9223372036854775808` — outside its own box — and this module reported its
-   own sampler as a defect in stelling. Integer candidates stay Python
-   integers now. (**Reported, not repaired here:**
+   incidentally. The guard is explicit now, and it asks whether an assume
+   NARROWED this declaration rather than whether the harness contains the word:
+   it tested presence, and a **vacuous** `assume(x0 >= -1e300)` disarmed it
+   (0 artefacts where no assume gives 2), exempting 172 of 1206 read programs.
+   It is not a blanket ban either: a `stelling_any` violation under a genuinely
+   narrowing assume is the ninth member. **THREE DEFECTS OF THAT SHAPE HAVE
+   NOW BEEN FOUND IN THIS ONE SAMPLER**: the float32 endpoint it was written
+   for; integer candidates routed through `float`, so
+   `any_array((), "int64", (1, 2**63 - 1))` sampled `-9223372036854775808`,
+   outside its own box; and an INFINITE endpoint, which under ℝ semantics means
+   *unbounded* and is not a member of the set — 71 of 33684 candidates were
+   ±inf and 51 of 563 violations occurred at one, every one of them in the NaN
+   row. `snap_inward` clamps to the format's largest finite magnitude now, the
+   way `falsify.probe`'s bool branch clamps, rather than refusing the way its
+   float branch does; the note there says why the two precedents differ.
+   (**Reported, not repaired here:**
    the declared endpoints stelling stores are binary64 images and are *not*
    snapped to the program's dtype grid, so a float32 box can have endpoints no
    float32 can take. That is a declaration-layer defect; this instrument only
@@ -398,26 +416,26 @@ are counted but not compared (a box endpoint is a binary64 float and an
 its own rounding). The wrap class those dtypes carry is `test_oracle.py`'s
 subject and is judged there exactly.
 
-**Cost, and how it runs.** 29-43 ms per example: a 1500-example run of the
-residual leg takes 44 s at load average 6 and 64 s at load average 7 on a
-24-core box, and three runs returned the census below byte for byte.
-The cost is dominated by jax dispatch — the op-by-op walk always, and one
-`jax.jit` compile for each program whose first route found a violation. At the
-`ci` profile the whole module costs **14.0-14.9 s**, three runs at load
-average 9 (`pytest -q -ra tests/property/test_float_oracle.py`, `1 passed,
+**Cost, and how it runs.** 28 ms per example: a 1500-example run of the
+residual leg takes 42.3 s at load average 3 on a 24-core box. The cost is
+dominated by jax dispatch — the op-by-op walk always, one `jax.jit` compile
+for each program whose first route found a violation, and a second forward
+propagation for the same programs to read their un-narrowed boxes. At the
+`ci` profile the whole module costs **13.0-13.1 s**, three runs at load
+average 3 (`pytest -q -ra tests/property/test_float_oracle.py`, `1 passed,
 1 xfailed`, zero warnings) —
 the containment leg stops at its first violation and then shrinks, and the
 residual leg runs its full 120 examples plus 11 pinned ones.
 
-**The nearest thing in `src/`, and what it does with these eight.**
+**The nearest thing in `src/`, and what it does with these nine.**
 `stelling.falsify.probe` (`check(..., falsify="sample")`) also executes the
 program at concrete points — but it asks whether the OBLIGATION is false
 there, not whether each value is inside its box, and it is default-off and
-`experimental`. Driven over all eight members plus the overflow probe,
-2026-08-28: **it reports none of the nine.** Two are UNKNOWN, so the probe
-never runs (it fires only after a VERIFIED); one is REFUTED; six are VERIFIED
-and stay VERIFIED. For four of those six it SAW the executed violation and
-declined it, in its own words:
+`experimental`. Driven over all nine members plus the overflow probe,
+2026-08-28: **it reports none of the ten.** Two are UNKNOWN, so the probe
+never runs (it fires only after a VERIFIED); one is REFUTED; seven are
+VERIFIED and stay VERIFIED. For five of those seven it SAW the executed
+violation and declined it, in its own words:
 
 ```
 falsification probe: 28 point(s) executed … declined 28 float-rounding-artefact.
@@ -426,8 +444,9 @@ obligation evaluated FALSE and the probe would not report it
 (28 exact-replay-holds-over-the-rationals).
 ```
 
-— 28 points for `ftz-subnormal-sum`, 12 for `f32-underflow`, 2 for
-`f32-single-multiply`, and 58 for `f32-exp` under
+— 28 points for `ftz-subnormal-sum`, 12 for `f32-underflow`, 2 each for
+`f32-single-multiply` and `assume-narrows-past-the-program` (which executed 72
+points, 63 of them admitted), and 58 for `f32-exp` under
 `no-exact-reading-of-this-program`. That decline rule *is* the ℝ defence in
 instrument form, disclosed rather than hidden, and it is why the probe is not
 a stand-in for this oracle. The other two VERIFIED members produce no

@@ -34,12 +34,12 @@ DECLINE.
 ``stelling.falsify.probe`` — ``check(..., falsify="sample")``, default-off and
 ``experimental`` — also executes the program at concrete points. It asks a
 different question: *is the OBLIGATION false here*, not *is each value inside
-its box*. Driven over all eight members plus ``OVERFLOW_PROBE``, 2026-08-28 at
-``a90862b``: **it reports none of the nine.** Two are UNKNOWN so it never runs
-(it fires only after a VERIFIED); one is REFUTED; six are VERIFIED and stay
-VERIFIED. For four of those six it SAW the executed violation and declined it
-— 28 points on ``ftz-subnormal-sum``, 12 on ``f32-underflow``, 2 on
-``f32-single-multiply`` as ``float-rounding-artefact``
+its box*. Driven over all NINE members plus ``OVERFLOW_PROBE``: **it reports
+none of the ten.** Two are UNKNOWN so it never runs (it fires only after a
+VERIFIED); one is REFUTED; seven are VERIFIED and stay VERIFIED. For five of
+those seven it SAW the executed violation and declined it — 28 points on
+``ftz-subnormal-sum``, 12 on ``f32-underflow``, 2 on ``f32-single-multiply``
+and 2 on ``assume-narrows-past-the-program`` as ``float-rounding-artefact``
 (``exact-replay-holds-over-the-rationals``), and 58 on ``f32-exp`` as
 ``no-exact-reading-of-this-program`` — and its note says so in its own words:
 *"28 EXECUTED VIOLATION(S) WERE DECLINED, NOT ABSENT"*. That decline rule is
@@ -47,7 +47,9 @@ the ℝ defence in instrument form, disclosed rather than hidden. The remaining
 two produce no obligation violation at all, because the box violation is one
 equation UPSTREAM of the obligation: ``1/Σ(…)`` executes ``inf > 0`` and the
 float32 square executes ``inf > 0``, both TRUE. A box-containment oracle sees
-a defect one equation before an obligation oracle can.
+a defect one equation before an obligation oracle can. (The ninth member was
+driven separately when it was pinned: 72 points executed, 63 admitted, none
+reported.)
 
 **THE ARGUMENT THAT KEPT THIS OUT IS RETRACTED, AND IT IS RETRACTED IN
 ``tests/property/README.md`` WITH WHAT IT SAID.** That file scoped the
@@ -149,11 +151,18 @@ result will meet them:
 A FOURTH, and it is about this file rather than about the search:
 **``UNEXPLAINED`` is a proof and it needs an exact reading to make.** Where
 :func:`_float_oracle.exact_value` has no entry for a primitive — ``sqrt``,
-``exp``, ``sign``, ``integer_pow``, every reduction but ``reduce_sum`` — a
-violation none of the five IEEE rules matched answers ``unclassified`` and is
-censused, not reported. A green residual leg therefore says *no violation was
-PROVED to be a box wrong about ℝ*, and the ``unclassified`` count is how much
-of the field that proof did not cover. It is 0 in the shipped run.
+``exp``, ``sign``, ``integer_pow``, every reduction but ``reduce_sum`` — no
+rule can prove anything, and a green residual leg says only *no violation was
+PROVED to be a box wrong about ℝ*.
+
+**AND ``unclassified`` IS NOT THE MEASURE OF THAT, WHICH IS WHAT THIS
+PARAGRAPH USED TO SAY.** It read *"the ``unclassified`` count is how much of
+the field that proof did not cover. It is 0 in the shipped run."* Zero is
+true and it measures the wrong thing: a violation an UNPROVED rule names is
+not unclassified, it is classified on no evidence, and 57 of the 563 were.
+The census carries :data:`_float_oracle.BASES` — 303 proved, 203 sound by
+construction, 57 heuristic — and the heuristic row is the honest answer to
+"how much did the proof not cover".
 
 ────────────────────────────────────────────────────────────────────────────
 POSITIVE CONTROLS
@@ -191,81 +200,91 @@ FLOAT_BOX_DEFECT = (
     "test XPASSes and the suite goes red."
 )
 
-#: THE PARTITION, as a dated record rather than a present-tense claim.
+#: THE PARTITION, as a dated record rather than a present-tense claim, and
+#: with the column that decides a repair beside the one that does not.
 #:
-#: Measured 2026-08-28 at ``874d8ba`` — jax 0.11.0, jaxlib 0.11.0, numpy
+#: Measured 2026-08-28 at ``03b2dbe`` — jax 0.11.0, jaxlib 0.11.0, numpy
 #: 2.5.2, CPython 3.12.3, hypothesis 6.165.10, ``JAX_PLATFORMS=cpu``, x64
 #: forced on by this module's fixture — by running THIS FILE's residual leg at
 #: ``STELLING_PROPERTY_SCALE=12.5``, i.e. 1500 examples, and reading its own
-#: census. Re-derivable by anyone with this tree and that command: the census
-#: line is what ``Census.require`` prints when a floor is not met, and the
-#: same object is what the floors below are asserted against. Three runs,
-#: 44-64 s depending on the load average on a 24-core box, byte-identical each
-#: time — the wall clock moves and not one count does.
+#: census. Re-derivable by anyone with this tree and that command.
 #:
-#: **THE PARTITION THIS FILE SHIPPED BEFORE THIS ONE IS SUPERSEDED, NOT
-#: CORRECTED, AND THE DIFFERENCE IS NOT A REMEASUREMENT.** It read 384
-#: violations as 178 flush / 109 nan / 51 narrow / 40 reassociation / 6
-#: overflow, over a different example sequence (a tenth and eleventh pinned
-#: ``@example`` moved the draw), and it was produced by an instrument that
-#: (a) reported one violation per point instead of one per data-dependence
-#: chain, (b) classified a violation ``flush-or-subnormal`` on an operand-side
-#: fact alone, (c) tried the dtype-dependent narrow-format rule before the
-#: physical flush rule, and (d) took the eager op-by-op answer where the
-#: compiled program constant-folds. Every one of those moved rows. The
-#: **ranking** survived — NaN and flush are the two big buckets, reassociation
-#: and overflow the two small ones — and the row an independent audit could
-#: not move from three directions, the falsified discharge, is unchanged by
-#: the one thing that could have moved it (see below).
+#: **EVENTS ARE THE WRONG DENOMINATOR AND THE RANKING INVERTS ON THEM.** 563
+#: events stand on 90 distinct programs and 110 distinct sites, and one pinned
+#: ``@example`` re-drawn contributes as many events as it is re-drawn. By
+#: events ``flush(231) > nan(162) > narrow(83) > reassoc(46)``; by distinct
+#: programs ``nan(31) > reassoc(30) > flush(12) > narrow(10)``. **A repair
+#: prioritised on 231-vs-46 would be prioritised on how often an example was
+#: re-drawn** — reduction reassociation is the second largest class by
+#: programs and the fourth by events. Both columns ship.
 #:
-#: **THE SPEC THIS WAS BUILT FROM QUOTED A DIFFERENT PARTITION AGAIN** — 120
-#: violations in 1500 examples, as 61 float32 precision, 37 NaN, 19
-#: overflow-to-inf, 3 box-touches-flush-region and 0 f64 in-band. It differs
-#: for reasons that are properties of this instrument rather than
-#: disagreements about the tree: it compares EVERY equation rather than the
-#: obligation's own, so a NaN deep inside an expression counts; it executes up
-#: to six points per program; and it calls a float32 underflow
-#: ``flush-or-subnormal`` rather than "float32 precision". The row that
-#: matters most is unchanged and is a PROOF rather than a count: **0 f64
-#: in-band violations from the uniform grammar**, because ``_grammar.SHAPES``
-#: tops out at four elements and the reassociation split needs 33.
+#: **AND THE THREE GENERATORS HAVE NOTHING IN COMMON BUT THIS CENSUS.** The
+#: unbiased grammar, the aimed cancelling-sum strategy and the pinned members
+#: are counted apart now, because mixing them makes the partition a statement
+#: about draw densities. The previous partition did mix them, and
+#: ``read/unlabelled`` — documented as "THE UNBIASED HALF, COUNTED SEPARATELY"
+#: — counted the aimed strategy too, because that one also yields
+#: ``label == ""``.
+#:
+#: **THE PARTITION THIS FILE SHIPPED AT ``03b2dbe`` IS SUPERSEDED.** It read
+#: 563 as 316 nan / 175 flush / 29 narrow / 27 reassoc / 16 overflow. Four
+#: things moved it: an unproved physical-band rule was preempting a provable
+#: ``UNEXPLAINED``; the sampler executed at ±inf, a point that is not a member
+#: of an unbounded declared set, which manufactured 51 NaN rows; the
+#: assume-narrowing class was being counted as arithmetic; and the refutation
+#: half of the obligation count was not element-aligned. The **ranking
+#: survives** on the column that matters.
 FLOAT_ORACLE_MEASURED = """\
-1511 programs drawn, 1206 read, 44.0-64.4 s (29-43 ms/example, load-bound)
- 305 not read: 108 whose assumes admit none of the sampled points; 76
-     ValueError, 53 OverflowError and 47 TypeError at the declaration door;
-     17 unsampleable (no value of the declaration's own dtype lies inside its
-     declared box); 4 UnsatisfiableAssumptionError
+1511 programs drawn, 1129 read, 42.3 s (28 ms/example, load average 3)
+ 382 not read: 108 ValueError, 79 TypeError, 50 OverflowError and 1
+     ZeroDivisionError at the declaration door; 95 whose assumes admit none of
+     the sampled points; 29 unsampleable; 20 UnsatisfiableAssumptionError
 
-13727 boxes read, in four buckets:
-     8411  compared  (61 %)  where a finite value can be caught outside a box
-     2042  TOP       (15 %)  the analysis declined; contains every finite float
-     1697  EMPTY     (12 %)  a size-0 declaration: no element to violate
-     1577  INTEGER   (11 %)  never compared; a binary64 box endpoint cannot
+13041 boxes read, in four buckets:
+     7719  compared  (59 %)  where a finite value can be caught outside a box
+     1948  EMPTY     (15 %)  a size-0 declaration: no element to violate
+     1787  TOP       (14 %)  the analysis declined; contains every finite float
+     1587  INTEGER   (12 %)  never compared; a binary64 box endpoint cannot
                              represent an int64 above 2**53
 
-563 VIOLATIONS, by cause:
-    316  nan
-    175  flush-or-subnormal
-     29  narrow-format-rounding
-     27  reduction-reassociation
-     16  overflow-to-inf
-      0  UNEXPLAINED   (the exact real value is OUTSIDE the box: PROVED)
-      0  unclassified  (no exact reading, or the box is right about ℝ:
-                    a refusal, not a finding)
+563 VIOLATIONS                      events   distinct programs
+    flush-or-subnormal                 231                  12
+    nan                                162                  31
+    narrow-format-rounding              83                  10
+    reduction-reassociation             46                  30
+    overflow-to-inf                     25                   8
+    assume-narrowing                    16                   1
+    UNEXPLAINED                          0                   0
+    unclassified                         0                   0
+                                       ---                 ---
+                                       563     90 programs, 110 sites
 
- 76 further candidate violations were DECLINED by the second route: the same
-    jaxpr as one compiled region does not have them, because XLA constant-folds
-    an all-constant equation in full precision where the op-by-op walk runs it
-    and gets the backend's flush-to-zero.
+BY EVIDENCE, which "0 unclassified" was standing in for:
+    303  proved                 an exact rational reading of the equation
+                                backed the cause AND placed the box inside ℝ
+    203  sound-by-construction  a NaN is in no box; an infinity a finite box
+                                excludes is in no box; a narrowing is decided
+                                by comparing two boxes. No reading needed
+     57  heuristic              a rule that names a plausible cause and proves
+                                nothing, reachable only where no exact reading
+                                of the primitive exists (exp, sqrt, sign)
 
- 95 violations are a DISCHARGE FALSIFIED: an obligation whose box says
-    "definitely true for all elements", whose predicate executed FALSE at an
-    admitted, dtype-representable point of its own declared box.
- 13 are the other direction: a "violated-over-set" that executed TRUE.
+BY STRATEGY                     drawn    read   violations
+    uniform (unbiased)            773     391          255
+    cancelling-sum (aimed)        607     607           29
+    pinned members                129     129          276
+    pinned probes                   2       2            3
 
-537 obligation readings were taken by BOTH routes at a violating point and
- 17 of them DISAGREE. Both counts above are read from the compiled route.
-    The 95 is the same on either route; the 13 was 18 on the eager one.
+   9 candidates DECLINED by the second route; 0 times it was unavailable
+ 420 obligation readings taken by BOTH routes, 0 of them disagreeing
+   0 sampler artefacts (a violation on `stelling_any` in a harness whose
+     assumes did not narrow that declaration)
+
+116 violations are a DISCHARGE FALSIFIED, over 21 DISTINCT PROGRAMS: an
+    obligation whose box says "definitely true for all elements", whose
+    predicate executed FALSE at an admitted, dtype-representable point of its
+    own declared box. The programs are the denominator a repair is scoped on.
+ 10 are the other direction: a "violated-over-set" that executed TRUE.
 """
 
 
@@ -323,6 +342,7 @@ OVERFLOW_PROBE = fo.Program(
          ("const", 0.0)),
     ),),
     "overflow-probe",
+    "probe",
 )
 
 #: ``x*x`` over ``float64 [-1, 1]``, pinned, with no violation on a clean tree.
@@ -347,16 +367,29 @@ MUL_CORNER_PROBE = fo.Program(
          ("const", 0.0)),
     ),),
     "mul-corner-probe",
+    "probe",
 )
 
 
-def _record(reading, census, program):
-    """Census one reading. Shared by both legs so they count the same things."""
+def _record(reading, census, program, distinct=None):
+    """Census one reading. Shared by both legs so they count the same things.
+
+    ``distinct`` is a ``key -> set of rendered programs``: 563 events standing
+    on 75 distinct programs is a different fact from 563 events, and the
+    ranking INVERTS between them — by events ``flush(175) > reassoc(27)``, by
+    distinct programs ``reassoc(17) > flush(8)``, because 170 of the 175
+    flushes are one pinned example re-drawn. A repair prioritised on the first
+    would be prioritised on how often an ``@example`` was re-drawn.
+    """
     census.draw()
+    census.tag(f"strategy/{program.source or 'unknown'}")
     if reading.status != "read":
         census.skip(reading.status)
         return
     census.tag("read")
+    census.tag(f"read/{program.source or 'unknown'}")
+    if program.source == "uniform":
+        census.tags["compared_boxes/uniform"] += reading.compared_boxes
     if not program.label:
         # THE UNBIASED HALF, COUNTED SEPARATELY, because every other floor in
         # this file is satisfiable by the pinned `@example`s alone. Driven with
@@ -376,6 +409,9 @@ def _record(reading, census, program):
         reading.contradicted_refutations
     )
     census.tags["route_declined"] += reading.route_declined
+    census.tags["route_unavailable"] += reading.route_unavailable
+    if distinct is not None and reading.falsified_discharges:
+        distinct.setdefault("falsified", set()).add(program.render())
     census.tags["route_obligations_compared"] += (
         reading.route_obligations_compared
     )
@@ -385,6 +421,18 @@ def _record(reading, census, program):
     census.tags["sampler_artefacts"] += reading.sampler_artefacts
     for v in reading.violations:
         census.tag(f"cause/{v.cause}")
+        census.tag(f"basis/{v.basis}")
+        census.tag(f"violations/{program.source or 'unknown'}")
+        if distinct is not None:
+            key = program.render()
+            distinct.setdefault(f"cause/{v.cause}", set()).add(key)
+            distinct.setdefault("any", set()).add(key)
+            # A SITE is a program AND the equation in it, because one program
+            # violating at three equations is three things to repair and one
+            # program re-drawn thirty times is one.
+            distinct.setdefault("site", set()).add(
+                (key, v.eqn, v.primitive)
+            )
         if program.label:
             census.tag(f"pinned/{program.label}")
 
@@ -396,6 +444,7 @@ def _report(program, reading, violation) -> str:
         "# sampled point (first element of each declaration): %r\n"
         "# boxes read %d = %d compared + %d ⊤ + %d empty + %d integer; the "
         "last three cannot be violated by a finite value at all\n"
+        "# cause reached by: %s\n"
         "# violations the SECOND (compiled) route declined: %d\n"
         "# obligations whose box says 'definitely true' and whose predicate "
         "executed FALSE, over every sampled point of this program: %d"
@@ -404,7 +453,7 @@ def _report(program, reading, violation) -> str:
             violation.element, violation.executed, violation.lo, violation.hi,
             violation.cause, program.render(), violation.point,
             reading.boxes_read, reading.compared_boxes, reading.top_boxes,
-            reading.empty_boxes, reading.integer_boxes,
+            reading.empty_boxes, reading.integer_boxes, violation.basis,
             reading.route_declined, reading.falsified_discharges,
         )
     )
@@ -433,8 +482,8 @@ def test_the_executed_value_lies_inside_the_computed_box():
     # marker they inherit a property that cannot pass vacuously — and the
     # floor is on NON-⊤ boxes, because a run that read nothing but ⊤ has
     # looked at nothing a finite value could ever fall outside of.
-    census.require(**{"read": 20, "read/unlabelled": 10,
-                      "compared_boxes": 100, "admitted_points": 20})
+    census.require(**{"read": 20, "read/uniform": 10,
+                      "compared_boxes/uniform": 50, "admitted_points": 20})
 
 
 def test_every_violation_it_finds_has_a_known_ieee_cause():
@@ -460,6 +509,7 @@ def test_every_violation_it_finds_has_a_known_ieee_cause():
     clean tree and is here to be the mutant control's harness.
     """
     census = _runner.Census("float-oracle/residual")
+    distinct: dict = {}
 
     @_profiles.current().settings(120)
     @given(fo.float_oracle_inputs())
@@ -477,7 +527,7 @@ def test_every_violation_it_finds_has_a_known_ieee_cause():
     def search(drawn):
         program, interior = drawn
         reading = fo.read(program, interior=interior)
-        _record(reading, census, program)
+        _record(reading, census, program, distinct)
         registered = fo.MEMBERS.get(program.label)
         if registered is not None and reading.violations:
             # A PINNED MEMBER THAT STILL VIOLATES FOR A DIFFERENT REASON is
@@ -530,12 +580,19 @@ def test_every_violation_it_finds_has_a_known_ieee_cause():
                 )
 
     search()
+    # DISTINCT PROGRAMS ALONGSIDE EVENTS, because the ranking inverts between
+    # them and a repair scoped on the event column would be scoped on how
+    # often an `@example` was re-drawn.
+    for key, seen in distinct.items():
+        census.tags[f"distinct/{key}"] = len(seen)
     floors = {
         "read": 30,
-        "read/unlabelled": 15,
-        "compared_boxes": 100,
+        "read/uniform": 15,
+        "read/cancelling": 10,
+        "compared_boxes/uniform": 50,
         "admitted_points": 30,
         "falsified_discharges": 1,
+        "distinct/any": 10,
     }
     floors.update({f"pinned/{name}": 1 for name in fo.MEMBER_NAMES})
     floors.update({

@@ -31,7 +31,7 @@ THIS PARAGRAPH USED TO CARRY A SECOND CLAIM AND IT IS WITHDRAWN. It read
 floats measures the documented gap rather than a bug."* The posture is
 declared, and a verdict the compiled program contradicts at a
 dtype-representable point of its own declared box is a defect regardless:
-``tests/property/test_float_oracle.py`` pins eight such programs, four of which
+``tests/property/test_float_oracle.py`` pins nine such programs, five of which
 reach ``v0.1.0``. What is integer-only is THIS oracle's arithmetic, not the
 question.
 
