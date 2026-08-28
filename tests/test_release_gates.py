@@ -660,10 +660,45 @@ def test_the_attributes_that_decide_whether_a_refusal_refuses():
 
 
 #: A `uses:` line naming the checkout action, with the optional sequence dash
-#: and optional quoting around the value. This is YAML STRUCTURE — an action
-#: can only enter a workflow through a `uses:` key — and not a spelling of how
-#: a step happens to be written.
-_USES_CHECKOUT = re.compile(r"""(?:-\s+)?uses:\s*["']?actions/checkout@""")
+#: and optional quoting around BOTH the key and the value. This is YAML
+#: STRUCTURE — an action can only enter a workflow through a `uses:` key — and
+#: not a spelling of how a step happens to be written.
+#:
+#: THE KEY'S QUOTES WERE THE LAST RING OUT. This read `(?:-\s+)?uses:` and
+#: :data:`_KEY` read `([A-Za-z0-9_.-]+):`, so `- "uses": actions/checkout@v4`
+#: with `"ref": deadbeef` was missed by BOTH — and because it was missed by
+#: both, the count cross-check that makes every other unparseable shape a loud
+#: red still balanced -- one `uses:` line fewer AND one step fewer -- and the
+#: step went unheld. One backreferenced quote group in each pattern closes it.
+#:
+#: RE-DRIVEN over six respellings of the `build` checkout, 2026-08-28, whole
+#: module each time:
+#:
+#:   `- "uses": …` with `"ref": …`          3 failed   (was 4 passed)
+#:   `- {uses: actions/checkout@v4}`        1 failed   (the count)
+#:   `- <<: *co`, the anchored definition
+#:     kept elsewhere in the file           1 failed   (the count)
+#:   `uses:` inside a `run:` block scalar   1 failed   (the count, a FALSE
+#:                                          red, which is the safe direction)
+#:   `ref:` at step level, outside `with:`  2 failed
+#:   the step commented out entirely        41 passed  (correct: a comment is
+#:                                          not a step, and `_code_lines`
+#:                                          drops it before either scan)
+#:
+#: THE ALIAS ROW NEEDS ITS DEFINITION TO REMAIN, and that is worth writing
+#: down because the first attempt at it here did not: replacing the step with
+#: `- <<: *co` and deleting the anchored mapping too is `41 passed`, correctly
+#: -- that is not an aliased checkout, it is a job with no checkout at all,
+#: and these pins are about the inputs of the checkouts that EXIST. A job that
+#: stops checking anything out fails in CI on the first missing file.
+_USES_CHECKOUT = re.compile(
+    r"""(?:-\s+)?(["']?)uses\1:\s*["']?actions/checkout@"""
+)
+
+#: `key: value` with one optional layer of matching quotes around the key. The
+#: backreference is what makes it one LAYER rather than any stray quote: `"a:`
+#: is not a key and does not match.
+_KEY = re.compile(r"""(["']?)([A-Za-z0-9_.-]+)\1:\s*(.*)$""")
 
 
 def _unquote(value: str) -> str:
@@ -697,10 +732,18 @@ def _checkout_steps() -> list[tuple[dict[str, str], dict[str, str]]]:
     quiet one**, which is the property the two scans it replaces did not have:
 
     * a step written as a FLOW mapping (`- {uses: actions/checkout@v4}`). The
-      reader would not find it, and :func:`_the_checkout_reader_sees_every_checkout`
-      asserts that the number of steps found equals the number of
-      `uses:`-assignments naming the action, so the count disagrees and the
-      suite goes red.
+      reader would not find it, and
+      :func:`test_the_checkout_reader_sees_every_checkout` asserts that the
+      number of steps found equals the number of `uses:`-assignments naming
+      the action, so the count disagrees and the suite goes red. A `uses:`
+      line inside a `run:` block scalar takes the same count red — a FALSE
+      red, and the safe direction.
+    * QUOTED KEYS ARE SEEN, and that is written here because they were not.
+      `- "uses": actions/checkout@v4` with `"ref": deadbeef` slipped BOTH this
+      reader and the count check — the only shape of the six driven that did,
+      because being invisible to both is what let the count balance — so the
+      quotes are part of the patterns now rather than part of what is
+      declared unreachable.
     * anchors, aliases and merge keys. `release.yml` carries none — re-derived
       with PyYAML 2026-08-28 — and one appearing would take the same count
       check red, because the alias would not carry a literal `uses:` line.
@@ -743,12 +786,12 @@ def _checkout_steps() -> list[tuple[dict[str, str], dict[str, str]]]:
                 if not entry.strip():
                     continue
                 depth = len(entry) - len(entry.lstrip())
-                match = re.match(r"([A-Za-z0-9_.-]+):\s*(.*)$", entry.strip())
+                match = _KEY.match(entry.strip())
                 if depth == key_indent and match:
-                    in_with = match.group(1) == "with"
-                    keys[match.group(1)] = _unquote(match.group(2).strip())
+                    in_with = match.group(2) == "with"
+                    keys[match.group(2)] = _unquote(match.group(3).strip())
                 elif in_with and depth == key_indent + 2 and match:
-                    with_map[match.group(1)] = _unquote(match.group(2).strip())
+                    with_map[match.group(2)] = _unquote(match.group(3).strip())
             steps.append((keys, with_map))
     return [(k, w) for k, w in steps
             if k.get("uses", "").startswith("actions/checkout@")]
