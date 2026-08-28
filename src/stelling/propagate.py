@@ -4023,14 +4023,48 @@ def _integer_pow_budget(box, y: int) -> None:
 # directions, and the question asked of each was specifically "what does an
 # upper-bound obligation below a division do with this".
 
-# ROUTING — every element of every output IS an element of a VALUE operand.
-# The primitive moves, copies, selects or joins values and introduces none
-# of its own, so the certificate rides the value operands and the rule is
-# their agreement. This is the ONLY class whose claim is already quantified
-# over every output of the equation, which is what lets `split` and
-# `unstack` carry the fact through their several outvars
+# ROUTING — **OVER ℝ**, every element of every output IS an element of a
+# VALUE operand: the primitive moves, copies, selects or joins values and
+# introduces none of its own, so the certificate rides the value operands
+# and the rule is their agreement. This is the ONLY class whose claim is
+# already quantified over every output of the equation, which is what lets
+# `split` and `unstack` carry the fact through their several outvars
 # (:meth:`_Propagator._strict_sign_out` permits multi-output here and
 # nowhere else).
+#
+# **THE "OVER ℝ" IS NEW AND IT IS A CORRECTION.** This sentence read "every
+# element of every output IS an element of a VALUE operand … introduces
+# none of its own" with no qualifier, and added that each member had been
+# checked against its transfer's own code. The check was real and the
+# unqualified sentence is false of the EXECUTABLE for exactly two members.
+# MEASURED, jax 0.11.0 CPU binary64:
+#
+#     lax.max(5e-324, -1.0)  ->  0.0     neither operand's value
+#     lax.min(-5e-324, 1.0)  -> -0.0     neither operand's value
+#     jnp.reshape(5e-324, ())->  5e-324  exact, as the class claims
+#
+# `max`/`min` are the two: the target's DAZ flush destroys a subnormal
+# operand before the comparison, so the result is a zero neither operand
+# held. Every other member is a bit-copy on the target as well as a value
+# copy in ℝ. The rule needs only the ℝ statement — real mode judges in
+# exact real arithmetic over the declared sets — and the executable's
+# departure from it is the same DAZ band `mul` and `sqrt` ride, disclosed
+# at :data:`stelling.interval.SUBNORMAL_INDETERMINACY_ASSUMPTION`. What
+# would make it a wrong VERDICT is a zero whose SIGN BIT disagrees with the
+# certificate, and that constraint is stated once at `_t_div`'s boundary
+# gate, which is the only consumer that can be hurt by one. Measured there:
+# `lax.min(-5e-324, 1.0)` is `-0.0`, matching the `-1` a `min` of certified
+# negatives would mint.
+#
+# **MEMBERSHIP OF THIS SET NOW GRANTS A RULE WITH NO CODE**, and that is a
+# widened blast radius worth naming. Before 0.3.0 a new carrier meant
+# writing a branch in :meth:`_Propagator._strict_sign_out`; a name added
+# here activates the generic agreement rule on its own. The totality check
+# reaches "classified somewhere" and never "classified rightly", and a
+# probe only checks what the rule ANSWERS. What catches a naming mistake is
+# `tests/test_strict_sign_census.py`'s EXECUTED-jax truth case per member —
+# which is why that table is asserted total over this set — and the
+# generated search in `tests/property/test_strict_sign_property.py`.
 #
 # Each member was checked against its transfer's own code, not against its
 # name — several names in this shape can introduce a value no operand held
@@ -4068,6 +4102,14 @@ def _integer_pow_budget(box, y: int) -> None:
 #   dynamic_update_slice — the same start discipline, plus the half that
 #     matters here: positions no admitted start writes are COPIED from the
 #     operand, not filled. Operand and update are both value operands.
+#
+# A PRECISION LOSS THIS CLASS TAKES ON PURPOSE: an EMPTY operand poisons a
+# variadic member. No size-0 value can ever be certified
+# (:meth:`_Propagator._record_strict_sign`), and the agreement rule needs
+# every value operand certified — so `concatenate([empty, y])` drops the
+# fact even though every element of the output comes from `y`. Sound,
+# strictly conservative, and cheaper than a per-operand emptiness carve-out
+# that would have to be right about which operands contribute elements.
 #
 # The two harness IDENTITIES are not here even though `[ins[0]]` satisfies
 # the class contract exactly; see `_SIGN_NO_RULE` for why a sound rule was
@@ -4133,21 +4175,31 @@ _SIGN_NO_RULE: dict[str, str] = {
     # indirection this project keeps re-finding.
     "pow": "a SOURCE gated on interval.pow_'s own domain guard, and pow "
            "underflows (measured: math.pow(1e-300, 3.0) == 0.0)",
-    # THE ONE THAT LOOKS LIKE IT BELONGS AND DOES NOT. Over R, `sign` is
-    # sign-preserving by definition. But `_t_sign`'s box deliberately admits
-    # 0 across the open band (-MIN_NORMAL, MIN_NORMAL) because the measured
-    # target flushes subnormals — `lax.sign(1e-320) == 0.0` on jax 0.11.0
-    # CPU binary64, eager and under jit — and it takes that reading in BOTH
-    # semantics modes on purpose ("the answer that is sound under either
-    # reading"). A certificate here would contradict its own transfer's box
-    # inside one mode, and would do it in exactly the shape that unlocks
-    # `boundary_div`: a box straddling zero plus a certificate saying it
-    # cannot. That is the highest-risk combination in this whole item, and
-    # it is the one place where the certificate and the transfer disagree
-    # about the same value rather than merely about its width.
-    "sign": "_t_sign's own box admits 0 across the subnormal band on the "
-            "reading it takes in both modes (measured: lax.sign(1e-320) "
-            "== 0.0); a certificate would contradict it at the div gate",
+    # THE ONE THAT LOOKS LIKE IT BELONGS AND DOES NOT, and the reason is
+    # NOT "it diverges from the executable in the subnormal band" — `mul`
+    # and `sqrt` do that too and are admitted (see the `sqrt` bullet at
+    # :meth:`_Propagator._strict_sign_out`, which compares the three).
+    # `sign` is refused because ITS OWN TRANSFER ADDS A ZERO TO A BOX THAT
+    # EXCLUDES ONE. `_t_sign` gates its definite branches on MIN_NORMAL
+    # rather than on zero, deliberately, because the measured target
+    # flushes subnormals (`lax.sign(1e-320) == 0.0`, jax 0.11.0 CPU
+    # binary64, eager and under jit) — so it takes that reading in BOTH
+    # semantics modes. MEASURED, and this is the whole distinction:
+    #
+    #     box [1e-320, 1e-310]   straddles_zero: False
+    #       _t_sign  -> [0.0, 1.0]                 straddles_zero: TRUE
+    #       iv.sqrt  -> [9.9999e-161, 9.9999e-156] straddles_zero: False
+    #
+    # A certificate on `sign`'s output would therefore contradict its own
+    # transfer's box inside one mode, and would do it in exactly the shape
+    # that unlocks `boundary_div`: a box straddling zero plus a certificate
+    # saying it cannot. `sqrt`'s box contains a zero only where the ASSUME
+    # left one there as a closed over-approximation, which is the ordinary
+    # case every rule in this table is built on.
+    "sign": "_t_sign ADDS a zero to a box that excludes one (measured: "
+            "_t_sign([1e-320, 1e-310]) == [0.0, 1.0]) because the target "
+            "flushes subnormals; a certificate would contradict its own "
+            "transfer's box in exactly the shape that unlocks boundary_div",
     # Truncated remainder is exactly zero on a lattice of nonzero operand
     # pairs: MEASURED, `lax.rem(6.0, 3.0) == 0.0` with both operands
     # certifiable `+1`. There is no side condition on the SIGNS that rescues
@@ -4209,19 +4261,34 @@ _STRICT_SIGN_PRIMITIVES = _SIGN_ROUTING | _SIGN_ARITHMETIC
 
 
 def _sign_value_operands(prim: str, sgn: list[int]) -> tuple[int, ...]:
-    """The per-operand certificates of the operands whose VALUES a ROUTING
-    primitive's output is built from — index operands dropped.
+    """The per-operand certificates of the operands whose VALUES an
+    equation's output is built from — index operands dropped.
 
-    **PRECISION ONLY, NEVER SOUNDNESS, and that is worth being precise
-    about.** The routing rule demands that every operand it is given agree
-    on one nonzero sign, so naming FEWER operands here can only make it
-    mint where the full list would not — that direction IS soundness, and
-    every entry below was checked against its transfer's operand order.
-    Naming MORE operands can only make it decline. The fallthrough is
-    therefore the safe one: a primitive this function has never heard of
-    gets its whole operand list, which for an index-carrying primitive
-    means the index has to be certified too and the rule almost always
-    drops. A new routing transfer is over-conservative here, never wrong.
+    Mostly ROUTING primitives, but not only: `scatter-add` is
+    :data:`_SIGN_ARITHMETIC` and is one of the named entries below, because
+    what makes an operand a VALUE operand is the primitive's signature and
+    not its census class.
+
+    **SOUNDNESS-BEARING IN ONE DIRECTION, PRECISION IN THE OTHER, AND THE
+    HEADLINE HERE USED TO SAY THE WRONG ONE.** It read *"PRECISION ONLY,
+    NEVER SOUNDNESS"* — contradicted two lines later by its own body, and
+    the headline is the part that licenses an edit. The direction is:
+
+    * naming FEWER operands than the output is built from **is a soundness
+      change**. It makes the rule mint where the full list would not, on an
+      operand that does not determine the value. Every named entry below
+      was checked against its transfer's operand order, and each is driven
+      by a mutation in `tests/test_strict_sign_census.py` that produced
+      false certificates the executed program contradicts.
+    * naming MORE operands can only make the rule decline, which is
+      precision.
+
+    So the FALLTHROUGH is the safe one and the ENTRIES are not: a primitive
+    this function has never heard of gets its whole operand list, which for
+    an index-carrying primitive means the index has to be certified too and
+    the rule almost always drops. A new routing transfer is
+    over-conservative here, never wrong. An edit to one of the named
+    entries is a soundness edit.
 
     The three shapes, from the transfers' own signatures:
 
@@ -4267,11 +4334,39 @@ DIV_STRADDLE_DECLINE = (
 # project keeps re-finding; both lists are read off the sets instead, so a
 # new classification cannot leave this sentence lying.
 #
-# WHAT IT STILL DOES NOT SAY: the per-rule SIDE CONDITIONS, beyond the two
-# spelled out. `select_n` needs every case certified, `max` needs only one
-# operand, `integer_pow` needs a decodable exponent. A reader who has the
-# primitive in the carrier list and still gets this decline is looking at a
-# side condition, and this message will not tell them which.
+# WHAT IT STILL DOES NOT SAY: WHICH per-rule side condition a given chain
+# failed. It names three as examples and says so.
+#
+# **IT USED TO SAY "Two of those carry it only under a side condition on
+# the operands' signs: `add` needs both certified the SAME sign, `sub`
+# needs them OPPOSITE", AND THAT COUNT WAS FALSE — inside the very
+# sentence whose hand-written enumeration this change had just replaced
+# with a derived one.** Derived from the shipped probe table
+# (`tests/test_strict_sign_census.py::PROBES`, all value operands
+# certified nonzero and the rule still answering 0) the count is
+# THIRTEEN, not two: `add`, `add_any`, `concatenate`, `dot_general`,
+# `dynamic_update_slice`, `integer_pow`, `reduce_sum`, `scatter`,
+# `scatter-add`, `select_n`, `sqrt`, `stack`, `sub` — and `max`/`min`
+# drop on a different condition again (one operand certified, the other
+# not). The paragraph directly above this one ALREADY admitted the
+# message did not enumerate them, which is what makes the count in the
+# string the defect rather than the omission: the prose knew and the
+# string overclaimed.
+#
+# So the count is gone rather than corrected. A number here would be a
+# THIRD place the same fact lives — the rules, the probe table, and a
+# string — and this project has been bitten by exactly that twice in this
+# one sentence. The conditions are also not all of one kind (`sqrt` needs
+# a POSITIVE operand, `reduce_sum` needs a non-empty one, `integer_pow`
+# needs a decodable exponent), so no single count is even well-formed.
+# `tests/test_strict_sign_census.py::
+# test_the_decline_message_makes_no_COUNT_claim_about_the_conditioned_rules`
+# derives the set and refuses a count in the string.
+#
+# THIS MESSAGE IS THE ONLY PLACE IN THE SHIPPED ARTEFACT A USER LEARNS THE
+# CARRIER SET — grepped across `docs/`, `README.md` and the live sections
+# of `SOUNDNESS.md` — which is why an overclaim in it points a reader at
+# the wrong remedy rather than merely reading badly.
 DIV_BOUNDARY_ZERO_DECLINE = (
     "div: the divisor interval {divisor} REACHES zero at a boundary, and "
     "nothing in this query excludes that point — real division is undefined "
@@ -4281,15 +4376,20 @@ DIV_BOUNDARY_ZERO_DECLINE = (
     "divisor itself, or on a value the divisor is built from by a primitive "
     "that carries the certificate — "
     + " ".join(sorted(_STRICT_SIGN_PRIMITIVES))
-    + " — with nonzero finite constants allowed anywhere in that chain. Two "
-    "of those carry it only under a side condition on the operands' signs: "
-    "`add` needs both certified the SAME sign, `sub` needs them OPPOSITE, "
-    "so `sum(x*x) - c` still breaks the chain (two positives can differ by "
-    "zero). These DROP it: "
+    + " — with nonzero finite constants allowed anywhere in that chain. "
+    "SEVERAL of those carry it only under a per-rule side condition, and "
+    "this message does not say which one your chain failed. Three "
+    "examples: `add` needs both operands certified the SAME sign, `sub` "
+    "needs them OPPOSITE (so `sum(x*x) - c` still breaks the chain — two "
+    "positives can differ by zero), and every rule that reads more than "
+    "one value operand needs those operands to agree. These primitives "
+    "DROP it outright: "
     + " ".join(sorted(_SIGN_NO_RULE))
-    + "; so does any primitive with no interval transfer at all. Remedies: "
-    "narrow the divisor's declared envelope to exclude zero, or add that "
-    "assume"
+    + ". So does every boolean-valued primitive ("
+    + " ".join(sorted(_SIGN_BOOLEAN))
+    + "), which can never carry a sign at all, and so does any primitive "
+    "with no interval transfer. Remedies: narrow the divisor's declared "
+    "envelope to exclude zero, or add that assume"
 )
 
 # Real-mode transfers that READ the strict-sign certificate, and therefore
@@ -4405,6 +4505,44 @@ def _t_div(eqn, params, ins, in_signs=None):
     ``in_signs is None`` — the shape every direct caller and every test
     that builds this transfer by hand takes — means "no certificate",
     the conservative reading.
+
+    **THE SIGN BIT OF AN EXECUTED ZERO IS THE ONE THING BETWEEN THIS GATE
+    AND A WRONG VERDICT, AND IT IS A STANDING CONSTRAINT ON EVERY RULE
+    THAT FEEDS IT.** Stated here rather than in the census because this is
+    the only place a certificate is consumed.
+
+    The certificate is a claim about ℝ, and the census admits three rows
+    (`mul`, `sqrt`, `max`/`min`) whose ℝ value is nonzero where the
+    executable's is zero, in the DAZ band. That gap costs NOTHING here,
+    and the reason is structural rather than lucky:
+    :func:`stelling.interval.boundary_div` drops only the divisor's zero
+    ENDPOINT, and at that endpoint IEEE division yields ``±inf``. Each arm
+    returns a box whose infinite end is exactly the one a
+    **matching-signed** zero produces. MEASURED, all four arms, dividend
+    ``[1, 2]`` or ``[-2, -1]`` and divisor ``[0, 4]`` or ``[-4, 0]``::
+
+        divisor [0,hi], cert +1   box=[0.25, inf]    a/(+0.0)= inf  IN
+                                                     a/(-0.0)=-inf  OUT
+        divisor [lo,0], cert -1   box=[-inf, -0.25]  a/(-0.0)=-inf  IN
+                                                     a/(+0.0)= inf  OUT
+        (both arms mirror for a negative dividend, same conclusion)
+
+    So a certificate that is false by float underflow is harmless **while
+    the zero the program actually computes carries the sign bit the
+    certificate claims**, and an OPPOSITE-signed zero falls outside the
+    returned box in all four arms — minting a false VERIFIED on a lower
+    bound and a false REFUTED on an upper one. That is the single route
+    from this whole mechanism to a wrong verdict.
+
+    A blinded audit of the 0.3.0 census searched for one: 500 traced
+    programs, 48 851 certified-value readings, **2 097 executed zeros
+    under a certificate, 0 with the wrong sign bit**. Nothing enforces it,
+    which is why it is written down: a future rule that can mint ``+1``
+    for a value the target computes as ``-0.0`` breaks this silently and
+    no existing check would tell its author.
+    ``tests/test_strict_sign_census.py`` pins both halves — the four-arm
+    asymmetry above, and the sign bit of the zeros the admitted rows
+    actually produce.
     """
     dtype = (eqn.outvars[0].aval.dtype or "") if eqn.outvars else ""
     if not _is_integer_dtype(dtype):
@@ -8588,10 +8726,73 @@ class _Propagator:
           purpose — a ``-1`` operand answers 0 here rather than relying on
           :func:`stelling.interval.sqrt` to have declined it, because a
           rule whose soundness rests on another function's domain guard is
-          a rule that moves when that guard does. Unlike ``exp`` and
-          ``pow``, which are in :data:`_SIGN_NO_RULE` for it, ``sqrt``
-          cannot underflow a nonzero to zero in binary64: ``√x == 0`` iff
-          ``x == 0`` for ``x >= 0``, even at the smallest subnormal.
+          a rule that moves when that guard does.
+
+          **THE SENTENCE THAT ADMITTED THIS ROW WAS FALSE OF THE TARGET.**
+          It read: *"Unlike ``exp`` and ``pow``, which are in
+          ``_SIGN_NO_RULE`` for it, ``sqrt`` cannot underflow a nonzero to
+          zero in binary64: ``√x == 0`` iff ``x == 0`` for ``x >= 0``, even
+          at the smallest subnormal."* That is true of ``math.sqrt``, which
+          is what it was measured against, and false of ``lax.sqrt``, which
+          is the program stelling is pointed at: the target flushes
+          subnormal INPUTS (:func:`stelling.interval.target_flushes_subnormals`
+          answers True for float64), so EVERY subnormal operand gives 0.
+          MEASURED, jax 0.11.0 CPU binary64, eager and under jit alike:
+
+              x                          math.sqrt      lax.sqrt
+              5e-324                     2.2228e-162    0.0
+              2.225073858507201e-308     1.4917e-154    0.0   (last subnormal)
+              2.2250738585072014e-308    1.4917e-154    1.4917e-154 (MIN_NORMAL)
+
+          THE HONEST ARGUMENT IS THE ONE ``mul`` ALREADY RIDES, and it is
+          a comparison rather than a denial. ``sqrt``'s real-vs-executable
+          divergence is exactly the DAZ band, and that band is a STRICT
+          SUBSET of the set on which ``mul`` — admitted by this table since
+          0.2.0 — diverges the same way. Measured by binary search against
+          the same target in the same session:
+
+              smallest x with lax.sqrt(x)  != 0 : 2.980232e-308
+              smallest x with lax.mul(x,x) != 0 : 1.491668e-154
+
+          146 decades apart, and ``sqrt``'s is the SMALLER. So admitting
+          ``sqrt`` while admitting ``mul`` is consistent; refusing it while
+          admitting ``mul`` would not be. What the row does NOT get to
+          claim is that there is no divergence at all.
+
+          The asymmetry a reader should still hold: ``mul`` diverges
+          because its RESULT underflows, ``sqrt`` because its OPERAND is
+          destroyed before the operation — ``√(5e-324)`` in ℝ is
+          ``2.2e-162``, a comfortably normal number 146 decades clear of
+          the band. Same band, opposite mechanism, and the executed-value
+          consequence is identical: a certified-nonzero value that runs as
+          zero. Real mode's posture covers it (obligations are judged in
+          exact real arithmetic over the declared sets); what would make it
+          a wrong VERDICT is a zero whose SIGN BIT disagrees with the
+          certificate, and that constraint is stated at :func:`_t_div`'s
+          boundary gate.
+
+          WHAT NO CHANNEL SAYS OUT LOUD, stated here because nothing else
+          does: a run that certifies a flushed ``sqrt`` emits NO note.
+          :data:`_SUBNORMAL_TELL_ROWS` is the real-mode tell for this
+          exact band and it holds the six COMPARISONS only, so
+          ``assume(x > 0); assert_(1 / sqrt(x) > 1e100)`` over a declared
+          ``[0, 1e-310]`` discharges silently while every point of that box
+          runs ``sqrt(x) == 0.0``. Extending the tell to an arithmetic row
+          is a change to :func:`_subnormal_flush_tell`, whose predicate and
+          wording are comparison-shaped and whose own suite is
+          ``tests/test_subnormal_tell.py``; it is NOT done here, and this
+          paragraph is the disclosure rather than the fix.
+
+          AND WHY THIS IS STILL NOT ``sign``'s CASE, which
+          :data:`_SIGN_NO_RULE` refuses over the very same band. ``sign``
+          is refused because its own transfer ADDS a zero to a box that
+          EXCLUDES one — MEASURED, ``_t_sign`` on ``[1e-320, 1e-310]``,
+          which does not straddle zero, returns ``[0.0, 1.0]``, which does
+          — so a certificate there would contradict its own transfer's box
+          inside one mode. :func:`stelling.interval.sqrt` on that same box
+          returns ``[9.9999e-161, 9.9999e-156]`` and adds nothing. The line
+          between the two rows is a fact about the two TRANSFERS, not about
+          the band they both sit in.
         * ``integer_pow``: ``x ≠ 0`` gives ``x**y ≠ 0`` for every integer
           ``y`` including negative ones, with sign ``+1`` for even ``y``
           (``y = 0`` included: ``x**0 = 1``) and ``sign(x)`` for odd.
@@ -10411,12 +10612,29 @@ class _Propagator:
             # separately; it is not this fact's job and folding it in here
             # would answer it twice, inconsistently.
             #
-            # THROUGH `_record_strict_sign`, which is what refuses the
-            # SIZE-0 case here: `ks` is the per-element bound list, so on
-            # an empty target both `all(...)` quantifiers below are
-            # vacuously true and this arm used to write a certificate for
-            # a value with no elements. Nothing downstream could tell it
-            # from an earned one.
+            # THROUGH `_record_strict_sign`, so that the size-0 rule is
+            # stated once for all three writers rather than three times.
+            #
+            # **HERE IT IS DEFENCE IN DEPTH, NOT A CLOSED HOLE, AND THIS
+            # COMMENT USED TO CLAIM OTHERWISE.** It read: "`ks` is the
+            # per-element bound list, so on an empty target both
+            # `all(...)` quantifiers below are vacuously true and this arm
+            # USED TO WRITE a certificate for a value with no elements."
+            # The first half is true and the conclusion was never
+            # measured. Measured for the 0.3.0 audit, by removing the
+            # guard from `_record_strict_sign` and running a size-0
+            # declaration through `assume(x > 0)`: the table comes back
+            # EMPTY, because an assume over a size-0 predicate is dropped
+            # inert further up and this arm is never reached. The live
+            # half of that rule is the ROUTING one — `slice(x, [0], [0])`
+            # over a certified `x` — which the same experiment shows does
+            # mint without the guard.
+            #
+            # So the guard stays here and is honest about what holds it:
+            # `tests/test_strict_sign_census.py::
+            # test_a_ROUTING_rule_that_produces_an_EMPTY_output_certifies_nothing`
+            # is its control, and the size-0-assume test beside it is a
+            # statement about the shipped answer with no absence half.
             if cmp == "gt" and all(k >= 0.0 for k in ks):
                 self._record_strict_sign(target_atom.id, new.size, 1)
             elif cmp == "lt" and all(k <= 0.0 for k in ks):
