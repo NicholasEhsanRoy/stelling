@@ -1095,7 +1095,9 @@ jobs:
       #     `tests/test_release_gates.py::test_BOTH_readers_of_the_newest_heading_agree`
       #     drives this extracted body and its Python twin over one corpus,
       #     and `::test_the_two_readers_agree_over_the_whole_corpus` drives
-      #     both over all 1884 documents of that corpus. And what holds them
+      #     both over all 2954 documents of that corpus, and a third
+      #     sweeps the WHITESPACE alphabet in all five positions this
+      #     grammar has one. And what holds them
       #     is no longer only each other: the corpus's verdicts come from
       #     `markdown_it.MarkdownIt("commonmark")`, recorded in
       #     `tests/_changelog_renderer_corpus.py`, because two readers held
@@ -1165,7 +1167,7 @@ jobs:
       # run this same body over the RENDERER'S corpus:
       # `::test_BOTH_readers_of_the_newest_heading_agree` over the named
       # documents, and `::test_the_two_readers_agree_over_the_whole_corpus`
-      # over all 1884 of them, holding this step's rc=0 to coincide exactly
+      # over all 2954 of them, holding this step's rc=0 to coincide exactly
       # with the Python twin's reading and holding that reading to what
       # `markdown_it.MarkdownIt("commonmark")` says the newest `<h2>` is.
       #
@@ -1275,27 +1277,32 @@ jobs:
           # HTML comment. Driven, on the body this file shipped: an indented
           # newer heading gave `release.yml gate rc=0`.
           #
-          # AND THE FIX FOR THAT WAS STILL PERMISSIVE IN THREE MORE PLACES,
+          # AND THE FIX FOR THAT WAS STILL PERMISSIVE IN FOUR MORE PLACES,
           # WHICH A RENDERER FOUND AND A SECOND READING OF THE RULES DID NOT.
           # The scan toggled `fenced` on ANY ``` or ~~~ line, opened an HTML
-          # comment on any line CONTAINING `<!--`, and knew nothing of setext.
-          # Driven with `markdown_it.MarkdownIt("commonmark")` over every
-          # document of at most three lines on a twelve-token alphabet -- 1884
-          # of them -- against the body this file shipped at `a90862b`:
+          # comment on any line CONTAINING `<!--`, and knew nothing of setext,
+          # of HTML blocks that are not comments, or of a heading indented
+          # four columns inside a list item. Driven with
+          # `markdown_it.MarkdownIt("commonmark")` over every document of at
+          # most three lines on a fourteen-token alphabet -- 2954 of them --
+          # against the body this file shipped at `a90862b`:
           #
           #   ('```',  '~~~',   '## 0.2.1 - 2026-08-28')   renderer: NO <h2>
           #   ('```',  '``` t', '## 0.2.1 - 2026-08-28')   renderer: NO <h2>
           #   ('````', '```',   '## 0.2.1 - 2026-08-28')   renderer: NO <h2>
           #   ('text', '---',   '## 0.2.1 - 2026-08-28')   renderer: <h2> 'text'
           #   ('<div>',         '## 0.2.1 - 2026-08-28')   renderer: NO <h2>
+          #   ('1. item', '    ## 9.9.9 - 2000-01-01',
+          #               '## 0.2.1 - 2026-08-28')         renderer: the 9.9.9
           #
-          # Each one is rc=0 from this step, with the tag's own version and
-          # date echoed, over a document whose newest RENDERED heading names a
-          # different release or is not a heading at all. And in the other
-          # direction, `` `<!--` `` -- the comment opener inside a code span --
-          # opened a comment that ran to EOF and made this step say
-          # "CHANGELOG.md holds no '## ' heading at all" about a file with
-          # several.
+          # 42 of the 2954, and each one is rc=0 from this step with the tag's
+          # own version and date echoed, over a document whose newest RENDERED
+          # heading names a different release or is not a heading at all. And
+          # in the other direction, `` `<!--` `` -- the comment opener inside a
+          # code span -- opened a comment that ran to EOF and made this step
+          # say "CHANGELOG.md holds no '## ' heading at all" about a file with
+          # several: 20 documents of the same corpus, all of them read
+          # correctly now.
           #
           # WHAT IT DOES NOW IS REFUSE, NOT PARSE. This step reads only the
           # PREFIX of the document, up to and including the first '## ' line;
@@ -1337,12 +1344,43 @@ jobs:
           # changelog whose first line is one -- so fence runs are counted
           # with `case` and parameter expansion, and the one regex that needs
           # a backtick is built from `bt`.
-          heading_any='^##([[:space:]]|$)'
-          heading_re='^[[:space:]]*##[[:space:]]+([0-9][0-9A-Za-z._+!-]*)[[:space:]]+—[[:space:]]+([^[:space:]].*[^[:space:]]|[^[:space:]])[[:space:]]*$'
+          #
+          # AND THE SEPARATORS ARE `[[:blank:]]` AND NOT `[[:space:]]`, WHICH
+          # IS A SOUNDNESS FIX AND NOT A TIDY-UP. CommonMark: an ATX heading's
+          # `#` run must be followed by SPACES OR TABS, or end of line.
+          # `[[:space:]]` is six characters and Python's `\s`, which the twin
+          # used, is twenty-nine -- three alphabets for one rule, none of them
+          # the renderer's. Driven by an auditor over every character
+          # `str.isspace()` finds: `##<VT>0.2.1 - 2026-08-28` standing over
+          # `## 9.9.9 - 2000-01-01` took THIS STEP to rc=0 with the tag's own
+          # version and date echoed, while the renderer's newest <h2> is
+          # `9.9.9 - 2000-01-01`. Three characters do it here (VT, FF, CR) and
+          # twenty-six misread in the twin. The correct class was already in
+          # this file, one line down, in `atx_any`.
+          #
+          # With the tight class, such a line is not a heading line at all: it
+          # falls to the whitelist, which does not admit a leading `#`, and is
+          # refused BY NAME. That is the design working once its alphabet is
+          # the renderer's -- refusal protects you where you refuse, and where
+          # you IMPLEMENT you own the details.
+          #
+          # SWEPT AND NOT ARGUED: `SEPARATOR_FORMS` in
+          # `tools/changelog_renderer_corpus.py` builds one document per
+          # (whitespace character, position) pair for all five positions this
+          # grammar has, the renderer's verdict on each is recorded in
+          # `tests/_changelog_renderer_corpus.py`, and
+          # `tests/test_release_gates.py::test_the_whitespace_alphabet_is_swept_in_every_position`
+          # drives this body over every one of them in every lane.
+          heading_any='^##([[:blank:]]|$)'
+          heading_re='^[[:blank:]]*##[[:blank:]]+([0-9][0-9A-Za-z._+!-]*)[[:blank:]]+—[[:blank:]]+([^[:blank:]].*[^[:blank:]]|[^[:blank:]])[[:blank:]]*$'
           atx_any='^#{1,6}([[:blank:]]|$)'
           ordered_li='^[0-9]{1,9}[.)]([[:blank:]]|$)'
           bt='`'
-          paragraph="^[A-Za-z0-9${bt}]"
+          # THE TILDE IS HERE FOR THE BACKTICK'S REASON and the twin's
+          # `_PARAGRAPH_LINE` carries it too: a run of one or two of either
+          # begins no block, and a rule spelled once must apply to both of its
+          # subjects or nobody can check it.
+          paragraph="^[A-Za-z0-9${bt}~]"
           heading=""
           heading_version=""
           heading_rest=""

@@ -141,7 +141,22 @@ ROUTED_STEP = "the tag and the changelog heading must agree"
 #: A release heading. `## <version> — <rest>`, em dash, which is the shape
 #: every heading in the file uses. `rest` is either `unreleased` or a date,
 #: and which one it is carries half the claim.
-_HEADING = re.compile(r"^##\s+(?P<version>\d[\w.+!-]*)\s+—\s+(?P<rest>.+?)\s*$", re.M)
+#:
+#: **THE SEPARATORS WERE `\s` AND THAT IS A THIRD WHITESPACE ALPHABET.** They
+#: read `^##\s+…\s+—\s+…\s*$`, and Python's `\s` is Unicode-aware: twenty-nine
+#: characters where CommonMark's heading grammar knows two. The bash twin's
+#: `[[:space:]]` is a fourth (six). Driven by an auditor over every character
+#: `str.isspace()` finds: **26 of 28 were read by this twin as a heading the
+#: renderer does not put there**, and 23 more made a heading parse here that
+#: parses nowhere else — a NBSP or a U+2028 between the version and the em
+#: dash. The correct class was three lines away the whole time, in
+#: :data:`_ATX_LINE`. It is `[ \t]` in both readers now, and the whole
+#: alphabet is swept rather than argued: see `SEPARATOR_FORMS` in
+#: `tools/changelog_renderer_corpus.py` and
+#: `tests/test_release_gates.py::test_the_whitespace_alphabet_is_swept_in_every_position`.
+_HEADING = re.compile(
+    r"^##[ \t]+(?P<version>\d[\w.+!-]*)[ \t]+—[ \t]+(?P<rest>.+?)[ \t]*$", re.M
+)
 
 #: PEP 440's pre-release and development spellings, which are what separates
 #: "this build is of 0.2.0" from "0.2.0 has happened".
@@ -188,7 +203,18 @@ def is_unshipped(version: str) -> bool:
 #:
 #: Four leading spaces is an indented code block and is deliberately NOT a
 #: heading, which is why the bound is three.
-_HEADING_LINE = re.compile(r"^ {0,3}##(?:\s|$)")
+#:
+#: **AND `\s` HERE WAS THE SAME BORROWED ALPHABET, IN THE ONE POSITION WHERE
+#: IT IS A FALSE PASS RATHER THAN A FALSE REFUSAL.** CommonMark: the `#` run
+#: must be followed by *spaces or tabs, or end of line*. `\s` adds `\v`, `\f`,
+#: `\r`, NBSP and twenty-four more, so `##\x0c0.2.1 — 2026-08-28` standing
+#: over `## 9.9.9 — 2000-01-01` was READ as the newest heading here and by the
+#: bash gate (`[[:space:]]`, rc=0, the tag's own version echoed) while the
+#: renderer's newest `<h2>` is `9.9.9 — 2000-01-01`. Three bash false passes
+#: (`\v`, `\f`, `\r`) and twenty-six wrong readings here. With `[ \t]` the
+#: line is not a heading line, falls to the whitelist below, and is refused BY
+#: NAME — which is the design working, once its alphabet is the renderer's.
+_HEADING_LINE = re.compile(r"^ {0,3}##(?:[ \t]|$)")
 
 #: A FENCED-CODE DELIMITER, spelled the way CommonMark spells one: up to three
 #: leading spaces, then a run of THREE OR MORE backticks or tildes, then the
@@ -208,12 +234,12 @@ _FENCE_LINE = re.compile(r"^ {0,3}(?P<run>`{3,}|~{3,})(?P<info>.*)$")
 #:
 #: **THIS USED TO BE THE SUBSTRING TEST `"<!--" in line`**, which opened a
 #: comment on any line MENTIONING the sequence — inside a code span, inside a
-#: sentence — and ran it to end of file. Driven on the 1884-document corpus at
-#: `tests/_changelog_renderer_corpus.py`: **20** of them were refused with
+#: sentence — and ran it to end of file. Driven on the 2954-document corpus at
+#: `tests/_changelog_renderer_corpus.py`: **20** documents were refused with
 #: *"CHANGELOG.md holds no `## ` heading at all"* over a document whose newest
-#: `<h2>` the renderer reads without difficulty, and all 20 of the 20 carry
-#: the alphabet's `` `<!--` `` token — a code span, which is inline and opens
-#: no block at all.
+#: `<h2>` the renderer reads without difficulty, and which this reader now
+#: reads correctly. Every one of the 20 carries the alphabet's `` `<!--` ``
+#: token — a code span, which is inline and opens no block at all.
 _COMMENT_OPEN = re.compile(r"^ {0,3}<!--")
 
 # --- the shapes the scan may STEP OVER, and why that is a whitelist ---------
@@ -241,6 +267,28 @@ _COMMENT_OPEN = re.compile(r"^ {0,3}<!--")
 # `tests/test_release_gates.py::test_BOTH_readers_of_the_newest_heading_agree`.
 # Adding a member means adding a document to that corpus and regenerating it
 # with the renderer.
+#
+# AND THE CORPUS IS ASKED WHETHER IT CAN SEE THESE RULES CHANGE, which is a
+# different question from whether it agrees with them today. Measured
+# 2026-08-28 on this branch, one mutation at a time, running
+# `tests/test_release_gates.py -k "corpus or readers or whitespace"`:
+#
+#   mutation                                             result
+#   `_INDENTED_LINE`  ^ {4}   -> ^ {3}                    3 failed
+#   `_FENCE_LINE`     ^ {0,3} -> ^ {0,4}                  1 failed
+#   `_HEADING_LINE`   ^ {0,3} -> ^ {0,4}                  2 failed
+#   closer run `>= fence[1]` -> `>= 3`                    2 failed
+#   closer character need not match the opener            2 failed
+#   `_ORDERED_LIST_LINE` never matches                    2 failed
+#   `_PARAGRAPH_LINE` widened to `<>=*+-`                 10 failed
+#   bash closer indent `-le 3` -> `-le 4`                 1 failed
+#
+# The first two rows and the last are the ones that MATTER, because they are
+# the ones an auditor found SURVIVING at 39 passed apiece before the
+# indent-boundary documents were added to `NAMED`: no document anywhere placed
+# a non-heading whitelist member at indent one to three, or a fence closer at
+# indent four, so the `>= 4` admission — the most load-bearing of the four
+# rules here — had an undriven boundary.
 
 #: Whitespace only. Closes a paragraph and an HTML block of type 6 or 7;
 #: cannot make or hide a heading.
@@ -258,11 +306,19 @@ _INDENTED_LINE = re.compile(r"^ {4}")
 _ATX_LINE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|$)")
 
 #: A paragraph line: nothing that begins a CommonMark block begins with a
-#: letter, a digit or a backtick run shorter than three, EXCEPT the ordered
-#: list below. A backtick run of three or more has already been taken as a
-#: fence delimiter; a run of one or two opens a code SPAN, which is inline and
-#: cannot swallow the line beneath it.
-_PARAGRAPH_LINE = re.compile(r"^ {0,3}[A-Za-z0-9`]")
+#: letter, a digit, or a backtick or tilde run shorter than three, EXCEPT the
+#: ordered list below. A run of three or more of either has already been taken
+#: as a fence delimiter above; a shorter run begins no block at all — a
+#: backtick opens a code SPAN, which is inline and cannot swallow the line
+#: beneath it, and one or two tildes are ordinary text to CommonMark.
+#:
+#: **THE TILDE WAS MISSING AND THE TWO ARE ONE RULE**, which an auditor noted:
+#: the class admitted a short backtick run and refused a short tilde run, on
+#: an argument that covers both. The direction was safe — a refusal — but a
+#: rule spelled once and applied to one of its two subjects is a rule nobody
+#: can check. Added as a whitelist member is added: with a document in the
+#: corpus, driven inert against the renderer, not with an argument.
+_PARAGRAPH_LINE = re.compile(r"^ {0,3}[A-Za-z0-9`~]")
 
 #: ...and the one carve-out. `1. item` begins with a digit and is an ordered
 #: LIST, whose content is indented four columns — where a `## ` heading is
@@ -336,7 +392,21 @@ def newest_heading_line(text: str) -> tuple[int, str] | None:
     **WHAT THIS READER DOES INSTEAD, and it is refusal rather than
     CommonMark.** The fence rule IS implemented, because it is exact and small
     — a fence closes only on the same character, a run at least as long, and
-    no info string. Setext is NOT implemented and is not meant to be: a
+    no info string.
+
+    **AND "EXACT AND SMALL" WAS TRUE OF ITS STRUCTURE AND NOT OF ITS
+    CHARACTER CLASSES, WHICH IS WHERE BOTH OF THIS BRANCH'S OWN SOUNDNESS
+    BREAKS TURNED OUT TO LIVE.** An auditor could not construct a single
+    structural admission that hides a heading — four lines deep, two
+    adversarial alphabets, 30 000 Hypothesis examples — and then found two
+    defects in the code this design chose to IMPLEMENT rather than refuse,
+    both the same mistake: a whitespace alphabet borrowed from the host
+    language standing in for one CommonMark defines narrowly. Refusal
+    protects a reader where it refuses; where it implements, it owns the
+    details. See :data:`_HEADING_LINE`, :data:`_HEADING`, the closing-fence
+    test below, and the sweep those three are now held to.
+
+    Setext is NOT implemented and is not meant to be: a
     `---` or `===` line above the first heading is a shape whose first
     character is not on the whitelist, so it stops the scan. So does `>`, so
     does `- `, so does `<div>`, so does a leading tab. The line grammar's
@@ -347,24 +417,28 @@ def newest_heading_line(text: str) -> tuple[int, str] | None:
     `markdown-it-py` 4.2.0's CommonMark preset as the oracle, over every
     document of at most three lines on a TWENTY-token alphabet — 8420 of them
     — carrying the shapes `tests/_changelog_renderer_corpus.py`'s own
-    twelve-token alphabet cannot reach: an indented heading, a tab-indented
-    one, a backtick run of four, a block quote, a bullet list, an ordered
-    list, a `<div>`, a fourth-level ATX heading and a link reference
-    definition. The bash gate driven here is the real extracted step body of
-    `.github/workflows/release.yml`, not a copy of it.
+    fourteen-token alphabet cannot reach: an indented heading, a tab-indented
+    one, a backtick run of four, a block quote, a bullet list, a `<div>`, a
+    fourth-level ATX heading and a link reference definition. The bash gate
+    driven here is the real extracted step body of
+    `.github/workflows/release.yml`, not a copy of it, and "unsound" means the
+    reader points at a LINE the renderer puts no `<h2>` on.
 
         readers                     unsound   twin drift   refusals the
                                                             renderer reads
-        this branch                       0            0            1408
-        `a90862b` (Python twin only)    112            —             906
+        this branch                       0            0            1536
+        `a90862b` (Python twin only)    206            —            1028
 
-    **Zero and 1408 is the whole trade in two numbers.** Nothing is read that
+    **Zero and 1536 is the whole trade in two numbers.** Nothing is read that
     a renderer does not read; a great deal that a renderer reads is refused.
-    The 8420 are not in the suite — what is in the suite is the 1884-document
+    The 8420 are not in the suite — what is in the suite is the 2954-document
     corpus, at
     `tests/test_release_gates.py::test_the_two_readers_agree_over_the_whole_corpus`,
-    where the same two numbers are 0 and 56 and the `a90862b` readers are 35
-    and 20.
+    where the same two numbers are 0 and 205 and the `a90862b` readers are 42
+    and 132 — plus the whitespace alphabet, swept separately at
+    `::test_the_whitespace_alphabet_is_swept_in_every_position`, because a
+    STRUCTURAL sweep cannot see a character-class defect and this branch
+    shipped two of those before an auditor swept for them.
 
     **WHAT IT STILL CANNOT SEE.**
 
@@ -389,8 +463,18 @@ def newest_heading_line(text: str) -> tuple[int, str] | None:
         if fence is not None:
             if delimiter is not None:
                 run, info = delimiter.group("run"), delimiter.group("info")
+                # `info.strip(" \t")` AND NOT `info.strip()`. CommonMark: a
+                # closing fence "may be followed only by spaces or tabs".
+                # `str.strip()` is Unicode-aware, so ```` ```\u00a0 ```` closed
+                # a block here that the renderer AND the bash twin — which
+                # spells this `${finfo//[[:blank:]]/}` — both leave open.
+                # Driven by an auditor on a 23-token alphabet, 12 719
+                # documents: 8 unsound readings and 4 disagreements between
+                # the two readers, every one of them a Unicode-space closer,
+                # and both of those quantities are asserted zero by the sweep
+                # in `tests/test_release_gates.py`.
                 if (run[0] == fence[0] and len(run) >= fence[1]
-                        and not info.strip()):
+                        and not info.strip(" \t")):
                     fence = None
             continue
         if delimiter is not None:
@@ -464,7 +548,10 @@ def newest_heading(text: str) -> tuple[str, str] | None:
     if first is None:
         return None
     _, line = first
-    parsed = _HEADING.match(line.strip())
+    # `strip(" \t")` AND NOT `strip()`, for :data:`_HEADING`'s reason: the
+    # bare call is Unicode-aware and would silently normalise a separator
+    # CommonMark does not know before the pattern ever sees it.
+    parsed = _HEADING.match(line.strip(" \t"))
     if parsed is None:
         raise MalformedNewestHeading(line)
     return parsed.group("version"), parsed.group("rest")

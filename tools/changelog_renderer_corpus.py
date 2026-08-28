@@ -11,7 +11,7 @@ this repository decide which line of `CHANGELOG.md` is the newest heading — a
 bash line grammar in `.github/workflows/release.yml` and its Python twin in
 `tests/test_changelog_names_the_version.py`. Held to each other they can be
 found to DISAGREE and can never be found to be WRONG, and at `a90862b` they
-did not disagree about a single one of the 1884 documents below. What found
+did not disagree about a single one of the 2954 documents below. What found
 them wrong was
 a real renderer, and `markdown-it-py` is installed in NONE of this project's
 three merge lanes — measured 2026-08-28 on `stelling-jax`, `stelling-nojax`
@@ -66,12 +66,18 @@ line of `CHANGELOG.md` is the newest heading: a bash line grammar in
 `(label, document, expected reading)` where the expected reading was **typed
 by the author of the readers**. That is two implementations of one idea plus
 one person's reading of CommonMark, and it agreed with itself: none of its ten
-rows was in ANY of the three classes on which both readers disagreed with a
-renderer, and all three were false PASSES. Three, not two: the item that
-opened this named the fence asymmetry and setext, and the sweep that replaced
-its ten-token alphabet with a twelve-token one found a third — an HTML block
-that is not a comment, `<div>` say, which swallows the lines below it and
-which no ten-token alphabet without an HTML tag could reach.
+rows was in ANY of the four classes on which both readers disagreed with a
+renderer, and all four were false PASSES.
+
+**FOUR, AND THE COUNT WENT TWO, THREE, FOUR AS THE ALPHABET GREW, WHICH IS THE
+ARGUMENT FOR MAKING IT DERIVABLE.** The item that opened this named two — the
+fence asymmetry and setext. A twelve-token alphabet found a third, an HTML
+block that is not a comment. An auditor found a fourth, a heading indented four
+columns inside a list item, and found it OUTSIDE the sweep: the repair was
+already in the whitelist (the ordered-list carve-out is written for exactly
+that shape) while the count was not, because no token of the alphabet was a
+list. Both of the missing tokens are in `ALPHABET` now, so the number is a
+property of the corpus and not of what anybody remembered.
 
 So the `expected` column is gone from that table and the renderer's column is
 here instead. Nothing in this file is anybody's opinion about what CommonMark
@@ -96,7 +102,7 @@ turns the doctoring red the moment anyone runs it with the library installed.
 There is no construction that removes it short of shipping a CommonMark parser
 in this repository, which is the thing this whole item exists not to do.
 
-**THE THREE COLUMNS.**
+**THE COLUMNS.**
 
 * :data:`PRODUCT` — one verdict per document, for EVERY document of 1 to
   :data:`MAX_LINES` lines over :data:`ALPHABET`, in `itertools.product` order.
@@ -104,17 +110,48 @@ in this repository, which is the thing this whole item exists not to do.
   `tools.changelog_renderer_corpus.documents`, which is the one function both
   the generator and the tests call, so a reordering cannot silently re-label a
   column.
-* :data:`VERDICTS` — the distinct verdicts, `PRODUCT`'s entries indexing into
-  it. Index 0 is `None`, meaning **the renderer made no `<h2>` at all**, which
-  is a different answer from "it made one that does not parse as a release
-  heading" and is kept distinguishable for that reason.
+* :data:`VERDICTS` — the distinct verdicts, `PRODUCT`'s and
+  :data:`SEPARATORS`' entries indexing into it. Each is
+  `(1-based line, inline content)`, and index 0 is `(None, None)`, meaning
+  **the renderer made no `<h2>` at all** — a different answer from "it made
+  one that does not parse as a release heading", and kept distinguishable for
+  that reason.
+
+  **THE LINE IS THE ORACLE. THE CONTENT IS FOR THE MESSAGE.** CommonMark
+  decides which LINE of a document is a heading and has nothing to say about
+  `<version> — <date>`, which is this project's own grammar. Comparing
+  CONTENT — which this file did until an auditor swept the whitespace alphabet
+  — imports the renderer's own deviations into the comparison: markdown-it's
+  ATX rule ends in a JavaScript-derived `.trim()` that strips the whole
+  Unicode whitespace set where CommonMark strips spaces and tabs, so 25
+  documents disagreed in a direction where OUR readers follow the
+  specification and the oracle does not. See `newest_h2` in the generator.
 * :data:`NAMED` — `(label, document, must_read, renderer verdict)` for
-  documents worth a name. `must_read` is the ONE authored field in this file
-  and it cannot license a wrong reading: `True` demands that both readers read
-  EXACTLY the renderer's verdict, `False` demands that both REFUSE. Neither
-  spelling supplies a reading, so flipping one can only move a green to a red.
-  It exists because a gate that refused every document would satisfy a
-  soundness relation and be useless.
+  documents worth a name. `must_read` is the ONE authored field in this file.
+  It cannot license a wrong reading — `True` demands that both readers read
+  EXACTLY the renderer's verdict, `False` demands that both REFUSE, and
+  neither spelling supplies a reading — so it cannot weaken the SOUNDNESS
+  half at all. It CAN weaken the liveness half: flipping `True` to `False`
+  after a reader stopped reading a row turns a red green. That is why the
+  liveness floors that matter are derived rather than authored, in
+  `tests/test_release_gates.py`.
+* :data:`SEPARATOR_CHARS` / :data:`SEPARATORS` — the whitespace alphabet
+  sweep. One verdict per `(character, form)` pair, characters in code-point
+  order and forms in `SEPARATOR_FORM_NAMES` order, both re-derived by
+  `tools.changelog_renderer_corpus.separator_documents`. The CHARACTER SET is
+  re-derived from `str.isspace()` at test time and the recorded copy is held
+  to it in every lane, so this family cannot be shrunk by editing this file.
+
+**WHAT NOTHING IN THIS FILE CAN STOP, and an auditor built it rather than
+imagining it.** `ALPHABET` and `MAX_LINES` live here, and cutting either one
+and then running the documented `--write` produces a corpus that is perfectly
+self-consistent with a live renderer — so even the freshness check stays green.
+Driven: `ALPHABET` cut to two tokens takes the product from four figures to
+14 rows, and every lane passes. What stands against it is outside this file
+and has to be: `tests/test_release_gates.py` asserts that a fixed handful of
+DISCRIMINATING documents, typed there, are members of
+`documents(ALPHABET, MAX_LINES)`, and that the recorded whitespace alphabet is
+the live one. A shrink that drops any of them is a red in every lane.
 """
 '''
 
@@ -145,39 +182,119 @@ def documents(alphabet: tuple[str, ...], max_lines: int) -> list[str]:
     return out
 
 
-def newest_h2(renderer, text: str) -> str | None:
-    """The inline content of the FIRST `<h2>` the renderer makes, or `None`.
+#: The FIVE positions in this project's heading grammar where one reader or the
+#: other spelled "a separator" with a character class BORROWED FROM ITS HOST
+#: LANGUAGE instead of the one CommonMark defines.
+#:
+#: **THIS FAMILY EXISTS BECAUSE AN AUDITOR FOUND TWO SOUNDNESS BREAKS IN IT AND
+#: BOTH WERE THE SAME MISTAKE.** CommonMark says an ATX heading's `#` run must
+#: be followed by *"spaces or tabs, or end of line"* and a closing fence may be
+#: followed *"only by spaces or tabs"*. The bash gate wrote `[[:space:]]`
+#: (six characters) and the Python twin wrote `\s` (Unicode-aware, twenty-nine)
+#: and `str.strip()` (the same set). Refusal protects a reader where it
+#: refuses; where it IMPLEMENTS a rule it owns that rule's alphabet, and
+#: "the fence rule is exact and small" was true of its structure and not of its
+#: character classes.
+#:
+#: So the alphabet is swept rather than argued: every character
+#: :func:`whitespace_alphabet` finds, in every one of these positions, with the
+#: renderer's own verdict recorded beside it.
+SEPARATOR_FORMS = (
+    # the ATX run's follower — `heading_any` / `_HEADING_LINE`
+    ("atx-run", "##{sep}0.2.1 — 2026-08-28\n## 9.9.9 — 2000-01-01\n"),
+    # the two separators inside the heading grammar — `heading_re` / `_HEADING`
+    ("version-em-dash", "## 0.2.1{sep}— 2026-08-28\n"),
+    ("em-dash-date", "## 0.2.1 —{sep}2026-08-28\n"),
+    # what a closing fence may be followed by — `${finfo//...}` / `info.strip()`
+    ("fence-closer", "```\n```{sep}\n## 0.2.1 — 2026-08-28\n"),
+    # and the tail, which both readers strip before parsing
+    ("heading-tail", "## 0.2.1 — 2026-08-28{sep}\n"),
+)
 
-    `None` is "this document has no `<h2>` at all" and is a different answer
-    from "it has one that does not parse as a release heading" — the second is
-    a string this returns and the tests refuse.
+
+def whitespace_alphabet() -> tuple[str, ...]:
+    """Every character Python calls whitespace, except the line separator.
+
+    DERIVED, over the whole code space, and not a list anybody typed: a list
+    would be a fourth alphabet standing beside the three this family exists to
+    compare. `\n` is excluded because it cannot occur INSIDE a line — it is
+    what ends one, in `read -r` and in `_lines` alike.
+
+    `tests/test_release_gates.py::test_the_recorded_whitespace_alphabet_is_the_live_one`
+    re-derives this and holds the recorded copy to it, IN EVERY LANE, so the
+    family cannot be shrunk by editing the generated file.
+    """
+    return tuple(c for c in map(chr, range(0x110000))
+                 if c.isspace() and c != "\n")
+
+
+def separator_documents(chars: tuple[str, ...]) -> list[str]:
+    """One document per `(character, form)`, in that order. Derived, not stored."""
+    return [shape.format(sep=char) for char in chars for _, shape in SEPARATOR_FORMS]
+
+
+def newest_h2(renderer, text: str) -> tuple[int | None, str | None]:
+    """`(1-based line, inline content)` of the FIRST `<h2>`, or `(None, None)`.
+
+    **THE LINE IS THE ORACLE AND THE CONTENT IS FOR THE MESSAGE, AND THAT
+    SPLIT WAS BOUGHT.** This returned the CONTENT alone, and the tests
+    compared it — parsed by this project's `<version> — <date>` grammar —
+    against what our readers read. Driven over the whitespace alphabet, that
+    put 25 documents in the false column that are not defects in either
+    reader: `markdown-it` is a port of a JavaScript library and its ATX rule
+    ends in `.trim()`, which in ECMAScript and in Python alike strips the
+    whole Unicode whitespace set. CommonMark strips *spaces or tabs*. So
+    `## 0.2.1 — 2026-08-28<NBSP>` renders with the NBSP GONE, our readers keep
+    it, and **our readers are the ones following the specification**.
+
+    Comparing content was importing the oracle's own deviation into the
+    comparison. The question this corpus exists to ask has always been
+    *"which LINE of this document is the newest heading"* — CommonMark decides
+    that and has nothing to say about `<version> — <date>`, which is this
+    project's grammar and is held between the two readers by the drives. So
+    the recorded oracle is `token.map[0] + 1`, which is exact, carries no
+    trimming, and is what `newest_heading_line` answers with.
+
+    `(None, None)` is "this document has no `<h2>` at all", still a different
+    answer from "it has one that does not parse as a release heading".
     """
     tokens = renderer.parse(text)
     for at, token in enumerate(tokens):
         if token.type == "heading_open" and token.tag == "h2":
-            return tokens[at + 1].content
-    return None
+            return token.map[0] + 1, tokens[at + 1].content
+    return None, None
 
 
 def render(corpus):
-    """`(product verdicts, named verdicts, renderer version)` for `corpus`."""
+    """`(product, named, separator, chars, renderer version)` for `corpus`.
+
+    The separator alphabet is re-derived HERE rather than read out of the
+    corpus, so regenerating cannot preserve a shrunken copy of it.
+    """
     import markdown_it  # noqa: PLC0415 - the whole point is that it is optional
 
     renderer = markdown_it.MarkdownIt("commonmark")
     product = [newest_h2(renderer, text)
                for text in documents(corpus.ALPHABET, corpus.MAX_LINES)]
     named = [newest_h2(renderer, text) for _, text, _, _ in corpus.NAMED]
-    return product, named, markdown_it.__version__
+    chars = whitespace_alphabet()
+    separators = [newest_h2(renderer, text) for text in separator_documents(chars)]
+    return product, named, separators, chars, markdown_it.__version__
 
 
 def _lit(value) -> str:
     return "None" if value is None else repr(value)
 
 
-def emit(corpus, product, named, version, today) -> str:
+def _verdict(value) -> str:
+    line, content = value
+    return f"({_lit(line)}, {_lit(content)})"
+
+
+def emit(corpus, product, named, separators, chars, version, today) -> str:
     """The whole corpus module, as text."""
-    verdicts: list[str | None] = [None]
-    for verdict in product:
+    verdicts: list[tuple[int | None, str | None]] = [(None, None)]
+    for verdict in [*product, *separators]:
         if verdict not in verdicts:
             verdicts.append(verdict)
     index = {verdict: at for at, verdict in enumerate(verdicts)}
@@ -197,7 +314,7 @@ def emit(corpus, product, named, version, today) -> str:
     lines.append("")
     lines.append("VERDICTS = (")
     for verdict in verdicts:
-        lines.append(f"    {_lit(verdict)},")
+        lines.append(f"    {_verdict(verdict)},")
     lines.append(")")
     lines.append("")
     lines.append("PRODUCT = (")
@@ -217,8 +334,35 @@ def emit(corpus, product, named, version, today) -> str:
         lines.append(f"        {label!r},")
         lines.append(f"        {text!r},")
         lines.append(f"        {must_read!r},")
-        lines.append(f"        {_lit(verdict)},")
+        lines.append(f"        {_verdict(verdict)},")
         lines.append("    ),")
+    lines.append(")")
+    lines.append("")
+    lines.append("SEPARATOR_CHARS = (")
+    row = []
+    for char in chars:
+        row.append(f"0x{ord(char):04x},")
+        if len(row) == 8:
+            lines.append("    " + " ".join(row))
+            row = []
+    if row:
+        lines.append("    " + " ".join(row))
+    lines.append(")")
+    lines.append("")
+    lines.append("SEPARATOR_FORM_NAMES = (")
+    for name, _ in SEPARATOR_FORMS:
+        lines.append(f"    {name!r},")
+    lines.append(")")
+    lines.append("")
+    lines.append("SEPARATORS = (")
+    row = []
+    for verdict in separators:
+        row.append(f"{index[verdict]},")
+        if len(row) == 20:
+            lines.append("    " + " ".join(row))
+            row = []
+    if row:
+        lines.append("    " + " ".join(row))
     lines.append(")")
     return "\n".join(lines) + "\n"
 
@@ -235,17 +379,17 @@ def main(argv=None) -> int:
 
     today = args.date or datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     corpus = _load(CORPUS)
-    product, named, version = render(corpus)
-    text = emit(corpus, product, named, version, today)
+    product, named, separators, chars, version = render(corpus)
+    text = emit(corpus, product, named, separators, chars, version, today)
+    counts = (f"{len(product)} product rows, {len(named)} named rows, "
+              f"{len(separators)} separator rows over {len(chars)} characters, "
+              f"markdown-it-py {version}")
     if args.write:
         CORPUS.write_text(text, encoding="utf-8")
-        print(f"wrote {CORPUS} ({len(product)} product rows, "
-              f"{len(named)} named rows, markdown-it-py {version})")
+        print(f"wrote {CORPUS} ({counts})")
         return 0
     same = CORPUS.read_text(encoding="utf-8") == text
-    print(f"{CORPUS}: {'up to date' if same else 'WOULD CHANGE'} "
-          f"({len(product)} product rows, {len(named)} named rows, "
-          f"markdown-it-py {version})")
+    print(f"{CORPUS}: {'up to date' if same else 'WOULD CHANGE'} ({counts})")
     return 0 if same else 1
 
 
