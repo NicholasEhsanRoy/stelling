@@ -40,10 +40,9 @@ something.
 
 from __future__ import annotations
 
-import ast
+import json
 import os
 import pathlib
-import re
 import subprocess
 import sys
 import textwrap
@@ -897,12 +896,16 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
 #
 # Latent when it was found, and now HELD rather than counted.
 # `tests/test_tripwire_plugin.py` reaches `pytester.runpytest` — IN-PROCESS —
-# through its `_run` helper, and no call site there hands a nested session
-# `-p _state_guard`. The nested sessions in THIS file do pass it and are
-# `subprocess.run`. What made it worth fixing rather than recording is that
-# the reaching edit is the idiom this very file already uses, one argument
-# away. The trajectory hangs off the session's `Config` now, so a nested
-# session gets a fresh one and the separation is BY CONSTRUCTION.
+# through its `_run` helper, and no session it spawns registers this module.
+# **THAT SENTENCE READ "no call site there hands a nested session `-p
+# _state_guard`" UNTIL 2026-08-28, AND THAT IS A CLAIM ABOUT A SPELLING.** It
+# was held by a scan of spellings for five rounds and it is held by a
+# measurement of those sessions' plugin managers now; the section below is the
+# record of why. The nested sessions in THIS file do pass `-p _state_guard`
+# and are `subprocess.run`. What made it worth fixing rather than recording is
+# that the reaching edit is the idiom this very file already uses, one
+# argument away. The trajectory hangs off the session's `Config` now, so a
+# nested session gets a fresh one and the separation is BY CONSTRUCTION.
 #
 # **THIS PARAGRAPH USED TO CARRY THE HELPER'S LINE NUMBER AND ITS CALL-SITE
 # COUNT, AND BOTH WERE FALSE.** It said line 83 from FOURTEEN sites; measured
@@ -916,318 +919,505 @@ def test_the_module_guard_cannot_see_an_IMPORT_TIME_statement_and_says_so(tmp_pa
 # the numbers are gone rather than corrected.
 
 
-#: The spellings that put this module's name into a nested session's
-#: arguments. `-p` takes its value joined as well as separated, so the joined
-#: forms are the same instruction written shorter — argparse accepts all three
-#: and a scan that reads only the separated one is a scan of a style, not of a
-#: behaviour.
-_LOADS_THIS_MODULE = ("_state_guard", "-p_state_guard", "-p=_state_guard")
+# ── the guarantee, MEASURED rather than modelled ────────────────────────────
+#
+# **WHAT USED TO BE HERE WAS A SYNTACTIC SCAN, AND THE RECORD OF WHY IT IS
+# GONE IS WORTH MORE THAN THE FUNCTION WAS.** Until 2026-08-28 the claim below
+# rested on `state_guard_references`, a single-file AST scan over
+# `tests/test_tripwire_plugin.py` that looked for the SPELLINGS which would
+# make a nested session load `tests/_state_guard.py`. Five rounds of audit
+# each closed one spelling, and each next round found another, always ONE
+# INDIRECTION further out:
+#
+#   1. reading only direct `Call` arguments missed a tuple spread as `*ARGS`;
+#   2. whole-string matching missed `makeconftest('pytest_plugins = [...]')`;
+#   3. naming four `pytester` wrapper methods missed `makefile`, the base
+#      method all four of them delegate to;
+#   4. naming `makefile` still missed a MODULE-LEVEL SOURCE CONSTANT handed to
+#      a `make*` call — which is the scanned file's own prevailing idiom, and
+#      so the likeliest of the lot to be written by accident;
+#   5. and the rule matched string LITERALS, so a generated conftest doing
+#      `import _state_guard; config.pluginmanager.register(_state_guard)` —
+#      where the name is an `import` alias and a `Name`, never a literal — was
+#      invisible.
+#
+# Every one of those was a spelling live in the scanned file or one keystroke
+# from it. Rounds 4 and 5 were then written down as DECLARED LIMITS and pinned
+# by `test_the_declared_limits_are_still_limits`, whose own failure message
+# said what to do when a limit is outgrown: strike the bullet and delete the
+# fixture entry. This is that commit, for both at once.
+#
+# The class does not close syntactically, and the five rounds are the argument
+# rather than the anecdote: every closed form admitted one more indirection,
+# and "one more indirection" is not a finite set. The shape had a name in the
+# struck prose already — ENUMERATING SPELLINGS OF THE THING INSTEAD OF THE
+# THING, written into the `_GENERATES_SOURCE` comment at round 3 — and naming
+# it did not stop it: `git show 519adcc -- tests/test_state_guard.py` is the
+# same edit growing that set of names from four to five. There is one cut that
+# does stop it. A check that models a behaviour is one indirection behind it,
+# so where the question is what the program DOES, run the program. "Does a
+# nested session load this module" is that question exactly.
+#
+# **AND ONE OF THE TWO PINNED LIMITS WAS PINNED AS SOURCE THAT COULD NOT HAVE
+# REACHED.** The struck docstring said of both routes *"Measured to load the
+# plugin"*. Driven now: the constant route does. The import-and-register route
+# was pinned spelled `def pytest_configure(c)`, and pluggy validates a
+# hookimpl's argument names against the hookspec's. Measured 2026-08-28 on
+# pytest 9.1.1 / pluggy 1.6.0, that conftest never registers at all::
+#
+#     PluginValidationError: Plugin '.../conftest.py' for hook 'pytest_configure'
+#     hookimpl definition: pytest_configure(c)
+#     Argument(s) {'c'} are declared in the hookimpl but can not be found in
+#     the hookspec
+#
+# The inner session dies during conftest loading at `ret == 3`, never reaches
+# `pytest_configure`, and nobody registers anything. The ROUTE reaches —
+# spelled `config`, and driven below. The SOURCE pinned for it did not, and
+# nothing noticed, because that pin only ever asked whether the SCAN could see
+# it: a guard that checks a claim is well-formed and never that it is true.
+# The repair is not a better literal. It is that a route is now shown to reach
+# by REACHING.
+#
+# **HOW THE INNER SESSION IS OBSERVED, AND WHY NOT THE OTHER WAYS**, because
+# the choice is what the check can see. :data:`_OBSERVER` is a pytest plugin
+# named to every session in the observed process tree through the
+# `PYTEST_PLUGINS` environment variable, and it reports through
+# `pytest_plugin_registered` — a HISTORIC hook, so plugins registered BEFORE
+# the observer was still reach it and there is no ordering in which a
+# registration is missed. It matches on the resolved `__file__` of the
+# registered object rather than on the name it was registered under, because a
+# name is a spelling and spellings are the thing five rounds could not
+# enumerate.
+#
+#   * `PYTEST_PLUGINS` rather than `-p`, because `-p` reaches the session this
+#     file launches and nothing that session spawns. `Config._preparse` calls
+#     `consider_env()` OUTSIDE the `PYTEST_DISABLE_PLUGIN_AUTOLOAD` branch
+#     (pytest 9.1.1), so the observer arrives whether autoload is on or off —
+#     measured both ways below — and `Pytester` deletes `PYTEST_ADDOPTS` from
+#     the environment of a nested session but not this.
+#   * NOT `runpytest_inprocess` and what it returns. `Pytester.inline_run`
+#     does build a `HookRecorder` on the INNER `Config.pluginmanager`, and
+#     `runpytest_inprocess` drops it; reaching for what it kept would in any
+#     case only answer for the sessions the observed file happens to run
+#     in-process, and that file runs sessions as subprocesses too.
+#   * NOT a `pytest_configure` hook written into the inner tree, and not a
+#     conftest that writes a file the outer test reads: the inner tree is
+#     written by the code under observation, which calls `makeconftest` and
+#     OVERWRITES it. A check that has to share a file with the thing it is
+#     checking is a check that thing can switch off by accident.
+#
+# **WHAT IT DOES NOT REACH.** A behavioural check has limits like any other,
+# and these are declared rather than discovered:
+#
+#   * it sees the sessions IT RUNS — `sys.executable`, this venv's installed
+#     distributions, this pytest. A session under another interpreter, another
+#     pytest, or another set of `pytest11` entry points can have a different
+#     plugin set and this says nothing about it;
+#   * the developer's environment is REMOVED from the input rather than
+#     inherited: :func:`_observe` drops `PYTEST_ADDOPTS` and
+#     `PYTEST_DISABLE_PLUGIN_AUTOLOAD` from the child environment so that the
+#     verdict is the same for everybody, which is the defect this repository
+#     keeps re-finding in checks that read the ambient shell. The price is
+#     that the verdict is about the autoload-ENABLED configuration, and the
+#     disabled one is measured here rather than asserted;
+#   * it identifies the module by the REAL PATH of one file. A copy of
+#     `tests/_state_guard.py` loaded from somewhere else is a different module
+#     object with its own everything, and is deliberately not a finding;
+#   * a session that never reaches `pytest_configure` reports no session row —
+#     the `pytest_configure(c)` measurement above is exactly such a session.
+#     So a report with no `loaded` row in it is not by itself good news, and
+#     the check below refuses to read it as good news: it asserts the observed
+#     run exited 0, and that nested sessions of BOTH kinds were seen at all.
+#
+# **MEASURED 2026-08-28** — jax 0.11.0, pytest 9.1.1, pluggy 1.6.0, python
+# 3.12.3 — running `tests/test_tripwire_plugin.py` under this observer, with
+# `PYTEST_DISABLE_PLUGIN_AUTOLOAD` unset and set to `1`, identical both ways::
+#
+#     31 passed    37 sessions: 1 outer, 26 nested IN-PROCESS, 10 in child
+#                  processes; 0 registrations of tests/_state_guard.py in any
+#                  of them
+#
+# The autoload-OFF half of that was driven by hand rather than through
+# :func:`_observe`, because :func:`_observe` is what drops the variable: a
+# measurement of a configuration the helper refuses to reproduce can only be
+# taken beside it. Single runs of that file measured 10.82s unobserved
+# against 10.58s observed, so the observer is not what this check costs. What
+# it costs is running the file at all, and that is reported at the check.
+#
+# **THE GUARANTEE STILL DOES NOT LIVE HERE, RE-VERIFIED RATHER THAN
+# REPEATED.** The trajectory hangs off the session's `Config` — `_TRAJECTORY`
+# in `tests/_state_guard.py`, and the comment above it — so a nested session
+# builds a fresh one and the separation holds whether or not the module loads
+# there. Checked against the current code on 2026-08-28: every module-level
+# binding in that file is immutable, so there is no module-level state for a
+# second session to share — `ABSENT` a `str`, `ENV_PREFIXES`, `ENTRIES` and
+# `PINNED_EXEMPTIONS` tuples, `ENTRY_NAMES` a `frozenset`, `_TRAJECTORY` a
+# `pytest.StashKey`, `_GONE` a bare sentinel. The two controls that drive it
+# are `test_a_module_leak_is_still_named_when_a_TEST_RUNS_A_NESTED_SESSION`
+# and `test_a_WELL_BEHAVED_module_stays_silent_when_a_test_runs_a_nested_
+# session`, both below, and both are green. The argument holds. This check is
+# still the belt rather than the braces — but it is a belt that measures now,
+# and it can no longer be defeated by a spelling nobody thought of.
 
-#: The `pytester` methods whose STRING ARGUMENT BECOMES A FILE the nested
-#: session then parses — the one place an EMBEDDED occurrence of this module's
-#: name is a load rather than a mention, because there the text stops being
-#: prose and becomes source. `makeconftest('pytest_plugins = ["_state_guard"]')`
-#: registers the plugin as surely as `-p` does, and that spelling is live in
-#: the scanned file, every site writing the name through a constant — which is
-#: why the file is clean, and for that reason rather than by luck.
+
+#: The observer, written into a temporary directory by :func:`_observe`.
 #:
-#: **`makefile` IS IN THIS SET BECAUSE IT IS THE PRIMITIVE THE OTHERS DELEGATE
-#: TO**, and leaving it out was this guard's third round of one mistake:
-#: enumerating spellings of the thing instead of the thing. The first version
-#: read only direct `Call` arguments and missed `*ARGS`; the second matched
-#: only whole strings and missed `makeconftest`; the third named four wrappers
-#: and missed the base method all four call. Each gap was a spelling live in
-#: the scanned file. A set of names is the wrong shape for "writes a file",
-#: and this one is defensible only because `makefile` closes it from below.
-_GENERATES_SOURCE = frozenset(
-    {"makefile", "makeconftest", "makepyfile", "makeini", "makepyprojecttoml"}
-)
+#: It reads its wiring with ``os.environ[...]`` and not ``.get``, on purpose:
+#: an observer that quietly disables itself when its wiring is missing writes
+#: an empty report, and an empty report from a broken instrument is
+#: indistinguishable from a clean tree. Missing wiring must be a usage error
+#: in the session that loads it, loudly, in the captured output below.
+_OBSERVER = r'''"""Every registration of one FILE, in every session in this process.
 
-#: The name as a WHOLE TOKEN, for generated text that is not Python. The
-#: lookbehind excludes `.` as well as word characters so `tests._state_guard`
-#: — a different module path — does not match, and the lookahead keeps
-#: `_state_guardian` and `_state_guard_` out.
-_EMBEDDED = re.compile(r"(?<![\w.])_state_guard(?![\w])")
+Written by ``tests/test_state_guard.py``; the prose there says why the
+question is asked by running the program rather than by reading it.
+"""
 
-#: How far to follow generated source into generated source. Bounded because
-#: the recursion below is over attacker-shaped input in principle, and because
-#: nothing in this tree nests a `make*` inside a `make*` even once.
-_MAX_GENERATED_DEPTH = 3
+import json
+import os
+
+_REPORT = os.environ["STATE_GUARD_OBSERVER_REPORT"]
+_SUBJECT = os.path.realpath(os.environ["STATE_GUARD_OBSERVER_SUBJECT"])
+
+#: ``id(manager)`` -> ordinal within this process, with the manager itself
+#: held in ``_KEEP``. The strong reference is the point: a garbage-collected
+#: nested session can have its ``id()`` handed to the next one, and two
+#: sessions conflated into one is the exact misreading that would let a
+#: nested load be attributed to the outer session.
+_ORDINALS = {}
+_KEEP = []
 
 
-def state_guard_references(
-    source: str, _depth: int = 0
-) -> list[tuple[int, str]]:
-    """`(line, spelling)` for every literal in `source` that LOADS this module.
+def _session(manager):
+    ordinal = _ORDINALS.get(id(manager))
+    if ordinal is None:
+        ordinal = _ORDINALS[id(manager)] = len(_ORDINALS)
+        _KEEP.append(manager)
+    return ordinal
 
-    **ONE RULE, APPLIED TWICE, BECAUSE A STRING MEANS DIFFERENT THINGS
-    DEPENDING ON WHO PARSES IT.** Getting that wrong is what made three
-    earlier versions of this scan miss three spellings the scanned file
-    actually uses.
 
-    1. **In THIS source.** A literal that IS one of
-       :data:`_LOADS_THIS_MODULE`, wherever it sits — a call argument, a
-       module-level tuple later spread as ``*ARGS``, a keyword's tuple, an
-       inline list, a dict, a comprehension. Whole-string, because in an
-       argument list the name is the whole argument. Prose is excluded by what
-       it IS rather than where it is: a docstring and a bare string statement
-       are the two ways Python holds text that is not a value, and comments
-       never reach the AST at all.
-    2. **In source this file GENERATES**, i.e. a literal anywhere beneath a
-       call to one of :data:`_GENERATES_SOURCE`. If that literal parses as
-       Python, **this function is applied to it** — so a generated conftest
-       gets rule 1, and a comment or docstring written *into* a generated file
-       is prose there for exactly the reason it is prose here. If it does not
-       parse — an ini, a TOML fragment — the whole-token
-       :data:`_EMBEDDED` match stands in.
+def _emit(row):
+    row["pid"] = os.getpid()
+    # Opened for append and written one short line at a time, because the
+    # observed tree runs sessions in child processes and they share this file.
+    with open(_REPORT, "a", encoding="utf-8") as report:
+        report.write(json.dumps(row, sort_keys=True) + "\n")
 
-    Recursing rather than pattern-matching the generated text is the point:
-    it is the same rule, and a guard that fires on a comment it generated
-    would be a guard that fires on its own explanation one level down. That
-    direction is the one this suite says gets a check deleted.
 
-    **The conservative edge, named.** Rule 2 catches ``makeini`` writing
-    ``addopts = -p _state_guard``, which does NOT register the plugin today.
-    That is pytest's current behaviour rather than a guarantee, and the
-    failure mode here is silent state-sharing, so an attempt to load is worth
-    naming even where the attempt would not currently work.
+def pytest_plugin_registered(plugin, plugin_name, manager):
+    """Every plugin registered in every manager here, matched by FILE.
 
-    **THIS SCAN IS A TRIPWIRE, NOT A PROOF, AND FIVE ROUNDS OF AUDIT ARE THE
-    EVIDENCE FOR THAT SENTENCE.** Each round closed one syntactic form and the
-    next found another, and the miss was always **one indirection** further
-    out: direct call arguments missed a splat; whole-string matching missed a
-    generated conftest; four wrapper names missed the base method they all
-    delegate to; and naming the base method still misses a source constant
-    reached through a variable. A syntactic single-file scan cannot close this
-    class — there is always one more indirection — so the honest thing is to
-    say what it does not reach and to say where the guarantee actually lives.
-
-    **WHERE THE GUARANTEE ACTUALLY LIVES**, and it is not here: the trajectory
-    hangs off the session's ``Config`` rather than off module-level dicts
-    (``tests/_state_guard.py``, the comment above ``_TRAJECTORY``). A nested
-    session builds a fresh ``Config``, **so the separation holds BY
-    CONSTRUCTION whether or not this module is loaded there.** That is the
-    braces. This scan is the belt: it catches a reaching edit at review time,
-    when the cost of the conversation is low, and nothing rests on it being
-    complete.
-
-    **WHAT IT DOES NOT REACH**, declared rather than discovered — the previous
-    four docstrings each claimed a completeness the code did not have, which is
-    the defect this list exists to stop repeating:
-
-    * a literal defined in **another module** and imported in — this is a
-      single-file scan, and the test below says so in its own title;
-    * a **direct write** into the nested tree
-      (``(pytester.path / "conftest.py").write_text(...)``), which loads the
-      plugin and goes through no ``make*`` call;
-    * a **local helper** wrapping one of those methods, one indirection past a
-      syntactic scan — worth naming because helper-wrapping is the scanned
-      file's prevailing idiom, which is how several of these gaps arrived;
-    * a **module-level source constant** handed to a ``make*`` call
-      (``SG = 'pytest_plugins = ["_state_guard"]'``; ``makeconftest(SG)``).
-      Measured to load the plugin. This is the same idiom the scanned file
-      already uses for generated source — ``WRAPPING_TEST`` is defined once
-      and handed to ``makepyfile`` at a dozen sites — so it is the likeliest
-      of these four to be written by accident;
-    * a **generated conftest that imports and registers**
-      (``import _state_guard; config.pluginmanager.register(_state_guard)``).
-      Measured to load the plugin. Rule 1 matches string literals, and here
-      the name is an ``import`` alias and a ``Name``, never a literal. A bare
-      ``import`` with no ``register`` does not load, and is correctly silent.
-
-    **THE REPAIR THAT WOULD ACTUALLY CLOSE IT** is not a sixth form. It is to
-    stop modelling the behaviour and measure it — assert on the nested
-    session's plugin manager rather than on the spelling that reaches it,
-    which is decidable, immune to every indirection above, and the same
-    measure-don't-model cut this project applies everywhere else. That is
-    recorded as work rather than done here, because it changes this from a
-    static check into one that runs nested sessions, and the property it
-    guards already holds by construction.
+    Historic hook: this is called for the plugins registered before this
+    module was as well as for every one after, so there is no ordering in
+    which a registration is missed. ``plugin_name`` is reported but never
+    matched on: the name a plugin is registered under is a spelling.
     """
-    tree = ast.parse(source)
-    prose: set[int] = set()
-    for node in ast.walk(tree):
-        # A bare string statement is text, not a value — and that covers every
-        # docstring, which is only ever the first such statement in a body.
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
-            if isinstance(node.value.value, str):
-                prose.add(id(node.value))
-
-    found: set[tuple[int, str]] = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and node.value in _LOADS_THIS_MODULE
-            and id(node) not in prose
-        ):
-            found.add((node.lineno, node.value))
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in _GENERATES_SOURCE
-        ):
-            for inner in ast.walk(node):
-                if not (
-                    isinstance(inner, ast.Constant)
-                    and isinstance(inner.value, str)
-                ):
-                    continue
-                if _generated_text_loads(inner.value, _depth):
-                    # The OUTER line, because that is the line a reader edits.
-                    found.add((inner.lineno, " ".join(inner.value.split())))
-    return sorted(found)
+    where = getattr(plugin, "__file__", None)
+    if where is None or os.path.realpath(where) != _SUBJECT:
+        return
+    _emit({"kind": "loaded", "session": _session(manager), "name": plugin_name})
 
 
-def _generated_text_loads(text: str, depth: int) -> bool:
-    """Whether generated `text` would load this module in the nested session.
+def pytest_configure(config):
+    """One row per session, so that "nothing loaded it" can be told apart
+    from "nothing ran"."""
+    _emit(
+        {
+            "kind": "session",
+            "session": _session(config.pluginmanager),
+            "args": list(config.invocation_params.args),
+        }
+    )
+'''
 
-    Python gets the Python rule, recursively. Anything else gets the
-    whole-token match, because there is no syntax to tell a value from a
-    remark in an ini file.
+
+class _Observed:
+    """One observer report, staged into what the assertions below ask of it.
+
+    A session is identified by ``(pid, ordinal)``: the ordinal alone repeats
+    across processes. The OUTER session is the first one to configure, because
+    nothing it spawns can configure before it does.
     """
-    if _EMBEDDED.search(text) is None:
-        return False
-    if depth >= _MAX_GENERATED_DEPTH:
-        return True
-    try:
-        return bool(state_guard_references(text, depth + 1))
-    except SyntaxError:
-        return True
+
+    def __init__(self, rows: list[dict]) -> None:
+        self.rows = rows
+        sessions = [row for row in rows if row["kind"] == "session"]
+        self.outer = (
+            (sessions[0]["pid"], sessions[0]["session"]) if sessions else None
+        )
+        self.here = [
+            row
+            for row in sessions
+            if self.outer is not None
+            and row["pid"] == self.outer[0]
+            and (row["pid"], row["session"]) != self.outer
+        ]
+        self.elsewhere = [
+            row
+            for row in sessions
+            if self.outer is not None and row["pid"] != self.outer[0]
+        ]
+        #: Registrations of the subject in a session that is NOT the outer
+        #: one. The outer session is excluded because its plugin set is
+        #: decided entirely by :func:`_observe` -- its own argv and its own
+        #: ``PYTEST_PLUGINS`` -- and never by the file under observation, so
+        #: nothing that file does can hide there.
+        self.loaded = [
+            row
+            for row in rows
+            if row["kind"] == "loaded" and (row["pid"], row["session"]) != self.outer
+        ]
+
+    def __str__(self) -> str:
+        """The counts, then every registration — and NOT every row.
+
+        The observed file spawns dozens of sessions, and printing all of them
+        buries the one line a reader needs. The counts are here because they
+        are what says the run happened at all; the registrations are here with
+        the arguments of the session that made them, because that is what a
+        reader has to go and find.
+        """
+        args = {
+            (row["pid"], row["session"]): row["args"]
+            for row in self.rows
+            if row["kind"] == "session"
+        }
+        made = [
+            f"  pid={row['pid']} session={row['session']} as {row['name']!r} "
+            f"args={args.get((row['pid'], row['session']), '<never configured>')}"
+            for row in self.loaded
+        ]
+        return "\n".join(
+            [
+                f"{len(self.rows)} rows: "
+                f"{'an outer session' if self.outer else 'NO outer session'}, "
+                f"{len(self.here)} nested in its process, "
+                f"{len(self.elsewhere)} in child processes",
+                "registrations of the subject outside the outer session:",
+                *(made or ["  (none)"]),
+            ]
+        )
 
 
-def test_no_nested_session_in_the_tripwire_file_loads_this_module():
-    """No literal in `tests/test_tripwire_plugin.py` names this module.
+def _observe(tmp_path, *args, cwd) -> tuple[subprocess.CompletedProcess, _Observed]:
+    """Run one pytest session over ``args``, watching every session it spawns.
 
-    THE HALF OF THE PARAGRAPH ABOVE THAT IS A CLAIM RATHER THAN A STORY. That
-    file's `_run` helper reaches `pytester.runpytest` IN-PROCESS, so a nested
-    session there that loaded this module would share the outer session's
-    bookkeeping — the exact shape the trajectory fix exists to make
-    impossible. The fix makes it impossible BY CONSTRUCTION and this makes the
-    argument re-derivable, which the line number and call count it replaced
-    never were.
+    ``PYTHONPATH`` carries the observer's directory and ``tests/``: the second
+    is what makes `_state_guard` importable BY NAME in the nested sessions, and
+    a route that could not import it would come back silent for the wrong
+    reason — an instrument reporting an ``ImportError`` as an absence of
+    defect.
 
-    The scan is :func:`state_guard_references`, and
-    :func:`test_the_reference_scan_is_driven_both_ways` drives it — because a
-    guard nobody can drive is the thing this suite refuses everywhere else.
+    ``PYTEST_ADDOPTS`` and ``PYTEST_DISABLE_PLUGIN_AUTOLOAD`` are dropped from
+    the child environment rather than inherited, so that this reports the same
+    verdict to everybody. What that costs is stated in the limits above.
     """
-    path = pathlib.Path(__file__).resolve().parent / "test_tripwire_plugin.py"
-    found = state_guard_references(path.read_text(encoding="utf-8"))
-    assert not found, (
-        "tests/test_tripwire_plugin.py names `_state_guard` at "
-        f"{[line for line, _ in found]}. Its sessions reach "
-        "`pytester.runpytest` IN-PROCESS, so loading this module there puts a "
-        "nested session and the outer one on the same bookkeeping — which is "
-        "the defect the trajectory-on-Config fix closed. If a nested session "
-        "there genuinely needs the guard, it needs a SUBPROCESS, the way this "
-        "file's own nested sessions get it."
+    workshop = tmp_path / "observer"
+    workshop.mkdir(exist_ok=True)
+    (workshop / "_sg_observer.py").write_text(_OBSERVER, encoding="utf-8")
+    report = tmp_path / "observed.jsonl"
+
+    env = dict(os.environ)
+    # The developer's shell is not an input to this measurement.
+    for ambient in ("PYTEST_ADDOPTS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD"):
+        env.pop(ambient, None)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [
+            str(workshop),
+            str(TESTS),
+            *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []),
+        ]
+    )
+    env["PYTEST_PLUGINS"] = "_sg_observer"
+    env["STATE_GUARD_OBSERVER_REPORT"] = str(report)
+    env["STATE_GUARD_OBSERVER_SUBJECT"] = str(TESTS / "_state_guard.py")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    proc = subprocess.run(
+        [
+            sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+            # never shuffled: see `deterministic_order_args` in conftest.py
+            "-p", "no:randomly", *args,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
+        env=env,
+    )
+    lines = (
+        report.read_text(encoding="utf-8").splitlines() if report.exists() else []
+    )
+    return proc, _Observed([json.loads(line) for line in lines if line])
+
+
+def test_no_nested_session_in_the_tripwire_file_loads_this_module(tmp_path):
+    """No session `tests/test_tripwire_plugin.py` spawns registers this module.
+
+    THE HALF OF THE PARAGRAPH ABOVE THAT IS A CLAIM RATHER THAN A STORY, and
+    it is decided by running that file rather than by reading it. Its `_run`
+    helper reaches `pytester.runpytest` IN-PROCESS, so a nested session there
+    that loaded this module would share the outer session's bookkeeping — the
+    exact shape the trajectory-on-`Config` fix exists to make impossible. The
+    fix makes it impossible BY CONSTRUCTION; this makes the argument
+    re-derivable, which neither the line number and call count it first
+    replaced nor the syntactic scan that replaced those ever were.
+
+    THE THREE ASSERTIONS ARE NOT ONE ASSERTION AND TWO ORNAMENTS. A report
+    with no registration in it is worth nothing until the run that produced it
+    is known to have run: a nested session that dies before `pytest_configure`
+    writes no row at all, so `exited 0` and `nested sessions were seen` are
+    what separate "nothing loaded it" from "nothing happened". Both kinds are
+    required because the observer's reach over both is a claim in the prose
+    above, and a claim nothing drives is a story.
+    """
+    # The observed file gates its whole module on jax, and a session that
+    # collects nothing spawns nothing.
+    pytest.importorskip("jax")
+    proc, seen = _observe(
+        tmp_path, str(TESTS / "test_tripwire_plugin.py"), cwd=REPO
+    )
+    assert proc.returncode == 0, (
+        "tests/test_tripwire_plugin.py does not pass under observation, so "
+        "what was measured is not the file this asserts about. If the "
+        "observer is what broke it, the instrument has changed its subject "
+        f"and that is the bug.\n{proc.stdout}\n{proc.stderr}"
+    )
+    assert seen.here and seen.elsewhere, (
+        "the observed run spawned no nested session of one or both kinds "
+        f"({len(seen.here)} in-process, {len(seen.elsewhere)} in a child "
+        "process), so this check measured nothing and must not read as "
+        "green. Either the file stopped running nested sessions — in which "
+        "case this test and the sentence it holds up should go — or the "
+        f"observer stopped reaching them.\n{seen}\n{proc.stdout}"
+    )
+    assert not seen.loaded, (
+        "a nested session of tests/test_tripwire_plugin.py registered "
+        f"tests/_state_guard.py:\n{seen}\n"
+        "Its sessions reach `pytester.runpytest` IN-PROCESS, so loading this "
+        "module there puts a nested session and the outer one on the same "
+        "bookkeeping — the defect the trajectory-on-`Config` fix closed. If a "
+        "nested session there genuinely needs the guard, it needs a "
+        "SUBPROCESS, the way this file's own nested sessions get it."
     )
 
 
-#: Reaching spellings and prose spellings, as SOURCE. Each reaching entry was
-#: silent against the call-argument scan this replaced, except the first, which
-#: is the only one that version caught.
-_REACHING = (
-    'pytester.runpytest("-p", "_state_guard")',
-    'pytester.runpytest("-p_state_guard")',
-    'pytester.runpytest("-p=_state_guard")',
-    'pytester.runpytest(*("-p", "_state_guard"))',
-    'pytester.runpytest(*["-p", "_state_guard"])',
-    'pytester.runpytest(plugins=("_state_guard",))',
-    'ARGS = ("-p", "_state_guard")\npytester.runpytest(*ARGS)',
-    'def f():\n    args = ["-p", "_state_guard"]\n    return args',
-    'pytester.makeconftest(\'pytest_plugins = ["_state_guard"]\')',
-    'pytester.makepyfile(conftest=\'pytest_plugins = ["_state_guard"]\')',
-    'pytester.makeini("[pytest]" + chr(10) + "addopts = -p _state_guard")',
-    'pytester.makefile(".py", conftest=\'pytest_plugins = ["_state_guard"]\')',
-    'pytester.makeconftest(dedent(\'pytest_plugins = ["_state_guard"]\'))',
+#: THE TWO ROUTES THE SYNTACTIC SCAN COULD NOT SEE, now the drive for what
+#: replaced it. Each is a whole test module for a MIDDLE session; each spawns
+#: an inner session that really does register `tests/_state_guard.py`, and
+#: :func:`_observe` is what has to notice. They are the anti-vacuity half of
+#: the check above and they are not optional: a check driven only by its own
+#: mutation is a check nobody has seen work.
+#:
+#: `assert_outcomes(passed=1)` inside each plant is the plant's own control.
+#: A route that stopped reaching because the inner session broke would
+#: otherwise come back looking like a route that never reached.
+_VIA_A_CONSTANT = r'''pytest_plugins = ["pytester"]
+
+# The scanned file's prevailing idiom for generated source: written once at
+# module level, handed to a `make*` call wherever it is wanted. One name away
+# from the literal a syntactic scan could see, and invisible to it.
+SG = 'pytest_plugins = ["_state_guard"]'
+
+
+def test_middle(pytester):
+    pytester.makepyfile(test_inner="def test_inner():\n    assert True\n")
+    pytester.makeconftest(SG)
+    pytester.runpytest().assert_outcomes(passed=1)
+'''
+
+#: **SPELLED `config` AND NOT `c`, AND THE DIFFERENCE IS THE WHOLE FINDING.**
+#: The struck `_KNOWN_MISSES` fixture pinned this route spelled
+#: `pytest_configure(c)`, which pluggy refuses at conftest registration, so
+#: the inner session died at `ret == 3` and never registered anything. See
+#: the measurement in the prose above.
+_IMPORT_AND_REGISTER = r'''pytest_plugins = ["pytester"]
+
+
+def test_middle(pytester):
+    pytester.makepyfile(test_inner="def test_inner():\n    assert True\n")
+    pytester.makeconftest(
+        "def pytest_configure(config):\n"
+        "    import _state_guard\n"
+        "    config.pluginmanager.register(_state_guard)\n"
+    )
+    pytester.runpytest().assert_outcomes(passed=1)
+'''
+
+#: The silent direction, and it is the one that gets a check deleted rather
+#: than the one that ships a defect: a nested session that MENTIONS this
+#: module in a comment it generates and loads nothing.
+_ONLY_MENTIONS_IT = r'''pytest_plugins = ["pytester"]
+
+
+def test_middle(pytester):
+    pytester.makepyfile(test_inner="def test_inner():\n    assert True\n")
+    pytester.makeconftest(
+        "# deliberately not `-p _state_guard`: see tests/test_state_guard.py\n"
+    )
+    pytester.runpytest().assert_outcomes(passed=1)
+'''
+
+
+def _observe_plant(
+    tmp_path, source: str
+) -> tuple[subprocess.CompletedProcess, _Observed]:
+    """Run one whole planted middle module under observation, in its own tree."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "test_middle.py").write_text(source, encoding="utf-8")
+    return _observe(tmp_path, "test_middle.py", cwd=tree)
+
+
+@pytest.mark.parametrize(
+    "source",
+    (_VIA_A_CONSTANT, _IMPORT_AND_REGISTER),
+    ids=("via-constant", "import-and-register"),
 )
-_PROSE = (
-    '# deliberately not `-p _state_guard`: see tests/test_state_guard.py',
-    '"""Explains why `_state_guard` is not passed here."""',
-    'def f():\n    """Not `-p _state_guard`, on purpose."""\n    return 1',
-    '"_state_guard"\n',
-    'x = "_state_guardian"',
-    'x = "state_guard"',
-    'x = "tests._state_guard"',
-    'x = "__state_guard"',
-    'x = "_state_guard_"',
-    'NOTE = "we never pass -p _state_guard here, see test_state_guard.py"',
-    'pytester.makeconftest("# nothing about _state_guardian here")',
-    'pytester.makeconftest("# we never pass -p _state_guard")',
-    'pytester.makepyfile(test_x=\'"""Not _state_guard."""\')',
-    'pytester.makefile(".py", x="# _state_guard is not loaded here")',
-)
+def test_a_nested_session_that_reaches_this_module_IS_NAMED(tmp_path, source):
+    """Both routes the scan declared unreachable are reached, and reported.
 
-
-#: THE TWO REACHING ROUTES THIS SCAN IS KNOWN NOT TO SEE, pinned so the gap is
-#: a fixture rather than a memory. Both were measured to load the plugin in a
-#: real nested session. If a later change makes one of them visible, this test
-#: fails and the limit above should be struck — a declared limit that has
-#: quietly stopped being a limit is its own defect, and the whole point of
-#: writing them down is that they stay checked.
-_KNOWN_MISSES = (
-    'SG = \'pytest_plugins = ["_state_guard"]\'\npytester.makeconftest(SG)',
-    'pytester.makeconftest("def pytest_configure(c):\\n"'
-    ' "    import _state_guard\\n"'
-    ' "    c.pluginmanager.register(_state_guard)\\n")',
-)
-
-
-@pytest.mark.parametrize("source", _KNOWN_MISSES, ids=("via-constant", "import-and-register"))
-def test_the_declared_limits_are_still_limits(source):
-    """The two routes the docstring declares unreachable are still unreached.
-
-    **A DECLARED LIMIT THAT HAS STOPPED BEING ONE IS ITS OWN DEFECT.** Writing
-    a limit down is worth nothing if nothing notices when it changes, and the
-    direction that matters here is the happy one: if a later edit widens the
-    scan so one of these becomes visible, this fails, and whoever did it
-    should strike the bullet rather than leave the file claiming a blindness
-    it no longer has.
+    These two are the evidence that the replacement is not the same instrument
+    in different clothes. They were `_KNOWN_MISSES` — pinned as blind spots,
+    with the docstring above them declaring the blindness — and the pin's own
+    failure message said that a limit which stops being a limit gets struck
+    and its fixture entry deleted. They are struck, and this is what they
+    became.
     """
-    assert not state_guard_references(source), (
-        "a route the docstring declares unreachable is now caught:\n"
-        f"  {source!r}\n"
-        "That is good news, not a bug. Strike the matching bullet from "
-        "`state_guard_references`'s WHAT IT DOES NOT REACH list and delete "
-        "this fixture entry, so the file stops claiming a limit it has "
-        "outgrown."
+    proc, seen = _observe_plant(tmp_path, source)
+    assert proc.returncode == 0, (
+        f"the plant did not run, so it reached nothing\n{proc.stdout}\n{proc.stderr}"
+    )
+    assert seen.here, (
+        f"the plant spawned no nested session in its own process\n{seen}\n{proc.stdout}"
+    )
+    assert seen.loaded, (
+        "a route measured to register tests/_state_guard.py in a nested "
+        f"session came back silent:\n{source}\n{seen}\n{proc.stdout}\n"
+        "Either the route stopped reaching — in which case say so here with "
+        "the measurement — or the observer stopped seeing it, and then the "
+        "check above passes on a tree that has the defect."
     )
 
 
-@pytest.mark.parametrize("source", _REACHING, ids=range(len(_REACHING)))
-def test_the_reference_scan_is_driven_both_ways(source):
-    """Every reaching spelling is found and no prose spelling is.
+def test_a_nested_session_that_only_MENTIONS_this_module_is_not_named(tmp_path):
+    """The silent direction, without which the two above prove nothing.
 
-    **THE ANTI-VACUITY SIBLING, AND IT IS NOT OPTIONAL HERE.** Every other
-    gate this release added has one, and the guard above arrived without: an
-    audit had to drive it by hand to learn that five reaching spellings were
-    silent, and `.github/workflows/release.yml`'s own rule is that a refusal
-    nothing observes is not known to be a refusal. Driving it by hand once is
-    a measurement; this is the check.
-
-    The prose half is the direction that gets a guard deleted rather than the
-    one that gets a defect shipped, and it is the harder half. Four entries —
-    `_state_guardian`, `tests._state_guard`, `__state_guard` and
-    `_state_guard_` — are near-misses a naive `in` test fires on. The fifth,
-    `state_guard`, is there for the opposite reason: it does NOT contain this
-    module's name, and it is the shorter spelling rule 2's token boundary must
-    not reach down to. **An earlier version of this sentence claimed
-    `state_guard` for the first group**, which is the one case that does not
-    hold — measured, `"_state_guard" in "state_guard"` is False.
+    An instrument that is stuck on reports every route as reaching, and would
+    pass both firing tests above while being worthless. This plant spawns a
+    real nested session, writes this module's name into the conftest that
+    session loads, and loads nothing — which is the shape of every honest
+    "deliberately not `-p _state_guard`" remark a reader might write.
     """
-    assert state_guard_references(source), (
-        f"a reaching spelling is invisible to the scan:\n  {source!r}\n"
-        "It puts this module's name into a nested session's arguments, so the "
-        "guard above would pass on a tree that has the defect."
+    proc, seen = _observe_plant(tmp_path, _ONLY_MENTIONS_IT)
+    assert proc.returncode == 0, (
+        f"the plant did not run\n{proc.stdout}\n{proc.stderr}"
     )
-
-
-@pytest.mark.parametrize("source", _PROSE, ids=range(len(_PROSE)))
-def test_the_reference_scan_is_silent_on_prose_and_near_misses(source):
-    """Prose about the module, and names that merely resemble it, do not fire."""
-    assert not state_guard_references(source), (
-        f"the scan fires on text that loads nothing:\n  {source!r}\n"
+    assert seen.here, (
+        "the plant spawned no nested session, so it shows nothing\n"
+        f"{seen}\n{proc.stdout}"
+    )
+    assert not seen.loaded, (
+        f"the observer fires on a nested session that loads nothing:\n{seen}\n"
         "A guard that reports its own explanation is a guard that gets deleted."
     )
 
