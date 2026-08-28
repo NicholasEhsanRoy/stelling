@@ -127,6 +127,29 @@ for the second.
   whose output cells each sum ONE term, is driven end to end by
   `tests/test_strict_sign_census.py`'s
   `"reduce_sum n=6 reduced to 1 term per cell"` row.
+* **`cumsum` IS A LIVE SIBLING, OUTSIDE THIS SWEEP'S TOTALITY OBLIGATION —
+  a fact about the CENSUS, not about the target.**
+  `test_the_sweep_is_TOTAL_over_the_carrying_set` is total over
+  `_STRICT_SIGN_PRIMITIVES`, and `cumsum` is not in it: measured 2026-08-28
+  at `a1ca48a`, no name containing `cum` appears in `propagate.TRANSFERS` at
+  all, so the sweep is total without a row for it and says nothing about it.
+  It diverges, and it diverges DIFFERENTLY from `reduce_sum`. Measured on
+  jax 0.11.0 CPU binary64, eager and under `jit`, identical both ways::
+
+      jnp.cumsum([-0.0])              -> [-0.0]
+      jnp.cumsum([-0.0, -0.0])        -> [+0.0, +0.0]
+      jnp.cumsum([-0.0, -0.0, -0.0])  -> [+0.0, +0.0, +0.0]
+
+  **The FIRST element is already wrong at n=2, and that element sums ONE
+  term** — where a one-term `reduce_sum` keeps the sign bit, which
+  `tests/test_strict_sign_census.py::
+  test_the_seeded_reduction_sign_bit_has_a_witness_that_is_NOT_an_amnesty`
+  pins as a control. So "the reduced extent is at least 2" is `reduce_sum`'s
+  bound and is NOT this one's. The day a `cumsum` transfer is admitted this
+  class needs its own row and its own bound, and the SEEDED-REDUCTION REPAIR
+  item should not assume one rule covers both. Recorded here rather than
+  swept: adding a row for a primitive the census does not carry would make
+  this module answer a question about a rule that does not exist.
 * **It is not the exact-rational property**, and the exact-rational property
   is not this. `tests/property/test_strict_sign_property.py` searches in
   `Fraction` arithmetic, where there is no signed zero at all: `(+0) + (−0)`
@@ -180,6 +203,37 @@ from stelling import propagate as P
 from stelling.propagate import _Propagator
 
 _TESTS_ROOT = __import__("pathlib").Path(__file__).resolve().parent
+
+OWNED_MODULES = (
+    _TESTS_ROOT / "test_executed_sign_bit_sweep.py",
+    _TESTS_ROOT / "test_strict_sign_census.py",
+    _TESTS_ROOT / "property" / "test_strict_sign_property.py",
+)
+"""The three modules this item owns, named ONCE for both guards that need it.
+
+`test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves` held this
+tuple as a local, and `tests/test_strict_sign_census.py`'s `_OWNED_PIN` held
+the same three paths again as dict keys. Two lists of the same three names
+can disagree, and the deletion pin is the one guard in this item that cannot
+be derived from the tree — so if its KEYS were also unpinned, an empty pin
+was a pin. They are the same object now: the pin's key set is asserted equal
+to this tuple, from both sides, and neither can shrink alone.
+
+**AND THIS TUPLE IS NOT ITSELF PINNED, DELIBERATELY.** The obvious next
+question is what stops `OWNED_MODULES = ()`, which would make both equalities
+`set() == set()` and both loops empty. Nothing new: three guards that already
+exist say so, and the answer is measured rather than argued. DRIVEN at
+`a1ca48a`, `OWNED_MODULES = ()` with everything else intact, `pytest -q -ra`
+over the two owned modules on `stelling-jax` — `3 failed, 214 passed, 4
+xfailed`:
+`test_no_test_this_item_owns_has_been_DELETED` (the non-empty pin no longer
+equals the empty owned set),
+`test_the_census_module_still_carries_the_DELETION_pin_and_its_guards` (the
+same equality from the other side) and
+`test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves` (every cell
+of its per-file floor table is now empty). A fourth check asserting this
+tuple is non-empty would be a check holding three checks, and it would be
+strictly weaker than any of them."""
 
 
 # --- what `main` carries, recorded rather than derived -----------------------
@@ -1931,14 +1985,24 @@ def _prose_of(path):
     SPLIT BY KIND, which is the other half. Counting them together is what
     let the floor survive the mutation it exists to catch: replace every
     DOCSTRING with a placeholder and the assertion-message strings still
-    carry eight foreign citations, over any single global floor. Measured on
-    this tree, citations that are NOT this item's own definitions:
+    carry eight foreign citations, over any single global floor.
 
-        docstrings      11
-        other strings    8
-        comments         3
-
-    so each kind is floored separately below."""
+    **SPLIT BY FILE AS WELL, WHICH IS THE THIRD ROUND'S CORRECTION.** This
+    docstring used to end with one union over the three owned modules —
+    `docstrings 11 / other strings 8 / comments 3` — and the caller floored
+    those unions at 4 / 3 / 1. A union over three files is not a floor on
+    any of them. DRIVEN at `a1ca48a`: all **40** docstrings in
+    `tests/test_strict_sign_census.py` replaced with
+    `\"\"\"placeholder.\"\"\"` — the scope statement, the reach statement, every
+    DRIVEN measurement, the entire two-walker justification — leaves
+    `pytest -q -ra` over the two owned modules at `217 passed, 4 xfailed`,
+    exit 0. Recomputing the HEAD floors under that plant gives **5**
+    surviving foreign docstring citations against the floor of 4, and
+    **three of the five are the item's own module stems**
+    (`test_strict_sign_census`, `test_executed_sign_bit_sweep`,
+    `test_strict_sign_property`), which `local` did not subtract because it
+    held only function names. With the caller's per-FILE, per-KIND table and
+    the stems subtracted, the same plant is `1 failed, 216 passed`."""
     import ast
     import io
     import tokenize
@@ -1996,11 +2060,17 @@ def test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves():
 
     **WHAT THIS DOES NOT REACH, and the re-audit measured it.** It fires only
     on a citation that resolves to NOTHING. It cannot see a test that is
-    deleted and cited nowhere — and 38 of this item's 52 test functions
-    appeared nowhere in the repository but their own `def` line, so deleting
-    them was invisible here. That is
+    deleted and cited nowhere, and most of this item's tests are cited
+    nowhere: measured at `a1ca48a` on 2026-08-28 over `git ls-files`,
+    skipping the `_OWNED_PIN` literal and each test's own `def` line, **36
+    of the 54 test functions the three modules define appear nowhere else in
+    the repository at all**. *That sentence read "38 of this item's 52 test
+    functions" until this commit, and `_OWNED_PIN`'s prose said the same; 52
+    was the count at `68ca084` and the final commit of that round added two
+    tests without moving either figure.* Deleting an uncited test is
+    invisible here, which is
     `tests/test_strict_sign_census.py::test_no_test_this_item_owns_has_been_DELETED`'s
-    job, which pins the names; this one keeps the CITATIONS honest. It also
+    job — it pins the names, and this one keeps the CITATIONS honest. It also
     cannot protect itself: it is one function in a file, and a truncation
     that removes it removes the report before anything it could report on —
     which is why the pin lives in the other module.
@@ -2009,11 +2079,7 @@ def test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves():
     `test_prose_hygiene.py`'s business and widening it is not this item's."""
     import ast
 
-    owned = (
-        _TESTS_ROOT / "test_executed_sign_bit_sweep.py",
-        _TESTS_ROOT / "test_strict_sign_census.py",
-        _TESTS_ROOT / "property" / "test_strict_sign_property.py",
-    )
+    owned = OWNED_MODULES
     # a citation resolves to a test FUNCTION or to a test MODULE — both are
     # things this item's prose points at, and `test_prose_hygiene.py`'s own
     # resolver is built the same way (`names.add(path.stem)` beside the
@@ -2031,13 +2097,22 @@ def test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves():
                 if path in owned:
                     local.add(node.name)
 
-    by_kind = {"docstrings": set(), "strings": set(), "comments": set()}
+    # THE OWNED MODULES' OWN STEMS ARE THIS ITEM'S NAMES TOO. `local` held
+    # only function names, so `test_strict_sign_census`,
+    # `test_executed_sign_bit_sweep` and `test_strict_sign_property` counted
+    # as FOREIGN citations of themselves — and three of the five that
+    # survived stripping every docstring from the census module were exactly
+    # those three stems. Subtracted here, at the one place `local` is built.
+    local |= {path.stem for path in owned}
+
+    by_kind = {}
     dangling = []
     for path in owned:
         prose = _prose_of(path)
         for kind, chunks in prose.items():
-            for name in _cited_names(chunks):
-                by_kind[kind].add(name)
+            names = _cited_names(chunks)
+            by_kind[(path.stem, kind)] = names
+            for name in names:
                 if name not in defined:
                     dangling.append(f"{path.name}: {name}")
 
@@ -2054,26 +2129,53 @@ def test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves():
         "string-literal boundary."
     )
 
-    # THE NON-VACUITY HALF, per kind and counting only names that are NOT
-    # this item's own definitions. Floors are set below the measurements in
-    # `_prose_of`'s docstring (11 / 8 / 3); a single global floor is what the
-    # broken version had, and stripping every docstring cleared it on the
-    # assertion strings alone.
-    floors = {"docstrings": 4, "strings": 3, "comments": 1}
+    # THE NON-VACUITY HALF, PER FILE AND PER KIND, counting only names that
+    # are neither this item's own function definitions nor its own module
+    # stems. The version this replaces floored three UNIONS over the three
+    # files (4 / 3 / 1 against measured 11 / 8 / 3): replacing every
+    # docstring in the census module with a placeholder left FIVE foreign
+    # docstring citations, three of them the item's own module stems, which
+    # cleared the floor of 4 — `217 passed, 4 xfailed`, exit 0, over the two
+    # owned modules. A union cannot floor a file.
+    #
+    # THE FLOORS ARE THE MEASUREMENT, NOT A MARGIN UNDER IT. Measured at
+    # `a1ca48a` on 2026-08-28, `len(_cited_names(...) - local)` per cell,
+    # with this commit's prose in place. Four of the seven cells measure 1
+    # or 2, where the only floor that can go red is the measurement itself:
+    # a margin under a 1 is a 0, and a floor of 0 is a check with no absence
+    # half. The price is that legitimately dropping a foreign citation reds
+    # this until the number below is dropped with it — the same price
+    # `_OWNED_PIN` pays, for the same reason.
+    #
+    # TWO CELLS ARE ABSENT AND THAT IS DELIBERATE, not an omission:
+    # `test_strict_sign_property`'s `strings` and `comments` both measure 0
+    # — it is a hundred-line module with one test whose assertion messages
+    # cite nothing outside itself — and a cell floored at 0 would be a row
+    # in this table that can never fail.
+    floors = {
+        ("test_executed_sign_bit_sweep", "docstrings"): 1,
+        ("test_executed_sign_bit_sweep", "strings"): 2,
+        ("test_executed_sign_bit_sweep", "comments"): 1,
+        ("test_strict_sign_census", "docstrings"): 8,
+        ("test_strict_sign_census", "strings"): 3,
+        ("test_strict_sign_census", "comments"): 4,
+        ("test_strict_sign_property", "docstrings"): 1,
+    }
     thin = []
-    for kind, floor in sorted(floors.items()):
-        foreign = by_kind[kind] - local
+    for (stem, kind), floor in sorted(floors.items()):
+        foreign = by_kind.get((stem, kind), set()) - local
         if len(foreign) < floor:
             thin.append(
-                f"{kind}: {len(foreign)} foreign citation(s) < {floor} "
-                f"({sorted(foreign)})"
+                f"{stem} {kind}: {len(foreign)} foreign citation(s) < "
+                f"{floor} ({sorted(foreign)})"
             )
     assert not thin, (
         "this item's prose has stopped citing the tests it is supposed to "
-        "point at, by kind:\n  " + "\n  ".join(thin)
-        + "\n\nEach kind is floored separately because they fail "
-        "separately: a refactor that rewrites docstrings leaves the "
-        "assertion strings intact, and a single total cannot tell you that."
+        "point at, by file and kind:\n  " + "\n  ".join(thin)
+        + "\n\nEach cell is floored separately because they fail "
+        "separately: a refactor that rewrites one module's docstrings "
+        "leaves its assertion strings and the other two modules intact, "
+        "and no total over either axis can tell you that."
     )
 
 
@@ -2087,7 +2189,26 @@ def test_the_census_module_still_carries_the_DELETION_pin_and_its_guards():
     this item actually suffered landed.
 
     So each module asserts the other's guards exist. Deleting one file's tail
-    is caught here; deleting both is a two-file edit that a diff shows."""
+    is caught here; deleting both is a two-file edit that a diff shows.
+
+    **AND IT CHECKS THE PIN HOLDS SOMETHING, WHICH IT USED TO ONLY SAY.**
+    This test asserted `"_OWNED_PIN" in assigned` — the presence of an
+    assignment, at any depth, of any value — while its own failure message
+    read "...has nothing to compare against and passes over an empty table".
+    It named the vacuity and did not test for it. DRIVEN at `a1ca48a`:
+    `_OWNED_PIN = {}` in the census module, with twelve of this item's tests
+    deleted including
+    `test_the_sweep_is_TOTAL_over_the_carrying_set` and this very guard, is
+    `205 passed, 4 xfailed`, exit 0, under `pytest -q -ra` over the two
+    owned modules on `stelling-jax`; the empty pin ON ITS OWN is `217
+    passed, 4 xfailed`, exit 0, which is that command's clean baseline
+    exactly. With the assertions below the empty pin is `2 failed, 215
+    passed`.
+
+    The pin's KEYS are now read out of the literal and required to be
+    exactly :data:`OWNED_MODULES`, and every value is required to name at
+    least one test. The census module asserts the same equality from its
+    side, against the same tuple, so the two cannot drift."""
     census = _TESTS_ROOT / "test_strict_sign_census.py"
     import ast
 
@@ -2116,4 +2237,38 @@ def test_the_census_module_still_carries_the_DELETION_pin_and_its_guards():
     assert "_OWNED_PIN" in assigned, (
         f"{census.name} no longer assigns `_OWNED_PIN`, so the deletion "
         f"guard has nothing to compare against and passes over an empty table"
+    )
+    pin = next(
+        (node.value for node in ast.walk(tree) if isinstance(node, ast.Assign)
+         and any(isinstance(target, ast.Name) and target.id == "_OWNED_PIN"
+                 for target in node.targets)),
+        None,
+    )
+    assert isinstance(pin, ast.Dict) and pin.keys, (
+        f"`_OWNED_PIN` in {census.name} is no longer a non-empty dict "
+        f"literal ({type(pin).__name__ if pin is not None else 'absent'}). "
+        f"The deletion guard iterates it, and over an empty mapping it "
+        f"collects no problems and PASSES — which is not a hypothetical: "
+        f"an empty pin plus twelve deleted tests was `205 passed`, exit 0."
+    )
+    pinned = {k.value for k in pin.keys if isinstance(k, ast.Constant)}
+    want = {str(path.relative_to(_TESTS_ROOT.parent))
+            for path in OWNED_MODULES}
+    assert pinned == want, (
+        f"`_OWNED_PIN` names {sorted(pinned)} and this item owns "
+        f"{sorted(want)}. A module dropped from the pin is a module whose "
+        f"tests can be deleted with nothing to say so."
+    )
+    empty = sorted(
+        key.value for key, value in zip(pin.keys, pin.values)
+        if not any(
+            isinstance(node, ast.Constant) and isinstance(node.value, str)
+            and node.value.startswith("test_")
+            for node in ast.walk(value)
+        )
+    )
+    assert not empty, (
+        f"`_OWNED_PIN` names {empty} but pins no test in them, so every test "
+        f"those modules define could be deleted and the pin would report a "
+        f"clean both-directions comparison over nothing."
     )

@@ -1481,21 +1481,74 @@ def test_the_message_names_every_transfer_in_one_of_its_three_lists():
 #     and reads `item.iter_markers("xfail")`, so it is INDEPENDENT OF SPELLING
 #     — a marker written as a decorator, as `pytestmark`, through an imported
 #     name, via `getattr`, or attached by a `conftest.py` all arrive the same
-#     way. Its reach is what this lane actually COLLECTS: every module under
-#     `tests/property/` gates on `importorskip("hypothesis")`, which is in
-#     none of the three merge lanes, so their markers are invisible to it
-#     there.
+#     way. Its reach is WHAT THIS LANE IMPORTS.
+#
+#     *This bullet used to say "every module under `tests/property/` gates on
+#     `importorskip("hypothesis")`", and the REACH paragraph of
+#     `test_every_xfail_PYTEST_COLLECTS_is_strict_and_narrowed` said it a
+#     second time. It is false, and the same docstring already establishes
+#     that it is: `test_suite_disclosure.py` carries no hypothesis gate.*
+#     Measured 2026-08-28 at `a1ca48a` on `stelling-jax`,
+#     `pytest -q -ra --collect-only tests/property`: **28 tests collected**,
+#     all of them `test_suite_disclosure.py`, with the other **seven**
+#     modules reported `SKIPPED ... needs hypothesis`. The true clause is
+#     *every property module that HOLDS PROPERTIES gates on hypothesis* —
+#     seven of the eight — and hypothesis is in none of the three merge
+#     lanes (measured the same day: `import hypothesis` raises
+#     `ModuleNotFoundError` under `stelling-jax`, `stelling-nojax` and
+#     `stelling-jax010`).
 #   * :func:`_xfail_markers_under` reads SOURCE. Its reach is every `*.py`
 #     under `tests/` whether or not it imports in this lane — but it can only
 #     see the spellings it matches syntactically.
 #
-# THE RESIDUAL, stated because it is real: a marker reached through a plain
-# NAME inside `tests/property/` is seen by neither on a merge lane — not by
-# collection (the module does not import) and not by the source walk (the
-# name is an `ast.Name`, and what it is bound to is not decidable from this
-# file). The property suite's own walker does not see it either; it reads
+# THE RESIDUAL, stated because it is real — AND STATED BY IMPORT RATHER THAN
+# BY DIRECTORY, WHICH IS THE CORRECTION. This paragraph used to end: *"The
+# property suite's own walker does not see it either; it reads
 # `decorator_list` only. Anything of that shape outside `tests/property/` IS
-# caught, by collection — driven below.
+# caught, by collection — driven below."* The last sentence is FALSE. It is
+# not a directory that bounds the collection walker, it is IMPORT, and
+# `tests/property/` is merely the largest region this lane does not import.
+#
+# The residual, correctly: **a marker reached through a plain NAME, in any
+# module this lane does not import.** Neither instrument sees it — not
+# collection (the module contributes no items for a marker to hang on) and
+# not the source walk (the name is an `ast.Name`, and what it is bound to is
+# not decidable from this file). The property suite's own walker does not see
+# it either; it reads `decorator_list` only.
+#
+# DRIVEN at `a1ca48a`, and the counter-example that forced the rewording:
+# `_BLANKET = getattr(pytest.mark, "xfail")` used as `@_BLANKET` in
+# `tests/test_tripwire_xdist.py` — which is OUTSIDE `tests/property/` and
+# gates on `importorskip("xdist")`, absent from all three merge lanes, so it
+# collects nothing anywhere. `pytest -q -ra tests/test_strict_sign_census.py`
+# on `stelling-jax`: `169 passed, 4 xfailed`, exit 0, WITH these fixes in
+# place and identical to the same command's clean baseline. The residual is
+# not closed by anything in this commit and is not claimed to be.
+#
+# TWO CONTROLS ISOLATE IT, both driven the same day, and the second is a
+# real defence worth recording:
+#
+#   * the same plant appended to `tests/test_absence_of_evidence.py`, which
+#     this lane DOES import, is caught by COLLECTION ALONE — `1 failed, 168
+#     passed`, the failure being
+#     `test_every_xfail_PYTEST_COLLECTS_is_strict_and_narrowed` reporting
+#     "carries no `raises=`" against the planted item's nodeid in that
+#     module, while the source walk matched nothing there and stayed green.
+#     So it is import, not spelling, that divides the two;
+#   * a marker BOUND in a helper — `BLANKET = pytest.mark.xfail` appended to
+#     `tests/_lanes.py`, imported and used in `tests/test_tripwire_xdist.py`
+#     — is caught by the SOURCE WALK AT THE BINDING SITE even though the
+#     using module is never imported: `2 failed, 167 passed`, the failures
+#     being `test_every_xfail_IN_THE_SOURCE_is_strict_and_narrowed` (three
+#     problems against `tests/_lanes.py::<module>`) and the AGREE test
+#     below. Hiding a blanket amnesty behind a name only works if the
+#     BINDING is also written in a spelling this walk cannot see.
+#
+# WHICH MODULES THOSE ARE IS ENUMERATED FROM THE COLLECTION, not from a
+# directory name:
+# `test_the_source_walk_and_the_collection_AGREE_where_both_can_see`
+# compares the two walkers file by file and names, in its own failure, any
+# file the source walk reached that collected no items here.
 
 import ast as _ast
 import json as _json
@@ -1508,6 +1561,36 @@ _REPO_ROOT = _TESTS_DIR.parent
 
 _MARK_DUMPER = '''
 import json, os
+
+_ERRORS = []
+
+
+def pytest_collectreport(report):
+    if report.failed:
+        _ERRORS.append(report.nodeid or "<rootdir>")
+
+
+def _raises(mark):
+    """The `raises=` of one marker, DECIDED ON THE REAL CLASSES.
+
+    `catches_assertion` is `issubclass(AssertionError, t)` — literally "would
+    this amnesty swallow a plain `assert`" — and not a comparison against a
+    list of type names, because the caller is a check about what the amnesty
+    DOES and an alias would defeat a list of names.
+    """
+    raises = mark.kwargs.get("raises")
+    if raises is None:
+        return None
+    types = raises if isinstance(raises, tuple) else (raises,)
+    return {
+        "names": [getattr(t, "__name__", repr(t)) for t in types],
+        "catches_assertion": any(
+            isinstance(t, type) and issubclass(AssertionError, t)
+            for t in types
+        ),
+    }
+
+
 def pytest_collection_modifyitems(items):
     out = []
     for item in items:
@@ -1517,22 +1600,55 @@ def pytest_collection_modifyitems(items):
                 "args": len(mark.args),
                 "kwargs": sorted(mark.kwargs),
                 "strict": mark.kwargs.get("strict"),
+                "raises": _raises(mark),
                 "reason": bool(mark.kwargs.get("reason")),
             })
     with open(os.environ["STELLING_MARKDUMP"], "w") as handle:
-        json.dump({"items": len(items), "marks": out}, handle)
+        json.dump({
+            "items": len(items),
+            "files": sorted({i.nodeid.split("::")[0] for i in items}),
+            "errors": _ERRORS,
+            "marks": out,
+        }, handle)
 '''
 """The collection plugin, as source. Written to a `tmp_path` and loaded with
 `-p`, which is the idiom `tests/test_skip_inventory.py` already uses for the
-sessions it has to run from outside itself."""
+sessions it has to run from outside itself.
+
+It reports four things and each has a consumer in the caller: the item count
+and the per-file item list (which files this lane actually imported), the
+failed collect reports, and the markers. `raises` is resolved HERE, in the
+process that holds the real exception classes, rather than being shipped out
+as a spelling and compared against a set of names."""
 
 
 def _collected_xfail_markers(tmp_path):
     """Every `xfail` marker PYTEST sees, over a real collection of `tests/`.
 
-    Returns ``(collected item count, [marker dicts])``. Measured at
-    `68ca084` on the jax lane: 5123 items collected in 2.2 s, so this is a
-    three-second check and not a second suite."""
+    Returns ``(collected item count, [collected file], [marker dicts])``.
+    Measured at `68ca084` on the jax lane: 5123 items collected in 2.2 s, so
+    this is a three-second check and not a second suite.
+
+    **THE SUB-SESSION'S EXIT STATUS IS READ, AND IT DID NOT USED TO BE.**
+    `proc.returncode` and `proc.stderr` appeared only in the "no dump file"
+    message, and `pytest_collection_modifyitems` still fires when other
+    modules fail to IMPORT — so a session that came back
+    `Interrupted: 1 error during collection` wrote a dump over a PARTIAL
+    collection and every caller read it as the whole suite. DRIVEN at
+    `a1ca48a`: a one-line module added under `tests/` that raises
+    `ImportError` at import time left
+    `pytest -q -ra tests/test_strict_sign_census.py` at `169 passed, 4
+    xfailed`, exit 0 — the marker guard read a dump of 5122 items out of a
+    session pytest had reported `Interrupted: 1 error during collection` and
+    said nothing. With these two assertions the same plant is `2 failed,
+    167 passed`. So the exit code and the failed collect reports are both
+    asserted here, at the one place that knows they exist.
+
+    **WHAT IT CANNOT SEE.** A module this lane does not IMPORT contributes
+    no items and no error — a skip at import time is neither — so its
+    markers are invisible to every caller. That is the residual the block
+    comment above states, and `files` is returned so a caller can name the
+    modules it fell into rather than guessing at a directory."""
     plugin_dir = tmp_path / "markplugin"
     plugin_dir.mkdir()
     (plugin_dir / "stelling_markdump.py").write_text(_MARK_DUMPER, "utf-8")
@@ -1553,7 +1669,23 @@ def _collected_xfail_markers(tmp_path):
         f"observed nothing:\nexit {proc.returncode}\n{proc.stdout[-3000:]}"
     )
     data = _json.loads(dump.read_text("utf-8"))
-    return data["items"], data["marks"]
+    # 0 is a clean collection; 5 is a clean collection of nothing, which the
+    # callers' own floors reject. Anything else — 2 in particular, which is
+    # what an import error gives — means the dump describes part of the
+    # suite while claiming to describe it.
+    assert proc.returncode in (0, 5), (
+        f"the collection sub-session exited {proc.returncode}, so the "
+        f"{data['items']} item(s) it dumped are a PARTIAL collection and "
+        f"every check reading them is looking at less of the suite than it "
+        f"says it is:\n{proc.stdout[-3000:]}\n{proc.stderr[-2000:]}"
+    )
+    assert not data["errors"], (
+        f"the collection sub-session reported {len(data['errors'])} failed "
+        f"collect report(s) — {data['errors'][:20]} — so the marker dump "
+        f"covers the modules that survived and no caller may read it as the "
+        f"suite:\n{proc.stdout[-3000:]}"
+    )
+    return data["items"], data["files"], data["marks"]
 
 
 def _xfail_markers_under(root):
@@ -1618,7 +1750,89 @@ def _xfail_markers_under(root):
     return out
 
 
-def _bad_marker(nodeid, strict, has_raises, has_reason):
+_BLANKET_OVER_ASSERTION = frozenset(
+    name for name, obj in vars(__import__("builtins")).items()
+    if isinstance(obj, type) and issubclass(AssertionError, obj)
+)
+"""The builtin names an `xfail(raises=...)` may not be narrowed TO.
+
+DERIVED AND NOT TYPED, because a typed set of three names is the shape this
+project keeps re-finding: *enumerating spellings of a thing instead of the
+thing*. The thing is "a class that a plain `assert` already satisfies", and
+the membership test for it is `issubclass(AssertionError, obj)`. Measured at
+`a1ca48a` on CPython 3.12.3 (the interpreter of all three merge lanes),
+this evaluates to
+`{'AssertionError', 'BaseException', 'Exception', 'object'}` — if a future
+runtime adds a fourth superclass of `AssertionError` to `builtins` it is in
+the set without an edit here.
+
+This is the SOURCE walk's half of the test and it is spelling-limited, like
+everything else that walk does: `_AE = AssertionError` used as `raises=_AE`
+is an `ast.Name` bound elsewhere and is not decidable from a syntax tree.
+The COLLECTION half does not have that limit — the plugin resolves
+`issubclass` against the real class objects — so the residual is a marker
+under an aliased exception name in a module this lane does not import, which
+is the residual the block comment above already states, one spelling
+narrower."""
+
+
+def _source_raises(node):
+    """A source-level `raises=` expression, in the shape the plugin dumps.
+
+    ``None`` for absent or literal `None`; otherwise
+    ``{"names": [...], "catches_assertion": bool}``. A tuple or list of
+    exception names is unpacked, an attribute chain contributes its last
+    component, and anything else contributes its `ast.dump` so the failure
+    message can show what it could not read."""
+    if node is None or (isinstance(node, _ast.Constant) and node.value is None):
+        return None
+    elements = (
+        node.elts if isinstance(node, (_ast.Tuple, _ast.List)) else [node]
+    )
+    names = []
+    for element in elements:
+        if isinstance(element, _ast.Name):
+            names.append(element.id)
+        elif isinstance(element, _ast.Attribute):
+            names.append(element.attr)
+        else:  # pragma: no cover - no marker in this tree is written so
+            names.append(_ast.dump(element))
+    return {
+        "names": names,
+        "catches_assertion": any(n in _BLANKET_OVER_ASSERTION for n in names),
+    }
+
+
+def _bad_marker(nodeid, strict, raises, has_reason):
+    """The rule, applied to one marker, from either walker.
+
+    `raises` is `None` when the marker carries none, and otherwise the dict
+    :func:`_source_raises` and the dump plugin both produce.
+
+    **THE THIRD CLAUSE IS THE ONE THE RE-AUDIT ADDED, AND IT IS THE POINT OF
+    THE WHOLE SECTION.** This function used to take `has_raises: bool` and
+    ask only that a `raises=` was PRESENT. Present is not narrow:
+    `raises=AssertionError` — and `Exception`, and `BaseException` — is a
+    blanket amnesty spelled as a narrowing, and it restores exactly the
+    failure mode :class:`WrongSignedZeroUnderCertificate` exists to prevent,
+    since that class subclasses `AssertionError` so that this table's two
+    VACUITY guards raise something the amnesty does NOT cover. `raises=None`
+    is the same amnesty spelled a third way and pytest treats it as absent.
+
+    DRIVEN at `a1ca48a`, before this clause: `raises` widened to
+    `AssertionError` on the four diverging rows AND `* _C * _C` deleted from
+    all four so that no sampled point executed a zero at all — the vacuity
+    guard fires, the amnesty eats it. Measured with
+    `pytest -q -ra tests/test_strict_sign_census.py` on `stelling-jax`:
+    `169 passed, 4 xfailed`, exit 0, BYTE-IDENTICAL to the clean baseline of
+    the same command on the same tree, both marker guards among the passes.
+    The same plant under `--runxfail` says, four times, "no sampled point
+    executed as zero, so this row did not exercise the sign-bit constraint
+    at all" — which is what the amnesty was swallowing. With this clause the
+    plant is `2 failed, 167 passed, 4 xfailed`.
+
+    The invariant is *the amnesty cannot swallow this module's own vacuity
+    asserts*, not *an amnesty was narrowed to something*."""
     problems = []
     if strict is not True:
         problems.append(
@@ -1626,11 +1840,20 @@ def _bad_marker(nodeid, strict, has_raises, has_reason):
             f"silently the day the defect is fixed, which is the one day it "
             f"must not be the first to notice."
         )
-    if not has_raises:
+    if raises is None:
         problems.append(
-            f"{nodeid}: xfail carries no `raises=`, so it is a blanket "
-            f"amnesty over every exception the test can raise — its vacuity "
-            f"guards included, which then fail GREEN."
+            f"{nodeid}: xfail carries no `raises=` (or `raises=None`, which "
+            f"pytest reads the same way), so it is a blanket amnesty over "
+            f"every exception the test can raise — its vacuity guards "
+            f"included, which then fail GREEN."
+        )
+    elif raises["catches_assertion"]:
+        problems.append(
+            f"{nodeid}: xfail is narrowed to {raises['names']}, which a "
+            f"plain `assert` already satisfies, so it is the blanket amnesty "
+            f"again under a narrower spelling: every vacuity guard in the "
+            f"test raises `AssertionError` and every one of them would now "
+            f"report XFAIL instead of failing."
         )
     if not has_reason:
         problems.append(
@@ -1640,7 +1863,7 @@ def _bad_marker(nodeid, strict, has_raises, has_reason):
     return problems
 
 
-def test_every_xfail_PYTEST_COLLECTS_is_strict_and_narrowed(tmp_path):
+def test_every_xfail_PYTEST_COLLECTS_is_strict_and_narrowed(request, tmp_path):
     """THE RULE, ASKED OF PYTEST RATHER THAN OF THE SOURCE.
 
     `tests/property/test_suite_disclosure.py::
@@ -1671,20 +1894,58 @@ def test_every_xfail_PYTEST_COLLECTS_is_strict_and_narrowed(tmp_path):
           -> the source walker: 3 passed, it matched an `ast.Name` and
              therefore nothing
 
-    REACH, stated: what a collection sees is what this lane IMPORTS. Every
-    module under `tests/property/` gates on hypothesis, absent from all three
-    merge lanes, so their markers are invisible here — which is exactly why
-    the source walker below still earns its place."""
-    items, marks = _collected_xfail_markers(tmp_path)
-    assert items > 100, (
-        f"the collection sub-session collected {items} item(s); it did not "
-        f"collect the suite, so this check saw almost none of it"
+    REACH, stated: what a collection sees is what this lane IMPORTS. *This
+    paragraph used to continue "Every module under `tests/property/` gates on
+    hypothesis" — which the CORRECTION PARAGRAPH ABOVE, in this same
+    docstring, had already disproved: `test_suite_disclosure.py` carries no
+    hypothesis gate and runs in every lane.* The clause that is true is
+    EVERY PROPERTY MODULE THAT HOLDS PROPERTIES. Measured 2026-08-28 at
+    `a1ca48a` on `stelling-jax`, `pytest -q -ra --collect-only
+    tests/property`: 28 tests collected, all of them
+    `test_suite_disclosure.py`, and the other seven modules SKIPPED "needs
+    hypothesis". And `tests/property/` is not the boundary either — IMPORT
+    is: `tests/test_tripwire_xdist.py` sits outside that directory, gates on
+    `importorskip("xdist")`, and collects nothing on any merge lane. That is
+    why the source walker below still earns its place, and why the block
+    comment above states the residual the two of them still leave.
+
+    THE FLOOR IS THE PARENT SESSION'S OWN COUNT, and it used to be the
+    literal `100` against a suite of 5125 — measured 2026-08-28 at
+    `a1ca48a` on `stelling-jax`, `pytest -q --collect-only tests` is `5125
+    tests collected in 2.30s` — a floor two orders of magnitude
+    under the thing it was a floor for, which a partial collection walks
+    straight over. It is derived from `request.session.items` instead. The
+    two counts are commensurable because `pyproject.toml` sets
+    `testpaths = ["tests"]`, so a session in this repository collects
+    exactly what the sub-session collects; a session pointed at something
+    outside `tests/` would make this floor too high and RED, which is a loud
+    wrong answer and not a quiet one.
+
+    DRIVEN, and the plant is one token inside the thing the floor exists
+    for: `--collect-only` pointed at this file instead of at `_TESTS_DIR`,
+    so the sub-session covers one module and still exits 0. At `a1ca48a`
+    that is `173 > 100` and passes; against the parent session's own 221 it
+    is `1 failed, 216 passed`, "the collection sub-session collected 173
+    item(s) and the session running this test has 221".
+
+    It is only ever as strong as the parent's own scope — run this test
+    alone and the parent collected one item, so the floor is one. The check
+    that catches a truncated collection that did NOT exit 0 is the
+    exit-status assertion in :func:`_collected_xfail_markers`; this floor is
+    its other half, for the truncation that exits cleanly."""
+    items, _, marks = _collected_xfail_markers(tmp_path)
+    parent = len(request.session.items)
+    assert items >= parent, (
+        f"the collection sub-session collected {items} item(s) and the "
+        f"session running this test has {parent}. A sub-session that sees "
+        f"less of the suite than its own parent did has collected part of "
+        f"it, and every marker conclusion below is drawn over that part "
+        f"while claiming the whole."
     )
     bad = []
     for mark in marks:
         bad.extend(_bad_marker(
-            mark["nodeid"], mark["strict"],
-            "raises" in mark["kwargs"], mark["reason"],
+            mark["nodeid"], mark["strict"], mark["raises"], mark["reason"],
         ))
     assert not bad, "\n  ".join(
         ["xfail markers pytest collected in this lane:", *bad]
@@ -1717,13 +1978,13 @@ def test_every_xfail_IN_THE_SOURCE_is_strict_and_narrowed():
         bad.extend(_bad_marker(
             nodeid,
             strict.value if isinstance(strict, _ast.Constant) else None,
-            "raises" in kw,
+            _source_raises(kw.get("raises")),
             bool(kw.get("reason")),
         ))
     assert not bad, "\n  ".join(["xfail markers in the source:", *bad])
 
 
-def test_the_source_walk_and_the_collection_AGREE_where_both_can_see():
+def test_the_source_walk_and_the_collection_AGREE_where_both_can_see(tmp_path):
     """Neither instrument may be trusted where the other cannot check it.
 
     The claim this replaces was that the two walkers PARTITION `tests/`. They
@@ -1738,11 +1999,50 @@ def test_the_source_walk_and_the_collection_AGREE_where_both_can_see():
           exclude, but reads `decorator_list` and so misses  3 passed, and
           the property suite's own walker: 1 passed
 
-    So this asserts the relationship that IS true: every marker the source
-    walk finds outside `tests/property/` is one pytest also collects here,
-    and this module's own markers are found by both. A marker that one sees
-    and the other does not, in the region where both should see it, means one
-    of them has quietly narrowed."""
+    **AND THEN THE FIX REMOVED THE COMPARISON INSTEAD OF SUPPLYING THE
+    MISSING SIDE.** The version this replaces computed `source`, asserted one
+    membership and made two text assertions about
+    `test_suite_disclosure.py`, and never called
+    :func:`_collected_xfail_markers` at all — `grep -n` found one call site
+    in the tree and it was the other test. A test whose name says AGREE and
+    whose body compares nothing is worse than no test, because the name is
+    read as coverage. DRIVEN at `a1ca48a`, a well-formed
+    `@pytest.mark.xfail(strict=True, raises=RuntimeError, reason="…")`
+    planted in `tests/test_tripwire_xdist.py` — seen by the source walk,
+    collected by nobody on any merge lane, and well-formed so that neither
+    narrowness check has anything to say about it —
+    `pytest -q -ra tests/test_strict_sign_census.py` was `169 passed, 4
+    xfailed`, exit 0. With the comparison restored the same plant is
+    `1 failed, 168 passed, 4 xfailed`, and the failure names the file.
+
+    So it now asks BOTH walkers and asserts the relationship that IS true:
+    every file the source walk finds a marker in outside `tests/property/`
+    is a file pytest also collected a marker in. **The region where both can
+    see is today exactly ONE FILE** — measured at `a1ca48a`,
+    `_xfail_markers_under(tests/)` returns two markers, one in
+    `tests/property/test_oracle.py` and one here — so the agreement is a
+    one-element inclusion and is stated as such rather than dressed up as a
+    partition. Its value is not in today's cardinality: it is that the
+    moment a marker appears in a module this lane does not import, that file
+    is named here, by the collection, instead of being assumed covered
+    because it is not under `tests/property/`.
+
+    **WHAT WOULD RED THIS WITHOUT BEING A DEFECT, stated because it is a
+    real shape and not a hypothetical.** The comparison is keyed by FILE,
+    and a module that owns no items — a `conftest.py`, a `tests/_helper.py`
+    — can BIND a marker that pytest then reports under some other file's
+    nodeid. Measured at `a1ca48a`: `BLANKET = pytest.mark.xfail` appended to
+    `tests/_lanes.py` reds this test as well as the source-walk narrowness
+    check. That is a true report — the collection instrument cannot see that
+    file at all, so only the spelling-limited walker covers it and the
+    residual paragraph above would have to be re-measured — but it is a
+    report about SCOPE, not about a walker narrowing, and whoever writes
+    such a binding should read it that way. There is no such binding in the
+    tree today: measured the same day, `_xfail_markers_under(tests/)`
+    returns exactly two markers, in `tests/property/test_oracle.py` and
+    here."""
+    _, collected_files, marks = _collected_xfail_markers(tmp_path)
+    marked_files = {mark["nodeid"].split("::")[0] for mark in marks}
     source = {
         nodeid.split("::")[0]
         for nodeid, _ in _xfail_markers_under(_TESTS_DIR)
@@ -1751,6 +2051,29 @@ def test_the_source_walk_and_the_collection_AGREE_where_both_can_see():
     assert "tests/test_strict_sign_census.py" in source, (
         "the source walk no longer finds this module's own markers, so it is "
         "measuring nothing and the agreement below is vacuous"
+    )
+    unseen = sorted(source - marked_files)
+    unimported = sorted(f for f in unseen if f not in collected_files)
+    unmarked = sorted(f for f in unseen if f in collected_files)
+    assert not unseen, (
+        f"the source walk finds an xfail marker outside `tests/property/` in "
+        f"{unseen} and pytest collected no marker there in this lane, so the "
+        f"two instruments disagree where both are supposed to see."
+        + (
+            f"\n  {unimported} contributed NO ITEMS AT ALL to the "
+            f"collection: this lane does not import them, so only the "
+            f"spelling-limited source walk covers them and the residual "
+            f"stated in the block comment above has grown a member — either "
+            f"gate the marker differently or re-measure that paragraph."
+            if unimported else ""
+        )
+        + (
+            f"\n  {unmarked} WERE collected and still carry no marker "
+            f"pytest can see, which means the source walk has started "
+            f"matching something that is not a marker, or the collection "
+            f"walker has quietly narrowed."
+            if unmarked else ""
+        )
     )
     # the property suite's own scope, read from ITS definitions rather than
     # guessed at, so its two by-name exclusions cannot silently widen
@@ -1771,24 +2094,6 @@ def test_the_source_walk_and_the_collection_AGREE_where_both_can_see():
 
 # --- F3 (re-audit): the tests themselves, pinned so DELETION is caught ------
 
-_OWNED_PIN_DOC = """The three modules this item owns, and the tests they define.
-
-**WHY A PIN AND NOT A DERIVATION.** Every other guard in these modules is
-derived from the tree at test time, which is the house rule. It cannot be
-here: the thing being guarded against is a test FUNCTION VANISHING, and any
-count or set derived from the file shrinks with it. Measured — deleting
-three contiguous guards from the sweep module leaves `44 passed`, exit 0,
-against a 47-test baseline, and deleting this item's positive witness AND the
-citation guard together leaves `309 passed, 9 skipped, 4 xfailed`, exit 0.
-Nothing anywhere pins a test count, and **38 of these 52 test functions
-appear nowhere in the repository but their own `def` line**, so a citation
-check cannot catch their removal either.
-
-The price is that ADDING a test to one of these modules reds this until the
-name is written here. That is the price of deletion being detectable, and it
-is paid deliberately."""
-
-
 def _defined_test_names(path):
     tree = _ast.parse(path.read_text(encoding="utf-8"))
     return frozenset(
@@ -1804,7 +2109,37 @@ def test_no_test_this_item_owns_has_been_DELETED():
 
     Both directions: a name in the pin that no longer exists is a deleted
     test, and a name in the file that is not in the pin is a new test whose
-    author must add it here. The pin lives in `_OWNED_PIN`, beside this."""
+    author must add it here. The pin lives in `_OWNED_PIN`, beside this.
+
+    **THE PIN'S OWN KEY SET IS DERIVED, AND THAT IS THE THIRD-ROUND FIX.**
+    This body used to iterate `_OWNED_PIN.items()` and nothing else, so over
+    `{}` it collected no problems and passed: an empty pin was a pin. DRIVEN
+    at `a1ca48a`, `pytest -q -ra` over the two owned modules on
+    `stelling-jax`: `_OWNED_PIN = {}` ALONE is `217 passed, 4 xfailed`, exit
+    0 — the clean baseline of that command exactly — and `_OWNED_PIN = {}`
+    plus twelve of this item's tests deleted, among them
+    `test_the_sweep_is_TOTAL_over_the_carrying_set` and the sweep's own
+    reciprocal guard, is `205 passed, 4 xfailed`, exit 0. The key set is now
+    asserted equal to
+    `tests/test_executed_sign_bit_sweep.py`'s `OWNED_MODULES`, which is
+    where the owned set already existed (the citation guard held it as a
+    local tuple), so the two cannot drift and neither can be emptied alone.
+
+    The count is NOT typed in this module's prose. It is summed off the pin
+    and printed in the failure below — 52 was typed in two docstrings, the
+    round that wrote them added two tests in its final commit, and both
+    figures stayed at 52. A figure derived where it is printed cannot do
+    that."""
+    from test_executed_sign_bit_sweep import OWNED_MODULES
+
+    owned = {str(path.relative_to(_REPO_ROOT)) for path in OWNED_MODULES}
+    assert set(_OWNED_PIN) == owned, (
+        f"`_OWNED_PIN` pins {sorted(_OWNED_PIN)} and this item owns "
+        f"{sorted(owned)}. A pin that does not name every owned module "
+        f"reports nothing about the modules it omits — and an EMPTY pin "
+        f"reports nothing about any of them while passing, which is the "
+        f"shape this assertion exists to make impossible."
+    )
     problems = []
     for rel, names in sorted(_OWNED_PIN.items()):
         path = _REPO_ROOT / rel
@@ -1823,7 +2158,12 @@ def test_no_test_this_item_owns_has_been_DELETED():
                 f"name: {added} — add them to `_OWNED_PIN`"
             )
     assert not problems, "\n  ".join(
-        ["the tests this item owns have changed:", *problems]
+        [
+            f"the tests this item owns have changed — the pin names "
+            f"{sum(len(v) for v in _OWNED_PIN.values())} test function(s) "
+            f"across {len(_OWNED_PIN)} module(s):",
+            *problems,
+        ]
     )
 
 
@@ -1958,6 +2298,42 @@ _OWNED_PIN = {
         "test_a_certified_sign_is_TRUE_at_every_assumed_point",
     }),
 }
-"""The test functions each owned module defines, as of this commit."""
+"""The test functions each owned module defines, as of this commit.
 
-OWNED_TEST_NAMES = dict(_OWNED_PIN)
+**WHY A PIN AND NOT A DERIVATION.** Every other guard in these modules is
+derived from the tree at test time, which is the house rule. It cannot be
+here: the thing being guarded against is a test FUNCTION VANISHING, and any
+count or set derived from the file shrinks with it. Measured — deleting
+three contiguous guards from the sweep module leaves `44 passed`, exit 0,
+against a 47-test baseline, and deleting this item's positive witness AND
+the citation guard together leaves `309 passed, 9 skipped, 4 xfailed`, exit
+0. Nothing anywhere pins a test count.
+
+Only the VALUES are a pin. The key set is derived from
+`tests/test_executed_sign_bit_sweep.py`'s `OWNED_MODULES` by
+`test_no_test_this_item_owns_has_been_DELETED`, which is what stops an empty
+dict from satisfying it.
+
+**A CITATION CHECK CANNOT CATCH A DELETION EITHER, AND THE FIGURE THAT SAID
+SO WAS STALE IN BOTH PLACES IT WAS PRINTED.** This paragraph lived above
+under a `_OWNED_PIN_DOC` name that nothing read, and
+`tests/test_executed_sign_bit_sweep.py::
+test_every_test_name_THIS_ITEM_cites_in_its_own_prose_resolves`
+repeated it; both said *"38 of these 52 test functions appear nowhere in the
+repository but their own `def` line"*. 52 was the count at `68ca084`, the
+final commit of that round added two tests, and neither figure moved.
+Neither said what the search had to EXCLUDE to be true, which is this
+literal — the pin names every one of them, so a search that reads it finds
+them all and the honest count is zero.
+
+Measured at `a1ca48a` on 2026-08-28, over `git ls-files`, skipping the
+`_OWNED_PIN` literal and each test's own `def` line: the three modules
+define **54** test functions (35 / 18 / 1) and **36** of them appear nowhere
+else in the repository at all. The total is not typed anywhere any more —
+`test_no_test_this_item_owns_has_been_DELETED` sums the pin and prints it in
+its own failure message, which is the one place a reader needs it and the
+one place it cannot go stale.
+
+The price is that ADDING a test to one of these modules reds that guard
+until the name is written here. That is the price of deletion being
+detectable, and it is paid deliberately."""
