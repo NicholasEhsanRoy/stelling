@@ -3104,14 +3104,14 @@ class _Slicer:
             # because a reader who takes them for live paths will look for
             # (and "fix") a cause that does not exist:
             #
-            #   * the two `eqn.*` shape screens — `_Walker._classify_
-            #     assumed_pred` forwards only a producer whose primitive is in
-            #     `_ASSUME_CMPS` and whose `invars` are exactly two `ir.Var`s
-            #     (it drops on `prim not in _ASSUME_CMPS` and on
-            #     `len(producer.invars) != 2` before ever reaching the forward
-            #     site), and `_ASSUME_CMPS` is the same set as `ASSUME_CMP_SYM`
-            #     here. Their reachable trigger is a `RelationalAssume`
-            #     assembled by hand;
+            #   * the two `eqn.*` shape screens —
+            #     `propagate._Propagator._classify_assumed_pred` forwards only a
+            #     producer whose primitive is in `_ASSUME_CMPS` and whose
+            #     `invars` are exactly two `ir.Var`s (it drops on `prim not in
+            #     _ASSUME_CMPS` and on `len(producer.invars) != 2` before ever
+            #     reaching the forward site), and `_ASSUME_CMPS` is the same set
+            #     as `ASSUME_CMP_SYM` here. Their reachable trigger is a
+            #     `RelationalAssume` assembled by hand;
             #   * `remap is None` — this was written for a scope the slicer
             #     does not descend, which means a `cond` branch, and a
             #     branch-scoped relational assume is no longer forwarded at
@@ -4330,9 +4330,9 @@ def fraction_text(fr: Fraction) -> str:
     PUBLIC because a solver model value is described on BOTH sides of the
     module boundary and there must be one renderer for it:
     ``solvers._require_valid_refutation`` attaches the same values to an
-    :exc:`EmissionInfidelityError`, and it used bare ``str()``, so the
-    box-escape alarm here returned its diagnosis safely and then died one
-    statement later rendering the same value.
+    :exc:`stelling.solvers.EmissionInfidelityError`, and it used bare
+    ``str()``, so the box-escape alarm here returned its diagnosis safely
+    and then died one statement later rendering the same value.
 
     **Public rather than imported privately, and the first reason given
     for that was wrong.** It was "nothing else in ``src/`` imports a

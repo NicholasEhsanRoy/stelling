@@ -277,18 +277,60 @@ def sub_jaxprs(eqn: ir.JaxprEqn) -> Iterable[ir.Jaxpr]:
     ledger 0 / assume_dropped False / covers True* — the pre-fix state
     presented as a satisfied postcondition.
 
-    No path inside stelling produces one: :func:`stelling.harness.trace` and
-    :meth:`ir.JaxprEqn.from_dict` both build tuples, so this is unreachable
-    from a real query and was never a live soundness hole. It is hardened
-    anyway because three rules now rest on this walk's totality (B3's
-    non-emptiness gate, ``ledger_covers``, and the ``REGION_NOT_ASKED``
-    tightening), ``JaxprEqn`` is a plain dataclass any caller can construct,
-    and a params mapping is untyped by construction: the tuple-ness of every
-    sub-jaxpr container is a property of today's decoder, not of the type, so
-    a future decoder that passed a list through would silently SHRINK the
-    requirement rather than fail. Nothing else in this function distinguishes
-    the two sequence types, and ``list`` is the only other one a decoder
-    plausibly yields.
+    **NO PATH INSIDE STELLING PRODUCES ONE — AND THE ARGUMENT FOR THAT HAD
+    TO BE REBUILT BEFORE IT COULD BE BELIEVED.** This paragraph read
+    *"stelling.harness.trace and ir.JaxprEqn.from_dict both build tuples,
+    so this is unreachable from a real query"*. **There is no
+    ``ir.JaxprEqn.from_dict``**: the library's only ``from_dict`` is
+    :meth:`ir.ClosedJaxpr.from_dict`, and equations are built by the
+    module-level :func:`ir._decode`. So half of a two-item enumeration named
+    a method that has never existed, which is another way of saying nobody
+    had checked it — and the enumeration was the wrong shape besides.
+    Measured by AST at `9b5b496` on 2026-08-28, ``src/`` constructs
+    ``ir.JaxprEqn`` at **nine** sites, not two, and a list of the routes
+    somebody remembered is exactly what a tenth route walks past.
+
+    Re-derived over the routes as a class rather than by name, the
+    conclusion SURVIVES, and on the document side it is stronger than the
+    sentence it replaces:
+
+    * **Seven of the nine originate nothing.** :mod:`stelling.vacuity`'s
+      bound-widener, :mod:`stelling.obligation`'s renumberer, alias
+      resolver and probe builder, and :mod:`stelling.propagate`'s three
+      gauge equations either hand ``eqn.params`` through untouched or
+      rebuild it as ``tuple(...)`` over a mapping they own outright. None
+      of them puts a sub-jaxpr into a params value at all, so whatever
+      container one holds is the container an originating route made.
+    * **The tracing route NORMALISES.** Every param goes through one arm of
+      :meth:`_jax_compat._Transcriber.param`, ``isinstance(v, (tuple,
+      list))`` → ``tuple(...)``, so a jax primitive that stashes its
+      branches in a list is transcribed to a tuple by construction and not
+      by luck. :func:`stelling.harness.trace` is the door onto that route.
+    * **The document route cannot SPELL a list.** :func:`ir._decode`
+      accepts a scalar or a tagged mapping and refuses everything else; a
+      sequence is written ``{"k": "tuple", "items": [...]}`` and read back
+      through ``tuple(...)``. Driven on this tree at `9b5b496` on
+      2026-08-28 — encode a ``cond`` equation whose ``branches`` param is a
+      pair of :class:`ir.ClosedJaxpr`, round-trip it, then put the bare
+      JSON array in place of the tagged mapping::
+
+          round-trip of `branches`   tuple
+          the bare array instead     ValueError: malformed IR
+                                     serialization: unexpected list
+
+      A route that REFUSES the list is a stronger fact than one that
+      happens to build tuples, and it is the half the old sentence got
+      closest to while pointing at the wrong door.
+
+    It is hardened anyway because three rules now rest on this walk's
+    totality (B3's non-emptiness gate, ``ledger_covers``, and the
+    ``REGION_NOT_ASKED`` tightening), ``JaxprEqn`` is a plain dataclass any
+    caller can construct, and a params mapping is untyped by construction:
+    the tuple-ness of every sub-jaxpr container is a property of today's
+    decoder, not of the type, so a future decoder that passed a list
+    through would silently SHRINK the requirement rather than fail. Nothing
+    else in this function distinguishes the two sequence types, and ``list``
+    is the only other one a decoder plausibly yields.
     """
     pending = [v for _, v in eqn.params]
     while pending:

@@ -87,9 +87,11 @@ def test_the_table_certifies_that_chain_negative_under_real_semantics():
     def h():
         a = any_array((), jnp.float64, (-1e-100, -1e-200))
         # THE certificate's one source for a declared input: a STRICT assume
-        # excluding the zero (`_classify_cmp`). The declared box alone mints
-        # nothing — a box is an over-approximation, and `-1e-200` is not
-        # "certainly nonzero" for that reason.
+        # excluding the zero (`_Propagator._classify_assumed_pred`; this
+        # comment said `_classify_cmp`, a name never defined in this tree).
+        # The declared box alone mints nothing — a box is an
+        # over-approximation, and `-1e-200` is not "certainly nonzero" for
+        # that reason.
         assume(a < -1e-200)
         c = a * a * a
         return assert_(1.0 / c <= -1.0)

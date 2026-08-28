@@ -69,7 +69,9 @@ def pytest_addoption(parser, pluginmanager):
     no-op it replaces — and there are two ways to hit it:
 
     * the entry point got there first, with autoload on and this module named
-      in a ``conftest.py``. :meth:`is_registered` is the guard.
+      in a ``conftest.py``. ``pluginmanager.is_registered`` is the guard —
+      pytest's method and not this package's, so it is written as a literal
+      here, the way every other borrowed name in this docstring is.
     * WE get there first, with autoload on and ``-p stelling.overflow``,
       because ``-p`` is consumed in ``Config._preparse`` *before*
       ``load_setuptools_entrypoints``. Registering under

@@ -18,16 +18,27 @@ the way five copies can. See :func:`unpaired_propagation` for what each site
 does with the answer.
 
 Scope, held deliberately (design/e2a-registration.md): no widening, no
-fixpoints, no cond/scan descent, no solver. The transfer registry contains
-exactly the primitives the target census returned
-(`design/primitive-census.md`, "The target census") plus the three harness
-primitives, plus the closed pytree-probe registration round (abs, eq, ne,
-and, or, stop_gradient, reshape, pow, reduce_or, and the scalar-selector /
-rank-broadcast forms of already-registered transfers), plus one
-allowed-by-census structural addition from the maddening HeatNode trace
-(``scatter`` in its static-index ``x.at[k].set(v)`` form only), plus two
-allowed-by-census structural additions from the MIME fvm laplacian trace
-(``gather`` in its static-index leading-axis row form only, and
+fixpoints, no ``scan``/``while_loop`` descent, no solver.
+
+**THAT CLAUSE READ "no cond/scan descent", AND THE ``cond`` HALF OF IT WAS
+FALSE.** It was false against this same docstring, which says below that
+*"the walk enters the transparent wrappers and ``cond``"*, and false against
+the code, where :meth:`_Propagator.eqn` takes a ``cond`` arm that walks every
+branch under a ``("cond", eqn_index, branch_index)`` scope step. It has been
+false since control-flow descent was built; the half that stayed true is
+``scan`` and ``while_loop``, which is the half the assume-recording rule
+below rests on — an assume the walk never reaches is unclassified, and the
+paragraph beginning "AN ASSUME THE WALK NEVER REACHES" is what says so.
+
+The transfer registry contains exactly the primitives the target census
+returned (`design/primitive-census.md`, "The target census") plus the three
+harness primitives, plus the closed pytree-probe registration round
+(abs, eq, ne, and, or, stop_gradient, reshape, pow, reduce_or, and the
+scalar-selector / rank-broadcast forms of already-registered transfers),
+plus one allowed-by-census structural addition from the maddening HeatNode
+trace (``scatter`` in its static-index ``x.at[k].set(v)`` form only), plus
+two allowed-by-census structural additions from the MIME fvm laplacian
+trace (``gather`` in its static-index leading-axis row form only, and
 ``transpose`` — both pure data movement with exact semantics), plus the
 closed three-row round measured by attribution against a real trace
 (``reduce_sum`` and ``integer_pow``; that round's third row was
@@ -488,7 +499,7 @@ class RelationalAssume:
 #                 run judges satisfies it by construction.
 #   ``no-op``     the conjunct was not applied, but its own value is
 #                 definitely TRUE over the boxes in force
-#                 (:meth:`_Walker._conjunct_certainly_true`), so it excluded
+#                 (:meth:`_Propagator._conjunct_certainly_true`), so it excluded
 #                 nothing and its absence widened nothing: the judged set IS
 #                 the assumed region for this conjunct.
 #   ``forwarded`` relational (both sides vary), so the interval domain cannot
@@ -4218,8 +4229,8 @@ def _t_sqrt(eqn, params, ins):
     On floats the monotone outward-rounded transfer runs; the domain refusal
     (``arg >= 0``, the obligation a sqrt call carries) is raised inside
     :func:`stelling.interval.sqrt` where a below-0 lower bound reaches the
-    out-of-domain region, and the walk turns that :class:`IntervalError`
-    into a noted top-decline."""
+    out-of-domain region, and the walk turns that
+    :class:`interval.IntervalError` into a noted top-decline."""
     _require_float_dtype(eqn, "sqrt")
     return [iv.sqrt(ins[0])]
 
@@ -7770,6 +7781,36 @@ def _probe_point(k: int, shape, lo: float, hi: float, dtype: str, base: int):
     return vals
 
 
+# **TWO NAMES THIS CLASS HAS NEVER HAD, AND EIGHT SENTENCES BUILT ON THEM.**
+# Prose in this file and in `src/stelling/obligation.py` called this class
+# `_Walker`, and called its `_classify_assumed_pred` below `_classify_cmp`.
+# NEITHER NAME HAS EVER BEEN DEFINED IN THIS REPOSITORY. Measured on
+# 2026-08-28: `git log --all -S "class _Walker" -- src/` and `git log --all
+# -S "def _classify_cmp" -- src/` each return no commits, while this class
+# has been `_Propagator` since the MVP commit `4f25390` (2026-07-17) and
+# `_classify_assumed_pred` was added in `8106a55` (2026-08-07). The invented
+# spellings entered the prose afterwards — `f116890` (2026-08-07) and
+# `0874dd1` (2026-08-14) — and reached six sites and two.
+#
+# So this is not a rename that was half-finished. A rename leaves a trail a
+# reader can date; these were written down as if they existed. Five of the
+# eight were `:meth:` roles, which do not decorate a sentence — a role
+# asserts that a method of that name exists, to a reader who will go looking
+# for it — and they were in the file whose subject is a soundness
+# certificate.
+#
+# THE EIGHT ARE CORRECTED WHERE THEY STAND and this comment is the record of
+# what they said, rather than the same paragraph repeated eight times.
+#
+# WHAT HOLDS IT NOW, AND WHAT THAT DOES NOT REACH:
+# `tests/test_referenced_names_resolve.py::test_every_cross_reference_
+# role_in_src_resolves` resolves every Sphinx cross-reference role in `src/`
+# against the parsed tree, so a role naming a method this class does not
+# have is a red. It reads ROLES ONLY. Three of the eight were plain
+# backticked identifiers — one further down this file, one in
+# `obligation.py`, one in `tests/test_strict_sign_algebra.py` — and those
+# were found by reading; nothing catches the next one, for the
+# false-positive reason that gate's docstring gives.
 class _Propagator:
     def __init__(
         self,
@@ -7827,8 +7868,9 @@ class _Propagator:
         # TWO WRITERS, both real-mode only, and each writes a fact it can
         # actually establish:
         #
-        #   1. a strict `gt`/`lt` assume in :meth:`_classify_cmp` — the
-        #      half-space the closed meet could not represent;
+        #   1. a strict `gt`/`lt` assume in
+        #      :meth:`_classify_assumed_pred` — the half-space the closed
+        #      meet could not represent;
         #   2. a CONSTVAR bound in :meth:`run` — whose decoded box IS its
         #      value, so its sign needs no assume at all.
         #
@@ -8094,10 +8136,10 @@ class _Propagator:
         has exactly two shapes: a VAR reads ``self.strict_sign``, a
         LITERAL reads its own decoded value
         (:func:`_literal_strict_sign`). The table itself has two writers
-        — a strict assume in :meth:`_classify_cmp`, and a CONSTVAR bound
-        in :meth:`run` — and both are real-mode only. The constant
-        sources, literal and constvar, are why a coefficient no longer
-        zeroes the chain it sits in.
+        — a strict assume in :meth:`_classify_assumed_pred`, and a
+        CONSTVAR bound in :meth:`run` — and both are real-mode only. The
+        constant sources, literal and constvar, are why a coefficient no
+        longer zeroes the chain it sits in.
 
         * ``mul``/``div``: ``sign(a·b) = sign(a)·sign(b)`` and a product or
           quotient of nonzeros is nonzero. Broadcasting is irrelevant
@@ -9241,20 +9283,21 @@ class _Propagator:
         here**, and this method is one of the few places it can be. The
         conjuncts of one ``assume`` are classified in sequence and each
         narrowing is written straight back —
-        ``self.env[target_atom.id] = new`` in :meth:`_classify_cmp` is the
-        one env writer in this file that makes a box *smaller* than the
-        values reaching that point. A conjunct read after a sibling
-        narrowed its variable is read against a box that is deliberately
-        NOT an over-approximation of the reachable set.
+        ``self.env[target_atom.id] = new`` in
+        :meth:`_classify_assumed_pred` is the one env writer in this file
+        that makes a box *smaller* than the values reaching that point.
+        A conjunct read after a sibling narrowed its variable is read
+        against a box that is deliberately NOT an over-approximation of
+        the reachable set.
 
         **What it does rest on**, in order:
 
         1. The box still over-approximates the *assumed region*, which is
            the only set the conclusion quantifies over. Every narrowing is
            a meet with the CLOSED half-space (chosen deliberately in
-           :meth:`_classify_cmp` — the strict form would under-approximate,
-           binding rule 1), so it can only remove points that no point of
-           the assumed region occupies.
+           :meth:`_classify_assumed_pred` — the strict form would
+           under-approximate, binding rule 1), so it can only remove
+           points that no point of the assumed region occupies.
         2. Emptiness — the case where ``[1, 1]`` is true but useless — is
            closed by an INDEPENDENT gate, not by anything here: the F7
            exactness decision on the ``narrowed`` tuple below
@@ -9829,7 +9872,17 @@ class _Propagator:
             def_true = False
         self.env[target_atom.id] = new
         if self.semantics == "real" and cmp in ("gt", "lt"):
-            # THE ONE SOURCE of the strict-sign certificate. The closed
+            # THE FIRST OF THE TABLE'S TWO WRITERS. **THIS SENTENCE READ
+            # "THE ONE SOURCE of the strict-sign certificate", AND IT WAS
+            # STALE AGAINST BOTH ITS NEIGHBOURS**: the block comment on
+            # `self.strict_sign` already said "TWO WRITERS" and "the
+            # CERTIFICATE has three sources and the TABLE has two", and
+            # the constvar writer below already called itself "THE SECOND
+            # SOURCE". One table, two writers — this one and the constvar
+            # bind in :meth:`run`; one certificate, three sources — those
+            # two plus :func:`_literal_strict_sign`, which recomputes a
+            # literal's sign on every read and stores nothing, so it is a
+            # source of the certificate and not of the table. The closed
             # meet just written cannot represent `x > k`; this records the
             # part of it the box lost, and only the part that is a
             # NONZERO-ness claim: `x > k` with `k >= 0` gives `x > 0`
@@ -10411,18 +10464,18 @@ class _Propagator:
                 # a definite TRUE over the box is a TRUE at the value.
                 #
                 # Before, not after, and the ordering is not defensive
-                # tidiness: `_classify_cmp` writes narrowed boxes straight
-                # back into the env, and a later conjunct read against a
-                # narrowed sibling is read against a box that is
-                # deliberately NOT an over-approximation of the reachable
-                # set (see `_conjunct_certainly_true`). Reading here keeps
-                # every witness answer a statement about the PINNED POINT
-                # and nothing else. (In fact a definitely-true predicate
-                # narrows nothing — the meet with the closed half-space is
-                # a no-op exactly when the comparison is definitely true —
-                # so on the runs that certify, the two orders agree; the
-                # runs where they differ are the runs that certify
-                # nothing.)
+                # tidiness: `_classify_assumed_pred` writes narrowed
+                # boxes straight back into the env, and a later conjunct
+                # read against a narrowed sibling is read against a box
+                # that is deliberately NOT an over-approximation of the
+                # reachable set (see `_conjunct_certainly_true`). Reading
+                # here keeps every witness answer a statement about the
+                # PINNED POINT and nothing else. (In fact a
+                # definitely-true predicate narrows nothing — the meet
+                # with the closed half-space is a no-op exactly when the
+                # comparison is definitely true — so on the runs that
+                # certify, the two orders agree; the runs where they
+                # differ are the runs that certify nothing.)
                 key = id(eqn)
                 true_here = self._conjunct_certainly_true(eqn.invars[0])
                 self.assume_witness[key] = (

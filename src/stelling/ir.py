@@ -3187,13 +3187,13 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
 
     Two distinct failures, and they are refused SEPARATELY because they
     are different facts about the document — the same split
-    :meth:`_declared_shape` makes. A param of the wrong container type is
-    refused for its TYPE; a param of the right type whose iteration raises
-    (a ``list`` SUBCLASS whose ``__iter__`` refuses — ``isinstance`` is a
-    claim about the type and not about the object) is refused for being
-    UNREADABLE. One sentence for both said "is not a sequence of extents"
-    over ``np.array([4])``, which is a sequence of extents and was refused
-    for a different reason.
+    :meth:`stelling.obligation._Slicer._declared_shape` makes. A param of
+    the wrong container type is refused for its TYPE; a param of the right
+    type whose iteration raises (a ``list`` SUBCLASS whose ``__iter__``
+    refuses — ``isinstance`` is a claim about the type and not about the
+    object) is refused for being UNREADABLE. One sentence for both said
+    "is not a sequence of extents" over ``np.array([4])``, which is a
+    sequence of extents and was refused for a different reason.
 
     **``lo`` AND ``hi`` ARE THE DECLARED SET ITSELF, AND THEY HAD NO RULE AT
     ALL** — audit 0.2.0 B12, S16. Three things were missing and they are one
