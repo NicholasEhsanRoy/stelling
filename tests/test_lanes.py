@@ -1032,6 +1032,19 @@ def test_a_line_that_SELECTS_an_interpreter_is_still_caught_after_the_split():
     A query cannot decide the answer on its own — something has to consume it,
     and every consumer is itself a reading — which is the last group of
     assertions below.
+
+    **AND THAT LAST GROUP BUILDS ITS COMBINATIONS OUT OF THE FIVE TOKENS,
+    WHICH IS THE HALF ITS AUTHOR HAD THOUGHT OF AND NOT THE HALF THAT WAS
+    OPEN.** ``export UV_PYTHON=…``, ``pyenv local …`` and ``uv venv --python
+    …`` are each caught by a test EARLIER in ``_interpreter_reading`` than the
+    query, so all three passed under a reading that decided the query branch
+    with a ``search`` — and so did every OTHER selection spelling beside a
+    query, as ``reporting``. A drive whose population is drawn from the set
+    the code already enumerates cannot find the members the set is missing.
+    ``test_a_selection_this_module_has_NO_TOKEN_FOR_is_still_caught_beside_a_query``
+    is the population this one could not reach, and it is where the boundary
+    is now driven; this test is kept because the five are still the spellings
+    the SELECTION branch has to keep catching on its own.
     """
     reading = _lanes._interpreter_reading
 
@@ -1308,3 +1321,230 @@ def test_the_shallow_lane_refuses_a_loss_it_does_not_declare_AND_one_that_vanish
     assert _lanes.shallow_clone_differences(
         _lanes.run_report(_log("1 passed, 400 skipped", lost)), full
     ) == []
+
+
+#: SELECTING SPELLINGS THIS MODULE HAS NO TOKEN FOR, each written beside a
+#: query on one line. **The population is chosen for what it is NOT**: not one
+#: of them contains `setup-python`, `python-version`, `UV_PYTHON`, `pyenv` or
+#: `deadsnakes`, so none is reachable by the ordering that
+#: `test_a_line_that_SELECTS_an_interpreter_is_still_caught_after_the_split`
+#: relies on. Under the `search` that decided the query branch until
+#: :data:`_lanes._REPORTING_LINE` existed, every one of these read
+#: ``reporting`` — an accepted reading of a line that pins an interpreter.
+#:
+#: They are not a new enumeration to be extended when somebody thinks of a
+#: twentieth: the reading they drive is a TOTAL grammar, so what they
+#: demonstrate is that a line carrying a second command is refused whatever
+#: that command is. Adding one costs nothing and proves nothing new; the
+#: value is in the variety of shapes — `&&`, `;`, a command-prefix
+#: assignment, a redirect, a wrapper that takes the command as an argument.
+_SELECTS_WITH_NO_TOKEN_THIS_MODULE_KNOWS = (
+    '        run: conda create -y -n ci python=3.13 && python --version',
+    '        run: micromamba create -n ci python=3.12 && python --version',
+    '        run: mise use python@3.13 && python --version',
+    '        run: asdf local python 3.11.9 && python --version',
+    '        run: source /opt/py311/bin/activate && python --version',
+    '        run: . /opt/py311/bin/activate; python --version',
+    '        run: export PATH=/opt/python3.10/bin:$PATH && python --version',
+    '        run: PATH=/usr/local/py313/bin:$PATH python --version',
+    '        run: echo "/opt/python3.10/bin" >> "$GITHUB_PATH" && python --version',
+    '        run: apt-get install -y python3.13 && python3 --version',
+    '        run: update-alternatives --set python3 /usr/bin/python3.11 && python3 --version',
+    '        run: ln -sf /opt/python3.13/bin/python3 /usr/local/bin/python && python --version',
+    '        run: docker run --rm python:3.13 python --version',
+    '        run: nix-shell -p python312 --run "python --version"',
+    '        run: hatch run python --version',
+    '        run: conda activate ci && python -c "import sys; print(sys.version_info)"',
+    '        run: PATH=/opt/py/bin:$PATH python -c "import sys; print(sys.version_info)"',
+    '        run: python --version && conda activate ci',
+)
+
+#: The other half, and it is what stops the fix above from being "refuse
+#: everything". Each of these IS the question and nothing else, in the shapes
+#: `ci.yml` writes: a `- run:` step, an inline `run:`, a bare line inside a
+#: block scalar; the interpreter by path, by name, with a version suffix; the
+#: question asked directly and through one `-c` program, in either quote.
+_ASKS_AND_DOES_NOTHING_ELSE = (
+    "      - run: python --version",
+    "      - run: python3 --version",
+    "      - run: python3.12 --version",
+    "      - run: .venv/bin/python --version",
+    "        run: ${RUNNER_TEMP}/venv/bin/python --version",
+    "          /usr/bin/python3 --version",
+    '        run: python -c "import sys; print(sys.version_info)"',
+    "        run: python -c 'import sys; print(sys.version_info)'",
+)
+
+
+def test_a_selection_this_module_has_NO_TOKEN_FOR_is_still_caught_beside_a_query():
+    """The half the split left open, and the population that can see it.
+
+    THE DEFECT. Moving ``python --version`` and ``sys.version_info`` out of
+    ``_OTHER_INTERPRETER_TOKEN`` and into a query reading was argued safe on
+    the ground that ``_interpreter_reading`` tests the selection before the
+    query, so a line doing both is decided by the selection. **That is true of
+    a line whose selection is one of five spellings and false of every other
+    one.** Under the ``search`` this replaces, a line reading
+
+        conda create -y -n ci python=3.13 && python --version
+
+    was ``reporting`` — an ACCEPTED reading, not a can't-tell — so a job
+    could start pinning an interpreter with `EXPECTED_PYTHON` unmoved and the
+    README's *"exactly one job pins an interpreter"* still green. The drive
+    written with the split built its combinations out of the same five tokens
+    and could not reach a single one of these.
+
+    THE REPAIR IS A CHANGE OF QUESTION, not a longer list. "Does this line
+    contain a selection I recognise?" is asked of an open set. "Is this line
+    NOTHING BUT a question put to an interpreter?" is asked of a closed shape,
+    and :data:`_lanes._REPORTING_LINE` decides it — so everything else,
+    including every spelling nobody has thought of, falls to ``unreadable:``.
+
+    Both directions are here. Refusing everything would satisfy the first
+    assertion and destroy the reading, which is what the second is for.
+    """
+    reading = _lanes._interpreter_reading
+
+    fell_through = []
+    for line in _SELECTS_WITH_NO_TOKEN_THIS_MODULE_KNOWS:
+        for token in ("setup-python", "python-version", "UV_PYTHON", "pyenv",
+                      "deadsnakes"):
+            assert token not in line, (
+                f"{line!r} carries {token!r}, so it is reachable by the "
+                f"selection branch and belongs in the other drive. This "
+                f"population exists to be the one that branch cannot see."
+            )
+        assert _lanes._INTERPRETER_QUERY.search(line), (
+            f"{line!r} carries no query at all, so it never reaches the "
+            f"branch this test is about and proves nothing here"
+        )
+        got = reading(line)
+        if got is None or not got.startswith("unreadable:"):
+            fell_through.append(f"{line.strip()}  ->  {got}")
+    assert not fell_through, (
+        "these lines SELECT an interpreter and ask it its version on the same "
+        "line, and this module read them as `reporting` — an accepted "
+        "reading, so a job that started pinning would leave "
+        "`python_provisioning()` unmoved:\n  " + "\n  ".join(fell_through)
+    )
+
+    reddened = [
+        f"{line.strip()}  ->  {reading(line)}"
+        for line in _ASKS_AND_DOES_NOTHING_ELSE
+        if reading(line) != "reporting"
+    ]
+    assert not reddened, (
+        "these lines are the question and nothing else, and the grammar "
+        "refuses them — which is the way this fix turns into 'no lane may "
+        "report at all' and puts the original defect back:\n  "
+        + "\n  ".join(reddened)
+    )
+
+
+def test_the_reporting_step_ci_yml_ACTUALLY_HAS_still_reads_as_one():
+    """The grammar against the real file, not against a specimen.
+
+    ``_ASKS_AND_DOES_NOTHING_ELSE`` above is prose this repository does not
+    ship. The line that matters is the one in `ci.yml`, and a grammar tightened
+    until the specimens pass while the real step reads ``unreadable:`` would
+    redden `EXPECTED_PYTHON` and be reverted by whoever met it — which is how a
+    gate gets loosened again.
+
+    Read off the file rather than restated: every line in `.github/workflows/`
+    that carries a query at all, and what it reads.
+    """
+    misread = []
+    reported = 0
+    for path in sorted(
+        p for p in _lanes.WORKFLOWS.iterdir() if p.suffix in (".yml", ".yaml")
+    ):
+        for line in _lanes._code_lines(path.read_text(encoding="utf-8")):
+            if not _lanes._INTERPRETER_QUERY.search(line):
+                continue
+            got = _lanes._interpreter_reading(line)
+            if got == "reporting":
+                reported += 1
+            else:
+                misread.append(f"{path.name}: {line.strip()}  ->  {got}")
+    assert reported, (
+        "no line in `.github/workflows/` asks an interpreter its version any "
+        "more, so this test watches nothing and `python_reporting()` is empty "
+        "for a reason nobody wrote down"
+    )
+    assert not misread, (
+        "a line in a shipped workflow asks an interpreter its version and "
+        "this module does not read it as a report. Either the step grew a "
+        "second command — in which case it also SELECTS and the reading is "
+        "right — or `_lanes._REPORTING_LINE` no longer admits the shape this "
+        "repository writes:\n  " + "\n  ".join(misread)
+    )
+
+
+def test_a_reporting_line_that_ALSO_SELECTS_moves_the_DECLARED_provisioning(
+    tmp_path, monkeypatch
+):
+    """End to end, which is where the fail-open was actually reachable.
+
+    A unit reading is not the claim. The claim is that
+    ``test_the_workflows_provision_the_interpreters_they_are_declared_to`` and
+    the README's count go RED when a lane starts choosing an interpreter, and
+    under the ``search`` they did not: editing the `random-order` reporting
+    line so that it ALSO prepends a directory to `PATH` left
+    ``python_provisioning()`` BYTE-IDENTICAL, because the line still carried a
+    query and nothing looked at the rest of it.
+
+    So the mutation is run against the real workflow directory, copied and
+    edited, with a control: the unedited copy has to reproduce
+    ``EXPECTED_PYTHON`` exactly, or the mutation is not the only difference and
+    the red below means nothing.
+    """
+    workflows = tmp_path / "workflows"
+    workflows.mkdir()
+    query_lines = {}
+    for path in sorted(
+        p for p in _lanes.WORKFLOWS.iterdir() if p.suffix in (".yml", ".yaml")
+    ):
+        text = path.read_text(encoding="utf-8")
+        (workflows / path.name).write_text(text, encoding="utf-8")
+        for line in text.splitlines():
+            if _lanes._INTERPRETER_QUERY.search(_lanes._strip_comment(line)):
+                query_lines[path.name] = line
+
+    monkeypatch.setattr(_lanes, "WORKFLOWS", workflows)
+    assert _lanes.python_provisioning() == _lanes.EXPECTED_PYTHON, (
+        "the CONTROL failed: a byte-for-byte copy of `.github/workflows/` does "
+        "not reproduce the declared provisioning, so nothing below is a "
+        "measurement of the mutation"
+    )
+    assert query_lines, "no workflow line asks an interpreter its version"
+
+    for name, line in query_lines.items():
+        path = workflows / name
+        clean = path.read_text(encoding="utf-8")
+        # The mutation the audit drove: the SAME question, on a line that now
+        # also puts an interpreter of somebody's choosing in front of `PATH`.
+        # It carries no token `_OTHER_INTERPRETER_SELECTION` knows.
+        pinned = 'export PATH=/opt/python3.10/bin:$PATH && ' + line.lstrip()
+        path.write_text(
+            clean.replace(line, line[: len(line) - len(line.lstrip())] + pinned),
+            encoding="utf-8",
+        )
+        try:
+            measured = _lanes.python_provisioning()
+        finally:
+            path.write_text(clean, encoding="utf-8")
+        assert measured != _lanes.EXPECTED_PYTHON, (
+            f"{name}'s reporting line was edited to select an interpreter as "
+            f"well as report one, and `python_provisioning()` did not move. "
+            f"The measured/declared pin cannot see a lane that started "
+            f"pinning, and the README's count of pinning jobs rests on it."
+        )
+        assert any(
+            r.startswith("unreadable:")
+            for readings in measured.values()
+            for r in readings
+        ), (
+            f"{name}'s reading moved, but not to a named can't-tell. A line "
+            f"this module cannot parse has to say so by name, because that is "
+            f"what makes the declared table red rather than merely different."
+        )
