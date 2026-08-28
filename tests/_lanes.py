@@ -829,14 +829,43 @@ _OTHER_INTERPRETER_SELECTION = re.compile(
 #: a query into a variable moves the fail-closed decision onto the line that
 #: USES it and does not lose it.
 #:
-#: **AND A LINE THAT DOES BOTH IS ``unreadable:``, NOT REPORTING.** The three
-#: tests below are ordered — the `uv` command first, then selection, then
-#: query — so `uv venv --python "$(python --version)"`, `export
-#: UV_PYTHON="$(python3 --version)"` and `pyenv local 3.13 && python
-#: --version` are each caught by the earlier test. A spelling that could be
-#: either is a selection here, which is the direction that fails closed.
-#: `test_a_line_that_SELECTS_an_interpreter_is_still_caught_after_the_split`
-#: drives exactly that direction.
+#: **"AND A LINE THAT DOES BOTH IS ``unreadable:``, NOT REPORTING" WAS TRUE OF
+#: FIVE SPELLINGS AND FALSE OF EVERY OTHER, AND THE DRIVE UNDER IT COULD NOT
+#: SEE THAT.** What stood here said the three tests are ordered — the `uv`
+#: command, then selection, then query — so that a line doing both is decided
+#: by the selection, and named `uv venv --python "$(python --version)"`,
+#: `export UV_PYTHON="$(python3 --version)"` and `pyenv local 3.13 && python
+#: --version` as the evidence. Every one of those three carries a token from
+#: the set ABOVE. **The ordering only ever protected lines whose selection is
+#: one of those five**, and any other selection written beside a query fell
+#: through to ``reporting`` — an accepted reading, not a can't-tell. The drive
+#: was built out of the same five tokens, so it measured the half its author
+#: had thought of; the open half was the half that was open. ELEVEN spellings
+#: were driven against the two readers by the audit that found this —
+#: `unreadable:` under the old pattern, `reporting` under the split — among
+#: them `conda create -y -n ci python=3.13 && python --version`, `mise use
+#: python@3.13 && python --version`, `source /opt/py311/bin/activate &&
+#: python --version` and `export PATH=/opt/python3.10/bin:$PATH && python
+#: --version`. The fence carries EIGHTEEN, in
+#: `tests/test_lanes.py`'s `_SELECTS_WITH_NO_TOKEN_THIS_MODULE_KNOWS`, and
+#: the number is not the point: they are shapes — `&&`, `;`, a command-prefix
+#: assignment, a redirect, a wrapper taking the command as an argument — and
+#: what refuses them is a grammar rather than their membership of a list.
+#: End to end, a `random-order` reporting line edited to ALSO prepend a
+#: directory to `PATH` left `python_provisioning()` byte-identical, so the
+#: README's *"exactly one job pins an interpreter"* stayed green over a lane
+#: that pins.
+#:
+#: **SO THE QUERY BRANCH IS NOT A ``search`` ANY MORE; IT IS A TOTAL LINE
+#: GRAMMAR** (:data:`_REPORTING_LINE`), and the asymmetry is deliberate. "Does
+#: this line contain a selection I recognise?" is a question about an OPEN set
+#: and can only ever be answered with the members somebody has enumerated.
+#: "Is this line NOTHING BUT a question put to an interpreter?" is a question
+#: about a CLOSED shape and is decidable, so it is decided — and everything
+#: the grammar does not cover is ``unreadable:`` rather than accepted. That is
+#: the same move `tests/test_tripwire_record.py` made for the same reason:
+#: a total line grammar is what lets a reader say *"there is no setting"*
+#: rather than only *"I did not find one"*.
 #:
 #: **``sys.version_info`` IS THE WEAKER OF THE TWO AND IS READ AS REPORTING
 #: ANYWAY; here is what that costs.** It is a READ of the interpreter already
@@ -846,7 +875,76 @@ _OTHER_INTERPRETER_SELECTION = re.compile(
 #: is the only question this section asks. A line that both branches on the
 #: version and provisions from the branch carries a selection token on the
 #: provisioning line, where this module reads it.
-_INTERPRETER_QUERY = re.compile(r"python3?\s+--version|sys\.version_info")
+#:
+#: **THE TRIGGER IS ``python[\d.]*``, NOT ``python3?``.** `python3.12
+#: --version` is as much a
+#: query as `python3 --version`, and under the old alternative it matched
+#: NEITHER pattern and read ``None`` — invisible rather than accepted, so
+#: not the fail-open this block is about, but a gap all the same, and one
+#: :data:`_REPORTING_LINE` advertises by admitting the spelling its own
+#: trigger could not fire on. Widening a trigger that feeds a total grammar
+#: can only move lines OUT of ``None`` and into ``reporting`` or
+#: ``unreadable:``, which is why it is safe to widen here and would not have
+#: been under the ``search``.
+_INTERPRETER_QUERY = re.compile(r"python[\d.]*\s+--version|sys\.version_info")
+
+#: THE WHOLE LINE, and that is the point. A line reads ``reporting`` only when
+#: it is an interpreter, the question, and nothing else — an optional `- ` and
+#: `run:` in front, a trailing `\` behind, and no other command anywhere on
+#: it. So `export PATH=/opt/python3.10/bin:$PATH && python --version` does not
+#: match and is ``unreadable:``, and so is every other spelling that puts a
+#: second command beside the question, whether or not this module has a token
+#: for it. See :data:`_INTERPRETER_QUERY` for the finding that made this a
+#: grammar rather than a search.
+#:
+#: WHAT IT ADMITS AND WHY EACH ONE IS THERE:
+#:
+#: * a PATH before the interpreter (`.venv/bin/python`,
+#:   `${RUNNER_TEMP}/venv/bin/python`) — every step in `ci.yml` names its
+#:   interpreter by path, and a bare `python` is the exception;
+#: * `python3`, `python3.12` — the version suffix is part of the program name,
+#:   not an argument;
+#: * `-c` with ONE quoted program, because that is how the only reporting step
+#:   in this repository asks the question — it prints the interpreter and the
+#:   resolved jax in one line — and `--version` alone cannot;
+#: * a trailing `\`, because that step continues into `| tee` on the next
+#:   line.
+#:
+#: WHAT IT DOES NOT REACH, and the first of these is not the grammar's:
+#:
+#: * **THIS IS A LINE READER.** A selection on a DIFFERENT line from the query
+#:   is invisible here, and no whole-line grammar can change that — `conda
+#:   activate ci` on one line and `python --version` on the next reads
+#:   ``(None, "reporting")``. That is the same exposure the selection branch
+#:   above has had since it was written, and it is why that branch fails
+#:   closed on the spellings it does know rather than pretending to know them
+#:   all.
+#: * **WHAT A ``-c`` PROGRAM DOES IS NOT MODELLED.** A program that prints
+#:   `sys.version_info` and also shells out reads ``reporting``. It cannot
+#:   change which interpreter THIS step got — it runs inside it — so what it
+#:   could change is a LATER step, through `$GITHUB_PATH` or `$GITHUB_ENV`;
+#:   and a line writing to either is invisible to this module already, on any
+#:   line, query or no query. `ci.yml`'s `venv-in-the-working-tree` job
+#:   contains exactly such a line (`echo … >> "$GITHUB_PATH"`) and it reads
+#:   ``None`` today. That is the section's blind spot and not this grammar's,
+#:   and it is named here rather than left to be found.
+#: * a python program that prints the version on its OWN line inside a
+#:   heredoc — `print(sys.version_info)` with the `python - <<'PY'` two lines
+#:   up — reads ``unreadable:``, because a line reader cannot tell a heredoc
+#:   body from a command. That is the fail-closed direction, and the one-line
+#:   `-c` form above is the spelling that reads.
+_REPORTING_LINE = re.compile(
+    r"""^\s*                                # indentation
+        (?:-\s+)?                           # the `- ` of a step, if any
+        (?:run:\s*)?                        # `run:` when the command is inline
+        (?:[\w./${}-]*/)?python[\d.]*       # the interpreter: a path, or bare
+        \s+
+        (?:--version                        # asked directly …
+           |-c\s+(?:"[^"]*"|'[^']*'))       # … or through ONE quoted program
+        \s*\\?\s*$                          # and nothing else on the line
+    """,
+    re.VERBOSE,
+)
 
 
 def _interpreter_reading(line: str) -> str | None:
@@ -856,9 +954,14 @@ def _interpreter_reading(line: str) -> str | None:
     Written twice they could disagree, and the disagreement would read as
     "a line fell outside a job" rather than as a bug here.
 
-    THE ORDER OF THE THREE TESTS IS THE FAIL-CLOSED PROPERTY, not a style: a
-    line carrying both a selection and a query is decided by the selection.
-    See :data:`_INTERPRETER_QUERY` for the argument.
+    THE ORDER OF THE THREE TESTS MATTERS AND IS NOT WHAT MAKES THIS FAIL
+    CLOSED. That sentence used to stand here on its own and it was wrong by
+    the size of an open set: ordering the selection test in front of the query
+    test protects a line only when its selection is one of the five spellings
+    :data:`_OTHER_INTERPRETER_SELECTION` names. What decides the query branch
+    now is :data:`_REPORTING_LINE`, a TOTAL grammar over the line: a line that
+    mentions a query and is not entirely a query is ``unreadable:``, whatever
+    else is on it and whether or not this module has heard of it.
     """
     cmd = _UV_INTERPRETER_CMD.search(line)
     if cmd:
@@ -872,7 +975,12 @@ def _interpreter_reading(line: str) -> str | None:
     if _OTHER_INTERPRETER_SELECTION.search(line):
         return f"unreadable:{line.strip()}"
     if _INTERPRETER_QUERY.search(line):
-        return "reporting"
+        # THE WHOLE LINE, NOT A SUBSTRING OF IT. See `_REPORTING_LINE`: a line
+        # that mentions a query and carries anything else is a can't-tell,
+        # which is what the `search` this replaced could not say.
+        if _REPORTING_LINE.match(line):
+            return "reporting"
+        return f"unreadable:{line.strip()}"
     return None
 
 
