@@ -360,7 +360,7 @@ exactly the runs its own condition holds for, and the conditions overlap.
 | `boundary='transparent': the strict-sign certificate …` | the run was at `transparent` and the carry was LIVE — the certificate was allowed to cross the wrappers the walk enters, and to enter a `cond` branch |
 | `boundary='transparent' CARRIED N strict-sign certificate(s) …` | …and it actually crossed, N times. Present only when N > 0; it reports the ACT, not the position, and a run that carried nothing does not carry this line |
 | `boundary='transparent' was requested and is INERT under semantics='ieee'` | the dial was set and the walk refused it. The certificate is a claim about ℝ and is false where a positive subnormal flushes to zero, so nothing crossed and this verdict rests on exactly the rules an `opaque` run would have used |
-| `boundary='transparent' EXTENDS THE REACH OF A DEFECT …` | the same runs as the first line, and what that permission is able to produce: a certificate carried into a chain whose divisor comes out of `reduce_sum` or `dot_general` can decide a verdict **the compiled program contradicts** at a point of the declared box — a false VERIFIED, or a false REFUTED where the quotient decides a `cond` selector and the analysis walks only the branch the program does not take. Those reductions accumulate from a `+0.0` seed, so a value certified NEGATIVE whose terms are all `-0.0` at run time reduces to `+0.0`. Not repaired in this release |
+| `boundary='transparent' EXTENDS THE REACH OF A DEFECT …` | the same runs as the first line, and what that permission is able to produce. The certificate is what licenses `interval.boundary_div` to drop a divisor box's zero endpoint, and the quotient box it returns can exclude the value the program computes: a false VERIFIED, or a false REFUTED where the quotient decides a `cond` selector and the analysis walks only the branch the program does not take. Measured through `reduce_sum` and, by a different mechanism, through `dot_general`. **It names one route and bounds nothing** — see below. Not repaired in this release |
 
 **NO LINE MEANS `opaque`, AND THAT IS DECIDABLE RATHER THAN CONVENTIONAL.**
 The default adds nothing to the stamp — deliberately, so that a
@@ -411,35 +411,43 @@ said *"behind a wrapper"*, which in this codebase names only the
 unconditional four; the `cond` route is measured in
 `::test_the_carry_reaches_it_through_a_cond_BRANCH_and_not_only_a_wrapper`.
 
-**Nor is the reach a story about small numbers.** Any long enough chain gets
+**Nor is the route a story about small numbers.** Any long enough chain gets
 there from ordinary declared values: `x` declared `[-0.4, -0.2]` with
 `assume(x < 0)` and `1.0 / jnp.sum(x ** 1001) < 0.0` is VERIFIED at the
 default, with no boundary line in its stamp, and returns `+inf`
 (`::test_an_ORDINARY_magnitude_chain_reaches_it_at_the_DEFAULT`).
 
-**AND THE FOURTH LINE IS NOT A BOUND ON WHEN A `real` VERDICT CAN BE
-WRONG — this paragraph once implied that it was.** It said the condition is
-that *"the analysis's own binary64 box underflows onto zero at one
-boundary"*. That is the condition for the route this dial widens, because
-`interval.boundary_div` is consulted only on a divisor box that reaches
-zero. The wider condition is the box entering **the target's subnormal
-band**, which needs no certificate, no reduction and no division at all:
+**THE FOURTH LINE NAMES A ROUTE. IT IS NOT A CHARACTERISATION OF THE CLASS,
+AND THIS PARAGRAPH TRIED TO WRITE ONE THREE TIMES.** In order it said the
+condition was *"behind a wrapper"*, then *"the analysis's own binary64 box
+underflows onto zero at one boundary"*, then *"the box entering the target's
+subnormal band"*. Each was written as the widening that ends the sequence
+and each was one route short. Two measured members of the class, with two
+unrelated mechanisms:
 
-| | |
-|---|---|
-| the query | `x = any_array((), f64, (-1.0, -0.5))`; `assert_(x * 2**-512 * 2**-511 < 0.0)` |
-| the boxes | `[-7.458e-155, -3.729e-155]` then `[-1.1125e-308, -5.563e-309]` — **zero excluded** |
-| `semantics="real"` | **VERIFIED**, 0 boundary crossings, no boundary line in the stamp |
-| the program | `-0.0` at every declared point, eager and jitted, so `< 0.0` is **False** |
-| exact ℝ | `-1.1125e-308`, so `< 0.0` is **True**; `python` and `numpy` return that value |
-| `semantics="ieee"` | **UNKNOWN** |
+| | flush-to-zero | re-association |
+|---|---|---|
+| the query | `x = any_array((), f64, (-1.0,-0.5))`; `assert_(x * 2**-512 * 2**-511 < 0.0)` | `W = [1e17,-1e17]×16 + [1.0]`; `assert_(jnp.sum(W) > 0.0)` |
+| the boxes | `[-1.1125e-308, -5.563e-309]` — zero excluded | one `reduce_sum`, nothing near zero |
+| anything small? | the *result* is a binary64 subnormal | **no** — every element is normal, `min |W| = 1.0` |
+| `semantics="real"` | **VERIFIED**, 0 crossings, no boundary line | **VERIFIED**, 0 crossings, no boundary line |
+| the program | `-0.0` at every declared point | `jnp.sum` is `0.0`, eager and jitted |
+| exact ℝ | `-1.1125369292536007e-308` (`python`, `numpy`) | `1.0` (`numpy.sum`, `math.fsum`) |
+| `semantics="ieee"` | **UNKNOWN** | **UNKNOWN** |
 
-The `semantics:` line at the top of every real-mode stamp already carries
-the general statement — *"the traced program's IEEE float behaviour is NOT
-modeled — a predicate can hold in ℝ and fail in floats"* — and it is true
-and covers this. The fourth line narrows nothing off it; it names one route
-in more detail because that is the route the dial widens. Pinned by
-`tests/test_boundary_dial_jax.py::test_the_WIDER_route_needs_neither_certificate_nor_reduction`.
+The class has **no closed form** short of the `semantics:` line, because
+every departure of the target from correctly-rounded IEEE lands in it:
+flush-to-zero, summation re-association, the libm fidelity `exp`/`pow`
+already stamp, and whatever the next lowering does. The **route** does have
+one — `interval.boundary_div` is consulted only on a divisor box that
+reaches zero, and a certificate crossing a boundary is what this dial
+widens — so the fourth line names the route, says it bounds nothing, and
+leaves the general statement where it has always been correct: the
+`semantics:` line at the top of every real-mode stamp, *"the traced
+program's IEEE float behaviour is NOT modeled — a predicate can hold in ℝ
+and fail in floats"*. Both members above are pinned by
+`tests/test_boundary_dial_jax.py::test_the_CLASS_is_wider_than_the_ROUTE_and_has_no_single_mechanism`,
+which asserts that they exist and asserts nothing about what they share.
 
 That is the whole of what a verdict-reader gets, and it is deliberate that
 there is no more: `Stamp` has no `boundary` field. A **programmatic**

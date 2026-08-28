@@ -415,8 +415,17 @@ def test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts():
 
 
 def test_the_reduction_seed_is_the_mechanism_and_it_is_measured():
-    """WHY the reach exists, decided by running jax rather than by citing
-    a lowering.
+    """`reduce_sum`'s mechanism — AND NOT `dot_general`'s — decided by
+    running jax rather than by citing a lowering.
+
+    The two primitives the reach sentence names reach the same wrong
+    verdict by two DIFFERENT routes through the compiler, and a sentence
+    saying *"those reductions accumulate from a +0.0 seed"* across both is
+    false of the second (0.3.0 P1 third re-audit, F4):
+    `::test_dot_general_reaches_it_too_and_the_CONTRACTION_LENGTH_decides`
+    measures `dot` keeping the sign for n = 1..32 — no seed at all — and
+    losing it from n = 33, which is a blocking choice in one backend's
+    lowering. This test is about `reduce_sum` only.
 
     `reduce_sum` accumulates from a `+0.0` seed, so `(+0) + (-0) = +0`: a
     value the strict-sign certificate calls NEGATIVE, all of whose elements
@@ -560,109 +569,124 @@ def test_an_ORDINARY_magnitude_chain_reaches_it_at_the_DEFAULT():
     )
 
 
-def _wider_route_harness():
-    """The whole defect class in four equations, and the stamped sentence's
-    own counterexample.
+_FLUSH_A, _FLUSH_B = 2.0**-512, 2.0**-511
+_REASSOC = np.array([1e17, -1e17] * 16 + [1.0])   # 33 elements, all normal
 
-    `x * 2**-512 * 2**-511` over `x` declared `[-1, -0.5]`. No `assume`, no
-    strict-sign certificate, no reduction, no division, no `boundary_div` —
-    just two multiplications whose exact result lands in the target's
-    SUBNORMAL BAND.
-    """
+
+def _flush_harness():
+    """CLASS MEMBER 1 — flush-to-zero. Four equations: `x * 2**-512 *
+    2**-511` over `x` declared `[-1, -0.5]`. No `assume`, no certificate,
+    no reduction, no division. The exact result is a binary64 SUBNORMAL and
+    this target flushes it."""
     def h():
         x = any_array((), "float64", (-1.0, -0.5))
-        return assert_(x * 2.0**-512 * 2.0**-511 < 0.0)
+        return assert_(x * _FLUSH_A * _FLUSH_B < 0.0)
 
     return h
 
 
-def test_the_WIDER_route_needs_neither_certificate_nor_reduction():
-    """**THE STAMPED SENTENCE ONCE READ "THE CONDITION IS ONLY THAT THE
-    ANALYSIS'S OWN BOX UNDERFLOWS ONTO ZERO", AND THE WORD *ONLY* MADE IT A
-    BOUND IT IS NOT** (0.3.0 P1 second re-audit, F1).
+def _reassoc_harness():
+    """CLASS MEMBER 2 — summation re-association. `Σ W` for 33 elements
+    that are all NORMAL and nonzero (`min |W| = 1.0`). Nothing underflows
+    anywhere; XLA's vectorised reduction absorbs the small term that an
+    exact fold keeps."""
+    def h():
+        return assert_(jnp.sum(jnp.asarray(_REASSOC)) > 0.0)
 
-    That is the condition for the route the dial widens — `boundary_div` is
-    consulted only on a divisor box that reaches zero. It is NOT the
-    condition for a real-mode VERIFIED the compiled program contradicts,
-    and a reader meeting `only` in a stamp concludes that a verdict whose
-    boxes never touch zero is safe.
+    return h
 
-    The witness below has ZERO EXCLUDED from every box, no certificate, no
-    reduction and no division, and it is VERIFIED at the default while the
-    program returns `-0.0` at every declared point. The wider condition is
-    the box entering the target's subnormal band: this target flushes a
-    subnormal RESULT of an ordinary `mul`, while the real-mode transfer
-    computes it exactly — `python` and `numpy` both return
-    `-1.1125369292536007e-308` for the same arithmetic.
 
-    Three controls, so this is a reading and not an anecdote: the query has
-    none of the machinery the reach sentence names; `semantics="ieee"`
-    declines it; and a sibling one binade up, whose result stays NORMAL, is
-    VERIFIED *and* agrees with the program.
+def test_the_CLASS_is_wider_than_the_ROUTE_and_has_no_single_mechanism():
+    """**THREE ROUNDS OF THIS ITEM STAMPED A CHARACTERISATION OF THE CLASS,
+    AND EACH ONE WAS A ROUTE SHORT.** In order: *"behind a wrapper"*, then
+    *"the condition is ONLY that the box underflows onto zero"*, then *"the
+    WIDER condition is the box entering the target's SUBNORMAL BAND"*. This
+    test exists so the tree carries the reason there will not be a fourth.
+
+    Two members of the class, with two UNRELATED mechanisms, both VERIFIED
+    at the DEFAULT with no boundary line in the stamp and both contradicted
+    by the compiled program:
+
+    1. FLUSH-TO-ZERO. `x * 2**-512 * 2**-511` over `x ∈ [-1, -0.5]`: every
+       box excludes zero, the exact result is a subnormal, and the target
+       returns `-0.0` — so `< 0.0` is False in the executable and True in
+       ℝ. `python` and `numpy` both return `-1.1125369292536007e-308`.
+    2. RE-ASSOCIATION. `Σ W` for `W = [1e17, -1e17] × 16 + [1.0]`: **every
+       element is a normal nonzero number**, `min |W| = 1.0`, nothing
+       underflows and nothing is subnormal. `jnp.sum` gives `0.0` eager and
+       jitted; `numpy.sum` and `math.fsum` both give `1.0`.
+
+    **WHAT THIS TEST DELIBERATELY DOES NOT ASSERT is any property common to
+    the two.** The class has no closed form short of the `semantics:` line,
+    because every departure of the target from correctly-rounded IEEE lands
+    in it — flush-to-zero, re-association, the libm fidelity `exp`/`pow`
+    already stamp, and whatever the next lowering does. The ROUTE has a
+    closed form (`interval.boundary_div` is consulted only on a divisor box
+    that reaches zero) and that is what the stamped sentence names.
+
+    Both are `UNKNOWN` under `semantics="ieee"`, which is the control: this
+    is real mode's posture and not a hole in the ieee face.
     """
-    cj = trace(_wider_route_harness())
-    prims = _all_primitives(cj.jaxpr)
-    assert prims == {"stelling_any", "mul", "lt", "stelling_assert"}, sorted(
-        prims
-    )
+    for name, harness, primitives in (
+        ("flush", _flush_harness,
+         {"stelling_any", "mul", "lt", "stelling_assert"}),
+        ("reassoc", _reassoc_harness,
+         {"reduce_sum", "gt", "stelling_assert"}),
+    ):
+        cj = trace(harness())
+        assert _all_primitives(cj.jaxpr) == primitives, (
+            f"{name}: {sorted(_all_primitives(cj.jaxpr))}"
+        )
+        p = propagate(cj, semantics="real")
+        assert p.obligations[0].status == "discharged", (
+            f"{name}: {p.obligations[0].detail}"
+        )
+        assert p.boundary_crossings == 0, name
+        assert p.relational_assumes == (), name
+        assert p.coverage.constrained == 0, name
 
-    p = propagate(cj, semantics="real")
-    assert p.obligations[0].status == "discharged", p.obligations[0].detail
-    assert p.boundary_crossings == 0
-    assert p.relational_assumes == ()
-    assert p.coverage.constrained == 0
+        v = check(harness(), vacuity_mode="all", semantics="real")
+        assert v.status == "VERIFIED", v.render()
+        assert not any("boundary=" in a for a in v.stamp.assumptions), (
+            f"{name}: this row is supposed to arrive with NOTHING in the "
+            f"stamp about a boundary"
+        )
+        ieee = check(harness(), vacuity_mode="all", semantics="ieee")
+        assert ieee.status == "UNKNOWN", (
+            f"{name}: the ieee face DECIDED this query. Both members are "
+            f"real-mode-only findings and ieee declining them is the "
+            f"control; if ieee now agrees with real mode here, the witness "
+            f"no longer sits where the two faces differ: {ieee.render()}"
+        )
 
-    boxes = interval_env(cj, assume_mode="constrain")
-    producers = {o.id: e.primitive for e in cj.jaxpr.eqns for o in e.outvars}
-    divisor_like = [
-        (b.los[0], b.his[0])
-        for vid, b in boxes.items()
-        if producers.get(vid) == "mul"
-    ]
-    assert all(lo < 0.0 and hi < 0.0 for lo, hi in divisor_like), divisor_like
-    assert any(
-        abs(hi) < 2.2250738585072014e-308 for _, hi in divisor_like
-    ), (
-        f"no box reaches the binary64 subnormal band, so this witness is not "
-        f"about the band at all: {divisor_like}"
-    )
-
-    v = check(_wider_route_harness(), vacuity_mode="all", semantics="real")
-    assert v.status == "VERIFIED", v.render()
-    assert not any("boundary=" in a for a in v.stamp.assumptions), (
-        "this row is supposed to arrive with NOTHING in the stamp about a "
-        "boundary; the defect it shows is the default's"
-    )
-
+    # MEMBER 1's mechanism: a subnormal result the target flushes
     for at in (-1.0, -0.75, -0.5):
         x = jnp.array(at, dtype=jnp.float64)
-        for f in (lambda z: z * 2.0**-512 * 2.0**-511,
-                  jax.jit(lambda z: z * 2.0**-512 * 2.0**-511)):
+        for f in (lambda z: z * _FLUSH_A * _FLUSH_B,
+                  jax.jit(lambda z: z * _FLUSH_A * _FLUSH_B)):
             assert not bool(f(x) < 0.0), (
-                f"the program satisfies the obligation at x={at}, so the "
-                f"target no longer flushes this result and the wider route "
-                f"named in the stamp has closed: {float(f(x))!r}"
+                f"the program satisfies the obligation at x={at}, so this "
+                f"target no longer flushes the result: {float(f(x))!r}"
             )
-    # ...and the same arithmetic OFF this target keeps the value
-    assert float(np.float64(-1.0) * 2.0**-512 * 2.0**-511) < 0.0, (
-        "numpy flushes it too, so this is not a target-flush finding"
+    exact_flush = float(np.float64(-1.0) * _FLUSH_A * _FLUSH_B)
+    assert exact_flush < 0.0 and abs(exact_flush) < 2.2250738585072014e-308, (
+        f"numpy flushed it too, or the result is not subnormal: "
+        f"{exact_flush!r}"
     )
 
-    # CONTROL 1: ieee declines the whole thing
-    assert check(_wider_route_harness(), vacuity_mode="all",
-                 semantics="ieee").status == "UNKNOWN"
-
-    # CONTROL 2: one binade up, the result is NORMAL and everything agrees
-    def normal():
-        x = any_array((), "float64", (-1.0, -0.5))
-        return assert_(x * 2.0**-512 * 2.0**-509 < 0.0)
-
-    assert check(normal, vacuity_mode="all", semantics="real").status == (
-        "VERIFIED"
-    )
-    assert float(jnp.float64(-0.5) * 2.0**-512 * 2.0**-509) < 0.0, (
-        "the control's result is flushed too, so it does not separate the "
-        "subnormal band from arithmetic in general"
+    # MEMBER 2's mechanism: re-association, with NOTHING small anywhere
+    assert min(abs(_REASSOC)) == 1.0, min(abs(_REASSOC))
+    assert not any(
+        w == 0.0 or abs(w) < 2.2250738585072014e-308 for w in _REASSOC
+    ), "member 2 contains a zero or a subnormal, so it is member 1 again"
+    for out in (jnp.sum(jnp.asarray(_REASSOC)),
+                jax.jit(jnp.sum)(jnp.asarray(_REASSOC))):
+        assert not bool(out > 0.0), (
+            f"the compiled reduction no longer re-associates this sum away, "
+            f"so member 2 has closed: {float(out)!r}"
+        )
+    assert float(np.sum(_REASSOC)) == 1.0 and math.fsum(_REASSOC) == 1.0, (
+        "numpy re-associates it too, so this is not a lowering finding"
     )
 
 
@@ -1007,6 +1031,121 @@ def test_dot_general_reaches_it_too_and_the_CONTRACTION_LENGTH_decides():
     moved = propagate(cj, semantics="real", boundary="transparent")
     assert moved.obligations[0].status == "discharged", moved.obligations[0].detail
     assert moved.boundary_crossings > 0
+
+
+# ---------------------------------------------------------------------------
+# the dial's plumbing, where anything observes it
+# ---------------------------------------------------------------------------
+
+
+def _polarity_harness(branch):
+    def h():
+        a = any_array((2,), "float64", (-2e-200, -1e-200))
+        assume(a < 0.0)
+        s = any_array((), "float64", (0.0, 1.0))
+        return assert_(lax.cond(s > 0.5, branch, branch, a) < 0.0)
+
+    return h
+
+
+def test_the_cond_IN_carry_POLARITY_is_a_soundness_invariant():
+    """**A COMMENT IN `propagate` ARGUED THIS LINE WAS INERT, AND THE
+    ARGUMENT WAS FALSE** (0.3.0 P1 third re-audit, F2).
+
+    It read: *"the sign POLARITY of the `cond` IN-carry — explained rather
+    than merely unobserved, since `_t_div` reads the certificate as a
+    boolean and `boundary_div` picks its arm from the BOX, so a flipped
+    sign changes no outcome."* Both premises are true. The conclusion does
+    not follow, because `_strict_sign_out` COMPOSES signs before anything
+    reads one as a boolean, and its `add`/`add_any` rule is an AGREEMENT
+    test — `sgn[0] if sgn[0] == sgn[1] else 0`. A flipped carry can
+    therefore fabricate a certificate the true signs deny.
+
+    The subject: `br(v) = 1.0 / (v + 1e-200)` inside a `cond`, with `a`
+    declared `[-2e-200, -1e-200]` and `assume(a < 0)`. Truly the carried
+    sign is −1 and the literal is +1, they disagree, and the rule returns 0
+    — no certificate, the divisor box reaches zero, the transfer declines,
+    UNKNOWN. Under a flipped carry the two agree at +1, `boundary_div` is
+    licensed, and the query DISCHARGES while the program at
+    `a = -1e-200` returns `inf`. The three dial modules pass 127/127 with
+    that mutant in place, which is why it needed a test of its own.
+
+    ANTI-VACUITY: the control replaces `+ 1e-200` with `* 1e-200`, whose
+    rule is a PRODUCT and therefore polarity-insensitive. It discharges,
+    under the same carry, on the same shape — so this test is not merely
+    observing that `cond` queries stay UNKNOWN.
+    """
+    live = propagate(
+        trace(_polarity_harness(lambda v: 1.0 / (v + 1e-200))),
+        semantics="real", boundary="transparent",
+    )
+    assert live.boundary_crossings > 0, (
+        "nothing crossed, so this query says nothing about the carry's sign"
+    )
+    assert live.obligations[0].status != "discharged", (
+        f"`add` composed a carried sign with a literal of the OPPOSITE sign "
+        f"and produced a certificate. The agreement test must return 0 "
+        f"there; the program at a = -1e-200 divides by zero and returns "
+        f"+inf: {live.obligations[0].detail}"
+    )
+    a = jnp.full((2,), -1e-200, dtype=jnp.float64)
+    assert not bool((1.0 / (a + 1e-200) < 0.0).all()), (
+        "the obligation holds in the executed program, so a discharge here "
+        "would not be a false VERIFIED and this test is not about soundness"
+    )
+
+    control = propagate(
+        trace(_polarity_harness(lambda v: 1.0 / (v * 1e-200))),
+        semantics="real", boundary="transparent",
+    )
+    assert control.obligations[0].status == "discharged", (
+        f"the polarity-insensitive control does not discharge either, so "
+        f"the assertion above is not discriminating: "
+        f"{control.obligations[0].detail}"
+    )
+    assert control.boundary_crossings > 0
+
+
+def test_the_widen_recheck_runs_at_the_SAME_dial_position():
+    """`_pipeline`'s VERIFIED widen re-check takes `boundary=` so that the
+    two runs differ in the declared envelope and in nothing else. Dropping
+    that keyword moves a stamped VACUITY line, in its FALSE direction.
+
+    Measured at `e16f96d` on 2026-08-28 over `assume(x > 0)` and
+    `cond(s > 0.5, 1/v, 1/v, x) > -1e9` at `vacuity_mode="all"`,
+    `boundary="transparent"`:
+
+        with `boundary=`     "vacuity checked … obligation(s) (0,) discharge
+                              with the declared bounds widened … envelope
+                              not load-bearing", plus a per-obligation note
+        without it           "vacuity checked … NO obligation discharges …
+                              this VERIFIED was not re-derivable without the
+                              declared envelope", and the note is gone
+
+    The second is the false direction of a vacuity disclosure: a CI
+    consumer is told the envelope was load-bearing when the run's own dial
+    position shows it was not. Listed as "defence-in-depth, inert" until
+    the third re-audit found this shape.
+    """
+    def h():
+        x = any_array((), "float64", (0.0, 2.0))
+        s = any_array((), "float64", (0.0, 1.0))
+        assume(x > 0.0)
+        return assert_(
+            lax.cond(s > 0.5, lambda v: 1.0 / v, lambda v: 1.0 / v, x) > -1e9
+        )
+
+    v = check(h, vacuity_mode="all", semantics="real", boundary="transparent")
+    assert v.status == "VERIFIED", v.render()
+    vac = [a for a in v.stamp.assumptions if a.startswith("vacuity checked")]
+    assert len(vac) == 1, v.stamp.assumptions
+    assert "discharge with the declared bounds widened" in vac[0], (
+        f"the widen re-check did not re-derive this obligation without the "
+        f"envelope. If it ran at `opaque` while the run was `transparent`, "
+        f"the two differ in the dial as well as in the envelope and the "
+        f"line is about the wrong comparison: {vac[0]}"
+    )
+    assert any("envelope not load-bearing" in n for n in v.notes), v.notes
 
 
 # ---------------------------------------------------------------------------

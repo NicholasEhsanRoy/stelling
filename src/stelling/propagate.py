@@ -11551,9 +11551,18 @@ BOUNDARY_CROSSED_DISCLOSURE = (
 #                                      (:data:`DIV_BOUNDARY_ZERO_DECLINE`)
 #
 # and the compiled program returns ``+inf`` — in no arm of that box — at
-# every point of the declared box. ``reduce_sum`` and ``dot_general``
-# accumulate FROM A ``+0.0`` SEED, so a value the certificate calls NEGATIVE
-# whose elements have all become ``-0.0`` sums to ``+0.0``. Measured beside
+# every point of the declared box, because ``reduce_sum`` accumulates FROM
+# A ``+0.0`` SEED and a value the certificate calls NEGATIVE whose elements
+# have all become ``-0.0`` therefore sums to ``+0.0``.
+#
+# **THAT IS ``reduce_sum``'s MECHANISM AND NOT ``dot_general``'s, AND THIS
+# COMMENT USED TO SAY "those reductions" ACROSS BOTH** (0.3.0 P1 third
+# re-audit, F4). Measured on both lanes, over products that are all
+# ``-0.0``: ``dot`` keeps the sign for n = 1..32 — there is no seed there —
+# and loses it from n = 33, which is a blocking choice in one backend's
+# lowering (``numpy.dot`` loses it from n = 2). The two primitives reach the
+# same wrong verdict by two different routes through the compiler, and the
+# stamped sentence no longer asserts one mechanism for both. Measured beside
 # it, and the two backends DISAGREE ON ONE ROW: jax gives ``-0.0`` at n = 1
 # and ``+0.0`` from n = 2 up, while ``numpy.sum`` (2.5.2) gives ``+0.0`` at
 # EVERY n, n = 1 included. **THIS COMMENT READ "in jax and in numpy alike"
@@ -11581,41 +11590,48 @@ BOUNDARY_CROSSED_DISCLOSURE = (
 # clean stamp, and returns ``+inf``. Pinned by
 # ``tests/test_boundary_dial_jax.py::test_an_ORDINARY_magnitude_chain_reaches_it_at_the_DEFAULT``.
 #
-# **AND THE SENTENCE THAT REPLACED THE MAGNITUDE STORY WAS ITSELF TOO
-# NARROW, WHICH IS WORSE, BECAUSE IT SAT IN THE STAMP.** It read *"The
-# condition is only that the PROPAGATOR'S OWN binary64 box underflows onto
-# zero at one boundary"*, and the word ONLY made it a BOUND — a reader
-# meeting it concludes that a verdict whose boxes never touch zero is safe.
-# That is false, and the second re-audit's minimal witness is four
-# equations with NO certificate, NO reduction, NO division and no
-# `boundary_div` anywhere. Re-derived here at `c5fb33e` on 2026-08-28 (jax
-# 0.11.0, CPU, x64), boxes from :func:`interval_env`:
+# **AND THEN A THIRD SENTENCE, AND A FOURTH, EACH WRITTEN AS THE WIDENING
+# THAT ENDS THE SEQUENCE AND EACH ONE ROUTE SHORT. THE SEQUENCE IS THE
+# FINDING.** What this constant stamped, in order: *"behind a wrapper"* →
+# *"the condition is ONLY that the box underflows onto zero"* → *"the WIDER
+# condition is the box entering the target's SUBNORMAL BAND"*. Three
+# rounds, three characterisations of the CLASS, three counterexamples:
 #
-#     x = any_array((), float64, (-1.0, -0.5))
-#     assert_(x * 2**-512 * 2**-511 < 0.0)
-#     mul  [-7.4583e-155, -3.7292e-155]
-#     mul  [-1.1125e-308, -5.5627e-309]   ZERO EXCLUDED, both ends negative
-#     VERIFIED at the DEFAULT, 0 crossings, no boundary line in the stamp
-#     the program: -0.0 at every declared point, so `< 0.0` is FALSE
-#     exact ℝ:    -1.1125e-308, so `< 0.0` is TRUE
-#     python and numpy: -1.1125369292536007e-308 — this target FLUSHES it
-#     semantics="ieee": UNKNOWN
+#   * a `cond` branch is a sub-jaxpr boundary and not a wrapper;
+#   * ``x`` declared ``[-1, -0.5]``, ``assert_(x * 2**-512 * 2**-511 < 0.0)``
+#     — boxes ``[-7.458e-155, -3.729e-155]`` then ``[-1.1125e-308,
+#     -5.563e-309]``, ZERO EXCLUDED, VERIFIED at the DEFAULT with 0
+#     crossings and no boundary line, and the program returns ``-0.0`` at
+#     every declared point. No certificate, no reduction, no division. The
+#     mechanism is FLUSH-TO-ZERO of a subnormal ``mul`` result;
+#   * ``W = np.array([1e17, -1e17] * 16 + [1.0])``, ``assert_(jnp.sum(W) >
+#     0.0)`` — VERIFIED at the DEFAULT, no boundary line, and
+#     ``jnp.sum(W)`` is ``0.0`` eager and jitted while ``numpy.sum`` and
+#     ``math.fsum`` both give ``1.0``. EVERY element is a normal nonzero
+#     number, ``min |W| = 1.0``. The mechanism is RE-ASSOCIATION in a
+#     vectorised reduction, and it is not the one above. Reproduced on jax
+#     0.11.0 and 0.10.2, and with a declared input in place of the
+#     constants.
 #
-# So the wider condition is the box entering THE TARGET'S SUBNORMAL BAND
-# (below 2.2250738585072014e-308 for binary64 here), not reaching zero:
-# this target flushes a subnormal RESULT of an ordinary ``mul`` while the
-# real-mode transfer computes it exactly. The two thresholds are both
-# closed forms over the same declared family and BOTH re-audits were right
-# about their own — over ``x`` in ``(-m, -m/2)`` with ``Σ(x**k)``,
-# ``2·(min subnormal)**(1/k)`` is where the CERTIFICATE stops being
-# load-bearing and ``2·(min normal)**(1/k)`` is where a default VERIFIED
-# stops being contradicted, and the second is larger at every k (k=3:
-# 3.406e-108 vs 5.625e-103; k=1001: 0.9507 vs 0.9856; k=1023: 0.9660 vs
-# 1.0007, which is why a whole-envelope row appeared at k=1023). The narrow
-# threshold is the one THIS dial widens; it is not a bound on the class,
-# and the stamped sentence now says so rather than implying the opposite.
-# Pinned by
-# ``tests/test_boundary_dial_jax.py::test_the_WIDER_route_needs_neither_certificate_nor_reduction``.
+# TWO MEMBERS OF THE CLASS WITH TWO UNRELATED MECHANISMS, AND THAT IS THE
+# POINT: THE CLASS HAS NO CLOSED FORM SHORT OF THE ``semantics:`` LINE,
+# because every departure of the target from correctly-rounded IEEE lands
+# in it — flush-to-zero, summation re-association, the libm fidelity
+# ``exp``/``pow`` already stamp, and whatever the next lowering does. A
+# fourth "the condition is X" would be the same defect again.
+#
+# **SO THE SCOPING IS FIXED INSTEAD OF THE WORDING** (0.3.0 P1 third
+# re-audit, adjudicated): a ROUTE disclosure had been given a CLASS
+# characterisation to carry. The ROUTE has a closed form —
+# :func:`stelling.interval.boundary_div` is consulted only on a divisor box
+# that REACHES ZERO, and the certificate crossing a boundary is exactly
+# what this dial widens — so the stamped sentence names the route, says it
+# bounds nothing, and points at the ``semantics:`` line, which has said the
+# true general thing correctly since before this dial existed. The class's
+# two measured members are pinned by
+# ``tests/test_boundary_dial_jax.py::test_the_CLASS_is_wider_than_the_ROUTE_and_has_no_single_mechanism``,
+# which asserts they exist and asserts NOTHING about what characterises
+# them.
 #
 # THREE MORE THINGS THE FIRST PASS OF THIS SENTENCE GOT WRONG, each now in
 # the stamped text and each pinned by a test that runs the program:
@@ -11638,25 +11654,50 @@ BOUNDARY_CROSSED_DISCLOSURE = (
 #     The condition is that the certificate and the reduction share a
 #     scope, with the certificate from any of its three sources.
 #
-# **FOUR PLACES PLUMB THIS DIAL AND NOTHING EXERCISES ANY OF THEM.** They
-# are defence-in-depth, they are correct, and they are INERT on every query
-# this suite has: the ``_pipeline`` widen re-check
+# **FOUR PLACES PLUMB THIS DIAL: the ``_pipeline`` widen re-check
 # (:mod:`stelling.preconditions`), the two witness probes
 # (:func:`_reachability_witnesses` and :func:`_region_witness` below), and
-# the sign POLARITY of the ``cond`` IN-carry — the last one explained
-# rather than merely unobserved, since :func:`_t_div` reads the certificate
-# as a boolean and :func:`stelling.interval.boundary_div` picks its arm
-# from the BOX, so a flipped sign changes no outcome. Measured at
-# `c5fb33e` on 2026-08-28 (0.3.0 P1 second re-audit, F5): each of the four
-# was mutated in turn — the widen re-check's keyword dropped, both probes
-# pinned to ``"opaque"``, the cond carry's signs negated — and the twelve
-# modules that could plausibly observe one (the three dial modules plus
-# `test_branch_reachability`, `test_nonempty_certificate`,
-# `test_probe_witness`, `test_reachability_solver_path`,
-# `test_vacuity_depth`, `test_vacuous_precondition`, `test_preconditions`,
-# `test_propagate`, `test_soundness_routing`) returned **349 passed for the
-# baseline and 349 passed for every mutant**. That is a statement about
-# those twelve modules on the jax lane and not about the tree.
+# the sign POLARITY of the ``cond`` IN-carry. THREE OF THEM ARE
+# LOAD-BEARING ON SHAPES THIS SUITE DOES NOT HAVE, AND THIS COMMENT USED TO
+# CALL ALL FOUR "defence-in-depth … INERT on every query this suite has"**
+# (0.3.0 P1 third re-audit, F3). The measurement behind that word was
+# correct and correctly scoped — each mutated in turn, twelve modules that
+# could plausibly observe one, 349 passed for the baseline and 349 for
+# every mutant — and "no test in those twelve sees it" is not "it does
+# nothing".
+#
+#   * THE POLARITY IS A SOUNDNESS INVARIANT. This comment argued it was
+#     inert *"since ``_t_div`` reads the certificate as a boolean and
+#     ``boundary_div`` picks its arm from the BOX, so a flipped sign
+#     changes no outcome"*. **Both premises are true and the conclusion is
+#     false**: :meth:`_strict_sign_out` COMPOSES signs before anything
+#     reads one as a boolean, and its ``add``/``add_any`` rule is an
+#     AGREEMENT test (``sgn[0] if sgn[0] == sgn[1] else 0``), so a flipped
+#     carry can fabricate a certificate the true signs deny. Driven at
+#     `e16f96d` on 2026-08-28: ``a`` declared ``[-2e-200, -1e-200]`` with
+#     ``assume(a < 0)`` and ``cond(s > 0.5, br, br, a) < 0`` where
+#     ``br(v) = 1.0/(v + 1e-200)`` is UNKNOWN on the shipped code and
+#     **DISCHARGED under the flipped carry — a false VERIFIED**, while the
+#     program at ``a = -1e-200`` returns ``inf``. The three dial modules
+#     pass 127/127 with that mutant in place. Now pinned by
+#     ``tests/test_boundary_dial_jax.py::test_the_cond_IN_carry_POLARITY_is_a_soundness_invariant``.
+#   * THE WIDEN RE-CHECK'S KEYWORD moves a stamped VACUITY line, in its
+#     false direction. Measured here: ``assume(x > 0)`` with
+#     ``cond(s > 0.5, 1/v, 1/v, x) > -1e9`` stamps *"obligation(s) (0,)
+#     discharge with the declared bounds widened … envelope not
+#     load-bearing"* with the keyword and *"no obligation discharges …
+#     not re-derivable without the declared envelope"* without it, losing
+#     the per-obligation note as well. Pinned by
+#     ``tests/test_boundary_dial_jax.py::test_the_widen_recheck_runs_at_the_SAME_dial_position``.
+#   * ``_region_witness``'s argument turns ``region_inhabited`` and a
+#     ``violated-over-set`` into ``False`` and ``unknown`` on a query whose
+#     certificate comes from the CONSTVAR writer — **the third re-audit's
+#     measurement, not mine**: six shapes tried here reproduced the
+#     withholding path but never with ``narrowing_uncertified`` engaged, so
+#     it is recorded with that provenance rather than as something this
+#     builder saw.
+#   * :func:`_reachability_witnesses` remains unobserved by anything
+#     measured on either side.
 #
 # WHY THE LINE HANGS ON THE POSITION AND NOT ON THE ACT, WHICH IS THE
 # OPPOSITE OF THE CONSTANT DIRECTLY ABOVE. :data:`BOUNDARY_CROSSED_DISCLOSURE`
@@ -11695,26 +11736,20 @@ BOUNDARY_CROSSED_DISCLOSURE = (
 # belongs with the repair, which is a separate change.
 BOUNDARY_TRANSPARENT_REACH_DISCLOSURE = (
     "boundary='transparent' EXTENDS THE REACH OF A DEFECT THAT IS NOT "
-    "CONFINED TO IT: a strict-sign certificate reaching a div whose divisor "
-    "came out of reduce_sum or dot_general can decide a verdict the "
-    "compiled program CONTRADICTS at a point of the declared box \u2014 a "
-    "false VERIFIED, or a false REFUTED through a cond selector. Those "
-    "reductions accumulate from a +0.0 seed, so a reduction all of whose "
-    "terms have become -0.0 at run time comes out +0.0, and 1.0/(+0.0) is "
-    "+inf, which is in no arm of the box the certificate licensed. No "
-    "assume is required \u2014 an array constant certifies too \u2014 and "
-    "the DEFAULT reaches this route wherever the certificate and the "
-    "reduction share a scope. **AND THIS LINE IS NOT A BOUND ON WHEN A "
-    "real-SEMANTICS VERDICT CAN BE WRONG.** It describes the route this "
-    "dial widens, which needs the analysis's own box to reach zero; the "
-    "WIDER condition is that box entering the target's SUBNORMAL BAND, "
-    "which this target flushes and a real-mode transfer computes exactly "
-    "\u2014 reached at the default with no certificate, no reduction and no "
-    "division (measured: x declared [-1,-0.5], assert_(x*2**-512*2**-511 < "
-    "0.0) is VERIFIED and runs to -0.0). The semantics line above carries "
-    "the general statement; this one narrows nothing. NOT REPAIRED IN THIS "
-    "RELEASE, and the reduction taint named as the repair for the route "
-    "above does not close the wider one"
+    "CONFINED TO IT. The strict-sign certificate is what licenses "
+    "interval.boundary_div to drop a divisor box's zero endpoint, and the "
+    "quotient box it returns can exclude the value the compiled program "
+    "computes \u2014 the verdict is then contradicted at a point of the "
+    "declared box, as a false VERIFIED or, through a cond selector, a false "
+    "REFUTED. Measured through reduce_sum and through dot_general. No "
+    "assume is required (an array constant certifies too), and the DEFAULT "
+    "reaches this route wherever the certificate and the division share a "
+    "scope; what this position adds is that they may sit on opposite sides "
+    "of a sub-jaxpr boundary \u2014 a wrapper body or a cond branch \u2014 "
+    "that the default DECLINED. **THIS NAMES ONE ROUTE AND BOUNDS "
+    "NOTHING**: the semantics line above is the general statement about "
+    "what real-mode judging models, and this line does not narrow it. NOT "
+    "REPAIRED IN THIS RELEASE"
 )
 
 # The mechanical guard on the domain dial: quoted verbatim when a
