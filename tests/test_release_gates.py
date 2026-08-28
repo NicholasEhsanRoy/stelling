@@ -2554,18 +2554,58 @@ _CHANGELOG_STEP = "the tag and the changelog heading must agree"
 _REAL_RELEASES = (("v0.2.0", "2026-08-25"), ("v0.1.0", "2026-08-12"))
 
 
+# THE IDENTITY AND THE THREE SETTINGS THAT WOULD MAKE THESE DRIVES' VERDICTS A
+# PROPERTY OF WHOEVER RAN THEM. A global `commit.gpgsign` / `tag.gpgSign` turns
+# every commit and annotated tag below into a signing prompt, and a global
+# `core.hooksPath` runs somebody's hooks over a scratch commit — so commits are
+# `--no-verify` and both signing settings are pinned off HERE rather than
+# inherited. A check whose input includes the developer's environment reports a
+# different truth to different people, which is the class the gate under test
+# exists to keep OUT of the release path.
+#
+# WRITTEN ONCE, at module level, because two functions plant tags now: the
+# tree-builder below and the remedy drive, which RE-CUTS a tag the way the
+# refusal message tells a maintainer to. A second copy of these flags is a
+# second place for the guard to be forgotten.
+_GIT_IDENT = ("-c", "user.name=release gates",
+              "-c", "user.email=gates@example.invalid",
+              "-c", "commit.gpgsign=false",
+              "-c", "tag.gpgSign=false")
+
+
+def _git(tree: pathlib.Path, *args, **kwargs):
+    """`git` in `tree`, failing loudly, with this module's identity guards."""
+    return subprocess.run(
+        ["git", *args], cwd=tree, check=True, capture_output=True, **kwargs
+    )
+
+
+def _annotate(tree: pathlib.Path, tag: str, tagger_date: str,
+              *, message: str | None = None, at: str | None = None) -> None:
+    """Cut `tag` as an ANNOTATED tag whose tagger date is `tagger_date`.
+
+    `GIT_COMMITTER_DATE` is what `git tag -a` writes into the tagger line —
+    the date is planted the way git plants it rather than by writing a tag
+    object by hand. `at` names the commit, so the remedy drive can re-cut at
+    the SAME commit the way the refusal message says to.
+    """
+    _git(tree, *_GIT_IDENT, "tag", "-a", tag,
+         *( (at,) if at else () ),
+         "-m", message or f"release {tag}",
+         env=dict(os.environ,
+                  GIT_COMMITTER_DATE=f"{tagger_date}T12:00:00+00:00"))
+
+
 def _tagged_tree(base: pathlib.Path, name: str, *, tag: str = "v0.2.0",
                  tagger_date: str = "2026-08-25", annotated: bool = True,
                  tagged: bool = True,
                  changelog: str | None = "## 0.2.0 — 2026-08-25\n") -> pathlib.Path:
     """A checkout carrying one tag and one `CHANGELOG.md`, as the tagged tree has.
 
-    The tagger date is the thing being planted, so it is set the way git sets
-    it — `GIT_COMMITTER_DATE` is what `git tag -a` writes into the tagger
-    line — rather than by writing a tag object by hand. `annotated=False`
-    gives the LIGHTWEIGHT shape, whose `%(taggerdate:short)` is empty and
-    which this gate refuses by name; `tagged=False` gives a checkout with no
-    such ref at all; `changelog=None` gives one with no `CHANGELOG.md`.
+    `annotated=False` gives the LIGHTWEIGHT shape, whose
+    `%(taggerdate:short)` is empty and which this gate refuses by name;
+    `tagged=False` gives a checkout with no such ref at all;
+    `changelog=None` gives one with no `CHANGELOG.md`.
 
     Nothing else is planted. The step reads a ref, a tag object and one line
     of one file, so a `dist/`, an index or a second commit would be furniture
@@ -2573,34 +2613,14 @@ def _tagged_tree(base: pathlib.Path, name: str, *, tag: str = "v0.2.0",
     """
     tree = base / name
     tree.mkdir(parents=True)
-    # THE IDENTITY AND THE TWO SETTINGS THAT WOULD MAKE THIS READER'S VERDICT
-    # A PROPERTY OF WHOEVER RAN IT. A global `commit.gpgsign` / `tag.gpgSign`
-    # turns the two commands below into a signing prompt, and a global
-    # `core.hooksPath` runs somebody's hooks over a scratch commit — so the
-    # commit is `--no-verify` and both signing settings are pinned off HERE
-    # rather than inherited. A check whose input includes the developer's
-    # environment reports a different truth to different people, which is the
-    # class the gate under test exists to keep OUT of the release path.
-    ident = ("-c", "user.name=release gates",
-             "-c", "user.email=gates@example.invalid",
-             "-c", "commit.gpgsign=false",
-             "-c", "tag.gpgSign=false")
-
-    def git(*args, **kwargs):
-        return subprocess.run(
-            ["git", *args], cwd=tree, check=True, capture_output=True, **kwargs
-        )
-
-    git("-c", "init.defaultBranch=main", "init", "-q")
-    git(*ident, "commit", "-q", "--no-verify", "--allow-empty",
-        "-m", "the tagged tree")
+    _git(tree, "-c", "init.defaultBranch=main", "init", "-q")
+    _git(tree, *_GIT_IDENT, "commit", "-q", "--no-verify", "--allow-empty",
+         "-m", "the tagged tree")
     if tagged:
         if annotated:
-            git(*ident, "tag", "-a", tag, "-m", f"release {tag}",
-                env=dict(os.environ,
-                         GIT_COMMITTER_DATE=f"{tagger_date}T12:00:00+00:00"))
+            _annotate(tree, tag, tagger_date)
         else:
-            git("tag", tag)
+            _git(tree, "tag", tag)
     if changelog is not None:
         (tree / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
     return tree
@@ -2878,6 +2898,152 @@ def test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry(tmp_path):
             f"docstring describing a drive that is no longer what runs."
         )
 
+
+#: The instructions the lightweight refusal PRINTS, as literals. The drive
+#: below executes each of them, so this tuple is what keeps the printed recipe
+#: and the executed one from drifting apart — a remedy the suite plays out but
+#: does not read would be a remedy that could be reworded into nonsense while
+#: the drive stayed green, which is the shape of the defect this whole test
+#: exists to close.
+#:
+#: IT IS A SPELLING PIN AND SAYS SO. It cannot tell a correct instruction from
+#: an incorrect one; what says the instruction WORKS is the three-row drive.
+_LIGHTWEIGHT_REMEDY = (
+    "git tag -d",
+    "git push origin :refs/tags/",
+    "git tag -a",
+    "onto the newest CHANGELOG.md heading",
+    "TODAY the tag's date",
+)
+
+
+@_needs_a_shell
+def test_the_lightweight_remedy_this_step_prints_is_the_one_that_works(tmp_path):
+    """A REFUSAL MESSAGE IS AN INSTRUCTION, AND THIS ONE IS EXECUTED.
+
+    THE DEFECT THIS CLOSES SHIPPED IN THE MESSAGE ITSELF. It read *"Cut the
+    release with 'git tag -a' — a GitHub release created from the web UI
+    writes an annotated tag — and re-run."* The clause after the dash was a
+    present-tense claim about a third party's UI, nothing here could check it,
+    and two dated reports say the release form creates a LIGHTWEIGHT tag — the
+    exact shape this refusal exists to stop. So the message was pointing a
+    maintainer whose release had just been refused back at the flow that
+    produced the refusal. `release.yml` carries the evidence, what could not be
+    determined, and why the refusal is kept anyway.
+
+    THE REPAIR IS NOT A BETTER SENTENCE ABOUT GITHUB, IT IS A SENTENCE ABOUT
+    `git` THAT THIS SUITE RUNS. The message now prints a recipe, and this test
+    plays that recipe out on the body `release.yml` ships, one instruction at
+    a time, asserting the verdict after each:
+
+        the tree                                       verdict
+        ─────────────────────────────────────────────  ──────────────────────
+        LIGHTWEIGHT tag, heading dated D0              rc=1, "not an
+                                                       annotated tag"
+        re-cut ANNOTATED at the SAME commit, tagger    rc=1, and now on the
+        date D1, heading still D0                      DATE arm: names D0
+                                                       and D1
+        heading moved to D1, tag re-cut at that        rc=0
+        commit with tagger date D1
+
+    THE MIDDLE ROW IS THE POINT AND A ONE-LINE REMEDY GETS IT WRONG.
+    Re-cutting an annotated tag gives it TODAY's tagger date, so a heading
+    written for the first attempt is then the wrong date and the step refuses
+    a SECOND time. A message that says only "cut it with `git tag -a`" sends
+    the maintainer round twice and looks, on the second round, like a gate
+    that cannot be satisfied — which is how a gate gets silenced. The message
+    predicts that round, and this row is what holds the prediction.
+
+    D0 AND D1 ARE FIXED PAST DATES AND NOT `today`. A drive that re-cut "now"
+    would compare against the clock of whoever runs the suite, which is the
+    environment-dependence this whole gate was moved out of
+    `tests/test_changelog_names_the_version.py` to avoid — arriving inside the
+    test that checks it. `GIT_COMMITTER_DATE` is what plants them.
+
+    WHAT THIS DOES NOT TOUCH is the other half of the message — *"push an
+    annotated tag FIRST and create the release on the tag that already
+    exists"*. That path is the one every green row in
+    :func:`test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry`
+    already drives, and it is what this repository's own two releases actually
+    did (measured in `release.yml` beside the step: both tags annotated, both
+    taggers the maintainer's git identity, both releases' `created_at` equal
+    to the tag object's tagger timestamp with `published_at` later). It is
+    cited rather than driven twice.
+    """
+    body = _step_body(_CHANGELOG_STEP)
+    d0, d1 = "2026-08-25", "2026-08-28"
+    tag = "v0.2.1"
+
+    # THE WEB-FORM SHAPE, whatever made it: a ref pointing straight at a
+    # commit, with no tag object and so no date of its own.
+    tree = _tagged_tree(tmp_path, "remedy", tag=tag, annotated=False,
+                        changelog=f"## 0.2.1 — {d0}\n\n- a release note\n")
+    first = _drive(body, tree, GITHUB_REF_NAME=tag)
+    assert first.returncode != 0, (
+        "the changelog gate accepted a LIGHTWEIGHT tag. It has no tagger date "
+        "at all, so the only date left is the commit's — the reading this "
+        f"step declines, four paragraphs of `release.yml` over.\n{first.stdout}"
+    )
+    assert "not an annotated tag" in first.stdout, first.stdout
+
+    # AND THE INSTRUCTIONS IT PRINTS ARE THE ONES EXECUTED BELOW.
+    missing = [want for want in _LIGHTWEIGHT_REMEDY if want not in first.stdout]
+    assert not missing, (
+        f"the lightweight refusal no longer prints {missing}, and those are "
+        f"the instructions this test then carries out. A recipe the suite "
+        f"plays but does not read can be reworded into nonsense with every "
+        f"drive still green.\n{first.stdout}"
+    )
+    # ...AND THE RETRACTED CLAIM IS NOT BACK. Asserted absent rather than the
+    # repair pinned by its spelling: what was wrong was a message resting a
+    # maintainer's next action on third-party behaviour nobody here can check.
+    # This sees one wording of one such claim and no other — the general form
+    # is not decidable by a text reader, and `release.yml` states the rule.
+    assert "web UI" not in first.stdout, (
+        "the refusal message is making a claim about a release UI again. The "
+        "one it used to make — that the web form writes an ANNOTATED tag — is "
+        "contradicted by two dated reports and would send a maintainer back "
+        "to the flow that produced this refusal. Nothing here can check what "
+        "any UI does; the remedy is about `git`, which this suite can run."
+    )
+
+    # STEP ONE OF THE RECIPE, exactly as printed: drop the tag and re-cut it
+    # ANNOTATED at the same commit. (`git push origin :refs/tags/...` is the
+    # remote half of the same instruction and has no meaning in a repository
+    # with no remote; the local half is the one that changes what this step
+    # reads, and it is the one driven.)
+    at = _git(tree, "rev-parse", "HEAD").stdout.decode().strip()
+    _git(tree, "tag", "-d", tag)
+    _annotate(tree, tag, d1, at=at, message="stelling 0.2.1")
+    second = _drive(body, tree, GITHUB_REF_NAME=tag)
+    assert second.returncode != 0, (
+        "re-cutting the tag annotated was enough on its own, so the message's "
+        "warning that this takes TWO edits is now false and should be "
+        f"withdrawn with the reason.\n{second.stdout}"
+    )
+    assert "not an annotated tag" not in second.stdout, (
+        "re-cutting the tag with `git tag -a` did not satisfy the arm the "
+        f"message says it satisfies:\n{second.stdout}"
+    )
+    assert f"is dated '{d0}'" in second.stdout and f"was made on {d1}" in second.stdout, (
+        "the second round is not the DATE arm naming both dates, so the "
+        f"maintainer cannot see what the second edit has to be:\n"
+        f"{second.stdout}"
+    )
+
+    # STEP TWO: the heading carries the date the NEW tag object got.
+    (tree / "CHANGELOG.md").write_text(
+        f"## 0.2.1 — {d1}\n\n- a release note\n", encoding="utf-8"
+    )
+    _git(tree, "tag", "-d", tag)
+    _annotate(tree, tag, d1, at=at, message="stelling 0.2.1")
+    third = _drive(body, tree, GITHUB_REF_NAME=tag)
+    assert third.returncode == 0, (
+        "the recipe this step PRINTS does not end in a release this step "
+        "ACCEPTS. A refusal whose remedy does not work is a refusal a "
+        f"maintainer routes around.\n{third.stdout}\n{third.stderr}"
+    )
+    assert f"tagged={d1}" in third.stdout and f"0.2.1 — {d1}" in third.stdout
 
 @_needs_a_shell
 def test_the_changelog_gate_reads_the_NEWEST_heading_by_POSITION(tmp_path):
