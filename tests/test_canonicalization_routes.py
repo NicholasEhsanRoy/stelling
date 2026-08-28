@@ -487,7 +487,15 @@ def _forgeable(base, derive_from=()):
 
     try:
         return Meta("Forged", derive_from, {})
-    except TypeError:
+    except TypeError as refused:
+        # MATCHED, NOT CAUGHT WHOLESALE -- see the sibling in
+        # `tests/test_ir_canonicalization.py`. A bare `except TypeError` reads
+        # every cause as CPython's layout rule, and on the declared floor the
+        # skip that rests on this is legitimate unconditionally, so an
+        # unrelated failure would be excused green there and caught only on
+        # 3.12+.
+        if "unsuitable layout" not in str(refused):
+            raise
         return None
 
 

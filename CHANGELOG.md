@@ -21,8 +21,10 @@ guard.
   the checkout's `.git` to answer with, and the whole defect class disappears
   — installs the unpacked tree, and refuses to run unless `stelling.__file__`
   resolves under the artefact and not under the checkout. A required check:
-  it has no third-party library to have a bad day, it fetches nothing
-  mid-run, and an sdist on PyPI cannot be unpublished.
+  it has no third-party library to have a bad day, it fetches nothing **from
+  GitHub** mid-run — the qualifier the job itself carries, and it matters,
+  because `uv build` and `uv pip install` do reach an index — and an sdist on
+  PyPI cannot be unpublished.
 
   The job landed **before** the three repairs and was watched to go red, so
   each repair has a failure it can be shown against. Two of the three refuse
@@ -72,8 +74,11 @@ guard.
 ### Instruments
 
 - **`tests/_lanes.py` tells a line that SELECTS an interpreter from one that
-  REPORTS which one it got**, structurally, and stays fail-closed: a line that
-  could be either still reads as a selection. The scan had matched
+  REPORTS which one it got**, structurally, and stays fail-closed: a line that could be either
+  reads as **`unreadable:`**, a named can't-tell. *An earlier draft said such
+  a line "still reads as a selection", reproducing the ordering argument that
+  `_interpreter_reading`'s own docstring retracts — the ordering only ever
+  protected lines carrying one of five enumerated tokens.* The scan had matched
   `python --version` in the same pattern as `setup-python` and `UV_PYTHON`,
   so the obvious repair for the lane above **was itself unavailable** — an
   instrument that made its own repair unreadable.
@@ -95,8 +100,11 @@ guard.
   out.** The exclusion was argued about a *kind of string* — test modules that
   write citation-shaped source strings as plants — and spelled as a *directory
   prefix*, so it also blinded every sentence in `tests/` that makes a claim
-  about the tree: **181 of 539 tracked files, 181 of the sdist's 379
-  members**. The rule is citation-shaped now: in a `.py` file a citation counts
+  about the tree: **181 of 539 tracked files at `9b5b496`, and 181 of that
+  release's 379 sdist members**. *An earlier draft gave those figures with no
+  sha; they are the tag's, and this release falsified them by adding a test
+  file — 182 of 540 here. Both sibling copies carried the sha and only the
+  changelog's was bare, in the section that lands L26.* The rule is citation-shaped now: in a `.py` file a citation counts
   in a comment or a docstring and not in a value. Staged before adopting —
   **0 of the 311 citations the old scan checked were in a value**, so the
   uniform rule loses nothing. Widening found 8 dangling `path::name` citations
@@ -110,7 +118,10 @@ guard.
   gate can SEE — `src/`, and roles — read back as a count of the tree: the
   same shape as the defect the gate exists for, one level up.* The names are
   `_classify_cmp` and `_Walker`, neither of which has ever been defined here
-  (`git log --all -S` finds no commit for either, so neither was a rename),
+  (`git log -S "def _classify_cmp" 9b5b496 -- src/` and its `class _Walker`
+  twin find no commit, so neither was a rename — **pinned to the tag on
+  purpose**: run unpinned, both now return the very commit that removed the
+  names, because it put both search strings into `src/` as the record),
   and `ir.JaxprEqn.from_dict`, which was carrying `coverage.py::sub_jaxprs`'s
   argument that a `list` sub-jaxpr container is unreachable from a real query.
   **That argument is re-derived over all nine `ir.JaxprEqn` construction sites

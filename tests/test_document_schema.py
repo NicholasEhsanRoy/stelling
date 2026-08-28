@@ -833,10 +833,36 @@ def test_the_doc_keys_heading_is_SCOPED_to_the_sweep_it_measured():
     """`_doc_keys` closed the last raw escape OVER THE B12 CENSUS SWEEP,
     which is single-position and finite-valued. It is not the last one
     `from_dict` has: `_decode` recurses, and a deep enough
-    ``{"k":"tuple","items":[…]}`` chain — reachable from pure JSON, since
-    ``json.loads``/``json.dumps`` both accept it — raises a bare
-    `RecursionError` on this tree and on `a4e4056` alike. Driven here so
-    the heading's scope is a measurement and not a hedge."""
+    ``{"k":"tuple","items":[…]}`` chain raises a bare `RecursionError`.
+
+    **"REACHABLE FROM PURE JSON" IS INTERPRETER-DEPENDENT, AND THIS
+    DOCSTRING ASSERTED IT FLATLY.** It said the chain is *"reachable from
+    pure JSON, since ``json.loads``/``json.dumps`` both accept it"*. Measured
+    2026-08-28 by bisecting both ceilings on the three interpreters
+    ``requires-python`` admits:
+
+    ======  ==================  ====================
+    python  ``json.loads``      ``ir._decode``
+    ======  ==================  ====================
+    3.10.20 survives 495        survives 496
+    3.11.15 survives 495        survives 497
+    3.12.3  survives ~4997      survives 497
+    ======  ==================  ====================
+
+    **On the declared floor the PARSER blows first, by one level**, so there
+    is no pure-JSON depth on 3.10 or 3.11 that reaches `_decode`'s recursion
+    at all. The claim holds on 3.12 and nowhere below it.
+
+    A previous repair split the two halves — reachability at a shallow depth,
+    recursion on a structure built in Python — because `json.dumps` was
+    overflowing during *setup* on the floor. That was right about the setup
+    and wrong about the consequence: it left the COMPOSED property (an
+    attacker-supplied JSON document driving `_decode` to a bare
+    `RecursionError`) driven on no interpreter at all, having previously been
+    driven on 3.12. So the composition is measured here rather than asserted:
+    both ceilings are found at run time, and the composed property is driven
+    wherever the parser can outreach the decoder — with the fact that it
+    cannot, on the floor, reported rather than skipped past."""
     assert "THE LAST OF THE READER'S RAW ESCAPES OVER THE B12 CENSUS SWEEP" \
         in _IR_SRC, "`ir._doc_keys`' heading dropped its scope"
 
@@ -863,9 +889,49 @@ def test_the_doc_keys_heading_is_SCOPED_to_the_sweep_it_measured():
     # in Python, which is what `_decode` would receive either way.
     shallow = json.loads(json.dumps(nest(200)))
     assert isinstance(ir._decode(shallow), tuple)
+
+    # THE DECODER'S OWN CEILING, on a structure built in Python — this is the
+    # half that holds on every interpreter, and it is the subject.
     deep = nest(4 * sys.getrecursionlimit())
     with pytest.raises(RecursionError):
         ir._decode(deep)
+
+    # THE COMPOSED PROPERTY, measured rather than assumed reachable — and NOT
+    # by bisection, which is the wrong tool here: `survives(d)` is not monotone
+    # in `d`, because each probe leaves a different amount of stack consumed
+    # and CPython's recursion flag set differently. Measured on 3.12.3, a
+    # bisect returns 496 while a single shot at 497 succeeds. The question does
+    # not need a search anyway: it is whether the PARSER can deliver a document
+    # at a depth the DECODER is already known to refuse.
+    def as_text(depth: int) -> str:
+        return ('{"k":"tuple","items":[' * depth
+                + '{"k":"tuple","items":[]}' + "]}" * depth)
+
+    depth = 4 * sys.getrecursionlimit()          # the depth proven above to blow `_decode`
+    try:
+        document = json.loads(as_text(depth))
+    except RecursionError:
+        # The PARSER is the binding constraint, so no pure-JSON document this
+        # interpreter will accept can reach `_decode`'s recursion. That is the
+        # state on the declared floor and it is a reading, not a gap: the
+        # composed property is unreachable rather than unchecked. Asserted so
+        # an interpreter where the order flips starts running the branch below
+        # instead of silently keeping this one.
+        assert not survives_parse(as_text, depth), depth
+    else:
+        with pytest.raises(RecursionError):
+            ir._decode(document)
+
+
+def survives_parse(as_text, depth: int) -> bool:
+    """Whether `json.loads` accepts a chain this deep. Its own function so the
+    negative branch above asserts through the same call it just made."""
+    import json as _json
+    try:
+        _json.loads(as_text(depth))
+    except RecursionError:
+        return False
+    return True
 
 
 def test_every_document_from_dict_ACCEPTS_reloads_with_its_hash():

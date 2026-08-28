@@ -611,8 +611,11 @@ def _bool_forgery_refused() -> bool:
 
     try:
         Meta("Forged", (int,), {})
-    except TypeError:
-        return True
+    except TypeError as refused:
+        # The predicate must answer about THE LAYOUT RULE and not about any
+        # `TypeError` that happens here, or a skip taken for an unrelated
+        # reason is excused by a rule that measured something else.
+        return "unsuitable layout" in str(refused)
     return False
 
 

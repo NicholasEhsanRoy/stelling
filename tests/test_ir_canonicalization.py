@@ -816,7 +816,17 @@ def test_a_metaclass_that_FORGES_the_mro_cannot_forge_a_payload():
 
     try:
         forged = MBool("ForgedBool", (int,), {})
-    except TypeError:
+    except TypeError as refused:
+        # MATCHED, NOT CAUGHT WHOLESALE. A bare `except TypeError`
+        # excuses ANY cause as the interpreter's layout rule -- and on
+        # 3.10 and 3.11 the rule's own predicate is unconditionally
+        # True, so an unrelated `TypeError` here would skip green on
+        # the declared floor and be caught only on 3.12+. An auditor
+        # drove both: the real refusal says `unsuitable layout`, an
+        # unrelated one (`type 'bool' is not an acceptable base type`)
+        # does not.
+        if "unsuitable layout" not in str(refused):
+            raise
         # The reason string is shared, verbatim, with
         # `tests/test_canonicalization_routes.py`'s sibling skip, and is
         # disclosed ONCE in `tests/test_skip_inventory.py`'s `RULES` — which

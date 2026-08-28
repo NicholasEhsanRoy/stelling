@@ -797,15 +797,20 @@ how two references to `_classify_cmp`, a method this repository has never
 had, stood in `SOUNDNESS.md` as claims about the propagator and shipped
 through the release whose subject was removing them: the gate built to catch
 that name could not read the page they were on, by a rule wider than its own
-reason. Both were repaired in 0.2.1's fix round; **the exclusion was not**,
+reason. Both were repaired on the 0.2.1 branch; **the exclusion was not**,
 because separating a dated record from a live claim inside those files is
 not mechanical and nobody has proposed a way. It is disclosed here rather
 than assumed narrow, which is the same posture this entry's first instance
 held before its repair landed.
 
-So the pattern has three witnesses in one release — `tests/` in the citation
-scan, and these two files in the name scan — and in all three the exclusion
-was **written by someone who had the right argument in front of them**. That
+So the pattern has **two exclusions** in one release — `tests/` in the
+citation scan, and the two record files in the name scan — and in both, the
+exclusion was **written by someone who had the right argument in front of
+them**. *This said "three witnesses … in all three", counting the two
+excluded FILES as two separate exclusions; they are one rule with one
+argument, and a count that turns a rule's members into instances of the
+pattern is the same instrument-for-subject confusion two commits in this
+release are titled for.* That
 is the tell worth carrying forward: this defect is not produced by
 carelessness about scope, it is produced by care about scope expressed in
 the wrong vocabulary.
@@ -903,17 +908,32 @@ that does not exist and is believed to.**
 
 **(c)** **Structural.** The tag forms, the sdist step, the manifest step,
 the pre-bump refusal and now the changelog-heading gate are driven on real
-artefacts inside the suite; the shallow-clone shape is reproduced with
-`git init` and `git fetch --depth=1`; the header's refusal count is
+artefacts inside the suite; the shallow-clone shape is exercised by a
+standing CI lane (`actions/checkout` at `fetch-depth: 1`, then
+`git fetch --unshallow`, the two runs compared by skip reason) — *this entry
+said it is "reproduced with `git init` and `git fetch --depth=1`" and listed
+that under STRUCTURAL; no test in the tree runs `git fetch --depth`,
+`git clone --depth` or `git fetch` at all, so what was described as a fixture
+is a job*; the header's refusal count is
 derived from the file rather than typed beside it; and the routing
 paragraph is held by a test that reads the workflow.
 
 **(d)** Every workflow whose trigger is rare and whose consequence is
 irreversible. Also every `if:` guard added "for safety" that no test has
-ever entered — **and nothing in this repository reads `if:` in any
-workflow**, which is the largest hole this entry knows about and does not
-close: a step-level or job-level `if:` would switch off any refusal point
-silently.
+ever entered.
+
+*This read **"nothing in this repository reads `if:` in any workflow"**, and
+that is false. It was reported to me twice by contexts that had each looked
+at one file, and I wrote it down without checking.* Measured 2026-08-28:
+`tests/test_tripwire_record.py` reads `raw.get("if")` into a step's
+`condition` and **refuses any condition outside a declared one-member set**,
+resolving the `steps.<id>` it names — the same reader L28(d) names one entry
+later. Its subject is `.github/workflows/nightly-jax-canary.yml`, which
+carries five `if:` lines. What is true is narrower and still worth having:
+**`ci.yml`'s one `if:` and `release.yml` are read by nothing**, so a
+step-level `if:` on a refusal point would switch it off silently. The
+mechanism to copy already exists one file over, which is the useful half the
+overstatement hid.
 
 ## L28 — A check that MODELS a behaviour is always one indirection behind it; measure the behaviour
 
@@ -954,14 +974,22 @@ from one that kills the session before it could, because it runs neither.
 with the instance resolved by declaration rather than by a sixth patch",
 and recorded the behavioural replacement as work rather than done. It is
 done, in the same release, and the sentence is corrected rather than left
-standing.* The question is decided by running the program: a plugin named
-to every session in the observed process tree reports what its plugin
-manager registered, matching on the registered object's resolved
-`__file__` rather than on the name it was registered under. Both routes
+standing.* The question is decided by running the program: a wrap on
+`pluggy.PluginManager.register` — the one function every route into a plugin
+manager ends in — reports what was registered, matching on the registered
+object's resolved `__file__` rather than on the name it was registered
+under, with a historic hook beside it for the one route the wrap cannot have
+(`-p` is consumed before the observer is imported). *This entry described the
+FIRST version of that fix, which named the module to every session through
+`PYTEST_PLUGINS`; an audit found that a session spawned with an explicit
+`env=` inherits nothing and is unseen, and the wrap replaced it.* Both routes
 the scan declared unreachable are driven as firing tests — the second in
-its corrected spelling — and the declared limits and their fixture are
-struck, which is what that fixture's own failure message said to do when a
-limit is outgrown. The by-construction argument that made the deferral
+its corrected spelling — and the two limits the syntactic scan declared, with their
+fixture, are struck — which is what that fixture's own failure message said
+to do when a limit is outgrown. **Two NEW limits are declared in their
+place**, each pinned by a fixture that asserts the route reaches before it
+asserts the instrument is blind, which is the shape the struck one failed to
+be. The by-construction argument that made the deferral
 defensible was re-verified rather than re-read: `tests/_state_guard.py`
 binds no mutable container at module scope at all, so a nested session
 building a fresh `Config` is separated whether or not the plugin loads.
