@@ -531,10 +531,13 @@ jobs:
   # buy reproducibility by giving that up. What was missing was never the pin.
   # It was the RECORD, which costs one step and takes nothing away.
   #
-  # The same line is `tee`d to `${RUNNER_TEMP}` and quoted into both of the
-  # `::error` annotations below, because the annotation is what a reader sees
-  # in the checks UI without opening the log — and the log is where this
-  # information used to be absent.
+  # The same line is REDIRECTED to `${RUNNER_TEMP}`, `cat` into the log by the
+  # step after it, and quoted into both of the `::error` annotations below,
+  # because the annotation is what a reader sees in the checks UI without
+  # opening the log — and the log is where this information used to be absent.
+  # (This said *"`tee`d"*, in one step, which is what it was until the reading
+  # became a property of the whole step rather than of one line of it. See the
+  # steps themselves.)
   #
   # `tests/_lanes.py` READS THIS STEP, and it had to be taught how. Its
   # interpreter scan recorded any line matching `python --version` or
@@ -568,16 +571,36 @@ jobs:
       - run: uv pip install -e ".[solvers,jax]" pytest pytest-randomly
       # WHAT THIS LANE SHUFFLED. See the block above the job: neither half of
       # this configuration is decided by this file, and until this step neither
-      # was written down anywhere. `set -o pipefail` is why this is a block —
-      # GitHub's default shell is `bash -e {0}`, errexit and NO pipefail, so in
-      # a one-line `python -c … | tee file` the status is tee's, a failing
-      # import exits 0, and the step passes having written an EMPTY file, which
-      # is the shape the two annotations below would then quote.
+      # was written down anywhere.
+      #
+      # ONE COMMAND IN THIS STEP, AND THE REASON IS THE READER RATHER THAN THE
+      # SHELL. This was `set -euo pipefail` and a `… | tee` continuation, and a
+      # re-audit found what that cost: `tests/_lanes.py` decided the reporting
+      # reading one LINE at a time, and this is a `run: |` BLOCK, so a
+      # selection written on its own line of it was invisible while the line
+      # below still read `reporting`. The reading is a property of the whole
+      # STEP now, and a step that does anything besides ask the question is a
+      # can't-tell — so this step asks it and nothing else.
+      #
+      # `>` RATHER THAN `| tee`, which is the same distinction one level down:
+      # a redirection is a shell OPERATOR and starts no program, where `tee` IS
+      # a program, and a grammar that admits one program is a grammar back to
+      # listing them.
+      #
+      # THE `set -o pipefail` GOES WITH THE PIPE IT WAS FOR, and the hazard it
+      # was for is recorded here because it comes back with the next pipeline
+      # anyone writes: GitHub's default shell is `bash -e {0}`, errexit and NO
+      # pipefail, so in `python -c … | tee file` the status is tee's, a failing
+      # import exits 0, and the step passes having written an EMPTY file — the
+      # shape the two annotations below would then quote. With `>` there is no
+      # pipeline and errexit alone fails the step.
       - name: RESOLVED interpreter and jax (both floating — this lane pins neither)
         run: |
-          set -euo pipefail
-          .venv/bin/python -c "import sys, jax, jaxlib; print('python', '.'.join(str(part) for part in sys.version_info[:3]), 'jax', jax.__version__, 'jaxlib', jaxlib.__version__)" \
-            | tee "${RUNNER_TEMP}/configuration.txt"
+          .venv/bin/python -c "import sys, jax, jaxlib; print('python', '.'.join(str(part) for part in sys.version_info[:3]), 'jax', jax.__version__, 'jaxlib', jaxlib.__version__)" > "${RUNNER_TEMP}/configuration.txt"
+      # …and into the log, which the redirection above takes it out of. A
+      # separate step because the one above may do nothing else.
+      - name: the configuration this lane shuffled
+        run: cat "${RUNNER_TEMP}/configuration.txt"
       - name: the suite, shuffled — and the seed, which is the reproducer
         run: |
           set -euo pipefail

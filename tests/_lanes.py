@@ -772,12 +772,110 @@ def lane_series() -> tuple[str, ...]:
 # name rather than by absence.
 WORKFLOWS = REPO / ".github" / "workflows"
 
-#: `uv venv`, `uv run`, `uv sync` — the subcommands that can choose an
-#: interpreter. `uv pip install` is not one: it installs INTO an environment
-#: that already exists, so scanning it would record a `runner-default` reading
-#: for a line that provisions nothing.
-_UV_INTERPRETER_CMD = re.compile(r"\buv\s+(?:venv|run|sync)\b(.*)$")
-#: `--python 3.12`, `--python=3.12`, `-p 3.12` on one of those commands.
+#: ANY `uv <subcommand>`, AND `uvx`. THE SUBCOMMAND IS CAPTURED, NOT MATCHED,
+#: which is the whole shape of this: what follows classifies it, and a
+#: subcommand nobody has classified is ``unreadable:`` rather than silence.
+#:
+#: **THIS WAS ``\buv\s+(?:venv|run|sync)\b`` AND THE THREE WERE READ AS A
+#: CLOSED SET.** The comment here enumerated them and argued why a FOURTH —
+#: `uv pip install` — was excluded, which is exactly how a reader (and the
+#: author) takes a list for a completed one. `uv build` was never in it, and
+#: `uv build --help` says `-p, --python <PYTHON>  The Python interpreter to
+#: use for the build environment.` (measured 2026-08-28 against uv 0.11.15 on
+#: this box). So `uv build --python 3.13` selected an interpreter
+#: and this module returned NOTHING for the line: measured on copies of the
+#: real workflows with `_lanes.WORKFLOWS` repointed, `uv build --python 3.13`,
+#: `uv build -p 3.13` and `uv build --python=3.13` each left
+#: :func:`python_provisioning` byte-identical and :func:`python_pins`
+#: unchanged, while the control `uv venv --python 3.13` in the same job moved
+#: both. The job in question is `release.yml`'s `build` — the one that makes
+#: the sdist and the wheel that go to PyPI — and it was ABSENT FROM THE MAP
+#: ENTIRELY under a docstring claiming the map answers for every job.
+#:
+#: A third round of naming members would have added `build` and waited for the
+#: fourth. **The default is what changed instead**: an unknown subcommand is a
+#: can't-tell, so the next one uv ships reddens :data:`EXPECTED_PYTHON` by name
+#: on the day it is written into a workflow, which is the only moment anybody
+#: is in a position to classify it.
+#:
+#: THE PRICE, said rather than discovered: an ordinary uv line nobody has
+#: classified reddens the declared table until it is put in one of the two
+#: sets below. `uv cache clean` is the whole of that price — measured against
+#: uv 0.11.15, `uv cache --help` offers no `--python <PYTHON>` at all, so
+#: refusing it buys nothing. **AND THE PRICE IS SMALLER THAN IT LOOKS**, which
+#: is the more useful half of the measurement: of the subcommands checked the
+#: same way, `venv`, `run`, `sync`, `build`, `version`, `lock` and `export`
+#: each offer `-p, --python <PYTHON>`. Four of those are classified as
+#: provisioning; the other three are NOT, and they are refused for a reason
+#: rather than by omission — they choose an interpreter to resolve against,
+#: which this module has no reading for. `uv pip` and `uv tool` carry the flag
+#: on their sub-subcommands rather than at the top level, and the flag is on
+#: the LINE either way, which is where it is read.
+#:
+#: This is the cost this module already pays for `actions/setup-python`, for a
+#: `.yaml` workflow and for a line outside every job block.
+_UV_COMMAND = re.compile(
+    r"\b(?:uv\s+(?P<sub>[a-z][\w-]*)|(?P<uvx>uvx))\b(?P<rest>.*)$"
+)
+
+#: uv subcommands that CREATE OR CHOOSE the interpreter something afterwards
+#: runs in, and whose `--python` is therefore read as a pin. `tool` and `uvx`
+#: are one command under two spellings (`uvx` IS `uv tool run`) and are
+#: classified together for that reason, not because both were thought of.
+_UV_PROVISIONS = frozenset({"venv", "run", "sync", "build", "tool", "uvx"})
+
+#: uv subcommands that act on an environment that ALREADY EXISTS. `uv pip
+#: install --python X` puts packages into X; it does not decide what X is, so
+#: reading its `--python` as a pin would record a pin for a line that
+#: provisions nothing. This set is the one exclusion the old comment argued
+#: for, kept, and now it is an explicit classification rather than an absence
+#: from a pattern.
+_UV_ACTS_ON_AN_EXISTING_ENVIRONMENT = frozenset({"pip"})
+
+
+def _mask_quoted(text: str) -> str:
+    """``text`` with the CONTENTS of quoted spans replaced by spaces.
+
+    THE SAME QUOTE RULE :func:`_strip_comment` STATES, applied to a different
+    question, and it is used in exactly one place: locating a `uv` command.
+    A quoted string is DATA, not a command, and `release.yml` says `uv build`
+    inside four `::error` messages that explain what one `uv build` produces.
+
+    **THIS IS WHY THE WIDENING ABOVE NEEDED IT.** Measured on `release.yml` at
+    the commit that widened :data:`_UV_COMMAND`: the `build` job read FIVE
+    ``runner-default`` provisionings, one for its `uv build` step and four for
+    error messages that MENTION one. A declared table saying a job provisions
+    five interpreters because its refusal text is well written is a claim
+    about the prose, and re-wording any of those messages would have moved it.
+
+    **AND IT IS DELIBERATELY NOT APPLIED TO THE OTHER TWO BRANCHES**, which is
+    the asymmetry worth stating. The `uv` branch is the only one that can
+    return a PERMISSIVE reading — ``runner-default``, "there is no pin here" —
+    so a false match there invents provisioning. A false match in the
+    selection or the query branch returns ``unreadable:``, which over-reports
+    and fails closed; `pyenv` quoted inside an error message would make a job
+    a named can't-tell, and a person would look. Masking those would be a
+    loosening, and it is not done.
+
+    Length is preserved so that a match position in the masked text indexes
+    the ORIGINAL: the command is LOCATED here and its arguments are read off
+    the real line, or `uv venv --python "3.12"` would lose its own value.
+    """
+    out = []
+    quote: str | None = None
+    for ch in text:
+        if quote is not None:
+            out.append(" " if ch != quote else ch)
+            if ch == quote:
+                quote = None
+        else:
+            out.append(ch)
+            if ch in "\"'":
+                quote = ch
+    return "".join(out)
+
+
+#: `--python 3.12`, `--python=3.12`, `-p 3.12` on a provisioning subcommand.
 _UV_PYTHON_FLAG = re.compile(r"--python[= ]\s*(\S+)|(?:^|\s)-p\s+(\S+)")
 #: What such a flag has to look like for its value to be READ as a version.
 #: `-p` is also pytest's plugin flag, so `uv run pytest -p no:randomly` would
@@ -907,18 +1005,41 @@ _INTERPRETER_QUERY = re.compile(r"python[\d.]*\s+--version|sys\.version_info")
 #: * `-c` with ONE quoted program, because that is how the only reporting step
 #:   in this repository asks the question — it prints the interpreter and the
 #:   resolved jax in one line — and `--version` alone cannot;
-#: * a trailing `\`, because that step continues into `| tee` on the next
-#:   line.
+#: * a trailing `\`, because a step may continue its one command onto the next
+#:   line, and :func:`_step_commands` joins those before this is applied;
+#: * ONE trailing SINK — `> FILE` or `>> FILE`. A redirection is a shell
+#:   OPERATOR: it starts no program and cannot choose an interpreter, which is
+#:   what separates it from `| tee FILE`, where `tee` IS a program. `tee` is
+#:   NOT admitted, and the reason is the shape rather than the program:
+#:   admitting one program is where a grammar goes back to being a list of
+#:   them. `ci.yml`'s reporting step was rewritten to use `>` for exactly
+#:   that reason, and lost its `set -o pipefail` with the pipe.
 #:
-#: WHAT IT DOES NOT REACH, and the first of these is not the grammar's:
+#: WHAT IT DOES NOT REACH, and the first of these is a CORRECTION:
 #:
-#: * **THIS IS A LINE READER.** A selection on a DIFFERENT line from the query
-#:   is invisible here, and no whole-line grammar can change that — `conda
-#:   activate ci` on one line and `python --version` on the next reads
-#:   ``(None, "reporting")``. That is the same exposure the selection branch
-#:   above has had since it was written, and it is why that branch fails
-#:   closed on the spellings it does know rather than pretending to know them
-#:   all.
+#: * **"THIS IS A LINE READER … AND NO WHOLE-LINE GRAMMAR CAN CHANGE THAT" WAS
+#:   THE WRONG BOUNDARY, AND STATING IT WRONGLY IS HOW IT WENT UNPINNED.**
+#:   What stood here said a selection on a DIFFERENT line from the query is
+#:   invisible, full stop. A re-audit drove the shape that sentence describes
+#:   — `ci.yml` writes `run: |` BLOCKS, the reporting step's block already
+#:   began `set -euo pipefail`, and a selection written as its own line of
+#:   that block left :func:`python_provisioning` byte-identical. Before the
+#:   query/reporting split that shape WAS caught, because every query line was
+#:   ``unreadable:``; the split lost it. It is closed now at the STEP — see
+#:   :func:`_step_is_only_a_report` — and what remains is not "a different
+#:   line" but **A DIFFERENT STEP**: a selection this module has no token for,
+#:   written as its own `- run:` of the same job, is invisible.
+#:
+#:   **AND THE BOUNDARY THERE IS THE TOKEN, NOT THE LOCATION**, which is the
+#:   half the old sentence buried. The same selection written in the same
+#:   place with a spelling :data:`_OTHER_INTERPRETER_SELECTION` knows —
+#:   `pyenv local 3.13` as its own step — IS caught, as ``unreadable:``. So
+#:   what defeats the reader is the open set the selection branch searches,
+#:   which is the module's declared and unclosable limit, and not where the
+#:   line sits. The fixture
+#:   ``tests/test_lanes.py::test_the_limit_is_the_TOKEN_and_not_the_STEP_and_here_is_both_sides``
+#:   asserts that route really does select — by catching it with a known token
+#:   in the same position — before asserting the blindness.
 #: * **WHAT A ``-c`` PROGRAM DOES IS NOT MODELLED.** A program that prints
 #:   `sys.version_info` and also shells out reads ``reporting``. It cannot
 #:   change which interpreter THIS step got — it runs inside it — so what it
@@ -941,14 +1062,124 @@ _REPORTING_LINE = re.compile(
         \s+
         (?:--version                        # asked directly …
            |-c\s+(?:"[^"]*"|'[^']*'))       # … or through ONE quoted program
+        (?:\s*>>?\s*                        # … with at most one SINK,
+           (?:"[^"`()]*"|'[^'`()]*'|[^\s"'`()]+))?   # a file to put it in
         \s*\\?\s*$                          # and nothing else on the line
     """,
     re.VERBOSE,
 )
 
+#: `set -euo pipefail`, `set -o pipefail`. The ONE thing a reporting step may
+#: do besides report, and it is admitted because it RUNS NO PROGRAM: `set`
+#: changes shell options, and no shell option chooses an interpreter. The
+#: shape refuses anything with an operator, a substitution or a quote in it,
+#: so `set -a && conda activate ci` is not one of these.
+_SHELL_OPTIONS = re.compile(r"set(?:\s+[-+]?\w+)+$")
 
-def _interpreter_reading(line: str) -> str | None:
+#: The header of a `run:` block scalar, and the column its key sits at.
+_RUN_BLOCK = re.compile(r"^(?P<lead>\s*(?:-\s+)?)run:\s*[|>][-+\d]*\s*$")
+
+
+def _step_lines(lines: list[str], index: int) -> list[str]:
+    """The lines of the ``run:`` block ``lines[index]`` is in, or the line.
+
+    A line that is not inside a block scalar IS its own step — `- run: python
+    --version` is one command and the whole of what that step does.
+    """
+    target = lines[index]
+    if not target.strip():
+        return [target]
+    indent = len(target) - len(target.lstrip())
+    for j in range(index - 1, -1, -1):
+        header = _RUN_BLOCK.match(lines[j])
+        if header is None:
+            continue
+        key = len(header.group("lead"))
+        if key >= indent:
+            continue
+        if not all(
+            not lines[k].strip()
+            or (len(lines[k]) - len(lines[k].lstrip())) > key
+            for k in range(j + 1, index)
+        ):
+            break  # a dedent between us and it: this is not our block
+        end = index + 1
+        while end < len(lines) and (
+            not lines[end].strip()
+            or (len(lines[end]) - len(lines[end].lstrip())) > key
+        ):
+            end += 1
+        return lines[j + 1:end]
+    return [target]
+
+
+def _step_commands(step: list[str]) -> list[str]:
+    """A step body as commands, with ``\\`` continuations joined."""
+    commands: list[str] = []
+    pending = ""
+    for line in step:
+        text = line.strip()
+        if not text:
+            continue
+        if text.endswith("\\"):
+            pending = f"{pending} {text[:-1].strip()}".strip()
+            continue
+        commands.append(f"{pending} {text}".strip() if pending else text)
+        pending = ""
+    if pending:
+        commands.append(pending)
+    return commands
+
+
+def _step_is_only_a_report(step: list[str]) -> bool:
+    """Whether this step's WHOLE body is one question and nothing else.
+
+    **THE TOTALITY IS AT THE STEP, NOT THE LINE, AND THAT IS A REPAIR.**
+    :data:`_REPORTING_LINE` decides one line, and `ci.yml` writes `run: |`
+    BLOCKS — so a selection put on its OWN line of the same block was invisible
+    while the query line beside it read ``reporting``. Driven on copies of the
+    real workflows: a selection written as a separate line above the query, a
+    `\\` continuation after it, and `conda activate ci` on its own line each
+    left :func:`python_provisioning` byte-identical with no ``unreadable:``
+    anywhere.
+
+    **WHAT THIS RESTORES IS PARITY, AND NOT MORE THAN THAT.** Before the
+    query/reporting split, ANY line carrying a query was ``unreadable:``, so a
+    job that reported was permanently a can't-tell — which is why no job
+    reported. That backstop caught a selection elsewhere in the same STEP and
+    never caught one in another step of the same job. This catches exactly
+    what it caught, and lets the pure report through.
+
+    **WHAT IT DOES NOT CATCH, and the boundary is the TOKEN and not the
+    location.** A selection this module has no token for, written as its own
+    STEP of the same job, is invisible — as it was before the split, and as it
+    is with no query in the job at all. See :data:`_REPORTING_LINE`'s limits
+    and the fixture that drives both sides of that boundary.
+    """
+    commands = [c for c in _step_commands(step) if not _SHELL_OPTIONS.match(c)]
+    return len(commands) == 1 and _REPORTING_LINE.match(commands[0]) is not None
+
+
+def _interpreter_readings(lines: list[str]) -> list[str | None]:
+    """One reading per line, each line read IN ITS STEP.
+
+    ONE RULE, TWO CALLERS, and this is where the rule now lives: the per-job
+    scan and the per-file count below both go through here, so they cannot
+    disagree about which step a line belongs to any more than they could
+    disagree about what the line says.
+    """
+    return [
+        _interpreter_reading(line, _step_lines(lines, i))
+        for i, line in enumerate(lines)
+    ]
+
+
+def _interpreter_reading(line: str, step: list[str] | None = None) -> str | None:
     """This line's reading, or ``None`` if it neither selects nor reports one.
+
+    ``step`` is the body of the ``run:`` block the line sits in, and ``None``
+    means the line IS its own step — which is what a line examined on its own
+    is, and what every unit drive of this function asks about.
 
     ONE RULE, TWO CALLERS — the per-job scan and the per-file count below it.
     Written twice they could disagree, and the disagreement would read as
@@ -963,22 +1194,36 @@ def _interpreter_reading(line: str) -> str | None:
     mentions a query and is not entirely a query is ``unreadable:``, whatever
     else is on it and whether or not this module has heard of it.
     """
-    cmd = _UV_INTERPRETER_CMD.search(line)
+    # LOCATED OUTSIDE QUOTES, READ OFF THE REAL LINE. See `_mask_quoted`: a
+    # `uv build` inside an `::error` message is prose about a command, and
+    # this is the one branch whose false match invents a provisioning.
+    cmd = _UV_COMMAND.search(_mask_quoted(line))
     if cmd:
-        flag = _UV_PYTHON_FLAG.search(cmd.group(1))
-        if flag is None:
-            return "runner-default"
-        version = flag.group(1) or flag.group(2)
-        if _A_VERSION.fullmatch(version):
-            return f"pin:{version}"
-        return f"unreadable:{line.strip()}"
+        subcommand = cmd.group("sub") or cmd.group("uvx")
+        if subcommand in _UV_PROVISIONS:
+            flag = _UV_PYTHON_FLAG.search(line[cmd.start("rest"):])
+            if flag is None:
+                return "runner-default"
+            version = flag.group(1) or flag.group(2)
+            if _A_VERSION.fullmatch(version):
+                return f"pin:{version}"
+            return f"unreadable:{line.strip()}"
+        if subcommand not in _UV_ACTS_ON_AN_EXISTING_ENVIRONMENT:
+            # THE DEFAULT IS THE FIX. See `_UV_COMMAND`: a subcommand neither
+            # set names is one nobody has decided about, and uv ships new ones.
+            return f"unreadable:{line.strip()}"
+        # ... and a line that only acts on an existing environment still gets
+        # the other two readings below: it may carry a selection token or be a
+        # report.
     if _OTHER_INTERPRETER_SELECTION.search(line):
         return f"unreadable:{line.strip()}"
     if _INTERPRETER_QUERY.search(line):
-        # THE WHOLE LINE, NOT A SUBSTRING OF IT. See `_REPORTING_LINE`: a line
-        # that mentions a query and carries anything else is a can't-tell,
-        # which is what the `search` this replaced could not say.
-        if _REPORTING_LINE.match(line):
+        # THE WHOLE STEP, NOT A SUBSTRING AND NOT ONE LINE OF IT. See
+        # `_REPORTING_LINE` for why a line carrying anything else is a
+        # can't-tell, and `_step_is_only_a_report` for why the same has to be
+        # true of the BLOCK the line sits in: `ci.yml` writes `run: |`, and a
+        # selection on its own line of the same block was invisible.
+        if _step_is_only_a_report(step if step is not None else [line]):
             return "reporting"
         return f"unreadable:{line.strip()}"
     return None
@@ -1021,11 +1266,7 @@ def python_provisioning() -> dict[str, tuple[str, ...]]:
         lines = _code_lines(path.read_text(encoding="utf-8"))
         attributed = 0
         for job, body in _blocks(lines).items():
-            readings: list[str] = []
-            for line in body:
-                reading = _interpreter_reading(line)
-                if reading is not None:
-                    readings.append(reading)
+            readings = [r for r in _interpreter_readings(body) if r is not None]
             if readings:
                 attributed += len(readings)
                 found[f"{path.name}:{job}"] = tuple(readings)
@@ -1034,7 +1275,7 @@ def python_provisioning() -> dict[str, tuple[str, ...]]:
         # recognises is DROPPED — the one way a pin can be invisible here rather
         # than merely misfiled. So the file's own count is taken independently
         # and the difference is reported as what it is.
-        present = sum(1 for line in lines if _interpreter_reading(line) is not None)
+        present = sum(1 for r in _interpreter_readings(lines) if r is not None)
         if present != attributed:
             found[f"{path.name}:<outside any job>"] = (
                 f"unreadable:{present - attributed} interpreter line(s) in this "
@@ -1057,7 +1298,10 @@ EXPECTED_PYTHON: dict[str, tuple[str, ...]] = {
     # somebody else on the day it runs, and a seed is not a reproducer without
     # the configuration it was drawn against.
     "ci.yml:random-order": ("runner-default", "reporting"),
-    "ci.yml:sdist-suite": ("runner-default",),
+    # TWO, and the second is the `uv build` that makes the sdist this job then
+    # runs the suite out of. It read as one until the uv branch stopped
+    # enumerating subcommands.
+    "ci.yml:sdist-suite": ("runner-default", "runner-default"),
     "ci.yml:shallow-clone": ("runner-default",),
     "ci.yml:test-jax": ("runner-default",),
     "ci.yml:test-jax-0-10": ("runner-default",),
@@ -1069,6 +1313,13 @@ EXPECTED_PYTHON: dict[str, tuple[str, ...]] = {
     "ci.yml:venv-in-the-working-tree": ("runner-default", "runner-default"),
     "nightly-jax-canary.yml:control": ("runner-default",),
     "nightly-jax-canary.yml:nightly": ("runner-default",),
+    # THE JOB THAT BUILDS WHAT GOES TO PyPI, AND IT WAS NOT IN THIS TABLE AT
+    # ALL. `uv build` provisions the interpreter its build environment runs in
+    # and takes `--python`; the uv branch matched three subcommands and this
+    # was not one of them, so the line returned nothing and the job was absent
+    # from a map whose docstring says it answers for every job. See
+    # `_UV_COMMAND`.
+    "release.yml:build": ("runner-default",),
     "release.yml:test": ("runner-default",),
 }
 

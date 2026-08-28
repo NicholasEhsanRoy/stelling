@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import dataclasses
 import pathlib
+import re
+import tempfile
 
 import pytest
 
@@ -1548,3 +1550,339 @@ def test_a_reporting_line_that_ALSO_SELECTS_moves_the_DECLARED_provisioning(
             f"this module cannot parse has to say so by name, because that is "
             f"what makes the declared table red rather than merely different."
         )
+
+
+# ── the uv branch: a subcommand nobody classified is a can't-tell ───────────
+
+
+def _provisioning_over(tmp_path, monkeypatch, edit=None):
+    """`python_provisioning()` over a COPY of `.github/workflows/`.
+
+    `edit` receives the copied directory. With no edit this is the control,
+    and it has to reproduce `EXPECTED_PYTHON` or nothing measured against it
+    means anything.
+
+    THE SOURCE IS `_lanes.CI.parent`, NOT `_lanes.WORKFLOWS`, AND A FRESH
+    DIRECTORY EVERY CALL. `monkeypatch` undoes at teardown rather than between
+    calls, so a second call copying from `_lanes.WORKFLOWS` would copy the
+    FIRST call's mutation and measure two edits as one. Driven: the first
+    version of this helper did exactly that, and the both-sides fixture below
+    read the positive control's `pyenv` line inside its blindness half.
+    """
+    workflows = pathlib.Path(
+        tempfile.mkdtemp(dir=tmp_path, prefix="workflows-")
+    )
+    for path in sorted(_lanes.CI.parent.iterdir()):
+        if path.suffix in (".yml", ".yaml"):
+            (workflows / path.name).write_text(
+                path.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+    if edit is not None:
+        edit(workflows)
+    monkeypatch.setattr(_lanes, "WORKFLOWS", workflows)
+    return _lanes.python_provisioning()
+
+
+def _replace_once(workflows, name, old, new):
+    path = workflows / name
+    text = path.read_text(encoding="utf-8")
+    assert text.count(old) == 1, (
+        f"{name} does not contain {old!r} exactly once ({text.count(old)}), so "
+        f"this mutation is not the one it says it is"
+    )
+    path.write_text(text.replace(old, new), encoding="utf-8")
+
+
+def _unreadable_in(provisioning):
+    return sorted(
+        job
+        for job, readings in provisioning.items()
+        for r in readings
+        if r.startswith("unreadable:")
+    )
+
+
+def test_a_uv_subcommand_nobody_has_classified_is_a_cant_tell():
+    """The uv branch, and the round of enumeration it stops.
+
+    THE DEFECT. `_UV_INTERPRETER_CMD` matched `venv|run|sync` and its comment
+    argued why a FOURTH — `uv pip install` — was excluded, which reads as a
+    completed set. `uv build` was never in it and takes `--python`, so the
+    line that builds the sdist and the wheel that go to PyPI selected an
+    interpreter and this module returned NOTHING for it. Adding `build` would
+    have been the third round of naming members.
+
+    So the DEFAULT changed instead: the subcommand is captured, two declared
+    sets say what it does, and anything else is `unreadable:`. That is what
+    makes the next subcommand uv ships a red on the day it is written into a
+    workflow rather than a silence.
+
+    BOTH SETS ARE DRIVEN, and so is the cost of the default. A test that only
+    showed unknown subcommands reddening would be satisfied by refusing every
+    uv line there is.
+    """
+    reading = _lanes._interpreter_reading
+
+    # PROVISIONING: `--python` read, absent means the runner's.
+    assert reading("      - run: uv build --python 3.13") == "pin:3.13"
+    assert reading("      - run: uv build -p 3.13") == "pin:3.13"
+    assert reading("      - run: uv build --python=3.13") == "pin:3.13"
+    assert reading("      - run: uv build") == "runner-default"
+    assert reading("      - run: uv venv") == "runner-default"
+    assert reading("      - run: uvx --python 3.12 ruff check") == "pin:3.12"
+    # `uvx` IS `uv tool run`, and the two spellings are classified together
+    # rather than one of them being remembered.
+    assert reading("      - run: uv tool run --python 3.12 ruff") == "pin:3.12"
+    assert reading("      - run: uv tool install --python 3.12 ruff") == "pin:3.12"
+    for subcommand in sorted(_lanes._UV_PROVISIONS - {"uvx"}):
+        assert reading(f"      - run: uv {subcommand}") == "runner-default", (
+            f"`uv {subcommand}` is declared to provision and does not read as "
+            f"one, so the set and the code disagree"
+        )
+
+    # ACTS ON AN EXISTING ENVIRONMENT: no reading of its own, and its
+    # `--python` is NOT a pin — it names where packages go, not what runs.
+    assert reading(
+        '      - run: uv pip install --python "${RUNNER_TEMP}/venv/bin/python" -e "."'
+    ) is None
+
+    # AND EVERYTHING ELSE. These are not a list to be extended: they are
+    # samples of the default, and the default is what the fix is.
+    for line in (
+        "      - run: uv python install 3.13",
+        "      - run: uv cache clean",
+        "      - run: uv lock --python 3.13",
+        "      - run: uv export --python 3.13",
+    ):
+        got = reading(line)
+        assert got is not None and got.startswith("unreadable:"), (
+            f"{line!r} names a uv subcommand neither declared set classifies, "
+            f"and it read {got!r}. An unclassified subcommand has to be a "
+            f"named can't-tell — that is the whole of this repair."
+        )
+    assert not (_lanes._UV_PROVISIONS & _lanes._UV_ACTS_ON_AN_EXISTING_ENVIRONMENT), (
+        "a uv subcommand is declared to both provision an interpreter and to "
+        "act on one that already exists; the two readings are different and "
+        "the classification has to pick one"
+    )
+
+    # A QUOTED `uv build` IS PROSE ABOUT A COMMAND, NOT A COMMAND. Four
+    # `::error` messages in `release.yml` explain what one `uv build`
+    # produces, and with the recogniser reading the raw line the `build` job
+    # measured FIVE provisionings — one real, four from its own refusal text.
+    assert reading(
+        '''          echo "::error title=x::One 'uv build' of this project '''
+        '''produces exactly one wheel."'''
+    ) is None
+
+
+def test_uv_build_pins_the_release_builds_interpreter_and_the_map_SAYS_SO(
+    tmp_path, monkeypatch
+):
+    """End to end, on the job that makes what goes to PyPI.
+
+    `release.yml`'s `build` job runs `uv build`. It was ABSENT from
+    `python_provisioning()` entirely — under a docstring saying the map
+    answers for every job — and an edit pinning its interpreter left the
+    declared table and the README's count untouched.
+    """
+    control = _provisioning_over(tmp_path, monkeypatch)
+    assert control == _lanes.EXPECTED_PYTHON, (
+        "the CONTROL failed: a copy of `.github/workflows/` does not "
+        "reproduce the declared provisioning"
+    )
+    assert "release.yml:build" in control, (
+        "the job that builds the sdist and the wheel that go to PyPI is not "
+        "in the map at all, so nothing about its interpreter is declared"
+    )
+
+    for flag in ("--python 3.13", "-p 3.13", "--python=3.13"):
+        measured = _provisioning_over(
+            tmp_path,
+            monkeypatch,
+            lambda w, flag=flag: _replace_once(
+                w, "release.yml", "- run: uv build", f"- run: uv build {flag}"
+            ),
+        )
+        assert measured.get("release.yml:build") == ("pin:3.13",), (
+            f"`uv build {flag}` pins the interpreter the release artefacts are "
+            f"built with and the map reads {measured.get('release.yml:build')!r}. "
+            f"The README's 'exactly one job pins an interpreter' rests on this."
+        )
+
+    # and an unclassified subcommand in the same place is a named can't-tell
+    measured = _provisioning_over(
+        tmp_path,
+        monkeypatch,
+        lambda w: _replace_once(
+            w, "release.yml", "- run: uv build", "- run: uv python install 3.13"
+        ),
+    )
+    assert _unreadable_in(measured) == ["release.yml:build"], measured
+
+
+# ── the reporting reading is decided over the STEP, not over one line ───────
+
+
+def _query_line() -> str:
+    """The one line in `.github/workflows/` that asks an interpreter its
+    version, read off the file."""
+    found = [
+        line
+        for path in sorted(_lanes.CI.parent.iterdir())
+        if path.suffix in (".yml", ".yaml")
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if _lanes._INTERPRETER_QUERY.search(_lanes._strip_comment(line))
+    ]
+    assert len(found) == 1, (
+        f"this drive edits THE query line and the workflows carry {len(found)} "
+        f"of them: {found}. Re-point it rather than mutating one of several."
+    )
+    return found[0]
+
+
+def _step_header_above(line: str) -> str:
+    """The `- name:` line of the step `line` sits in, read off `ci.yml`.
+
+    Derived rather than typed: `- name: RESOLVED` occurs seven times in this
+    workflow, and a mutation anchored on a string that is not unique is a
+    mutation of something else.
+    """
+    text = _lanes.CI.read_text(encoding="utf-8").splitlines()
+    index = text.index(line)
+    for candidate in reversed(text[:index]):
+        if re.match(r"^\s*- name: ", candidate):
+            assert "\n".join(text).count(candidate) == 1, (
+                f"{candidate.strip()!r} is not a unique anchor in ci.yml"
+            )
+            return candidate
+    raise AssertionError("no `- name:` step header above the query line")
+
+
+def test_a_selection_on_its_own_line_of_the_reporting_STEP_is_caught(
+    tmp_path, monkeypatch
+):
+    """The escape a per-LINE grammar left, and it was reachable in `ci.yml`.
+
+    `_REPORTING_LINE` decides one line and this workflow writes `run: |`
+    BLOCKS. The reporting step's block already began `set -euo pipefail`, so a
+    selection written as its OWN LINE of that block was invisible while the
+    query line beside it read `reporting`. **Before the query/reporting split
+    that shape was caught** — every query line was `unreadable:` — so the
+    split lost a backstop, and losing one is not the same as never having had
+    it.
+
+    The three shapes below are the ones the re-audit drove, each of them
+    `UNCHANGED=True` with no `unreadable:` anywhere before this repair.
+
+    THE READING IS OVER THE STEP NOW, so each of them is a can't-tell. What
+    that restores is PARITY with the pre-split backstop and not more: see
+    `test_the_limit_is_the_TOKEN_and_not_the_STEP_and_here_is_both_sides` for
+    what neither reader ever caught, and for the fixture that pins it.
+    """
+    query = _query_line()
+    indent = " " * (len(query) - len(query.lstrip()))
+    assert _provisioning_over(tmp_path, monkeypatch) == _lanes.EXPECTED_PYTHON, (
+        "the CONTROL failed: a copy of `.github/workflows/` does not "
+        "reproduce the declared provisioning"
+    )
+
+    shapes = {
+        "a selection on its own line ABOVE the query, same run: | block":
+            f"{indent}conda activate ci\n{query}",
+        "a selection on its own line BELOW it":
+            f"{query}\n{indent}conda activate ci",
+        "a backslash continuation AFTER the query":
+            f"{query.rstrip()} \\\n{indent}  && conda activate ci",
+    }
+    for label, replacement in shapes.items():
+        measured = _provisioning_over(
+            tmp_path,
+            monkeypatch,
+            lambda w, r=replacement: _replace_once(w, "ci.yml", query, r),
+        )
+        assert measured != _lanes.EXPECTED_PYTHON, (
+            f"{label}: the reporting step now also SELECTS an interpreter and "
+            f"`python_provisioning()` did not move"
+        )
+        assert _unreadable_in(measured), (
+            f"{label}: the reading moved but not to a named can't-tell"
+        )
+
+
+def test_the_limit_is_the_TOKEN_and_not_the_STEP_and_here_is_both_sides(
+    tmp_path, monkeypatch
+):
+    """The declared limit, with its SUBJECT asserted before its blindness.
+
+    L28(d): a declared limit gets a fixture, and the fixture must assert the
+    limit's SUBJECT. Declaring in prose that this reader cannot see a
+    selection written elsewhere in the job is not enough — a fixture that only
+    showed the blindness would be satisfied by a reader that sees nothing at
+    all, which is why the POSITIVE CONTROL comes first here.
+
+    THE SUBJECT is that a job CAN select an interpreter in a step of its own,
+    and that this position is one the instrument reaches. That is asserted by
+    putting the selection there in a spelling
+    `_OTHER_INTERPRETER_SELECTION` knows: `pyenv local 3.13` as its own
+    `- run:` step of `random-order` reddens the declared map by name.
+
+    THEN THE BLINDNESS, in the same position, one token different: `conda
+    activate ci` leaves the map byte-identical. So what defeats this reader is
+    the OPEN SET the selection branch searches — the module's declared and
+    unclosable limit — and not where the line sits. The prose here used to say
+    the boundary was line-ness; it is not, and a fixture is what would have
+    said so.
+
+    **THIS FIXTURE IS GREEN BOTH WAYS AND IS SAID TO BE.** Neither half moved
+    with the step-level repair: the reader at `2e4b780` also caught `pyenv` in
+    a separate step and also missed `conda`. It drives no red, and a limit pin
+    that could go red would be a defect pin rather than a limit pin. What it
+    is for is the day somebody widens this reader again — the positive control
+    is what stops the blindness half from being satisfied by a reader that
+    stopped seeing anything, and the pair is what stops the limit paragraph
+    from drifting away from what the code does in EITHER direction.
+    """
+    query = _query_line()
+    marker = _step_header_above(query)
+    step_indent = " " * (len(marker) - len(marker.lstrip()))
+    assert _provisioning_over(tmp_path, monkeypatch) == _lanes.EXPECTED_PYTHON, (
+        "the CONTROL failed: a copy of `.github/workflows/` does not "
+        "reproduce the declared provisioning"
+    )
+
+    def as_its_own_step(command):
+        # a `- run:` step of the same job, immediately before the reporting one
+        return f"{step_indent}- run: {command}\n{marker}"
+
+    # THE SUBJECT: this position really does select, and the reader reaches it
+    seen = _provisioning_over(
+        tmp_path,
+        monkeypatch,
+        lambda w: _replace_once(
+            w, "ci.yml", marker, as_its_own_step("pyenv local 3.13")
+        ),
+    )
+    assert _unreadable_in(seen) == ["ci.yml:random-order"], (
+        "a selection written as its own step of `random-order` is not caught "
+        "even with a spelling this module KNOWS, so the blindness below is "
+        "not a statement about the token set — it is a statement about a "
+        "position this instrument cannot read at all, and the limit is "
+        "declared wrongly."
+    )
+
+    # THE BLINDNESS: the same position, a spelling the module has no token for
+    unseen = _provisioning_over(
+        tmp_path,
+        monkeypatch,
+        lambda w: _replace_once(
+            w, "ci.yml", marker, as_its_own_step("conda activate ci")
+        ),
+    )
+    assert unseen == _lanes.EXPECTED_PYTHON, (
+        "a selection this module has no token for, written as its own step, "
+        "is now VISIBLE — which is better than the declared limit says. Good "
+        "news, and the limit paragraph at `_REPORTING_LINE` has to be "
+        "rewritten to say what is true rather than left overstating the reach "
+        "in the safe direction."
+    )
