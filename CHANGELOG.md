@@ -103,7 +103,12 @@ guard.
   and 24 dangling bare mentions, all in `tests/`; five named tests **no
   revision of this tree has ever defined**.
 
-- **Nine cross-references in `src/` named three things that do not exist** —
+- **Eleven references across the repository named three things that do not
+  exist** — eight in `src/` (six of them Sphinx roles, two plain backticks),
+  two in `SOUNDNESS.md` and one in `tests/`. *An earlier draft of this bullet
+  said "nine cross-references in `src/`", which was the count of what the new
+  gate can SEE — `src/`, and roles — read back as a count of the tree: the
+  same shape as the defect the gate exists for, one level up.* The names are
   `_classify_cmp` and `_Walker`, neither of which has ever been defined here
   (`git log --all -S` finds no commit for either, so neither was a rename),
   and `ir.JaxprEqn.from_dict`, which was carrying `coverage.py::sub_jaxprs`'s

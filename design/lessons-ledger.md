@@ -830,9 +830,13 @@ reintroduced it, in a third file.
 count and hand the reader the re-derivation. The coordinates are gone,
 replaced by assertions. The tenses are dated records with the original
 measurement kept. **And 0.2.1 added the face this entry did not have: a
-name.** Nine cross-references in `src/` named three things the tree has
-never had — two of them never renames, established by `git log --all -S`
-finding no commit that ever defined either.
+name.** Eleven references across the repository named three things the tree
+has never had — eight in `src/`, two in `SOUNDNESS.md`, one in `tests/` — two
+of the three never renames, established by `git log --all -S` finding no
+commit that ever defined either. *This entry said "nine cross-references in
+`src/`", which was the count of what the gate built to catch them can SEE
+(that directory, and Sphinx roles only) read back as a count of the tree —
+the entry's own defect, one level up, in the entry recording it.*
 `tests/test_referenced_names_resolve.py` resolves every Sphinx role in a
 `src/` docstring against the parsed package, which is the derived form of
 a claim that had been carried by habit.
