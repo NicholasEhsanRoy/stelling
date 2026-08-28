@@ -786,6 +786,30 @@ tree has ever defined**.
 prefix, and there are several. For each, ask what the *argument* excludes
 and whether the *rule* excludes more.
 
+**A SECOND INSTANCE, FOUND IN THE SAME RELEASE AND BY THE SAME QUESTION.**
+`tests/test_documented_names_exist.py` excludes `SOUNDNESS.md` and
+`CHANGELOG.md` from its corpus, and argues it: they are **dated event
+records**, where *"on 2026-08-06 `X` gained a check"* stays true of that date
+whatever the tree does later. That argument is sound and it is about a
+**kind of sentence**. The rule it produced excludes **two whole files** — so
+it also excludes every *live present-tense claim* in them. That is exactly
+how two references to `_classify_cmp`, a method this repository has never
+had, stood in `SOUNDNESS.md` as claims about the propagator and shipped
+through the release whose subject was removing them: the gate built to catch
+that name could not read the page they were on, by a rule wider than its own
+reason. Both were repaired in 0.2.1's fix round; **the exclusion was not**,
+because separating a dated record from a live claim inside those files is
+not mechanical and nobody has proposed a way. It is disclosed here rather
+than assumed narrow, which is the same posture this entry's first instance
+held before its repair landed.
+
+So the pattern has three witnesses in one release — `tests/` in the citation
+scan, and these two files in the name scan — and in all three the exclusion
+was **written by someone who had the right argument in front of them**. That
+is the tell worth carrying forward: this defect is not produced by
+carelessness about scope, it is produced by care about scope expressed in
+the wrong vocabulary.
+
 ## L26 — A claim in prose that nothing holds will go false, and the tense is part of the claim
 
 **(a)** Prose beside code carries assertions, and **nothing reads prose**.
