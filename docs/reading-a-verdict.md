@@ -338,6 +338,51 @@ not, the budget is an extrapolation you are making. See
 and `stelling.propagate.LIBM_MEASURED`, which carries every figure beside
 the population it came from.
 
+### Three `assumes:` lines say which BOUNDARY RULE ran — and their absence says one too
+
+`boundary="opaque"` (the default) and `boundary="transparent"` decide
+whether the strict-sign certificate — the fact that lets a division tighten
+a divisor box whose endpoint is exactly zero — crosses a sub-jaxpr
+boundary. The dial can move a verdict, in both directions, so the stamp has
+to say which position ran. It says it in **at most one** of three lines,
+and which one is decided by what the walk actually did:
+
+| the line begins | it means |
+|---|---|
+| `boundary='transparent': the strict-sign certificate …` | the run was at `transparent` and the carry was LIVE — the certificate was allowed to cross the wrappers the walk enters, and to enter a `cond` branch |
+| `boundary='transparent' CARRIED N strict-sign certificate(s) …` | …and it actually crossed, N times. Present only when N > 0; it reports the ACT, not the position, and a run that carried nothing does not carry this line |
+| `boundary='transparent' was requested and is INERT under semantics='ieee'` | the dial was set and the walk refused it. The certificate is a claim about ℝ and is false where a positive subnormal flushes to zero, so nothing crossed and this verdict rests on exactly the rules an `opaque` run would have used |
+
+**NO LINE MEANS `opaque`, AND THAT IS DECIDABLE RATHER THAN CONVENTIONAL.**
+The default adds nothing to the stamp — deliberately, so that a
+`boundary="opaque"` verdict is byte-for-byte the verdict the same query got
+before the dial existed, and so that every verdict recorded in this
+project's history stays comparable against a new one. A reader meeting a
+stamp with no boundary line has exactly two cases and no third, and the
+stamp's own first rendered line — `stelling <version>` — separates them:
+
+* the version is **below** the release that ships the dial: no dial
+  existed, and the run is boundary-opaque because nothing else was
+  possible;
+* the version is **at or above** it: one of the three lines above is
+  written on *every* run that is not boundary-opaque, so their absence is
+  the `opaque` position and not a gap in the record.
+
+That is the whole of what a verdict-reader gets, and it is deliberate that
+there is no more: `Stamp` has no `boundary` field. A **programmatic**
+reader of a *propagation* — not of a verdict — can read
+`stelling.propagate.propagate(...).boundary` and `.boundary_crossings`
+directly; `check()` returns a `Verdict` and those fields are not on it.
+
+**The `ieee` line is the one to read twice.** It is the only one of the
+three that reports a request the analysis *declined*, and it exists
+because the alternative was worse: before it, an `ieee` run at
+`boundary="transparent"` stamped the first line in the table — *"the
+certificate … was allowed to cross"* — on a walk that had refused the carry
+at every descent. That told the reader the analysis had used a rule which
+under `ieee` would be unsound. The line now written says the opposite, and
+says it because the stamping site consults the same gate the walk did.
+
 ## `coverage-not-established:` — what the `coverage:` line did not settle
 
 `coverage:` is a **census**. It counts whether each equation's primitive
