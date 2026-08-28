@@ -226,14 +226,16 @@ FLOAT_BOX_DEFECT = (
 #: THE PARTITION, as a dated record rather than a present-tense claim, and
 #: with the column that decides a repair beside the one that does not.
 #:
-#: Measured 2026-08-29 on the tree THIS COMMIT creates — jax 0.11.0, jaxlib
-#: 0.11.0, numpy 2.5.2, CPython 3.12.3, hypothesis 6.165.10, pytest 9.1.1,
+#: Measured 2026-08-29 at ``eb86def`` — jax 0.11.0, jaxlib 0.11.0, numpy
+#: 2.5.2, CPython 3.12.3, hypothesis 6.165.10, pytest 9.1.1,
 #: ``JAX_PLATFORMS=cpu``, x64 forced on by this module's fixture — by running
 #: THIS FILE's residual leg at ``STELLING_PROPERTY_SCALE=12.5``, i.e. 1500
-#: examples, and reading its own census. Re-derivable by anyone with this tree
-#: and that command. (A commit cannot contain its own hash; the commit that
-#: follows this one replaces this sentence with the sha and changes nothing
-#: else, so the numbers stay reproducible at the commit they name.)
+#: examples, and reading its own census. Re-derivable by anyone with that tree
+#: and that command. ``eb86def`` is the commit BEFORE this one, and this
+#: commit changes only the sentence you are reading: a commit cannot contain
+#: its own hash, and a sha typed at a guess is the defect the paragraph below
+#: records. The instrument is byte-identical at both, so the command gives the
+#: same table here.
 #:
 #: **THE ANCHOR ITSELF WAS WRONG AND THAT IS WHY THIS SENTENCE IS SO CAREFUL.**
 #: It read *"Measured 2026-08-28 at ``03b2dbe``"* while the table it introduced
