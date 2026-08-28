@@ -1440,6 +1440,19 @@ jobs:
   # command in a venv that DOES have z3 and cvc5 gives the same three
   # numbers.
   #
+  # THAT ROW IS A DATED RECORD AND THE `1` IN IT IS NOW WRONG FOR THE TIP.
+  # `tests/property/test_float_oracle.py` adds a SECOND strict xfail — the
+  # executed value falling outside the box the propagator computed — so the
+  # step below asserts `^XFAIL ` is exactly **2**, and a run of the tip
+  # reporting 1 means one of the two markers stopped firing. Measured on the
+  # branch that added it, in a venv built exactly as the steps below build one
+  # (jax 0.11.0, jaxlib 0.11.0, numpy 2.5.2, hypothesis 6.165.10, CPython
+  # 3.12.3, NO solver wheels), `python -m pytest -q -ra tests/property` ->
+  # `48 passed, 1 skipped, 2 xfailed`, pytest exit 0, zero XPASS matches, in
+  # 234 s on a box at load average 11.5. The 3482822 row above is left as it
+  # was measured rather than edited to agree, because what it records is a run
+  # of a tree that no longer exists.
+  #
   # AND THE DEFECT IS STILL BEING FOUND, which is the half a green tick
   # cannot say on its own: an XFAIL here means the test body RAISED
   # `WrongVerifiedFromWrap`, i.e. the property searched and found a wrong
@@ -1635,6 +1648,12 @@ jobs:
   #   "the completeness pin is WITHDRAWN, not passed: this session reported
   #    1 test(s) as xfailed."
   #
+  # — and it reads `2 test(s)` from the commit that added the float oracle
+  # onward, for the same reason and with the same consequence. The count in
+  # that sentence is derived by the pin from `len(XFAILED)`, so nothing has
+  # to be edited for it to stay true; it is quoted here because a reader
+  # comparing the log against this block should not be surprised by it.
+  #
   # Measured on the whole tree with hypothesis installed: 3910 passed,
   # 13 skipped, 1 xfailed, exit 0, and that pin among the skips. Re-driven
   # at 3482822, jax 0.11.0, hypothesis 6.165.10, CPython 3.12.3,
@@ -1667,9 +1686,14 @@ jobs:
   #     outside this appended block, and this file is being edited concurrently.
   #     The command is in `tests/property/README.md`; until a trigger is added,
   #     nobody is running it, and that is the honest state.
-  #   * three of the TWELVE positive controls — `cvc5-stateful` (20x budget),
-  #     `cross-series` (two interpreters), and `oracle-wrap` (its property is
-  #     the xfail above, which the step below already asserts fired).
+  #   * four of the FOURTEEN positive controls — `cvc5-stateful` (20x
+  #     budget), `cross-series` (two interpreters), and the two whose
+  #     properties ARE the xfails, `oracle-wrap` and `float-oracle-box`,
+  #     which the step below already asserts fired. `float-oracle-box` was
+  #     measured to work as a `--control` (4.9 s wall, best of three on a
+  #     box at load 6, `2/2 controls fired` alongside its sibling); it is
+  #     left out for the same reason `oracle-wrap` is, not because it
+  #     cannot be demonstrated.
   property:
     name: property suite (hypothesis)
     runs-on: ubuntu-latest
@@ -1729,7 +1753,7 @@ jobs:
 
           What this job DOES buy, and it is worth having: the strategies still
           draw their boundary classes, the registered mutations still apply,
-          every property still has a control, nine controls still fire, and
+          every property still has a control, ten controls still fire, and
           the suite still runs at all. That is rot, caught on the push that
           causes it. It is not a soundness argument.
 
@@ -1750,17 +1774,44 @@ jobs:
             * the cvc5 record protocol, flat and stateful: a definite answer
               requires exit 0, no truncation, and a harvested model equal to the
               value records in the bytes actually read
+            * every violation of BOX CONTAINMENT that the float oracle finds
+              has one of five IEEE causes — NaN, overflow to infinity,
+              rounding into a format narrower than the binary64 the box was
+              computed in, a flush or gradual underflow, or a reduction the
+              compiler reassociated. A sixth kind would mean the box is
+              wrong about the REALS  (this one must be green)
+            * eight pinned programs where the executed value IS outside the
+              box are each re-run and each still found, with its registered
+              cause  (asserted as a census floor inside that property)
             * the strategies still draw their boundary classes (generator floor)
             * every property is registered with a positive control, every
               control names a property that exists, every mutation still applies
-            * NINE of the twelve positive controls FIRE where they are supposed
-              to, one of them for each of the cvc5 oracle's three clauses
+            * TEN of the fourteen positive controls FIRE where they are
+              supposed to, one of them for each of the cvc5 oracle's three
+              clauses
 
           NOT RUN HERE AT ALL:
             * THE OPEN WRAP DEFECT IS EXPECTED TO FAIL. The unmasked oracle leg
               is xfail(strict, raises=WrongVerifiedFromWrap). This job is GREEN
               while stelling returns VERIFIED for predicates that are false at
               every declared point, and will go RED the day that is fixed.
+            * THE OPEN BOX-CONTAINMENT CLASS IS EXPECTED TO FAIL, for the same
+              reason and by the same mechanism: xfail(strict,
+              raises=ExecutedValueOutsideBox). This job is GREEN while the
+              value the compiled program computes falls outside the box the
+              propagator computed for it, in eight pinned programs, and 110
+              of the 384 violations one 1500-example run found are an
+              obligation whose box says `definitely true for all elements`
+              executing FALSE at an admitted point of its own declared box.
+            * WHAT A GREEN FLOAT-ORACLE LEG DOES NOT SAY. Of 11488 boxes read
+              in a 1500-example run, 1603 are TOP (which contains every finite
+              float) and 1177 are EMPTY (a size-0 declaration) — a quarter of
+              its field of view, where it is blind for two different reasons,
+              one of them being that the propagator already declined; it samples
+              at most six dtype-representable points of each declared box;
+              and neither of its generators reaches scan/while/cond, vmap,
+              grad, the affine refinement, the solver legs or
+              semantics="ieee". Its pass rate is not a safety signal.
             * the two tested jax series agreeing (needs two interpreters)
             * the nightly budgets — no scheduled job exists
             * the solver legs, control flow (scan/while/fori_loop), vmap/grad,
@@ -1858,15 +1909,15 @@ jobs:
           set -euo pipefail
           out="${RUNNER_TEMP}/property.txt"
           if grep -qE '^(XPASS |\[XPASS|FAILED .*\[XPASS)' "${out}"; then
-            echo "::error title=an xfail-marked property PASSED::A property marked xfail is now passing. If the wrap remedy landed, delete the marker in tests/property/test_oracle.py; if it did not, the property has stopped finding a defect that is still there."
+            echo "::error title=an xfail-marked property PASSED::A property marked xfail is now passing. If the wrap remedy landed, delete the marker in tests/property/test_oracle.py; if the box-containment remedy landed, delete the marker in tests/property/test_float_oracle.py; if neither did, a property has stopped finding a defect that is still there."
             exit 1
           fi
           n="$(grep -c '^XFAIL ' "${out}" || true)"
-          if [ "${n}" != "1" ]; then
-            echo "::error title=expected exactly one xfail::Found ${n}. This job asserts the open wrap defect is still being found and still being disclosed as an expected failure. A different number means a marker was added, removed, or silently weakened."
+          if [ "${n}" != "2" ]; then
+            echo "::error title=expected exactly two xfails::Found ${n}. This job asserts that BOTH open classes are still being found and still being disclosed as expected failures: the integer-literal wrap (tests/property/test_oracle.py) and the executed value outside the computed box (tests/property/test_float_oracle.py). A different number means a marker was added, removed, or silently weakened. It read 1 until the float oracle landed."
             exit 1
           fi
-          echo "one xfail, zero xpasses — the open wrap defect is still found and still disclosed"
+          echo "two xfails, zero xpasses — the open wrap defect and the open box-containment class are both still found and still disclosed"
       - name: positive controls (the per-push subset)
         # The anti-vacuity mechanism, executed rather than asserted: today's
         # property, run against a tree that carries the defect, must come back
@@ -1899,7 +1950,8 @@ jobs:
             --control widen \
             --control cvc5-flat \
             --control cvc5-exit-tell \
-            --control cvc5-phantom-model
+            --control cvc5-phantom-model \
+            --control float-oracle-unexplained
 
   # ── TWO SHAPES OF WORKING TREE THAT WERE CHECKED BY HAND AND BY NOTHING ELSE ─
   #

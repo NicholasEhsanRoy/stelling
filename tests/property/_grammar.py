@@ -20,12 +20,20 @@ each of them is load-bearing:
 
 **Why the exact oracle is integer-only.** ``SOUNDNESS.md`` records that real
 mode judges floats in exact real arithmetic while integers are judged
-execution-faithfully. So a float harness can be correctly VERIFIED in ℝ and
-violated by IEEE execution: that is the declared posture, not a defect, and an
-oracle pointed at floats measures the documented gap rather than a bug. At
-integer dtypes the two readings agree, so a VERIFIED whose predicate is false
-at an enumerated point of the declared box is a genuine defect with no
-ℝ-vs-IEEE confound to argue about.
+execution-faithfully. At integer dtypes the two readings agree, so a VERIFIED
+whose predicate is false at an enumerated point of the declared box is a
+genuine defect with no ℝ-vs-IEEE confound to argue about — and the machinery
+below, :func:`eval_expr_exact`, works in unbounded Python integers and has no
+float reading to offer.
+
+THIS PARAGRAPH USED TO CARRY A SECOND CLAIM AND IT IS WITHDRAWN. It read
+*"...that is the declared posture, not a defect, and an oracle pointed at
+floats measures the documented gap rather than a bug."* The posture is
+declared, and a verdict the compiled program contradicts at a
+dtype-representable point of its own declared box is a defect regardless:
+``tests/property/test_float_oracle.py`` pins eight such programs, four of which
+reach ``v0.1.0``. What is integer-only is THIS oracle's arithmetic, not the
+question.
 
 **Why the oracle evaluates the source text and not jax.** An execution oracle
 runs the predicate through the same jax that introduced the defect this suite
@@ -1119,10 +1127,16 @@ def _order(pair):
 def general_specs(draw, *, max_decls=3, max_stmts=4, dtypes=ALL_DTYPES):
     """The wide grammar: floats, casts, reductions, ``where``, connectives.
 
-    **No oracle.** This grammar exists for the metamorphic properties, which
-    relate two runs of the tool to each other and need no ground truth. Pointing
-    an execution oracle at it would measure the declared ℝ-vs-IEEE posture, not
-    a defect.
+    **No EXACT oracle.** This grammar exists for the metamorphic properties,
+    which relate two runs of the tool to each other and need no ground truth,
+    and for ``test_float_oracle.py``, which does point an execution oracle at
+    it. This docstring used to end *"Pointing an execution oracle at it would
+    measure the declared ℝ-vs-IEEE posture, not a defect"* — **withdrawn**.
+    Measured 2026-08-28 over 1500 derandomised draws of THIS strategy alone,
+    the executed value falls outside the propagator's box in **146** of them.
+    What this grammar has no oracle for is the EXACT reading:
+    :func:`eval_expr_exact` cannot evaluate a float harness, which is why the
+    float question is answered by running the program instead.
     """
     n = draw(st.integers(1, max_decls))
     shape = draw(st.sampled_from(SHAPES))

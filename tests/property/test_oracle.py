@@ -17,16 +17,32 @@ it through jax, and it *could not have found* the defect it was aimed at — the
 defect is that an out-of-dtype-range integer literal wraps mod ``2**bits``
 before tracing, so an execution oracle wraps it too and cheerfully agrees with
 the wrong answer. ``_grammar.eval_pred_exact`` evaluates the predicate in
-unbounded Python integers and never wraps a constant. Where a defect is in the
-TRANSLATION to the jaxpr, a metamorphic or source-text oracle is strictly
-stronger than an execution oracle.
+unbounded Python integers and never wraps a constant. **For THAT defect** — one
+that destroys the program before any stelling primitive binds it — a
+source-text oracle is strictly stronger than an execution oracle.
 
-**Why integers only.** ``SOUNDNESS.md`` records that real mode judges floats in
-exact real arithmetic while integers are judged execution-faithfully. A float
-harness can therefore be correctly VERIFIED in ℝ and violated by IEEE
-execution: that is the declared posture, and an oracle pointed at floats would
-be reporting the documentation rather than a defect. At integer dtypes the two
-readings coincide.
+NARROWED TO ITS SUBJECT. That sentence used to end *"Where a defect is in the
+TRANSLATION to the jaxpr, a metamorphic or source-text oracle is strictly
+stronger than an execution oracle"*, and it was read as an argument about
+execution oracles in general. It is true of the wrap and of anything else that
+rewrites the program before tracing. It says nothing about a defect in the
+ANALYSIS of a faithfully traced program, where there is no second reading to be
+stronger than — see ``test_float_oracle.py``, which executes the program and
+pins eight harnesses, in five distinct IEEE causes, that this file cannot
+express at all.
+
+**Why integers only — AND WHAT THAT DOES NOT MEAN ANY MORE.**
+``SOUNDNESS.md`` records that real mode judges floats in exact real arithmetic
+while integers are judged execution-faithfully, so a float harness can be
+correctly VERIFIED in ℝ and violated by IEEE execution. This paragraph used to
+conclude from that *"an oracle pointed at floats would be reporting the
+documentation rather than a defect"*, and **that conclusion is withdrawn**: a
+VERIFIED the compiled program contradicts at a dtype-representable point of its
+own declared box is unacceptable whatever ℝ says, and ``test_float_oracle.py``
+pins eight of them. What survives is the narrow, mechanical reason THIS file is
+integer-only: its ground truth is ``_grammar.eval_pred_exact``, which evaluates
+in unbounded Python integers, and there is no float it could evaluate in. The
+float question is asked next door, by executing the program.
 
 ────────────────────────────────────────────────────────────────────────────
 WHAT IS AND IS NOT COVERED — read this before trusting a green run
@@ -38,11 +54,13 @@ own range and small enough to enumerate exactly, an optional ``assume`` and one
 ``abs``, ``square``, ``** k`` and the six comparisons, with literals drawn from
 in-range, just-out-of-range and far-out-of-range pools.
 
-NOT covered: floats of any width; ``bool``; more than one declaration; boxes
-too large to enumerate; ``scan``/``while``/``fori_loop``; casts; reductions;
-``where``; scatter; the solver legs; ``nonvacuity``; anything reached only
-through the public template helpers rather than ``any_array``. A green run says
-nothing about any of those.
+NOT covered: floats of any width (``test_float_oracle.py`` covers those, by a
+different mechanism — executing the program and comparing against the
+propagated box); ``bool``; more than one declaration; boxes too large to
+enumerate; ``scan``/``while``/``fori_loop``; casts; reductions; ``where``;
+scatter; the solver legs; ``nonvacuity``; anything reached only through the
+public template helpers rather than ``any_array``. A green run says nothing
+about any of those.
 
 ────────────────────────────────────────────────────────────────────────────
 THE TWO LEGS, AND WHY THERE ARE TWO

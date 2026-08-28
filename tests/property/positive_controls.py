@@ -19,9 +19,12 @@ that carries the defect, asserting that the run comes back RED.
 
 A property whose control cannot be demonstrated does not ship. That is the
 rule, it cost one property (see ``test_metamorphic.py``'s module docstring),
-and the rest of its cost is visible here: **five of the twelve** controls are
+and the rest of its cost is visible here: **six of the fourteen** controls are
 source MUTANTS rather than historical commits, because the defect they describe
-has never been in this tree.
+has never been in this tree. (It read *"five of the twelve"* until
+``float-oracle-box`` and ``float-oracle-unexplained`` were registered; the
+first is a commit control on the live tree, the second a sixth mutant, and it
+shares its mutation with two others while sharing its property with none.)
 
 That count has been wrong in the cheap direction, once, on this branch.
 ``cvc5-exit-tell`` shipped as a mutant whose ``why`` said "no revision of this
@@ -92,6 +95,7 @@ _ORACLE = f"{PROPERTY_DIR}/test_oracle.py"
 _META = f"{PROPERTY_DIR}/test_metamorphic.py"
 _CVC5 = f"{PROPERTY_DIR}/test_cvc5_protocol.py"
 _CROSS = f"{PROPERTY_DIR}/test_cross_series.py"
+_FLOAT = f"{PROPERTY_DIR}/test_float_oracle.py"
 
 
 # The mutation two controls below share: interval multiplication that keeps
@@ -498,6 +502,62 @@ CONTROLS = (
             new="        values=tuple(sorted(set(values))),",
         ),
         expect_message="HARVESTED A MODEL THAT WAS NOT WRITTEN",
+    ),
+    # ── the executed value outside the computed box, live on main today ─────
+    Control(
+        name="float-oracle-box",
+        nodeid=f"{_FLOAT}::test_the_executed_value_lies_inside_the_computed_box",
+        kind="commit",
+        at="HEAD",
+        why=(
+            "the value the compiled program computes falls OUTSIDE the box "
+            "the propagator computed for it, so a discharge over a declared "
+            "set says nothing about the program the user runs. EIGHT pinned "
+            "programs do it: `1/S(x*1e-200*1e-200)` and `sum(x)` over two "
+            "binary64 subnormals, both flushed to zero; a float32 square "
+            "underflowing through a binary64 box; `y/y` at 0; `jnp.sum` over "
+            "33 float64s, where XLA splits the reduction into two windows and "
+            "interval.reduce_sum models one order; one float32 multiply and "
+            "float32 `exp` on [-100,-50], both judged in binary64; and "
+            "`0.0 >= 5e-324`, which executes True because the subnormal "
+            "operand is flushed before the comparison. Measured over 1500 "
+            "examples: 384 violations, 110 of them an obligation whose box "
+            "says `definitely true for all elements` executing FALSE. OPEN — "
+            "this control fires for as long as the class lives, and the "
+            "property is xfail(strict) so that the day it is repaired the "
+            "suite goes red instead of quiet."
+        ),
+        expect_message="EXECUTED VALUE OUTSIDE THE COMPUTED BOX",
+    ),
+    # ── the residual: a violation with no IEEE explanation ──────────────────
+    Control(
+        name="float-oracle-unexplained",
+        nodeid=(
+            f"{_FLOAT}::test_every_violation_it_finds_has_a_known_ieee_cause"
+        ),
+        kind="mutant",
+        at="HEAD",
+        why=(
+            "interval multiplication over the two SAME-CORNER products makes "
+            "the box of `x*x` over float64 [-1, 1] equal [1, 1], and the "
+            "sampler executes x = 0 and gets 0.0 — a violation at float64, "
+            "finite, not a reduction and nowhere near the subnormal band, so "
+            "none of the five IEEE explanations applies and it is reported "
+            "UNEXPLAINED. That is the distinction this leg exists to make: a "
+            "box that is wrong about the REALS, not one that is right about "
+            "the reals and contradicted by the floats. A MUTANT, for the same "
+            "reason `oracle-masked` and `widen` are — no revision of this tree "
+            "has carried a non-monotone interval domain — and weaker evidence "
+            "for it. It shares that mutation with those two and NOT its "
+            "property, so each of the three demonstrates a different oracle "
+            "against one defect."
+        ),
+        mutation=Mutation(
+            path="src/stelling/interval.py",
+            old=_MUL_CORNERS_OLD,
+            new=_MUL_CORNERS_NEW,
+        ),
+        expect_message="UNEXPLAINED BOX VIOLATION",
     ),
     # ── cross-series ────────────────────────────────────────────────────────
     Control(
