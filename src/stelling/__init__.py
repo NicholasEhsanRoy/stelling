@@ -93,7 +93,7 @@ from stelling._tripwire.perimeter import NarrowingError
 # only" names the builds between the `v0.1.0` tag and this commit —
 # whichever of the two strings they stamped — and no release, this one
 # included.
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 __all__ = [
     "EagerTruncationError",

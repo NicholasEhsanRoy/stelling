@@ -5,6 +5,141 @@ SPDX-License-Identifier: Apache-2.0
 
 # Changelog
 
+## 0.2.1 — 2026-08-28
+
+**A maintenance release. No verdict moves, no public name is added or
+removed, and nothing in the analysis core changed.** It closes what 0.2.0
+shipped disclosed, and repairs six instruments — five of which were found to
+be unable to fire, or able to fire green, in the state they were meant to
+guard.
+
+### The artefact
+
+- **The suite shipped inside the sdist is green, and a lane runs it.**
+  `.github/workflows/ci.yml` gains `sdist-suite`, which builds the sdist,
+  unpacks it **outside `$GITHUB_WORKSPACE`** — a tree inside the workspace has
+  the checkout's `.git` to answer with, and the whole defect class disappears
+  — installs the unpacked tree, and refuses to run unless `stelling.__file__`
+  resolves under the artefact and not under the checkout. A required check:
+  it has no third-party library to have a bad day, it fetches nothing
+  mid-run, and an sdist on PyPI cannot be unpublished.
+
+  The job landed **before** the three repairs and was watched to go red, so
+  each repair has a failure it can be shown against. Two of the three refuse
+  the obvious fix on principle: adding the three cited `scratchpad/` paths to
+  `NOT_IN_THIS_TREE` would have switched the check off in the one tree that
+  can decide them, and the `PKG-INFO` record was correct while the check was
+  asking `(staged / name).exists()` — the right question of the wrong thing.
+  That check decides by **running the build** now, with a positive control
+  planted on the same build.
+
+### Release machinery
+
+- **The changelog heading is gated against the tag** —
+  `.github/workflows/release.yml`'s fifteenth refusal point, in `build`,
+  before anything is uploaded. It refuses a newest heading whose version is
+  not the tag's, one that says *unreleased* under a final tag, one whose date
+  is not the tag's, and every way it cannot READ one of those, each named —
+  including a **lightweight tag**, which has no tagger date and is a refusal
+  rather than a fallback. One `exit 1` site, reporting every disagreement
+  together.
+
+  It reads the **tag object's tagger date** rather than the committer date
+  the routing prose asked for. Both readings agree on both real tags, so the
+  data cannot discriminate: the choice rests on the argument that a heading's
+  date is a claim about when the *release* happened, and that on a release cut
+  later than its last commit the committer reading refuses a **correct**
+  heading. That is argued beside the step and labelled as a choice.
+
+  The check had been **routed by name and never written**. Measured: the
+  routing paragraph arrived at `0e79ede` and `git rev-list --count
+  0e79ede..9b5b496` is **47**, so a present-tense claim about another file
+  stood over 47 commits describing a gate nobody had built. The routing
+  paragraph is now held by a test that reads the workflow.
+
+- **Two standing CI lanes for shapes of working tree** that were previously
+  checked by hand at a release: `venv-in-the-working-tree` and
+  `shallow-clone`. Both run the suite twice over one commit and compare the
+  two reports, because neither shape is answerable by an exit code — measured
+  at `9b5b496`, a `--depth 1` clone of this repository is **exit 0 with
+  `verdict=made`** while silently turning 13 checks into skips.
+
+- **The `random-order` lane records what it shuffled.** It floats on two
+  things — the runner's interpreter and the newest jax — and printed neither,
+  so a red named a seed and nothing about the configuration that seed was
+  drawn against.
+
+### Instruments
+
+- **`tests/_lanes.py` tells a line that SELECTS an interpreter from one that
+  REPORTS which one it got**, structurally, and stays fail-closed: a line that
+  could be either still reads as a selection. The scan had matched
+  `python --version` in the same pattern as `setup-python` and `UV_PYTHON`,
+  so the obvious repair for the lane above **was itself unavailable** — an
+  instrument that made its own repair unreadable.
+
+- **The state guard's question is decided by running the program.**
+  `tests/test_state_guard.py` asserted that no nested session in
+  `tests/test_tripwire_plugin.py` loads `tests/_state_guard.py` by scanning
+  source for the spellings that would cause it. Five rounds of audit each
+  closed one spelling and each next round found another, always one
+  indirection further out. It now observes the nested session's plugin
+  manager. **One of the two routes the old scan had declared unreachable was
+  pinned as source that could not have reached**: spelled
+  `pytest_configure(c)`, which pluggy refuses — the inner session dies during
+  conftest loading and nothing registers anything. The scan only ever asked
+  whether it could SEE the source, never whether the source did what it was
+  recorded as doing.
+
+- **`tests/test_prose_hygiene.py`'s citation checks no longer scope `tests/`
+  out.** The exclusion was argued about a *kind of string* — test modules that
+  write citation-shaped source strings as plants — and spelled as a *directory
+  prefix*, so it also blinded every sentence in `tests/` that makes a claim
+  about the tree: **181 of 539 tracked files, 181 of the sdist's 379
+  members**. The rule is citation-shaped now: in a `.py` file a citation counts
+  in a comment or a docstring and not in a value. Staged before adopting —
+  **0 of the 311 citations the old scan checked were in a value**, so the
+  uniform rule loses nothing. Widening found 8 dangling `path::name` citations
+  and 24 dangling bare mentions, all in `tests/`; five named tests **no
+  revision of this tree has ever defined**.
+
+- **Nine cross-references in `src/` named three things that do not exist** —
+  `_classify_cmp` and `_Walker`, neither of which has ever been defined here
+  (`git log --all -S` finds no commit for either, so neither was a rename),
+  and `ir.JaxprEqn.from_dict`, which was carrying `coverage.py::sub_jaxprs`'s
+  argument that a `list` sub-jaxpr container is unreachable from a real query.
+  **That argument is re-derived over all nine `ir.JaxprEqn` construction sites
+  and survives**, and is stronger than the sentence claimed: the document
+  route refuses a bare list outright. `tests/test_referenced_names_resolve.py`
+  resolves every Sphinx role in a `src/` docstring against the parsed tree.
+  `tests/test_documented_names_exist.py` could not see any of them — it reads
+  `.md`, tests presence by substring (which `_classify_cmp` **passed**, being
+  present in exactly the wrong sentences), and excludes dotted names by
+  construction.
+
+- **`propagate.py`'s module docstring claimed "no cond/scan descent" while
+  descending `cond`**, contradicting line 98 of its own docstring; and the
+  assume-side strict-sign writer called itself "THE ONE SOURCE" beside
+  neighbours reading "TWO WRITERS" and "THE SECOND SOURCE".
+
+- **A false GREEN in the changelog coupling.** `headings(text)[0]` was not the
+  newest heading: `finditer` **skips** what it cannot match, so a malformed
+  newest heading was stepped past and `[0]` became an older one. Usually that
+  reds for the wrong reason — but whenever the older heading happens to name
+  the current release segment, which is the state every version bump passes
+  through, every assertion downstream is satisfied and the file is accepted
+  with a malformed heading standing above it. The reader now locates the first
+  `## ` line and parses it **second**, the same order the new `release.yml`
+  step uses.
+
+- **Two absence-shaped tests in `tests/test_tripwire_arm.py` were green with
+  the event never happening.** Censused by plant rather than by reading — a
+  plugin making `selfcheck`'s `make_jaxpr` a no-op, so no trace in the process
+  reaches the const-fold site: 41 of 76 node ids stayed green, 39 of them
+  legitimately, and exactly two were green for the wrong reason. One had named
+  its positive control as **a different test**, which a shuffled order does not
+  have and which that test cannot see.
+
 ## 0.2.0 — 2026-08-25
 
 ### New transfers and precision improvements
@@ -1563,34 +1698,37 @@ on `main` at `198a2b5`; audit 0.2.0 M10, S4) —
   the release at the 0.2.0 bump; see the SOUNDNESS.md entry of
   2026-08-15 (B7).
 
-- **The suite shipped INSIDE the sdist exits 1 on four bookkeeping tests, and
-  none of them is about the library.** Unpack `stelling-0.2.0.tar.gz` and run
-  `pytest` in it and you get four failures against roughly 2350 passes. All
-  four are the same shape — **a check whose model is a git checkout, run in a
-  distribution** — and each has an independent cause: three `scratchpad/`
-  paths cited in `docs/` are absent from `NOT_IN_THIS_TREE` (the prose beside
-  each already tells the reader the file is tracked and not shipped, so no
-  shipped sentence is false); `PKG-INFO` is declared generated-in-distribution
-  while being a real file in an unpacked sdist; and two solver-battery skip
-  reasons written *for* the sdist are not registered with the skip-inventory
-  pin, which aborts that completeness claim in any sdist session. **Nothing
-  here touches a verdict, the public API, or `pip install stelling`** — the
-  wheel is unaffected and `python -m stelling` is green from a clean venv on
-  3.10 and 3.12. It is not new: a rebuilt `v0.1.0` sdist fails two of the four
-  today. It stands because **no workflow unpacks the built sdist and runs its
-  suite**, which is the fix that makes the class non-recurring rather than
-  patching three symptoms; that job, and the three repairs, are 0.2.1.
+- *CLOSED IN 0.2.1, and kept rather than deleted because it stood here and
+  stopped being true.* **The suite shipped INSIDE the sdist exited 1 on four
+  bookkeeping tests, and none of them was about the library.** Three
+  independent causes, all one shape — a check whose model is a git checkout,
+  run in a distribution. It stood because **no workflow unpacked the built
+  sdist and ran its suite**, which is the repair that makes the class
+  non-recurring; `.github/workflows/ci.yml`'s `sdist-suite` job does that now
+  and the three checks were repaired after it was watched to go red, in that
+  order. *This bullet said "four failures against roughly 2350 passes" and
+  stated no configuration beside the figure. Measured at `17ef918` before the
+  repairs, the two lanes differ by a factor of two — **4760 passes with jax
+  and both solvers, 2362 with solvers and no jax** — so the number was the
+  no-jax lane's and was not re-derivable as written.*
 
-- **One test is order-dependent under a shuffled whole-suite run.**
+- *CLOSED IN 0.2.1, and the explanation this bullet gave was WRONG.* **One
+  test was order-dependent under a shuffled whole-suite run**:
   `tests/test_tripwire_arm.py::test_jax_s_own_prng_mask_is_suppressed_and_named_not_blamed_on_the_caller`
-  fails at seed `20260825` and passes in file order on the same tree and the
-  same venv; it is green in isolation and green as a module at that seed, so
-  the dependence is cross-module and the shape points at a warning already
-  having been emitted by an earlier test. `.github/workflows/ci.yml` declares
-  the randomised-order lane **not a required check** precisely so this kind of
-  finding reports rather than blocks, and the seed is the reproducer. The fix
-  is to make the test independent of whether that warning has been emitted —
-  not to pin an order.
+  failed at seed `20260825` and passed in file order. *This bullet said the
+  shape "points at a warning already having been emitted by an earlier test".
+  No warning is involved anywhere in it.* Measured at `9b5b496` on jax 0.11.0:
+  **one prior `jax.random.key(0)` anywhere in the process is sufficient and is
+  the whole of it** — `jax.random.key` is jitted and jax's trace cache is
+  process-wide, so a replayed call performs no conversion for the const-fold
+  hook to observe and the recorder read `invocations=0`. What the test
+  measured was whether it was the first thing in the process to build a PRNG
+  key. **A fix written to the diagnosis above would have reset a warning
+  registry and left the test exactly as order-dependent as it found it**,
+  which is why the wrong sentence is quoted here rather than removed. It now
+  evicts jax's trace caches through the shipped
+  `_tripwire.evict_trace_caches()`, asserts that call's return code, and
+  carries a positive control on the site having been reached at all.
 
 ---
 
