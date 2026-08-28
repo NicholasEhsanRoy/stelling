@@ -12,10 +12,12 @@ and asks the one question the rest of this repository never asks:
 That sentence is the invariant every VERIFIED rests on. It is the reason a
 discharge over a declared set means anything at all about the program the user
 will run. Nothing in ``src/`` asserts it and nothing in ``tests/`` asserted it
-before this module, and it is FALSE on this tree in eight measured places
+before this module, and it is FALSE on this tree in **nine** measured places
 (:data:`MEMBERS`) — the seven this module was commissioned to pin
-(:data:`SEVEN`) and one it found itself while its own classifier was being
-written.
+(:data:`SEVEN`) and two it found itself: a comparison against a subnormal
+constant, found while its own classifier was being written, and a precondition
+that narrows away a point the compiled program admits, found by an independent
+audit of this file.
 
 The nearest thing ``src/`` does have is ``stelling.falsify.probe``, which also
 executes the program but asks whether the OBLIGATION is false rather than
@@ -39,16 +41,27 @@ where the analysis already gave up. Two consequences, both acted on here:
 :func:`read` counts ⊤ boxes separately (:attr:`Reading.top_boxes`) and the
 properties assert a floor on NON-⊤ boxes examined; and the assumes are KEPT
 (``assume_mode="constrain"``), because dropping them widens every box a
-narrowing would have tightened. Measured 2026-08-28 at ``a90862b`` on jax
-0.11.0, by the shipped residual leg at
-``STELLING_PROPERTY_SCALE=12.5`` (1500 examples), of 11488 boxes read:
-**1603 are ⊤ (14 %)** and a further **1177 are EMPTY (10 %)** — a size-0
-declaration, a value with no elements to violate anything — leaving **8708
-(76 %)** that a finite value could be caught outside of. A quarter of this
-instrument's own field of view is a place where it cannot see a finite
-violation at all, for two different reasons which are counted apart. NaN is
-the one exception — no box contains a NaN, ⊤ included — which is why the
-``nan`` cause survives a ⊤ and the other four do not.
+narrowing would have tightened. Measured 2026-08-28 at ``874d8ba`` on jax
+0.11.0, by the shipped residual leg at ``STELLING_PROPERTY_SCALE=12.5``
+(1500 examples), of **13727** boxes read:
+
+    2042  ⊤        (15 %)  the analysis declined; contains every finite float
+    1697  EMPTY    (12 %)  a size-0 declaration: no element to violate anything
+    1577  INTEGER  (11 %)  not compared at all; see below
+    8411  compared (61 %)  where a finite value can be caught outside its box
+
+**THE FOURTH BUCKET IS A CORRECTION AND THE THIRD WAS HIDING IN IT.** This
+read "8708 (76 %) that a finite value could be caught outside of", and 1327 of
+that 8708 were integer boxes the comparison ``continue``s past — counted as
+falsifiable and never compared. Integer-dtype outputs are skipped because a
+box endpoint is a binary64 float and an ``int64`` above 2**53 has no exact
+binary64 image, so the comparison would report its own rounding; that is a
+sound decision and it was not disclosed anywhere a reader could find it. The
+real figure is 61 %, and **39 % of this instrument's own field of view is a
+place where it cannot see a finite violation at all**, for three different
+reasons which are now counted apart. NaN is the one exception — no box
+contains a NaN, ⊤ included — which is why the ``nan`` cause survives a ⊤ and
+the other four do not.
 
 **2. A DECLARED ENDPOINT IS NOT NECESSARILY A POINT OF THE PROGRAM'S DTYPE.**
 ``np.float32(1e-20)`` is ``9.9999997e-21``, which is BELOW a box declared
@@ -60,7 +73,7 @@ endpoint the largest still ``<= hi``, by ``nextafter`` in the target format. A
 declaration with no such value at all is not sampled and is reported as
 ``unsampleable`` — a refusal to answer, never a silent "no violation".
 
-DRIVEN BOTH WAYS on 2026-08-28 at ``a90862b``, with the two ``nextafter``
+DRIVEN BOTH WAYS on 2026-08-28 at ``874d8ba``, with the two ``nextafter``
 steps deleted on a copy of this tree. On the identity harness
 ``x0 : float32 (1e-20, 1e-10) |- x0 >= 1e-20``, which contains no
 arithmetic whatever, the unsnapped sampler reports **two** violations — one
@@ -68,14 +81,28 @@ per endpoint, ``9.999999682655225e-21`` and ``1.000000013351432e-10``, both
 against the declaration's own box — and the snapped one reports none. Over 600
 derandomised draws of :func:`uniform_float_programs`:
 
-    unsnapped   330 read, 139 violations, **99 of them (71 %) on
-                ``stelling_any`` itself** (61 overflow-to-inf, 38
-                narrow-format-rounding)
-    snapped     322 read,  84 violations, **0** on ``stelling_any``
+    unsnapped   330 read, 246 violations, **162 of them (66 %) on
+                ``stelling_any`` itself** (99 overflow-to-inf, 46
+                narrow-format-rounding, 17 flush-or-subnormal)
+    snapped     322 read, 148 violations, **0** on ``stelling_any``
 
-Seventy-one per cent of the unsnapped instrument's findings are its own
-sampler's rounding. That is not a bias to be corrected in the reading; it is a
-different instrument.
+Two thirds of the unsnapped instrument's findings are its own sampler's
+rounding. That is not a bias to be corrected in the reading; it is a different
+instrument. **AND NOTHING ASSERTED IT UNTIL AN AUDIT SAID SO**: with the snap
+deleted, the containment leg still XFAILed and the residual leg failed only
+incidentally, through one member's cause-drift check. The guard is now
+explicit — see :attr:`Reading.sampler_artefacts` and the residual leg — and it
+is not a blanket ban, because a ``stelling_any`` violation under a NARROWING
+ASSUME is a genuine member of the class (``assume-narrows-past-the-program``).
+
+THE SAME MISTAKE, ONE DTYPE OVER, WAS LIVE IN THIS FILE UNTIL THE SAME AUDIT.
+The candidates were built as binary64 and handed to ``np.full(..., dtype=...)``
+for integer declarations too. Above 2**53 that is lossy and at 2**63 it WRAPS:
+``any_array((), "int64", (1, 2**63 - 1))`` sampled ``-9223372036854775808``,
+outside its own declared box, and the comparison one equation downstream then
+executed True against a box the propagator had proved definitely false — this
+module reporting its own sampler as a defect in stelling. Integer candidates
+stay Python integers now; :func:`sample_points` carries the record.
 
 RELATED, NOT REPAIRED HERE, AND REPORTED: the declared endpoints stelling
 stores are binary64 images (``_bound_spelling.binary64_image``) and are not
@@ -103,8 +130,11 @@ size, same seed (driver in the builder's scratchpad, not in the tree):
 which is the n <= 32 fold / n >= 33 split boundary, re-derived from this
 instrument rather than quoted — and **byte-identical on jax 0.10.2**, every
 row, so the boundary is a property of the XLA lowering and not of one series.
-All eight pinned members fire on 0.10.2 too, and all seven of the
-box-genuinely-contains-it controls stay green there. Reaching the class needs three things AT ONCE —
+Every pinned member fires on 0.10.2 too, and the seven programs the builder's
+red/green driver runs as boxes that GENUINELY contain their value stay green
+there. That driver is in the builder's scratchpad and is NOT in this tree,
+which is said here because the sentence beside it names a table that is not in
+the tree either and said so. Reaching the class needs three things AT ONCE —
 a DEGENERATE envelope (so the box of each
 element is a point and the box of the sum is the outward-rounded exact sum),
 PER-ELEMENT CONSTANTS (so the 33 elements are not all the same number), and
@@ -233,12 +263,25 @@ NARROW = "narrow-format-rounding"
 FLUSH = "flush-or-subnormal"
 REASSOCIATION = "reduction-reassociation"
 UNEXPLAINED = "UNEXPLAINED"
+UNCLASSIFIED = "unclassified"
 
 #: Every cause this module can name, in the order :func:`classify` tries them.
-#: ``UNEXPLAINED`` is last and is the residual: a violation with none of the
-#: five IEEE explanations is either a defect in the interval domain itself or a
-#: sixth class nobody has written down, and either is a finding.
-CAUSES = (NAN, OVERFLOW, NARROW, FLUSH, REASSOCIATION, UNEXPLAINED)
+#:
+#: THE LAST TWO ARE DIFFERENT ANSWERS AND THEY USED TO BE ONE.
+#: :data:`UNEXPLAINED` is a **proof**: the exact real value of the equation on
+#: the values it ran on is computable, it is OUTSIDE the box, and no IEEE
+#: difference accounts for the miss — so the box is wrong about the REALS,
+#: which is a defect in the interval domain and is what the residual leg
+#: forbids. :data:`UNCLASSIFIED` is a **refusal**, and it covers two shapes:
+#: this classifier has no exact reading of that primitive, so it can neither
+#: explain the violation nor prove it unexplainable; or it has one, the box is
+#: RIGHT about ℝ, and the rounding that moved the float out is one none of the
+#: four IEEE rules names. Neither is a defect in the interval domain, and
+#: neither may redden the residual leg. Returning ``UNEXPLAINED`` for them
+#: would make the leg cry wolf on ``sqrt``; returning ``FLUSH``, which is what
+#: it did, made "0 unexplained" mean less than it looked.
+CAUSES = (NAN, OVERFLOW, NARROW, FLUSH, REASSOCIATION, UNEXPLAINED,
+          UNCLASSIFIED)
 
 
 # ── the program under test ───────────────────────────────────────────────────
@@ -461,12 +504,29 @@ def sample_points(shape, dtype: str, lo: float, hi: float, interior: float):
     if snapped is None:
         return None
     a, b = snapped
-    fa, fb = float(a), float(b)
-    wanted = [fa, fb]
-    for c in (0.0, 1.0, -1.0, fa + 0.5 * (fb - fa),
-              fa + max(0.0, min(1.0, interior)) * (fb - fa)):
-        if fa <= c <= fb and math.isfinite(c):
-            wanted.append(c)
+    t = max(0.0, min(1.0, interior))
+    if dtype in INT_DTYPES:
+        # INTEGERS NEVER GO THROUGH `float`, AND THAT IS A BUG THIS FILE HAD.
+        # The candidates used to be built as binary64 and handed to
+        # `np.full(..., dtype=int64)`. Above 2**53 that is lossy and at
+        # 2**63 it WRAPS: `any_array((), "int64", (1, 2**63 - 1))` sampled
+        # `-9223372036854775808` — outside its own declared box — and the
+        # comparison one equation downstream then executed True against a box
+        # the propagator had proved definitely false. Measured, and it was
+        # this module reporting its own sampler as a defect in stelling: the
+        # exact analogue, one dtype over, of the float32 endpoint problem
+        # :func:`snap_inward` was written for. Python integers are exact and
+        # numpy stores them exactly, so the arithmetic below stays in ℤ.
+        wanted = [a, b]
+        for c in (0, 1, -1, (a + b) // 2, a + int(t * (b - a))):
+            if a <= c <= b:
+                wanted.append(c)
+    else:
+        fa, fb = float(a), float(b)
+        wanted = [fa, fb]
+        for c in (0.0, 1.0, -1.0, fa + 0.5 * (fb - fa), fa + t * (fb - fa)):
+            if fa <= c <= fb and math.isfinite(c):
+                wanted.append(c)
     npd = np.dtype(dtype) if dtype != "bfloat16" else np.dtype(FLOAT_TYPES["bfloat16"])
     out, seen = [], set()
     for v in wanted:
@@ -522,10 +582,11 @@ def is_top(box) -> bool:
     entirely different reasons: a ⊤ box is a value the analysis declined to
     bound, an empty one is a value that does not exist. Conflating them
     inflated the headline ⊤ figure with array shapes. Measured by the shipped
-    residual leg at ``STELLING_PROPERTY_SCALE=12.5``: of 11488 boxes read,
-    **1177 are size-0** against **1603** that are genuinely ⊤ — so the
-    conflated figure was 2780, and 42 % of it was array shapes. The counters
-    are three-way now and :attr:`Reading.empty_boxes` is the third.
+    residual leg at ``STELLING_PROPERTY_SCALE=12.5``: of 13727 boxes read,
+    **1697 are size-0** against **2042** that are genuinely ⊤ — so the
+    conflated figure would be 3739, and 45 % of it array shapes. The counters
+    are four-way now (⊤ / empty / integer / compared) and
+    :attr:`Reading.empty_boxes` is the second.
     """
     return box.size > 0 and all(
         lo == -math.inf and hi == math.inf
@@ -609,6 +670,151 @@ def execute(jax_closed, points):
     return values, operands, True
 
 
+# ── the second route: the same jaxpr as ONE compiled region ─────────────────
+#
+# THE OP-BY-OP WALK IS A GRANULARITY, AND IT IS THE TRACE'S RATHER THAN THE
+# PROGRAM'S. `Primitive.bind` runs each equation on its own, so XLA never sees
+# two of them together — and an equation whose operands are all compile-time
+# constants is then executed at RUNTIME, where XLA:CPU flushes a subnormal
+# operand, instead of being CONSTANT-FOLDED in full IEEE precision the way the
+# compiled program folds it. Measured 2026-08-28 at `874d8ba`:
+#
+#     jax.jit(lambda: jnp.sqrt(5e-324))()    2.2227587494850775e-162
+#     np.sqrt(5e-324)                        2.2227587494850775e-162
+#     jnp.sqrt(jnp.asarray(5e-324))          0.0            <- the eager route
+#
+# and the box for that equation is `[2.2227587494850772e-162,
+# 2.222758749485078e-162]`, which CONTAINS the compiled answer. So the eager
+# route alone reports a violation the compiled program does not have, and this
+# module's headline noun is *the value the COMPILED PROGRAM computes*.
+#
+# `src/stelling/falsify.py` already ships the guard for this class — a second
+# compilation route, decline reason `executed-float-depends-on-granularity` —
+# and this is that guard one axis over. Two properties of it are copied
+# deliberately from :func:`stelling.falsify._whole_program_route`:
+#
+# * **it is consulted only after the eager route found a violation, and it can
+#   only DECLINE.** It never promotes anything to a violation. That is
+#   one-sided ON PURPOSE and it is a blindness, stated here: a violation only
+#   the compiled route would show is not looked for by this module;
+# * **it is built once per program**, so jax's jit cache keys on one function
+#   object and compiles one module rather than one per sampled point.
+
+
+def staged_runner(jax_closed):
+    """``(jitted, keys)`` — the jaxpr interpreted inside ONE :func:`jax.jit`.
+
+    The sampled points are jit ARGUMENTS and the jaxpr's literals stay
+    literals, which is the same split the compiled program has: an
+    ``any_array`` declaration is an input to the program the user runs and a
+    literal is a constant in it. Getting that split wrong in either direction
+    would make this route answer about a different program.
+    """
+    import jax
+    import jax.extend.core as jex
+
+    jaxpr = jax_closed.jaxpr
+    keys = [(i, j) for i, eqn in enumerate(jaxpr.eqns)
+            for j in range(len(eqn.outvars))]
+
+    def staged(*pts):
+        env = {}
+        for var, val in zip(jaxpr.constvars, jax_closed.consts):
+            env[var] = val
+        out = {}
+        k = 0
+        for i, eqn in enumerate(jaxpr.eqns):
+            name = eqn.primitive.name
+            if name == "stelling_any":
+                outs = [pts[k]]
+                k += 1
+            else:
+                ins = [a.val if isinstance(a, jex.Literal) else env[a]
+                       for a in eqn.invars]
+                if name in ("stelling_assume", "stelling_assert",
+                            "stelling_nonvacuity"):
+                    outs = [ins[0]]
+                else:
+                    r = eqn.primitive.bind(*ins, **dict(eqn.params))
+                    outs = list(r) if eqn.primitive.multiple_results else [r]
+            for j, (ov, v) in enumerate(zip(eqn.outvars, outs)):
+                env[ov] = v
+                out[(i, j)] = v
+        return tuple(out[key] for key in keys)
+
+    return jax.jit(staged), keys
+
+
+def operands_of(jax_closed, values):
+    """``eqn index -> its operands``, read back out of a values map.
+
+    Used for the compiled route, whose interpreter runs inside ``jit`` and
+    cannot hand intermediate operands back cheaply. Literals answer their own
+    value, exactly as :func:`execute` resolves them.
+    """
+    import jax.extend.core as jex
+
+    var_of = {}
+    for i, eqn in enumerate(jax_closed.jaxpr.eqns):
+        for j, ov in enumerate(eqn.outvars):
+            var_of[ov] = (i, j)
+    consts = dict(zip(jax_closed.jaxpr.constvars, jax_closed.consts))
+    out = {}
+    for i, eqn in enumerate(jax_closed.jaxpr.eqns):
+        ins = []
+        for atom in eqn.invars:
+            if isinstance(atom, jex.Literal):
+                ins.append(atom.val)
+            elif atom in var_of:
+                ins.append(values.get(var_of[atom]))
+            else:
+                ins.append(consts.get(atom))
+        out[i] = tuple(ins)
+    return out
+
+
+def ancestors(jax_closed):
+    """``eqn index -> every equation whose output reaches its inputs``.
+
+    THE CUT THIS EXISTS FOR IS DATA DEPENDENCE AND IT USED TO BE EQUATION
+    INDEX. :func:`_compare` reports the earliest violation and drops the rest,
+    on the rationale that *once a value is outside its box nothing DOWNSTREAM
+    of it is guaranteed by anything*. Keyed on the index, that rationale is
+    false for a SIBLING: `assert_((y/y <= 1.0) & (x + x >= 5.0))` has the
+    division and the addition under one `&`, neither downstream of the other,
+    and an index cut reports the NaN and silently drops an addition that may
+    be violating for a completely different reason. Driven on a copy of this
+    tree with `interval.add` shifted by +1.0, one wrong box: alone it reports
+    `add executed 5.0 -> UNEXPLAINED`; with one NaN equation placed EARLIER it
+    reports the NaN and the add is never seen. A second false-green route in
+    the leg whose whole job is to forbid an unexplained violation.
+
+    A jaxpr's equations are in topological order, so one forward pass is
+    enough and this asserts nothing it has not seen.
+    """
+    import jax.extend.core as jex
+
+    producer = {}
+    for i, eqn in enumerate(jax_closed.jaxpr.eqns):
+        for ov in eqn.outvars:
+            producer[ov] = i
+    out: dict = {}
+    for i, eqn in enumerate(jax_closed.jaxpr.eqns):
+        seen: set = set()
+        for atom in eqn.invars:
+            # a jax Literal is UNHASHABLE, so it cannot even be looked up here
+            # — and it has no producer to be downstream of.
+            if isinstance(atom, jex.Literal):
+                continue
+            producing = producer.get(atom)
+            if producing is None:
+                continue
+            seen.add(producing)
+            seen |= out.get(producing, set())
+        out[i] = seen
+    return out
+
+
 # ── classification ───────────────────────────────────────────────────────────
 
 
@@ -626,107 +832,345 @@ class Violation:
 
 
 def _prev(T, x):
-    return float(np.nextafter(T(x), T(-math.inf)))
+    # `errstate` for the reason :func:`sample_points` gives: a box endpoint of
+    # 1e300 cast to float32 IS an overflow, and the answer that produces is the
+    # right one for the window below. A RuntimeWarning on a correct path
+    # teaches its readers to ignore warnings.
+    with np.errstate(over="ignore", invalid="ignore"):
+        return float(np.nextafter(T(x), T(-math.inf)))
 
 
 def _next(T, x):
-    return float(np.nextafter(T(x), T(math.inf)))
+    with np.errstate(over="ignore", invalid="ignore"):
+        return float(np.nextafter(T(x), T(math.inf)))
 
 
-def _exact_reduction(primitive: str, inputs) -> Fraction | None:
-    """The EXACT real value of a reduction over its executed inputs, or ``None``.
+# ── the exact reading, which is what makes UNEXPLAINED a PROOF ──────────────
 
-    Only ``reduce_sum`` is answered. That is a deliberate floor rather than an
-    oversight: the reassociation cause claims *"the analysis's box is right
-    about ℝ and the execution reassociated"*, and it may only be claimed where
-    the real value is computed exactly. Every other primitive falls through to
-    ``UNEXPLAINED``, which is the direction a classifier has to fail in — it
-    can produce a report to read, never a silent explanation.
+_EXACT_UNARY = {
+    "neg": lambda a: -a,
+    "abs": abs,
+    "copy": lambda a: a,
+    "convert_element_type": lambda a: a,
+}
+_EXACT_BINARY = {
+    "add": lambda a, b: a + b,
+    "sub": lambda a, b: a - b,
+    "mul": lambda a, b: a * b,
+    "max": max,
+    "min": min,
+}
+_EXACT_CMP = {
+    "ge": lambda a, b: a >= b, "gt": lambda a, b: a > b,
+    "le": lambda a, b: a <= b, "lt": lambda a, b: a < b,
+    "eq": lambda a, b: a == b, "ne": lambda a, b: a != b,
+}
+
+
+def _element(operand, idx: int, n_out: int):
+    """One operand element as an exact :class:`~fractions.Fraction`, or ``None``.
+
+    ``None`` for a broadcast this reader will not guess at, for a
+    non-arithmetic dtype, and for a non-finite value — each of which is a
+    refusal to answer rather than an answer.
     """
-    if primitive != "reduce_sum":
+    if operand is None:
         return None
-    flat = np.asarray(inputs[0]).astype(np.float64).reshape(-1)
+    arr = np.asarray(operand)
+    name = str(arr.dtype)
+    if name not in FLOAT_TYPES and name != "bool" and name not in INT_DTYPES:
+        return None
+    flat = arr.reshape(-1)
+    if flat.size == 1:
+        w = flat[0]
+    elif flat.size == n_out and idx < flat.size:
+        w = flat[idx]
+    else:
+        return None
+    w = float(w)
+    if not math.isfinite(w):
+        return None
+    return Fraction(w)
+
+
+def _exact_reduction(operands):
+    """The exact real sum of a ``reduce_sum``'s operand, or ``None``."""
+    flat = np.asarray(operands[0]).astype(np.float64).reshape(-1)
     if not np.all(np.isfinite(flat)):
         return None
     total = Fraction(0)
-    for v in flat:
-        total += Fraction(float(v))
+    for w in flat:
+        total += Fraction(float(w))
     return total
 
 
+def exact_value(primitive: str, operands, idx: int, n_out: int):
+    """The EXACT REAL value of one output element, or ``None``.
+
+    ``None`` is a refusal to answer and it is what separates
+    :data:`UNEXPLAINED` from :data:`UNCLASSIFIED`. The table is deliberately
+    small — the four field operations, the two lattice operations, sign and
+    magnitude, a format conversion, the six comparisons, and ``reduce_sum`` —
+    because every entry is a claim that this function computes the same real
+    number the primitive is specified to compute, and a wrong entry would
+    manufacture an UNEXPLAINED out of its own arithmetic. ``sqrt``, ``exp``,
+    ``sign``, ``integer_pow``, every reduction other than ``reduce_sum`` and
+    everything not listed answer ``None``.
+    """
+    if primitive == "reduce_sum":
+        return _exact_reduction(operands) if n_out == 1 else None
+    if primitive in _EXACT_UNARY and len(operands) == 1:
+        a = _element(operands[0], idx, n_out)
+        return None if a is None else Fraction(_EXACT_UNARY[primitive](a))
+    if len(operands) == 2:
+        a = _element(operands[0], idx, n_out)
+        b = _element(operands[1], idx, n_out)
+        if a is None or b is None:
+            return None
+        if primitive in _EXACT_BINARY:
+            return Fraction(_EXACT_BINARY[primitive](a, b))
+        if primitive in _EXACT_CMP:
+            return Fraction(1) if _EXACT_CMP[primitive](a, b) else Fraction(0)
+        if primitive == "div" and b != 0:
+            return a / b
+    return None
+
+
+def _exact_in_box(exact, lo: float, hi: float) -> bool:
+    """Is the exact real ``exact`` inside ``[lo, hi]``? Infinities included.
+
+    ``Fraction(math.inf)`` RAISES ``OverflowError``, and an infinite box
+    endpoint is ordinary here — ``any_array((), "float32", (1.0, math.inf))``
+    is a declaration this grammar draws and stelling accepts. Comparing
+    against an infinity is a comparison in the extended reals and needs no
+    rational at all, so the infinite side is answered structurally and only
+    the finite side is converted.
+    """
+    if math.isinf(lo):
+        if lo > 0:
+            return False
+    elif exact < Fraction(lo):
+        return False
+    if math.isinf(hi):
+        if hi < 0:
+            return False
+    elif exact > Fraction(hi):
+        return False
+    return True
+
+
+def _rounds_to(T, exact, v: float) -> bool:
+    """Does ``exact`` round into ``T`` as exactly ``v``? ``False`` if it cannot
+    be asked — a Fraction too large for a float raises rather than answering."""
+    try:
+        with np.errstate(over="ignore", invalid="ignore"):
+            return float(T(float(exact))) == v
+    except (OverflowError, ValueError):  # pragma: no cover - defensive
+        return False
+
+
+def _subnormal_elements(operands):
+    """``[(operand position, format, value)]`` for every nonzero subnormal."""
+    out = []
+    for pos, operand in enumerate(operands):
+        if operand is None:
+            continue
+        arr = np.asarray(operand)
+        name = str(arr.dtype)
+        if name not in FLOAT_TYPES:
+            continue
+        mn = MIN_NORMAL[name]
+        for w in arr.reshape(-1):
+            w = float(w)
+            if 0.0 < abs(w) <= mn:
+                out.append((pos, name, w))
+    return out
+
+
+def _flushed(operands):
+    """``operands`` with every nonzero subnormal replaced by a signed zero."""
+    out = []
+    for operand in operands:
+        if operand is None:
+            out.append(operand)
+            continue
+        arr = np.asarray(operand)
+        name = str(arr.dtype)
+        if name not in FLOAT_TYPES:
+            out.append(operand)
+            continue
+        mn = MIN_NORMAL[name]
+        flat = np.array(arr, dtype=np.float64).reshape(-1)
+        for k, w in enumerate(flat):
+            if 0.0 < abs(float(w)) <= mn:
+                flat[k] = math.copysign(0.0, float(w))
+        out.append(flat.reshape(arr.shape))
+    return tuple(out)
+
+
+def _operand_flush_explains(primitive, operands, idx, n_out, v, lo, hi) -> bool:
+    """Does flushing the subnormal OPERANDS to zero explain ``v``?
+
+    TWO CONDITIONS, AND THE FIRST ONE USED TO BE MISSING. This rule read
+    *"some operand element is a nonzero subnormal"* and nothing else, so an
+    operand-side fact licensed an UNBOUNDED output-side error: on a copy of
+    this tree with ``interval.add`` shifted by +1.0, a program whose addend was
+    a subnormal literal reported ``executed -1.0, box [0.0, 2.0]`` as
+    ``flush-or-subnormal`` while the SAME injected defect with the addend
+    ``1.0`` reported ``UNEXPLAINED``. Driven straight at the classifier on the
+    clean tree, ``classify("add", "float64", v=1e300, box=[0.0, 1.0],
+    operands=(5e-324, 1e300))`` answered ``flush-or-subnormal``. **21 of the
+    384 violations this module shipped were classified by that rule.**
+
+    So the rule now asks two things and can prove both:
+
+    * the EXACT REAL value of this primitive on its UNFLUSHED operands is
+      INSIDE the box — the box is right about ℝ, exactly as the reassociation
+      rule requires;
+    * flushing those subnormal elements to a signed zero REPRODUCES the
+      executed value — the flush is what moved it out, rather than something
+      else that happened to have a subnormal nearby.
+
+    Either one unanswerable makes this ``False``, and the violation falls
+    through to a rule that can answer or to :data:`UNCLASSIFIED`.
+    """
+    if not _subnormal_elements(operands):
+        return False
+    exact = exact_value(primitive, operands, idx, n_out)
+    if exact is None or not _exact_in_box(exact, lo, hi):
+        return False
+    flushed = exact_value(primitive, _flushed(operands), idx, n_out)
+    if flushed is None:
+        return False
+    return float(flushed) == v
+
+
+def _same_side_of_zero(v: float, lo: float, hi: float) -> bool:
+    """A single rounding cannot cross zero, and the window must not either."""
+    if lo > 0.0 and v <= 0.0:
+        return False
+    if hi < 0.0 and v >= 0.0:
+        return False
+    return True
+
+
 def classify(primitive: str, dtype: str, v: float, lo: float, hi: float,
-             inputs) -> str:
+             inputs, element: int = 0, n_out: int = 1) -> str:
     """Why is ``v`` outside ``[lo, hi]``? One of :data:`CAUSES`.
 
-    THE ORDER IS LOAD-BEARING AND IT WAS GOT WRONG ONCE, in the direction that
-    flatters the instrument. ``reduction-reassociation`` was tried before
-    ``flush-or-subnormal``, and its test — *"the exact real value of this
-    reduction over its executed operands is INSIDE the box"* — is satisfied by
-    ANY rounding a reduction does, flush-to-zero included. So
-    ``ftz-subnormal-sum``, whose ``reduce_sum`` of two binary64 subnormals
-    executes ``0.0`` against a strictly negative box, was reported as a
-    reassociation of a two-element sum, which has no association to choose.
-    The specific explanation has to be tried before the general one, and
-    ``reassociation`` is the most general of the five.
+    ────────────────────────────────────────────────────────────────────────
+    UNEXPLAINED IS A PROOF AND UNCLASSIFIED IS A REFUSAL, AND THEY USED TO BE
+    ONE ANSWER
+    ────────────────────────────────────────────────────────────────────────
 
-    Each step below says what it excludes as well as what it claims.
+    This returned ``UNEXPLAINED`` for *anything the five IEEE rules did not
+    match*, which conflated two completely different findings: a violation
+    whose exact real value is computable and is OUTSIDE the box — the box is
+    wrong about ℝ, which is a defect in the interval domain — and a violation
+    this classifier simply cannot read, which is a fact about this file. Only
+    the first is a finding, and only the first should be able to redden the
+    residual leg. So :data:`UNEXPLAINED` now REQUIRES the exact reading, and
+    everything else answers :data:`UNCLASSIFIED` and is censused.
+
+    ────────────────────────────────────────────────────────────────────────
+    THE ORDER, WHICH IS LOAD-BEARING AND HAS BEEN WRONG TWICE
+    ────────────────────────────────────────────────────────────────────────
+
+    * ``reduction-reassociation`` was once tried before
+      ``flush-or-subnormal``, and its test — *the exact real value of the
+      reduction is inside the box* — is satisfied by ANY rounding a reduction
+      does, flush included. ``ftz-subnormal-sum``, a two-element sum with no
+      association to choose, was reported as a reassociation.
+    * ``narrow-format-rounding`` was tried before ``flush-or-subnormal``, and
+      its window is computed on the ROUNDED image of the box: where ``lo`` is
+      below ``T``'s smallest subnormal, ``T(lo)`` is ``0.0`` and
+      ``_prev(T, 0.0)`` is the smallest NEGATIVE subnormal, so the window
+      swallowed every flush-to-zero at a narrow dtype. Measured:
+      ``_prev(float32, 1e-48) = -1.401298464324817e-45``, and the identical
+      float32 underflow classified ``flush-or-subnormal`` from a box of
+      ``(1e-20, 1e-10)`` and ``narrow-format-rounding`` from ``(1e-24,
+      1e-10)``. In an independent 1500-draw sequence **17 of 52** narrow
+      classifications were flushes — including ``min``, which performs no
+      rounding at all. In THIS module's shipped derandomised sequence the
+      overlap was 0 of 51, so it was latent in the numbers and live in the
+      classifier.
+
+    Both are closed the same way: **the specific explanation is tried before
+    the general one**, and each rule that can be made provable has been.
     """
     if v != v:
-        # No box contains a NaN, ⊤ included. This is the one cause that
-        # survives a declined equation, and the reason the ⊤ count does not
-        # bound this instrument's whole reach.
+        # No box contains a NaN, ⊤ included. The one cause that survives a
+        # declined equation, and the reason the ⊤ count does not bound this
+        # instrument's whole reach.
         return NAN
     if math.isinf(v) and math.isfinite(lo) and math.isfinite(hi):
         # An infinity the analysis said could not happen. Where the box is
         # already unbounded on that side there is no violation to classify.
         return OVERFLOW
-    T = FLOAT_TYPES.get(dtype)
-    if T is not None and dtype != "float64" and _prev(T, lo) <= v <= _next(T, hi):
-        # Boxes are computed in binary64 whatever the program's dtype, so a
-        # narrower output is one rounding away from the box by construction.
-        # Claimed only within ONE ulp of the format either side; anything
-        # wider is not a single rounding and is not explained by one.
-        return NARROW
     mn = MIN_NORMAL.get(dtype)
     if mn is not None and min(abs(lo), abs(hi)) <= mn and abs(v) <= mn:
         # The box comes into the format's subnormal band and the executed
-        # value is in it too: flush-to-zero, or gradual underflow the ℝ box
-        # does not model. BOTH endpoints are checked — a box that merely
+        # value is in it too. BOTH endpoints are checked — a box that merely
         # CONTAINS zero (say [-1, 1]) is not in the band, and an executed 0
-        # there is not explained by underflow.
+        # there is not explained by underflow. This is the PHYSICAL rule and
+        # it now precedes the dtype-dependent one below.
         return FLUSH
-    if _an_operand_is_subnormal(inputs):
-        # THE OPERAND SIDE, AND IT IS NOT A REFINEMENT — IT IS THE ONLY WAY A
-        # COMPARISON'S VIOLATION CAN BE EXPLAINED AT ALL. A ``bool`` output
-        # has no format and no subnormal band of its own, so the rule above
-        # cannot answer for one, and the first thing this instrument found
-        # that the rule above could not answer for was a comparison:
-        # ``x0 >= 5e-324`` over ``x0 ∈ [0, 0]`` has the box ``(0, 0)`` —
-        # definitely false, and right over ℝ — and **executes True** on this
-        # backend, measured at ``a90862b`` on jax 0.11.0 / CPU. The subnormal
-        # operand is flushed before the comparison, so the compiled program is
-        # answering ``0 >= 0``. Same cause, one indirection out.
+    T = FLOAT_TYPES.get(dtype)
+    if T is not None and dtype != "float64":
+        # Boxes are computed in binary64 whatever the program's dtype, so a
+        # narrower output is one rounding away from the box by construction.
+        # Where the exact real value is readable this is PROVED — the box is
+        # right about ℝ and rounding that real into T is exactly what ran.
+        # Where it is not (``exp``, ``sqrt``), the one-ulp window stands in,
+        # guarded so that it cannot cross zero: a single rounding cannot turn
+        # a strictly-signed real into a zero of the other sign, and the case
+        # where it CAN produce a zero is underflow, which the rule above has
+        # already taken.
+        exact = exact_value(primitive, inputs, element, n_out)
+        if exact is not None:
+            if _exact_in_box(exact, lo, hi) and _rounds_to(T, exact, v):
+                return NARROW
+        elif _prev(T, lo) <= v <= _next(T, hi) and _same_side_of_zero(v, lo, hi):
+            return NARROW
+    if _operand_flush_explains(primitive, inputs, element, n_out, v, lo, hi):
+        # THE OPERAND SIDE, AND IT IS THE ONLY WAY A COMPARISON'S VIOLATION
+        # CAN BE EXPLAINED AT ALL: a ``bool`` output has no format and no
+        # subnormal band of its own. ``x0 >= 5e-324`` over ``x0 ∈ [0, 0]`` has
+        # the box ``(0, 0)`` — definitely false, and right over ℝ — and
+        # executes True on this backend, because the subnormal operand is
+        # flushed before the comparison. Both halves of that are now proved;
+        # see :func:`_operand_flush_explains`.
         return FLUSH
-    exact = _exact_reduction(primitive, inputs)
-    if exact is not None and Fraction(lo) <= exact <= Fraction(hi):
+    exact = exact_value(primitive, inputs, element, n_out)
+    if primitive == "reduce_sum" and exact is not None and _exact_in_box(
+        exact, lo, hi
+    ):
         # THE MOST GENERAL OF THE FIVE, hence last of them. The box is RIGHT
         # about the real value of this reduction and the executed float is not
-        # it, and no narrower explanation above applied: the compiler chose an
+        # it, and no narrower explanation applied: the compiler chose an
         # association order the interval domain does not model.
         return REASSOCIATION
-    if _an_operand_is_nan(inputs):  # pragma: no cover - a NaN operand
-        # normally makes the output NaN and is caught above; kept because a
-        # comparison against a NaN is a bool, not a NaN, and would otherwise
-        # arrive here unexplained.
+    if _an_operand_is_nan(inputs):
+        # A comparison against a NaN is a bool, not a NaN, so it would
+        # otherwise arrive here unexplained.
         return NAN
-    return UNEXPLAINED
+    if exact is not None and not _exact_in_box(exact, lo, hi):
+        # PROVED: the exact real value of this equation on the values it ran
+        # on is OUTSIDE the box the propagator computed for it, and no IEEE
+        # difference accounts for the miss. The box is wrong about the REALS.
+        return UNEXPLAINED
+    # Either no exact reading exists for this primitive, or one does and the
+    # box is RIGHT about ℝ — a rounding no rule above names. Neither is a
+    # defect in the interval domain; both are a refusal, and both are
+    # censused rather than reported.
+    return UNCLASSIFIED
 
 
 def _float_elements(inputs):
     """Every float element of an equation's operands, with its format name.
 
-    NaNs and infinities included — :func:`_an_operand_is_nan` is one of the two
-    readers and would see nothing without them.
+    NaNs and infinities included — :func:`_an_operand_is_nan` is a reader and
+    would see nothing without them.
     """
     for operand in inputs:
         if operand is None:
@@ -737,12 +1181,6 @@ def _float_elements(inputs):
             continue
         for w in arr.reshape(-1):
             yield name, float(w)
-
-
-def _an_operand_is_subnormal(inputs) -> bool:
-    return any(
-        0.0 < abs(w) <= MIN_NORMAL[name] for name, w in _float_elements(inputs)
-    )
 
 
 def _an_operand_is_nan(inputs) -> bool:
@@ -759,12 +1197,16 @@ class Reading:
     boxes_read: int = 0
     top_boxes: int = 0
     empty_boxes: int = 0
-    finite_boxes: int = 0
-    skipped_integer: int = 0
+    integer_boxes: int = 0
+    compared_boxes: int = 0
     points: int = 0
     admitted_points: int = 0
     falsified_discharges: int = 0
     contradicted_refutations: int = 0
+    route_declined: int = 0
+    route_obligations_compared: int = 0
+    route_obligations_disagreed: int = 0
+    sampler_artefacts: int = 0
     detail: str = ""
 
     @property
@@ -841,6 +1283,15 @@ def read(program: Program, *, interior: float = 0.5, max_rounds: int = 6):
             return reading
         candidates.append(c)
 
+    anc = ancestors(jax_closed)
+    # `.name`, because a jax equation's `primitive` is a Primitive OBJECT
+    # while the transcribed IR's is a string. Comparing the object to a string
+    # is quietly False for every harness, which made the guard below fire on
+    # the one member it exists to exempt.
+    has_assume = any(e.primitive.name == "stelling_assume"
+                     for e in jax_closed.jaxpr.eqns)
+    staged = _StagedOnce(jax_closed)
+
     rounds = min(max_rounds, max((len(c) for c in candidates), default=1))
     for r in range(rounds):
         points = [c[min(r, len(c) - 1)] for c in candidates]
@@ -860,55 +1311,66 @@ def read(program: Program, *, interior: float = 0.5, max_rounds: int = 6):
         # `assume(x >= 1.0)` over a box of (-10, 10) is the shape — has no
         # admitted point in round 0, so counting there recorded `boxes_read =
         # 0` for a program this instrument had in fact read four boxes of.
-        # Measured on that harness before the fix: `boxes=0`, and the ⊤
-        # fraction those counters feed was therefore computed over a
-        # population that silently excluded every assume-narrowed program.
         _compare(reading, boxes, values, operands, points,
-                 reading.admitted_points == 1)
+                 reading.admitted_points == 1, jax_closed, anc, has_assume,
+                 staged, refusals)
     if reading.admitted_points == 0 and reading.status == "read":
         reading.status = "no-admitted-point"
     return reading
 
 
-def _compare(reading, boxes, values, operands, points, count_boxes):
-    """Compare every box against its executed value; record the EARLIEST miss.
+class _StagedOnce:
+    """:func:`staged_runner`, built at most once and only if it is needed.
 
-    Only the earliest violating equation is recorded per point. Once a value
-    is outside its box, nothing downstream of it is guaranteed by anything —
-    reporting the derived misses as findings would count one defect three
-    times and would classify a boolean comparison's box as the cause of a
-    float multiply's underflow.
+    Compiling is the expensive half of this module, so the second route is
+    paid for only where the first found something to check.
     """
-    point = tuple(float(np.asarray(p).reshape(-1)[0]) if np.asarray(p).size
-                  else None for p in points)
-    earliest = None
+
+    def __init__(self, jax_closed):
+        self._jax_closed = jax_closed
+        self._made = None
+
+    def values(self, points):
+        if self._made is None:
+            self._made = staged_runner(self._jax_closed)
+        jitted, keys = self._made
+        with np.errstate(all="ignore"):
+            got = jitted(*points)
+        return dict(zip(keys, got))
+
+
+def _violating_elements(boxes, values, reading, count_boxes):
+    """Every ``(eqn, primitive, dtype, element, v, lo, hi)`` outside its box.
+
+    Buckets the boxes on the way past, in FOUR buckets and not three.
+    ``finite_boxes`` used to be incremented and then ``continue``d on an
+    integer dtype, so 1327 of the 8708 boxes it reported as falsifiable were
+    never compared at all and the "76 % falsifiable" sentence was 64 %.
+    """
+    out = []
     for i, primitive, j, box in boxes:
         v = values.get((i, j))
         if v is None:  # pragma: no cover - every outvar is bound above
             continue
         arr = np.asarray(v)
         dtype = str(arr.dtype)
+        comparable = dtype in FLOAT_TYPES or dtype == "bool"
         if count_boxes:
-            # THREE BUCKETS, NOT TWO. A ⊤ box is a value the analysis declined
-            # to bound and contains every float; an EMPTY box is a value that
-            # has no elements at all. Both are unfalsifiable and neither is
-            # the other; only the third bucket is a place a finite value can
-            # be found outside its box, and only the third is floored on.
             reading.boxes_read += 1
             if box.size == 0:
                 reading.empty_boxes += 1
             elif is_top(box):
                 reading.top_boxes += 1
+            elif dtype in INT_DTYPES:
+                # A box endpoint is a binary64 float and an int64 above 2**53
+                # has no exact binary64 image, so a comparison here would
+                # report the comparison's own rounding as a violation.
+                reading.integer_boxes += 1
+            elif comparable:
+                reading.compared_boxes += 1
             else:
-                reading.finite_boxes += 1
-        if dtype in INT_DTYPES:
-            # A box endpoint is a binary64 float and an int64 above 2**53 has
-            # no exact binary64 image, so a comparison here would report the
-            # comparison's own rounding as a violation. Counted, not judged.
-            if count_boxes:
-                reading.skipped_integer += 1
-            continue
-        if dtype not in FLOAT_TYPES and dtype != "bool":
+                reading.integer_boxes += 1
+        if dtype in INT_DTYPES or not comparable or box.size == 0:
             continue
         flat = arr.astype(np.float64).reshape(-1)
         if flat.size != box.size:  # pragma: no cover - shapes agree by trace
@@ -918,22 +1380,100 @@ def _compare(reading, boxes, values, operands, points, count_boxes):
             lo, hi = box.los[idx], box.his[idx]
             if lo <= x <= hi:
                 continue
-            if earliest is not None and i >= earliest[0]:
-                continue
-            ins = operands.get(i, ())
-            earliest = (
-                i,
-                Violation(
-                    eqn=i, primitive=primitive, dtype=dtype, element=idx,
-                    executed=x, lo=lo, hi=hi,
-                    cause=classify(primitive, dtype, x, lo, hi, ins),
-                    point=point,
-                ),
+            out.append((i, primitive, dtype, idx, x, lo, hi, flat.size))
+    return out
+
+
+def _compare(reading, boxes, values, operands, points, count_boxes, jax_closed,
+             anc, has_assume, staged, refusals):
+    """Compare every box against its executed value and record what survives.
+
+    THREE CUTS, and each one is a place this instrument was wrong:
+
+    * violations at an equation that DEPENDS on another violating equation are
+      dropped, because once a value is outside its box nothing computed from
+      it is guaranteed by anything. The cut is by data dependence
+      (:func:`ancestors`) and was by equation INDEX, which dropped siblings;
+    * every survivor is re-checked against the SECOND ROUTE — the same jaxpr
+      as one compiled region — and one the compiled program does not have is
+      declined, not reported. See :func:`staged_runner`;
+    * a survivor on ``stelling_any`` in a harness with NO assume can only be
+      this module's own sampler rounding, and is counted as such.
+    """
+    point = tuple(float(np.asarray(p).reshape(-1)[0]) if np.asarray(p).size
+                  else None for p in points)
+    compiled = None
+    candidates = _violating_elements(boxes, values, reading, count_boxes)
+    if candidates:
+        violating_eqns = {c[0] for c in candidates}
+        candidates = [c for c in candidates
+                      if not (anc.get(c[0], set()) & violating_eqns)]
+    if candidates:
+        try:
+            compiled = staged.values(points)
+        except Exception as exc:  # noqa: BLE001
+            if type(exc).__name__ in refusals:
+                compiled = None
+            else:
+                raise
+        if compiled is not None:
+            # THE STRONGEST FIGURE THIS MODULE REPORTS IS THE FALSIFIED
+            # DISCHARGE, AND IT IS READ FROM THE EAGER ROUTE. So wherever the
+            # second route runs at all, the two routes' OBLIGATION TRUTH
+            # VALUES are compared and any disagreement is counted — which
+            # turns "the discharge counts are route-independent" from a
+            # sentence into a number the census carries on every run.
+            eager_truths = _obligation_truths(boxes, values)
+            compiled_truths = _obligation_truths(boxes, compiled)
+            reading.route_obligations_compared += len(eager_truths)
+            reading.route_obligations_disagreed += sum(
+                1 for a, b in zip(eager_truths, compiled_truths) if a != b
             )
-            break
-    if earliest is not None:
-        reading.violations.append(earliest[1])
-    d, r = _contradicted_obligations(boxes, values)
+            compiled_ops = operands_of(jax_closed, compiled)
+            kept = []
+            for (i, prim, dtype, idx, _x, lo, hi, n_out) in candidates:
+                cv = compiled.get((i, 0))
+                if cv is None:  # pragma: no cover - every outvar is bound
+                    continue
+                cflat = np.asarray(cv).astype(np.float64).reshape(-1)
+                if idx >= cflat.size:  # pragma: no cover
+                    continue
+                x = float(cflat[idx])
+                if lo <= x <= hi:
+                    # THE COMPILED PROGRAM DOES NOT HAVE THIS VIOLATION.
+                    reading.route_declined += 1
+                    continue
+                kept.append((i, prim, dtype, idx, x, lo, hi, n_out,
+                             compiled_ops.get(i, ())))
+            candidates = kept
+        else:  # pragma: no cover - a refusal inside the compiled route
+            candidates = [(c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7],
+                           operands.get(c[0], ())) for c in candidates]
+    for (i, prim, dtype, idx, x, lo, hi, n_out, ins) in candidates:
+        if prim == "stelling_any" and not has_assume:
+            reading.sampler_artefacts += 1
+        reading.violations.append(
+            Violation(
+                eqn=i, primitive=prim, dtype=dtype, element=idx,
+                executed=x, lo=lo, hi=hi,
+                cause=classify(prim, dtype, x, lo, hi, ins, idx, n_out),
+                point=point,
+            )
+        )
+    # READ FROM THE COMPILED ROUTE WHEREVER IT RAN, because the claim these
+    # two numbers make is about the program the user compiles. **THE TWO
+    # ROUTES DO DISAGREE HERE**, and the disagreement is not rare on the
+    # points that matter: measured over 1500 examples, 17 of the 537
+    # obligation readings taken at a violating point differ between the eager
+    # walk and one compiled region. That is a biased sample by construction —
+    # the second route is consulted only where the first found a violation,
+    # which is exactly where granularity bites — and it is why this cannot be
+    # left on the eager reading. Where no violation was found the two agree by
+    # construction: a falsified discharge IS a violation at the obligation's
+    # own equation, so the compiled route has run wherever one exists.
+    d, r = _contradicted_obligations(
+        boxes, values if compiled is None else compiled
+    )
     reading.falsified_discharges += d
     reading.contradicted_refutations += r
 
@@ -945,6 +1485,21 @@ def _compare(reading, boxes, values, operands, points, count_boxes):
 #: not need.
 _BOOL_TRUE = (1.0, 1.0)
 _BOOL_FALSE = (0.0, 0.0)
+
+
+def _obligation_truths(boxes, values):
+    """``True``/``False`` per ``stelling_assert``, in walk order.
+
+    The quantity :func:`_contradicted_obligations` reads. Extracted so the two
+    execution routes can be compared on it directly.
+    """
+    out = []
+    for i, primitive, j, _box in boxes:
+        if primitive != "stelling_assert":
+            continue
+        v = values.get((i, j))
+        out.append(None if v is None else bool(np.all(np.asarray(v))))
+    return out
 
 
 def _contradicted_obligations(boxes, values):
@@ -1008,10 +1563,13 @@ def _contradicted_obligations(boxes, values):
 # of them is a property of the jax and the backend, and pinning that would
 # turn a version bump into a red suite that says nothing about stelling.
 #
-# SEVEN OF THESE ARE THE SEVEN THIS MODULE WAS BUILT TO PIN. The eighth,
-# `subnormal-comparison`, was found BY this instrument from an unbiased draw
-# while the classifier was being written, and is registered here because a
-# member found and not pinned is a member that gets lost.
+# SEVEN OF THESE ARE THE SEVEN THIS MODULE WAS BUILT TO PIN. The other two
+# were found BY this instrument and are registered here because a member found
+# and not pinned is a member that gets lost: `subnormal-comparison`, from an
+# unbiased draw while the classifier was being written, and
+# `assume-narrows-past-the-program`, which an independent audit of this file
+# drove while showing that nothing asserted a violation was not the sampler's
+# own rounding. The second is a class the other eight do not cover.
 #
 # HOW FAR BACK THEY GO, RE-DERIVED RATHER THAN QUOTED. This module was
 # commissioned with the sentence "four of the seven need no strict-sign
@@ -1020,10 +1578,12 @@ def _contradicted_obligations(boxes, values):
 # (`harness.trace` plus `jax.make_jaxpr`, since `trace_with_jaxpr` did not
 # exist yet) standing in for `read`'s one:
 #
-#   eight of the nine pinned programs violate box containment at v0.1.0 too;
-#   FOUR of them falsify a DISCHARGE there — `ftz-subnormal-sum` (2 points),
-#   `f32-underflow`, `f32-single-multiply` and `f32-exp` (1 each) — and
-#   `subnormal-comparison` contradicts a refutation. The figure re-derives.
+#   nine of the ten pinned programs violate box containment at v0.1.0 too;
+#   FIVE of them falsify a DISCHARGE there — `ftz-subnormal-sum` (2 points),
+#   `f32-underflow`, `f32-single-multiply`, `f32-exp` and
+#   `assume-narrows-past-the-program` (1 each) — and `subnormal-comparison`
+#   contradicts a refutation. The figure re-derives, and it went from four to
+#   five when the ninth member was pinned, not when it was re-measured.
 #
 # THE ONE THAT DOES NOT REACH v0.1.0 IS `reassociation-n33`, AND THE REASON IS
 # WORTH KNOWING: v0.1.0's `interval.mul` was not exact, so `x * K` at the
@@ -1225,6 +1785,30 @@ _register(
     "operand 5e-324 is flushed to zero before the comparison",
 )
 
+# (9) NOT ONE OF THE SEVEN EITHER, and a class the other eight do not cover:
+#     A PRECONDITION THAT NARROWS AWAY A POINT THE PROGRAM ADMITS. The assume
+#     `x0 >= 5e-324` narrows the declared box over ℝ to `[5e-324, 1.0]`, and
+#     the compiled comparison flushes the subnormal and ADMITS `x0 = 0.0` —
+#     so the narrowed box excludes a point the program's own precondition lets
+#     through, and the violation is on `stelling_any` itself. Every other
+#     violation on that primitive can only be this module's sampler rounding
+#     (:func:`snap_inward`), which is why `_compare` counts those separately;
+#     this one is the reason the guard is "no `stelling_any` violation in a
+#     harness with NO narrowing assume" rather than a blanket ban.
+_register(
+    "assume-narrows-past-the-program",
+    Program(
+        (Decl("x0", (), "float64", 0.0, 1.0),),
+        (Stmt("assume", ("cmp", ">=", ("var", "x0"), ("const", 5e-324))),
+         _assert(("cmp", ">", ("var", "x0"), ("const", 0.0)))),
+        "assume-narrows-past-the-program",
+    ),
+    FLUSH,
+    "stelling_any executes 0.0 against the assume-narrowed box "
+    "[5e-324, 1.0]; the compiled comparison flushes the subnormal and admits "
+    "the point the analysis narrowed away",
+)
+
 #: The seven this module was commissioned to find, in the order they were
 #: handed over. Named separately from :data:`MEMBER_NAMES` so that "all seven"
 #: stays a checkable claim about a fixed list after an eighth was added.
@@ -1264,12 +1848,21 @@ def uniform_float_programs():
     against a run of any other generator, and the leg that would catch a class
     nobody has thought of. It reaches NaN, flush-or-subnormal and
     narrow-format DENSELY; it reaches overflow-to-inf only BY LUCK — 0 in one
-    1500-draw derandomised run and 7 in another, which is why
-    ``test_float_oracle.OVERFLOW_PROBE`` is pinned; and it reaches the
+    1500-draw derandomised run, 7 in another and 13 in the shipped one, which
+    is why ``test_float_oracle.OVERFLOW_PROBE`` is pinned; and it reaches the
     reassociation class **never**, because ``SHAPES`` tops out at four
     elements and no draw of it can cross the n >= 33 boundary. The last of
     those three is a proof about the generator rather than a zero in a table,
     and it is stated here rather than left to be inferred.
+
+    **NOTHING FLOORED THIS LEG UNTIL AN AUDIT SAID SO.** Every floor in
+    ``test_float_oracle.py`` — the read count, the box count, the admitted
+    points, the discharges, the per-member and per-cause tags — was satisfied
+    by the pinned ``@example``s alone. Driven with both unbiased generators
+    replaced by one declaration stelling refuses: BOTH LEGS GREEN, on
+    ``read=39`` and 29 falsified discharges, every number of them from the
+    pins. The residual leg now floors on ``read/unlabelled``, which only a
+    drawn program can raise, and the same tree fails it at ``0 < 15``.
     """
     return _grammar.general_specs().map(Program.from_spec)
 
@@ -1308,8 +1901,9 @@ def cancelling_sum_programs(draw):
     **15/200** at n = 34, **9/200** at n = 64 and **0/200** at n = 128. The
     density is low on purpose — the pairs have to straddle the window boundary
     for the two orders to differ — and 400 derandomised draws of this strategy
-    alone produced **15** violations, every one of them
-    ``reduction-reassociation``, at 4.9 ms/example. That n = 128 is back to
+    alone produced **24** violations, every one of them
+    ``reduction-reassociation``, none of them declined by the second route, at
+    7.8 ms/example. That n = 128 is back to
     zero is recorded and NOT explained: 64 exact pairs may simply re-cancel
     under whatever split XLA picks there. It is a fact about this
     construction, not about the boundary, and the n <= 32 rows are what

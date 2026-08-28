@@ -10,13 +10,25 @@ Every one of those stamps rests on one sentence:
     propagator computed for it.**
 
 Nothing in ``src/`` asserts that sentence and nothing in ``tests/`` asserted it
-before this module. It is FALSE on this tree, in eight measured places — the
-seven this module was commissioned to pin (``_float_oracle.SEVEN``) plus one
-it found itself. **Seven of the eight are false against ``v0.1.0``'s own
-``src/`` too, and four of those falsify a discharge there**, which is
-re-derived at :data:`_float_oracle.MEMBERS` rather than quoted. This module
-runs the propagator and the compiled program over the same query and compares
-them value by value.
+before this module. It is FALSE on this tree, in NINE measured places — the
+seven this module was commissioned to pin (``_float_oracle.SEVEN``) plus two
+it found itself. **Eight of them are false against ``v0.1.0``'s own ``src/``
+too, and five of those falsify a discharge there**, which is re-derived at
+:data:`_float_oracle.MEMBERS` rather than quoted. This module runs the
+propagator and the compiled program over the same query and compares them
+value by value.
+
+**AND IT RUNS THE PROGRAM TWICE.** The op-by-op walk is a granularity — the
+TRACE's, not the program's — so an equation whose operands are all
+compile-time constants is executed at runtime, where the backend flushes a
+subnormal, instead of being constant-folded in full precision the way the
+compiled program folds it. Every candidate violation is therefore re-checked
+against the same jaxpr staged into ONE ``jax.jit``, and one the compiled
+program does not have is declined rather than reported: **76 of 639 candidates
+in a 1500-example run**. That second route follows
+``stelling.falsify._whole_program_route``, including the two properties that
+make it safe — it is consulted only after a violation, and it can only
+DECLINE.
 
 **THE NEAREST INSTRUMENT THAT DOES EXIST, AND WHAT IT DOES WITH THESE EIGHT.**
 ``stelling.falsify.probe`` — ``check(..., falsify="sample")``, default-off and
@@ -44,7 +56,7 @@ measures the documentation"* — a float harness may be correctly VERIFIED in �
 and violated by IEEE, which is the declared posture. The premise is true and
 the conclusion does not follow: a VERIFIED that the compiled program
 contradicts at a point of its own declared box is unacceptable whatever ℝ
-says, and the eight programs pinned below are exactly that. What the ℝ posture
+says, and the nine programs pinned below are exactly that. What the ℝ posture
 buys is that such a verdict is DISCLOSED, not that it is harmless.
 
 ────────────────────────────────────────────────────────────────────────────
@@ -113,12 +125,16 @@ The three blindnesses are implemented in ``_float_oracle`` and stated in its
 module docstring in full. In one line each, here, where a reader of a null
 result will meet them:
 
-1. **⊤ is unfalsifiable.** A declined equation's box is ``[-inf, inf]`` and
-   contains every finite float, so this instrument is blind exactly where the
-   propagator already declined. The pass rate is **not** a safety signal. The
-   census counts boxes in three buckets — ⊤, EMPTY (a size-0 declaration, a
-   value with no elements to violate anything) and the rest — and both
-   properties floor on the third alone.
+1. **⊤ is unfalsifiable, and it is not the only bucket that is.** A declined
+   equation's box is ``[-inf, inf]`` and contains every finite float, so this
+   instrument is blind exactly where the propagator already declined. The pass
+   rate is **not** a safety signal. The census counts boxes in FOUR buckets —
+   ⊤ (15 %), EMPTY (12 %: a size-0 declaration, no element to violate
+   anything), INTEGER (11 %: never compared, because a binary64 box endpoint
+   cannot represent an ``int64`` above 2**53) and compared (61 %) — and both
+   properties floor on the last alone. **39 % of the field of view is blind**,
+   for three different reasons, and the third of them was counted as
+   falsifiable until an audit instrumented it.
 2. **The sampler's grid.** Only dtype-representable points strictly inside the
    declared box are executed, snapped inward with ``nextafter``. A declaration
    whose box holds no value of its own dtype is reported ``unsampleable`` and
@@ -129,6 +145,15 @@ result will meet them:
    nothing else. Neither reaches ``scan``/``while``/``cond``, ``vmap``,
    ``grad``, the solver legs, the affine refinement, ``semantics="ieee"``, or
    any dtype the sampler cannot construct.
+
+A FOURTH, and it is about this file rather than about the search:
+**``UNEXPLAINED`` is a proof and it needs an exact reading to make.** Where
+:func:`_float_oracle.exact_value` has no entry for a primitive — ``sqrt``,
+``exp``, ``sign``, ``integer_pow``, every reduction but ``reduce_sum`` — a
+violation none of the five IEEE rules matched answers ``unclassified`` and is
+censused, not reported. A green residual leg therefore says *no violation was
+PROVED to be a box wrong about ℝ*, and the ``unclassified`` count is how much
+of the field that proof did not cover. It is 0 in the shipped run.
 
 ────────────────────────────────────────────────────────────────────────────
 POSITIVE CONTROLS
@@ -160,63 +185,87 @@ import _runner  # noqa: E402
 
 FLOAT_BOX_DEFECT = (
     "open class: the executed value falls outside the box the propagator "
-    "computed, in eight pinned programs. Seven of the eight do it against "
-    "v0.1.0's own src as well, and four of those falsify a discharge there. "
-    "This marker is strict and narrowed by raises=: the day a remedy lands "
-    "this test XPASSes and the suite goes red."
+    "computed, in nine pinned programs. Eight of them do it against v0.1.0's "
+    "own src as well, and five of those falsify a discharge there. This "
+    "marker is strict and narrowed by raises=: the day a remedy lands this "
+    "test XPASSes and the suite goes red."
 )
 
 #: THE PARTITION, as a dated record rather than a present-tense claim.
 #:
-#: Measured 2026-08-28 at ``a90862b`` — jax 0.11.0, jaxlib 0.11.0, numpy
+#: Measured 2026-08-28 at ``874d8ba`` — jax 0.11.0, jaxlib 0.11.0, numpy
 #: 2.5.2, CPython 3.12.3, hypothesis 6.165.10, ``JAX_PLATFORMS=cpu``, x64
 #: forced on by this module's fixture — by running THIS FILE's residual leg at
 #: ``STELLING_PROPERTY_SCALE=12.5``, i.e. 1500 examples, and reading its own
 #: census. Re-derivable by anyone with this tree and that command: the census
 #: line is what ``Census.require`` prints when a floor is not met, and the
-#: same object is what the floors below are asserted against.
+#: same object is what the floors below are asserted against. Three runs,
+#: 44-64 s depending on the load average on a 24-core box, byte-identical each
+#: time — the wall clock moves and not one count does.
 #:
-#: **THE SPEC THIS WAS BUILT FROM QUOTED A DIFFERENT PARTITION** — 120
+#: **THE PARTITION THIS FILE SHIPPED BEFORE THIS ONE IS SUPERSEDED, NOT
+#: CORRECTED, AND THE DIFFERENCE IS NOT A REMEASUREMENT.** It read 384
+#: violations as 178 flush / 109 nan / 51 narrow / 40 reassociation / 6
+#: overflow, over a different example sequence (a tenth and eleventh pinned
+#: ``@example`` moved the draw), and it was produced by an instrument that
+#: (a) reported one violation per point instead of one per data-dependence
+#: chain, (b) classified a violation ``flush-or-subnormal`` on an operand-side
+#: fact alone, (c) tried the dtype-dependent narrow-format rule before the
+#: physical flush rule, and (d) took the eager op-by-op answer where the
+#: compiled program constant-folds. Every one of those moved rows. The
+#: **ranking** survived — NaN and flush are the two big buckets, reassociation
+#: and overflow the two small ones — and the row an independent audit could
+#: not move from three directions, the falsified discharge, is unchanged by
+#: the one thing that could have moved it (see below).
+#:
+#: **THE SPEC THIS WAS BUILT FROM QUOTED A DIFFERENT PARTITION AGAIN** — 120
 #: violations in 1500 examples, as 61 float32 precision, 37 NaN, 19
-#: overflow-to-inf, 3 box-touches-flush-region and 0 f64 in-band — and the
-#: totals agree far better than the shape does. Re-measured over 1500 draws of
-#: the UNBIASED leg alone, this instrument found violations in **146** of
-#: them, which is the same order as 120. The partition differs for three
-#: reasons, all of them properties of this instrument rather than
+#: overflow-to-inf, 3 box-touches-flush-region and 0 f64 in-band. It differs
+#: for reasons that are properties of this instrument rather than
 #: disagreements about the tree: it compares EVERY equation rather than the
 #: obligation's own, so a NaN deep inside an expression counts; it executes up
-#: to six points per program rather than one, so one program contributes
-#: several violations; and it classifies a float32 underflow as
-#: ``flush-or-subnormal`` rather than as "float32 precision", which moves the
-#: largest bucket. The row that matters most is unchanged, and here it is a
-#: PROOF rather than a count: **0 f64 in-band violations from the uniform
-#: grammar**, because ``_grammar.SHAPES`` tops out at four elements and the
-#: reassociation split needs 33.
+#: to six points per program; and it calls a float32 underflow
+#: ``flush-or-subnormal`` rather than "float32 precision". The row that
+#: matters most is unchanged and is a PROOF rather than a count: **0 f64
+#: in-band violations from the uniform grammar**, because ``_grammar.SHAPES``
+#: tops out at four elements and the reassociation split needs 33.
 FLOAT_ORACLE_MEASURED = """\
-1510 programs drawn, 1171 read; 33.5 s and 40.5 s on two runs at load
-     average 6 and 12 on a 24-core box, i.e. 22-27 ms/example, of which
-     the great majority is op-by-op jax dispatch and not propagation.
-     Both runs gave the census below byte for byte.
- 339 not read: 125 ValueError, 52 OverflowError and 44 TypeError at the
-     declaration door; 74 whose assumes admit none of the sampled points;
-     22 UnsatisfiableAssumptionError; 22 unsampleable (no value of the
-     declaration's own dtype lies inside its declared box)
-11488 boxes read: 1603 ⊤ (14 %), 1177 EMPTY (10 %, a size-0 declaration),
-     8708 (76 %) that a finite value could be caught outside of. The first two
-     cannot be violated by a finite value at all, for different reasons
+1511 programs drawn, 1206 read, 44.0-64.4 s (29-43 ms/example, load-bound)
+ 305 not read: 108 whose assumes admit none of the sampled points; 76
+     ValueError, 53 OverflowError and 47 TypeError at the declaration door;
+     17 unsampleable (no value of the declaration's own dtype lies inside its
+     declared box); 4 UnsatisfiableAssumptionError
 
-384 VIOLATIONS, by cause:
-    178  flush-or-subnormal
-    109  nan
-     51  narrow-format-rounding
-     40  reduction-reassociation
-      6  overflow-to-inf
-      0  UNEXPLAINED
+13727 boxes read, in four buckets:
+     8411  compared  (61 %)  where a finite value can be caught outside a box
+     2042  TOP       (15 %)  the analysis declined; contains every finite float
+     1697  EMPTY     (12 %)  a size-0 declaration: no element to violate
+     1577  INTEGER   (11 %)  never compared; a binary64 box endpoint cannot
+                             represent an int64 above 2**53
 
-110 of them are a DISCHARGE FALSIFIED: an obligation whose box says
+563 VIOLATIONS, by cause:
+    316  nan
+    175  flush-or-subnormal
+     29  narrow-format-rounding
+     27  reduction-reassociation
+     16  overflow-to-inf
+      0  UNEXPLAINED   (the exact real value is OUTSIDE the box: PROVED)
+      0  unclassified  (no exact reading, or the box is right about ℝ:
+                    a refusal, not a finding)
+
+ 76 further candidate violations were DECLINED by the second route: the same
+    jaxpr as one compiled region does not have them, because XLA constant-folds
+    an all-constant equation in full precision where the op-by-op walk runs it
+    and gets the backend's flush-to-zero.
+
+ 95 violations are a DISCHARGE FALSIFIED: an obligation whose box says
     "definitely true for all elements", whose predicate executed FALSE at an
     admitted, dtype-representable point of its own declared box.
- 18 are the other direction: a "violated-over-set" that executed TRUE.
+ 13 are the other direction: a "violated-over-set" that executed TRUE.
+
+537 obligation readings were taken by BOTH routes at a violating point and
+ 17 of them DISAGREE. Both counts above are read from the compiled route.
+    The 95 is the same on either route; the 13 was 18 on the eager one.
 """
 
 
@@ -308,15 +357,32 @@ def _record(reading, census, program):
         census.skip(reading.status)
         return
     census.tag("read")
+    if not program.label:
+        # THE UNBIASED HALF, COUNTED SEPARATELY, because every other floor in
+        # this file is satisfiable by the pinned `@example`s alone. Driven with
+        # both unbiased generators replaced by one unsampleable program, BOTH
+        # LEGS STAYED GREEN on `read=42 finite_boxes=191 admitted_points=112
+        # falsified_discharges=31` — every number of them from the members.
+        # Nothing required the search to have looked at anything.
+        census.tag("read/unlabelled")
     census.tags["boxes_read"] += reading.boxes_read
     census.tags["top_boxes"] += reading.top_boxes
     census.tags["empty_boxes"] += reading.empty_boxes
-    census.tags["finite_boxes"] += reading.finite_boxes
+    census.tags["integer_boxes"] += reading.integer_boxes
+    census.tags["compared_boxes"] += reading.compared_boxes
     census.tags["admitted_points"] += reading.admitted_points
     census.tags["falsified_discharges"] += reading.falsified_discharges
     census.tags["contradicted_refutations"] += (
         reading.contradicted_refutations
     )
+    census.tags["route_declined"] += reading.route_declined
+    census.tags["route_obligations_compared"] += (
+        reading.route_obligations_compared
+    )
+    census.tags["route_obligations_disagreed"] += (
+        reading.route_obligations_disagreed
+    )
+    census.tags["sampler_artefacts"] += reading.sampler_artefacts
     for v in reading.violations:
         census.tag(f"cause/{v.cause}")
         if program.label:
@@ -328,15 +394,18 @@ def _report(program, reading, violation) -> str:
         "EXECUTED VALUE OUTSIDE THE COMPUTED BOX — equation %d (%s, %s) "
         "element %d executed %r, box [%r, %r]; cause %s\n%s\n"
         "# sampled point (first element of each declaration): %r\n"
-        "# boxes read %d, of which ⊤ (unfalsifiable for a finite value): %d\n"
+        "# boxes read %d = %d compared + %d ⊤ + %d empty + %d integer; the "
+        "last three cannot be violated by a finite value at all\n"
+        "# violations the SECOND (compiled) route declined: %d\n"
         "# obligations whose box says 'definitely true' and whose predicate "
         "executed FALSE, over every sampled point of this program: %d"
         % (
             violation.eqn, violation.primitive, violation.dtype,
             violation.element, violation.executed, violation.lo, violation.hi,
             violation.cause, program.render(), violation.point,
-            reading.boxes_read, reading.top_boxes,
-            reading.falsified_discharges,
+            reading.boxes_read, reading.compared_boxes, reading.top_boxes,
+            reading.empty_boxes, reading.integer_boxes,
+            reading.route_declined, reading.falsified_discharges,
         )
     )
 
@@ -364,7 +433,8 @@ def test_the_executed_value_lies_inside_the_computed_box():
     # marker they inherit a property that cannot pass vacuously — and the
     # floor is on NON-⊤ boxes, because a run that read nothing but ⊤ has
     # looked at nothing a finite value could ever fall outside of.
-    census.require(read=20, finite_boxes=100, admitted_points=20)
+    census.require(**{"read": 20, "read/unlabelled": 10,
+                      "compared_boxes": 100, "admitted_points": 20})
 
 
 def test_every_violation_it_finds_has_a_known_ieee_cause():
@@ -403,6 +473,7 @@ def test_every_violation_it_finds_has_a_known_ieee_cause():
     @example((fo.MEMBERS["f32-single-multiply"][0], 0.5))
     @example((fo.MEMBERS["f32-exp"][0], 0.5))
     @example((fo.MEMBERS["subnormal-comparison"][0], 0.5))
+    @example((fo.MEMBERS["assume-narrows-past-the-program"][0], 0.5))
     def search(drawn):
         program, interior = drawn
         reading = fo.read(program, interior=interior)
@@ -429,6 +500,25 @@ def test_every_violation_it_finds_has_a_known_ieee_cause():
                        sorted(causes),
                        _report(program, reading, reading.violations[0]))
                 )
+        if reading.sampler_artefacts:
+            # THE ELEVENTH CHECK, AND NOTHING ASSERTED IT. A box violation on
+            # `stelling_any` in a harness with NO assume cannot be the
+            # program's arithmetic — there is none — so it can only be this
+            # module's own sampler landing outside the declared box, which is
+            # what `snap_inward` exists to prevent. Driven with its two
+            # `nextafter` steps deleted, 600 draws: 97 violations of which
+            # **52 are on `stelling_any`**, offered as
+            # `narrow-format-rounding` and `overflow-to-inf`. The containment
+            # leg still XFAILed and this leg failed only incidentally, through
+            # one member's cause-drift check.
+            raise AssertionError(
+                "SAMPLER ARTEFACT — %d violation(s) on `stelling_any` in a "
+                "harness that states no assume. The declaration primitive "
+                "computes nothing, so a value outside its own declared box is "
+                "this instrument's sampler, not the program:\n%s"
+                % (reading.sampler_artefacts,
+                   _report(program, reading, reading.violations[0]))
+            )
         for v in reading.violations:
             if v.cause == fo.UNEXPLAINED:
                 raise AssertionError(
@@ -442,7 +532,8 @@ def test_every_violation_it_finds_has_a_known_ieee_cause():
     search()
     floors = {
         "read": 30,
-        "finite_boxes": 100,
+        "read/unlabelled": 15,
+        "compared_boxes": 100,
         "admitted_points": 30,
         "falsified_discharges": 1,
     }
