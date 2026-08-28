@@ -512,6 +512,19 @@
 # the choice is made on the argument. The argument, the rejected hybrid, the
 # lightweight-tag cost and what the step cannot see are beside the step.
 #
+# AND ITS LIGHTWEIGHT-TAG REMEDY WAS PROBABLY BACKWARDS FOR ONE RELEASE. The
+# refusal message told a maintainer to *"Cut the release with 'git tag -a' —
+# a GitHub release created from the web UI writes an annotated tag"*; the
+# clause after the dash was written from memory, and two dated third-party
+# reports say the release form creates a LIGHTWEIGHT tag, which is the shape
+# this refusal exists to stop. A refusal message that rests a maintainer's
+# next action on third-party behaviour nobody here can check is the same
+# defect as a REFUSAL that rests on it — the one this header declines twice,
+# at the twine `.zip` table and at "WE DO NOT RELY ON EITHER DEFAULT". The
+# claim is deleted, quoted, and replaced by a recipe about `git` that the
+# suite PLAYS OUT; the evidence, what could not be determined, and why the
+# hard refusal is kept anyway are beside the step.
+#
 # IT IS DRIVEN IN BOTH DIRECTIONS AND INSIDE THE SUITE, like the ninth
 # through the fourteenth and unlike the seven driven by hand at a61c01f — the
 # "SEVEN OF THE FIFTEEN" above is a dated record of THAT session and does not
@@ -914,6 +927,108 @@ jobs:
       # comment says it compares, silently, on exactly the releases where the
       # two readings differ.
       #
+      # AND THE REMEDY THAT MESSAGE USED TO GIVE WAS AN UNVERIFIED CLAIM
+      # ABOUT SOMEBODY ELSE'S UI, AND THE EVIDENCE POINTS THE OTHER WAY. It
+      # read: *"Cut the release with 'git tag -a' — a GitHub release created
+      # from the web UI writes an annotated tag — and re-run."* The clause
+      # after the dash was written from memory, nothing in this repository
+      # could check it, and TWO DATED THIRD-PARTY REPORTS SAY THE OPPOSITE:
+      # `github/community` discussion 4924, opened 2021-08-05 and last active
+      # 2025-10-15 with 113 👍 — *"At this moment creating a release (tag)
+      # using releases page does only create a lightweight git tag, which
+      # does not contain essential information like time when it was
+      # created"* — and discussion 149183, opened 2025-01-14 and still
+      # reported as current on 2026-07-15, six weeks before this commit.
+      # Neither carries a GitHub staff confirmation. GitHub's own REST
+      # reference for `POST /repos/{owner}/{repo}/releases` says only that
+      # `target_commitish` "Specifies the commitish value that determines
+      # where the Git tag is created from … Unused if the Git tag already
+      # exists", and does not say which KIND of tag it creates. Read
+      # 2026-08-28.
+      #
+      # SO THE SENTENCE WAS NOT MERELY UNVERIFIED, IT WAS PROBABLY BACKWARDS:
+      # it pointed a maintainer whose release had just been refused straight
+      # back at the flow that produced the refusal. It is deleted, and it is
+      # quoted above rather than deleted quietly because the defect is the
+      # SHAPE — a refusal message resting a maintainer's next action on
+      # third-party behaviour nobody here can check — and this file already
+      # refuses to rest a REFUSAL on such behaviour twice over (the twine
+      # `.zip` table, and "WE DO NOT RELY ON EITHER DEFAULT" about
+      # `upload-artifact`). A message is not exempt from the rule the
+      # refusals follow: what a reader is told to DO is as load-bearing as
+      # what the gate decides.
+      #
+      # WHAT IS MEASURED, ON THIS REPOSITORY, 2026-08-28 — and it is why the
+      # refusal does not stand in this project's way. Both real tags are
+      # ANNOTATED (`%(objecttype)` = `tag`, on the local refs and through
+      # `GET /repos/NicholasEhsanRoy/stelling/git/matching-refs/tags`), both
+      # taggers are the maintainer's own git identity rather than a GitHub
+      # address, `v0.2.0`'s tag object carries 1856 characters of
+      # hand-written release prose — the release form has no tag-message
+      # field at all — and for BOTH releases the API's `created_at` equals
+      # the tag object's tagger timestamp to the second while `published_at`
+      # is later (`v0.1.0` 2026-08-11T23:47:18Z tagged / 23:50:11Z published;
+      # `v0.2.0` 2026-08-25T17:53:59Z tagged / 19:39:28Z published). Both
+      # tags were also made AFTER the commit they point at (6m36s and
+      # 1h35m). That is one path and only one: an annotated tag cut with
+      # `git tag -a` and pushed, and a release then created ON IT. This gate
+      # has never refused a release this project has actually made, and that
+      # is now a measurement rather than an assumption.
+      #
+      # WHAT COULD NOT BE DETERMINED, said plainly. The web form was NOT
+      # driven. Driving it means creating a real release on a real
+      # repository, and on this one that fires `release: published` and runs
+      # THIS WORKFLOW from the default branch — a measurement whose side
+      # effect is a release job is not a measurement worth taking, and no
+      # repository exists here that could be created for it and then
+      # removed. So the two discussions above are the whole of the evidence
+      # about the form, they are third-party and dated, and NOTHING BELOW
+      # RESTS ON THEM IN EITHER DIRECTION: the step refuses a tag with no
+      # tagger date whatever made it, and the remedy it prints is about
+      # `git`, which this suite can run, and not about a UI, which it cannot.
+      #
+      # KEEPING THE HARD REFUSAL IS THE DECISION, AND THE COST IS WHERE IT
+      # LANDS RATHER THAN WHETHER IT IS PAID. If the form does create a
+      # lightweight tag, then a maintainer who uses it meets this refusal
+      # AFTER the release and the tag are already public — which is the worst
+      # moment to meet a gate, and "a gate that refuses the ordinary release
+      # path is how a gate gets silenced" is the right worry. Three things
+      # decide it the other way. (1) The alternative is the hybrid rejected
+      # four paragraphs above: with no tagger date the only date available is
+      # the COMMIT's, which is the reading this step declines because it
+      # refuses correct headings. Accepting it here would make the gate mean
+      # one thing for annotated tags and another for lightweight ones,
+      # silently, and the second meaning is the one this step exists to not
+      # have. (2) NOTHING IS PUBLISHED. The refusal is in `build`, before
+      # `upload-artifact` and before `publish`, so what a maintainer loses is
+      # a job, not an artefact — the line this gate defends is PyPI, which is
+      # immutable, not GitHub's release page, which is editable. (3) The
+      # recovery is finite, and it is DRIVEN rather than asserted:
+      # `tests/test_release_gates.py::test_the_lightweight_remedy_this_step_prints_is_the_one_that_works`
+      # plays the printed recipe out, step by step, on the body this file
+      # ships.
+      #
+      # THAT RECIPE IS TWO EDITS AND NOT ONE, WHICH IS THE PART A ONE-LINE
+      # REMEDY GETS WRONG. Re-cutting the tag annotated gives it TODAY's
+      # tagger date, so a heading written on the day of the first attempt is
+      # then the wrong date and this step refuses AGAIN, on the date arm.
+      # MEASURED on the body this commit ships, one planted tree carried
+      # through the message's own instructions:
+      #
+      #   what the tree holds                          verdict
+      #   ───────────────────────────────────────────  ──────────────────────
+      #   lightweight `v0.2.1`, heading `— 2026-08-25`  rc=1 "not an
+      #                                                 annotated tag"
+      #   re-cut ANNOTATED at the same commit, tagger   rc=1 "is dated
+      #   date 2026-08-28, heading unchanged            '2026-08-25' … was
+      #                                                 made on 2026-08-28"
+      #   heading moved to `— 2026-08-28`, tag re-cut   rc=0
+      #
+      # The middle row is the one the message has to predict or the
+      # maintainer is sent round twice, and it says so. The last row is what
+      # makes the recipe an instruction that WORKS rather than one that
+      # sounds right.
+      #
       # ONE `exit 1` SITE AND EVERY COMPLAINT REPORTED, which is why this is
       # ONE refusal point and not eight. Everything below appends to a list
       # and the step refuses once, printing all of it. A heading that is
@@ -1081,7 +1196,7 @@ jobs:
                 if [ "${got_ref}" != "${ref}" ]; then
                   problems+=("asked git about ${ref} and it answered about ${got_ref}. The name comes from the environment, so a name git would read as a PATTERN is refused here rather than followed.")
                 elif [ "${got_type}" != "tag" ]; then
-                  problems+=("${ref} is a ${got_type} object and not an annotated tag, so it carries no tagger date at all: a lightweight tag has no release date for the heading to agree with. Cut the release with 'git tag -a' -- a GitHub release created from the web UI writes an annotated tag -- and re-run.")
+                  problems+=("${ref} is a ${got_type} object and not an annotated tag, so it carries no tagger date at all: a lightweight tag has no release date for the heading to agree with. TO RECOVER, and it is TWO edits and not one: delete the tag here and on the remote ('git tag -d ${tag}' and 'git push origin :refs/tags/${tag}'), re-cut it ANNOTATED at the same commit ('git tag -a ${tag} <sha> -m ...'), push it, and put the date the NEW tag object gets onto the newest CHANGELOG.md heading -- re-cutting it today makes TODAY the tag's date, so this step will refuse the old heading date on the next run unless the heading moves with it. TO AVOID IT NEXT TIME: push an annotated tag FIRST and create the release on the tag that already exists -- which is how every release this project had cut as of 2026-08-28, measured rather than assumed, beside this step. This step makes no claim about what any release UI does with a tag name that does not yet exist; see beside it for the evidence there is, what could not be determined, and why this refusal is kept anyway.")
                 elif [ -z "${got_date}" ]; then
                   problems+=("${ref} is a tag object whose tagger date is empty, so there is nothing to compare the heading's date against.")
                 else
