@@ -1087,10 +1087,45 @@ jobs:
       #     what it asks about the object.
       #   * a heading grammar this repository does not use. The em dash is
       #     required, as it is in `_HEADING` in
-      #     `tests/test_changelog_names_the_version.py`; the two grammars
-      #     are written twice in two languages and NOTHING
-      #     holds them to each other, which is declared here rather than
-      #     left for the next reader to discover from a red release.
+      #     `tests/test_changelog_names_the_version.py`.
+      #
+      #     THIS BULLET SAID *"the two grammars are written twice in two
+      #     languages and NOTHING holds them to each other"* AND THAT IS
+      #     WITHDRAWN, in both halves. Something does hold them:
+      #     `tests/test_release_gates.py::test_BOTH_readers_of_the_newest_heading_agree`
+      #     drives this extracted body and its Python twin over one corpus,
+      #     and `::test_the_two_readers_agree_over_the_whole_corpus` drives
+      #     both over all 1884 documents of that corpus. And what holds them
+      #     is no longer only each other: the corpus's verdicts come from
+      #     `markdown_it.MarkdownIt("commonmark")`, recorded in
+      #     `tests/_changelog_renderer_corpus.py`, because two readers held
+      #     only to one another can be found to DISAGREE and never to be
+      #     WRONG — which is exactly what happened. What is still true is
+      #     that the em-dash grammar itself is spelled twice, once here and
+      #     once there, and a THIRD spelling of it would be a third thing to
+      #     keep in step.
+      #   * A SETEXT HEADING, A FENCE IT CANNOT MATCH, AND EVERY OTHER SHAPE
+      #     ON THE REFUSAL SIDE OF THE WHITELIST. This bullet list used to
+      #     name the em dash and stop, so this step declared a NARROWER
+      #     blindness than its own Python twin did — the twin's docstring
+      #     named setext and the fence asymmetry and this did not, while both
+      #     readers had the same hole. They are no longer holes: they are
+      #     refusals, listed at the scan below. What is still blind is the
+      #     other direction — this step REFUSES a document a renderer reads
+      #     without difficulty whenever the prefix above the newest heading
+      #     holds a `>` block quote, a list, an HTML block that is not a
+      #     comment, a `---`/`===` underline, a leading tab or seven hashes.
+      #     That is the trade, taken deliberately, and it costs a maintainer
+      #     one edit.
+      #   * THE ATX CLOSING SEQUENCE. `## 0.2.0 — 2026-08-25 ##` renders as an
+      #     `<h2>` whose content is `0.2.0 — 2026-08-25`; `heading_re` below
+      #     keeps the trailing `##`, so the READING differs from the
+      #     renderer's. The VERDICT does not — `2026-08-25 ##` is not the
+      #     tag's date and is not the word `unreleased`, so this step refuses
+      #     it, and
+      #     `tests/test_changelog_names_the_version.py::test_both_halves_of_the_coupling_are_driven`
+      #     drives that rather than leaving it as a sentence. It is outside
+      #     the corpus for that reason.
       #   * WHERE `CHANGELOG.md` IS. The path is relative, so it is read
       #     from this step's working directory, which is the checkout root
       #     because nothing here sets `working-directory:`. That is the same
@@ -1114,11 +1149,27 @@ jobs:
       # Measured on this box, which is where the drive was taken: GNU bash
       # 5.2.21(1)-release.
       #
+      # THE HEADING SCAN BELOW ADDS NO THIRD ONE, and this is a reading of the
+      # constructs rather than a run: `$'\r'`, `${var//pattern/}`,
+      # `${var#pattern}`, `case` with a POSIX class, and `[[ =~ ]]` with
+      # `BASH_REMATCH` are bash 3.2 or older, and the step already used the
+      # last of those for `heading_re`. No bash 3.2 exists on this box to
+      # drive that on, which is why it is stated as a reading and not as a
+      # measurement.
+      #
       # DRIVEN IN BOTH DIRECTIONS, INSIDE THE SUITE, on the body this file
       # ships:
       # `tests/test_release_gates.py::test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry`
       # extracts this step and runs it under `bash -e` against planted trees
-      # carrying real annotated tags with chosen tagger dates. GREEN on the
+      # carrying real annotated tags with chosen tagger dates. Two more drives
+      # run this same body over the RENDERER'S corpus:
+      # `::test_BOTH_readers_of_the_newest_heading_agree` over the named
+      # documents, and `::test_the_two_readers_agree_over_the_whole_corpus`
+      # over all 1884 of them, holding this step's rc=0 to coincide exactly
+      # with the Python twin's reading and holding that reading to what
+      # `markdown_it.MarkdownIt("commonmark")` says the newest `<h2>` is.
+      #
+      # GREEN on the
       # two shapes this repository has actually released — `v0.2.0` over
       # `## 0.2.0 — 2026-08-25` and `v0.1.0` over `## 0.1.0 — 2026-08-12` —
       # and on the same tags spelled without the leading `v`; RED on a
@@ -1212,6 +1263,7 @@ jobs:
           # pattern would step PAST a malformed newest heading and take an
           # older one for the newest, which is a guard reading the absence of
           # a match as the absence of a problem.
+          #
           # THE HEADING RULE IS A RENDERER'S, NOT A REGEX'S, AND AN AUDITOR
           # DROVE WHY. This read `^##[[:space:]]` and its Python twin read
           # `^##\s` over the whole document. Both missed a heading indented by
@@ -1223,50 +1275,198 @@ jobs:
           # HTML comment. Driven, on the body this file shipped: an indented
           # newer heading gave `release.yml gate rc=0`.
           #
+          # AND THE FIX FOR THAT WAS STILL PERMISSIVE IN THREE MORE PLACES,
+          # WHICH A RENDERER FOUND AND A SECOND READING OF THE RULES DID NOT.
+          # The scan toggled `fenced` on ANY ``` or ~~~ line, opened an HTML
+          # comment on any line CONTAINING `<!--`, and knew nothing of setext.
+          # Driven with `markdown_it.MarkdownIt("commonmark")` over every
+          # document of at most three lines on a twelve-token alphabet -- 1884
+          # of them -- against the body this file shipped at `a90862b`:
+          #
+          #   ('```',  '~~~',   '## 0.2.1 - 2026-08-28')   renderer: NO <h2>
+          #   ('```',  '``` t', '## 0.2.1 - 2026-08-28')   renderer: NO <h2>
+          #   ('````', '```',   '## 0.2.1 - 2026-08-28')   renderer: NO <h2>
+          #   ('text', '---',   '## 0.2.1 - 2026-08-28')   renderer: <h2> 'text'
+          #   ('<div>',         '## 0.2.1 - 2026-08-28')   renderer: NO <h2>
+          #
+          # Each one is rc=0 from this step, with the tag's own version and
+          # date echoed, over a document whose newest RENDERED heading names a
+          # different release or is not a heading at all. And in the other
+          # direction, `` `<!--` `` -- the comment opener inside a code span --
+          # opened a comment that ran to EOF and made this step say
+          # "CHANGELOG.md holds no '## ' heading at all" about a file with
+          # several.
+          #
+          # WHAT IT DOES NOW IS REFUSE, NOT PARSE. This step reads only the
+          # PREFIX of the document, up to and including the first '## ' line;
+          # nothing below that line can move which line is newest. In that
+          # prefix it decides exactly three things -- a fenced block (by
+          # CHARACTER, RUN LENGTH and the absence of an info string, which is
+          # CommonMark's actual closing rule), an HTML comment (CommonMark's
+          # HTML block type 2: `<!--` at the START of the line after at most
+          # three spaces, ending on the first line CONTAINING `-->`), and an
+          # ATX heading -- and every other line must be one of a WHITELIST of
+          # shapes that cannot be, or hide, a heading: blank, indented four or
+          # more spaces, another ATX level, or a paragraph line beginning with
+          # a letter, a digit or a code span. Anything else STOPS THE SCAN and
+          # is refused by name.
+          #
+          # THE DEFAULT IS REFUSAL AND THAT IS THE TRADE, made deliberately: a
+          # `>` block quote, a `- ` or `1. ` list, a `<div>`, a `---` or `===`
+          # setext underline, a leading tab, seven hashes -- all of them are
+          # legal Markdown that a renderer reads without difficulty, and all of
+          # them are refused here. Refusing an exotic-but-valid CHANGELOG.md
+          # costs a maintainer one edit. Passing one costs a wrong release note
+          # standing beside an artefact PyPI cannot unpublish. A construct
+          # nobody here has thought of lands in the refusal branch rather than
+          # being stepped over, which is the direction a whitelist buys and a
+          # list of known hazards does not.
+          #
           # Four leading spaces is an indented code block and is deliberately
           # NOT a heading, which is why the bound is three. `##` with nothing
           # after it IS a heading line and is refused by `heading_re` below,
           # which is the point -- refusing beats reading past.
-          heading_any='^ {0,3}##([[:space:]]|$)'
+          #
+          # THE PATTERNS ARE APPLIED TO `rest`, the line with its (at most
+          # three) leading blanks removed, so `^##` here means what
+          # `^ {0,3}##` meant before: the indent has already been decided
+          # above. A backtick cannot be written into a single-quoted bash
+          # regex in this YAML without the backslash surviving into the
+          # pattern -- driven: the first attempt made every line read as a
+          # fence and the gate reported "no '## ' heading at all" on a
+          # changelog whose first line is one -- so fence runs are counted
+          # with `case` and parameter expansion, and the one regex that needs
+          # a backtick is built from `bt`.
+          heading_any='^##([[:space:]]|$)'
           heading_re='^[[:space:]]*##[[:space:]]+([0-9][0-9A-Za-z._+!-]*)[[:space:]]+—[[:space:]]+([^[:space:]].*[^[:space:]]|[^[:space:]])[[:space:]]*$'
+          atx_any='^#{1,6}([[:blank:]]|$)'
+          ordered_li='^[0-9]{1,9}[.)]([[:blank:]]|$)'
+          bt='`'
+          paragraph="^[A-Za-z0-9${bt}]"
           heading=""
           heading_version=""
           heading_rest=""
+          undecided=""
+          undecided_at=0
           if [ ! -f CHANGELOG.md ] || [ ! -r CHANGELOG.md ]; then
             problems+=("there is no readable regular file called CHANGELOG.md at the root of the tagged tree, so the release note this tag claims to carry cannot be read at all.")
           else
-            fenced=0
+            fence_char=""
+            fence_run=0
             in_comment=0
+            lineno=0
             while IFS= read -r line || [ -n "${line}" ]; do
+              lineno=$(( lineno + 1 ))
+              # `read -r` keeps a CRLF file's carriage return on the line and
+              # nothing below tolerates one in the middle of a pattern, so it
+              # comes off here. The Python twin splits on '\n' and does the
+              # same, rather than on `str.splitlines()`, which breaks on eight
+              # boundaries neither CommonMark nor `read` knows.
+              line="${line%$'\r'}"
               if [ "${in_comment}" -eq 1 ]; then
                 case "${line}" in *'-->'*) in_comment=0 ;; esac
                 continue
               fi
-              # A FENCE IS MATCHED WITH `case` AND NOT A REGEX, because a
-              # backtick cannot be written into a single-quoted bash regex in
-              # this YAML without the backslash surviving into the pattern --
-              # driven: the first attempt made every line read as a fence and
-              # the gate reported "no '## ' heading at all" on a changelog
-              # whose first line is one.
-              case "${line}" in
-                '```'*|' ```'*|'  ```'*|'   ```'*|\
-                '~~~'*|' ~~~'*|'  ~~~'*|'   ~~~'*)
-                  fenced=$(( 1 - fenced )); continue ;;
-              esac
-              if [ "${fenced}" -eq 0 ]; then
-                case "${line}" in
-                  *'<!--'*'-->'*) : ;;
-                  *'<!--'*) in_comment=1; continue ;;
-                esac
+              # THE LINE, SPLIT INTO ITS LEADING BLANKS AND THE REST. Every
+              # rule below is stated in terms of an indent of at most three
+              # SPACES, so the indent is measured once, here.
+              lead=""
+              rest="${line}"
+              if [[ "${line}" =~ ^([[:blank:]]*)(.*)$ ]]; then
+                lead="${BASH_REMATCH[1]}"
+                rest="${BASH_REMATCH[2]}"
               fi
-              [ "${fenced}" -eq 1 ] && continue
-              if [[ "${line}" =~ $heading_any ]]; then
+              lead_tab=0
+              case "${lead}" in *$'\t'*) lead_tab=1 ;; esac
+              # THE FENCE DELIMITER: which character, and how long a run.
+              # Counted with parameter expansion because the pattern is a
+              # quoted variable, which cannot glob and cannot be
+              # command-substituted.
+              fchar=""
+              case "${rest}" in
+                '`'*) fchar='`' ;;
+                '~'*) fchar='~' ;;
+              esac
+              frun=0
+              finfo="${rest}"
+              if [ -n "${fchar}" ]; then
+                while [ "${finfo#"${fchar}"}" != "${finfo}" ]; do
+                  finfo="${finfo#"${fchar}"}"
+                  frun=$(( frun + 1 ))
+                done
+              fi
+              # INSIDE A FENCE, nothing is a heading and only a matching
+              # closer gets out: same character, a run at least as long, no
+              # info string, at most three spaces of indent. A tab in the
+              # indent is four columns to CommonMark and so is not a closer.
+              if [ -n "${fence_char}" ]; then
+                if [ "${lead_tab}" -eq 0 ] && [ "${#lead}" -le 3 ] \
+                   && [ "${fchar}" = "${fence_char}" ] \
+                   && [ "${frun}" -ge "${fence_run}" ] \
+                   && [ -z "${finfo//[[:blank:]]/}" ]; then
+                  fence_char=""
+                  fence_run=0
+                fi
+                continue
+              fi
+              # A BLANK LINE closes a paragraph and opens nothing.
+              [ -z "${rest}" ] && continue
+              # A TAB IN THE INDENT expands to the next four-column stop and
+              # this grammar does not do column arithmetic, so it is refused
+              # rather than guessed at.
+              if [ "${lead_tab}" -eq 1 ]; then
+                undecided="${line}"; undecided_at="${lineno}"; break
+              fi
+              # FOUR OR MORE SPACES is an indented code block, or the lazy
+              # continuation of a paragraph. Neither can be a heading, whose
+              # indent is bounded at three.
+              [ "${#lead}" -ge 4 ] && continue
+              # A FENCE OPENER. A BACKTICK fence's info string may not itself
+              # hold a backtick; `` ``` a`b `` is a paragraph, and falls
+              # through to the whitelist, where a leading backtick is a code
+              # span.
+              if [ "${frun}" -ge 3 ]; then
+                if [ "${fchar}" = '~' ] || [ "${finfo#*"${bt}"}" = "${finfo}" ]; then
+                  fence_char="${fchar}"
+                  fence_run="${frun}"
+                  continue
+                fi
+              fi
+              # AN HTML COMMENT, by CommonMark's HTML-block rule and not by
+              # substring: the line must BEGIN with `<!--`. A comment that
+              # opens and closes on one line is one line of HTML and nothing
+              # more.
+              case "${rest}" in
+                '<!--'*)
+                  case "${line}" in *'-->'*) : ;; *) in_comment=1 ;; esac
+                  continue ;;
+              esac
+              if [[ "${rest}" =~ $heading_any ]]; then
                 heading="${line}"
                 break
               fi
+              # THE WHITELIST. Another ATX level, or a paragraph line -- and
+              # an ordered-list marker is NOT one, because a list item's
+              # content is indented four columns, where a `## ` heading is
+              # still a heading to a renderer and is invisible to a reader
+              # bounded at three.
+              [[ "${rest}" =~ $atx_any ]] && continue
+              if [[ "${rest}" =~ $paragraph ]] && ! [[ "${rest}" =~ $ordered_li ]]; then
+                continue
+              fi
+              undecided="${line}"; undecided_at="${lineno}"; break
             done < CHANGELOG.md
-            if [ -z "${heading}" ]; then
-              problems+=("CHANGELOG.md holds no '## ' heading at all, so there is no newest release heading for this tag to agree with.")
+            # THE FLAG IS THE LINE NUMBER AND NOT THE LINE. `[ -n
+            # "${undecided}" ]` reads a refused line as "nothing was refused"
+            # if that line is empty, and while nothing above can set it empty
+            # -- a blank line `continue`s before either refusal branch -- a
+            # guard whose correctness depends on a fact three branches away is
+            # a guard one edit from being wrong. `undecided_at` is 0 or a real
+            # line number.
+            if [ "${undecided_at}" -ne 0 ]; then
+              problems+=("line ${undecided_at} of CHANGELOG.md stands ABOVE the newest heading and is a shape this step cannot decide: [${undecided}]. This is a line grammar, not a CommonMark parser, and the shapes it will step over are a whitelist -- blank, indented four spaces, another ATX level, or a paragraph line beginning with a letter, a digit or a code span. A setext underline (--- or ===), a block quote, a list marker, an HTML block that is not a comment and a leading tab all stop it here, because each of them can put a heading somewhere this reader cannot see, and stepping past one is how a gate returns rc=0 over a document whose real newest heading names another release. Rewrite the prefix above the newest heading, or move the heading above it.")
+            elif [ -z "${heading}" ]; then
+              problems+=("CHANGELOG.md holds no '## ' heading at all, so there is no newest release heading for this tag to agree with. A fenced block or an HTML comment left open swallows everything below it and reads the same way, which is what a renderer does with it too.")
             elif [[ "${heading}" =~ $heading_re ]]; then
               heading_version="${BASH_REMATCH[1]}"
               heading_rest="${BASH_REMATCH[2]}"

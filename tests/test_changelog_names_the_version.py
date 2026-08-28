@@ -190,43 +190,231 @@ def is_unshipped(version: str) -> bool:
 #: heading, which is why the bound is three.
 _HEADING_LINE = re.compile(r"^ {0,3}##(?:\s|$)")
 
-#: A fence opener or closer, ``` or ~~~, indented up to three spaces. A `##`
-#: inside a fenced block is source, not a heading.
-_FENCE_LINE = re.compile(r"^ {0,3}(?:```|~~~)")
+#: A FENCED-CODE DELIMITER, spelled the way CommonMark spells one: up to three
+#: leading spaces, then a run of THREE OR MORE backticks or tildes, then the
+#: info string. The run and the character are captured because both decide
+#: whether a later line CLOSES this block — see :func:`newest_heading_line`.
+#:
+#: **THIS USED TO BE `^ {0,3}(?:```|~~~)` AND THE SCAN TOGGLED ON IT.** Under
+#: that reading any delimiter closed any block, so ```` ``` ```` followed by
+#: `~~~` left the scan believing it was OUTSIDE a fence the renderer had left
+#: OPEN, and the next `## ` line — code, to a renderer — was taken as the
+#: newest heading. Driven; see :func:`newest_heading_line`.
+_FENCE_LINE = re.compile(r"^ {0,3}(?P<run>`{3,}|~{3,})(?P<info>.*)$")
+
+#: CommonMark's HTML block **type 2**, which is what an HTML comment is: the
+#: line must BEGIN with `<!--`, after at most three spaces. The block ends on
+#: the first line CONTAINING `-->`, that line included.
+#:
+#: **THIS USED TO BE THE SUBSTRING TEST `"<!--" in line`**, which opened a
+#: comment on any line MENTIONING the sequence — inside a code span, inside a
+#: sentence — and ran it to end of file. Driven on the 1884-document corpus at
+#: `tests/_changelog_renderer_corpus.py`: **20** of them were refused with
+#: *"CHANGELOG.md holds no `## ` heading at all"* over a document whose newest
+#: `<h2>` the renderer reads without difficulty, and all 20 of the 20 carry
+#: the alphabet's `` `<!--` `` token — a code span, which is inline and opens
+#: no block at all.
+_COMMENT_OPEN = re.compile(r"^ {0,3}<!--")
+
+# --- the shapes the scan may STEP OVER, and why that is a whitelist ---------
+#
+# THE SCAN READS ONLY THE PREFIX OF THE DOCUMENT UP TO ITS FIRST `## ` LINE.
+# Everything below that line is somebody else's problem: the newest heading is
+# a POSITION, and no line after it can move it. So the only lines this reader
+# has to be right about are the ones standing above the heading — a comment, a
+# title, some prose — and the question for each of them is not "what is it"
+# but "can this grammar be SURE it is not, and does not hide, a heading".
+#
+# **THE ANSWER IS A WHITELIST AND THE DEFAULT IS REFUSAL.** A line in that
+# prefix that is not one of the shapes below stops the scan with
+# :exc:`UndecidedChangelogShape`. That is the opposite shape from a list of
+# hazards: a CommonMark construct nobody here thought of — a block quote, a
+# list item, an HTML block that is not a comment, a leading tab — lands in the
+# refusal branch rather than being stepped over, and a release gate is allowed
+# to be conservative. Refusing an exotic-but-valid `CHANGELOG.md` costs a
+# maintainer one edit. Passing one costs a wrong release note standing beside
+# an artefact that cannot be unpublished, only yanked.
+#
+# Every member below is DRIVEN INERT against a real CommonMark renderer rather
+# than argued from a reading of the specification — see
+# `tests/_changelog_renderer_corpus.py` and
+# `tests/test_release_gates.py::test_BOTH_readers_of_the_newest_heading_agree`.
+# Adding a member means adding a document to that corpus and regenerating it
+# with the renderer.
+
+#: Whitespace only. Closes a paragraph and an HTML block of type 6 or 7;
+#: cannot make or hide a heading.
+_BLANK_LINE = re.compile(r"^[ \t]*$")
+
+#: Four or more leading SPACES. Either an indented code block or the lazy
+#: continuation of a paragraph, and neither can be a `##` heading — a heading
+#: line is bounded at three spaces of indent, which is the whole reason
+#: `_HEADING_LINE`'s bound is three.
+_INDENTED_LINE = re.compile(r"^ {4}")
+
+#: An ATX heading of some level OTHER than two — level two has already
+#: returned by the time this is reached. A heading closes whatever stands
+#: above it and opens nothing.
+_ATX_LINE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|$)")
+
+#: A paragraph line: nothing that begins a CommonMark block begins with a
+#: letter, a digit or a backtick run shorter than three, EXCEPT the ordered
+#: list below. A backtick run of three or more has already been taken as a
+#: fence delimiter; a run of one or two opens a code SPAN, which is inline and
+#: cannot swallow the line beneath it.
+_PARAGRAPH_LINE = re.compile(r"^ {0,3}[A-Za-z0-9`]")
+
+#: ...and the one carve-out. `1. item` begins with a digit and is an ordered
+#: LIST, whose content is indented four columns — where a `## ` heading is
+#: still a heading to a renderer and is invisible to a reader bounded at three.
+#: Driven: `1. text` / blank / `    ## 9.9.9 — 2000-01-01` renders an `<h2>`
+#: this scan would step over.
+_ORDERED_LIST_LINE = re.compile(r"^ {0,3}\d{1,9}[.)](?:[ \t]|$)")
 
 
-def heading_lines(text: str):
-    """`(line number, line)` for every line a RENDERER would make an `<h2>`.
+def _lines(text: str) -> list[str]:
+    """`text` split the way `read -r` in `release.yml` splits it.
 
-    Fenced blocks and HTML comments are skipped, because a `##` inside either
-    is not a heading to any reader but a regex. The scan is line-by-line so
-    that nothing can fuse two lines into one heading.
+    `str.splitlines()` — what this used to call — breaks on eight boundaries
+    CommonMark does not know and `read` does not either: `\\v`, `\\f`,
+    `\\x1c`, `\\x1d`, `\\x1e`, `\\x85`, `\\u2028`, `\\u2029`. A form feed made
+    this twin see two lines where the bash gate and the renderer both see one,
+    and read a `## ` heading out of the second half of one paragraph.
+    Splitting on `\\n` and dropping a trailing `\\r` is exactly `IFS= read -r
+    line`, which is the point: these two readers are twins and the line
+    boundary is part of the grammar.
 
-    **Its reach, stated:** this is a line grammar, not a Markdown parser. It
-    does not know setext headings (`Release\n=======`), a fence opened with a
-    longer run than it is closed with, or an HTML comment opened inside a
-    fence. Those are all shapes `CHANGELOG.md` does not use, and a heading it
-    misses is stepped past — which is the direction :func:`newest_heading`
-    refuses, so a miss here becomes a refusal there rather than a silent
-    older reading.
+    DRIVEN, not reasoned: the corpus row *"a form feed is not a line break"*
+    in `tests/_changelog_renderer_corpus.py`, red on the `splitlines()`
+    reading at
+    `tests/test_release_gates.py::test_BOTH_readers_of_the_newest_heading_agree`
+    — the twin reads `9.9.9` out of the second half of one paragraph where
+    the renderer reads `0.2.0`. Measured on that document: the bash gate,
+    which never had this, reads `0.2.0 — 2026-08-25` and returns rc=0, so the
+    two readers had DRIFTED as well as one of them being wrong. That row
+    reddens on the twin's assertion first, which is why this paragraph states
+    the drift rather than pointing at a second red.
     """
-    fenced = False
+    out = text.split("\n")
+    if out and out[-1] == "":
+        out.pop()
+    return [line[:-1] if line.endswith("\r") else line for line in out]
+
+
+def newest_heading_line(text: str) -> tuple[int, str] | None:
+    """`(line number, line)` for the line a RENDERER would make the first `<h2>`.
+
+    `None` means the document has no such line. :exc:`UndecidedChangelogShape`
+    means the prefix above it holds a shape this grammar cannot decide, and
+    that is a REFUSAL rather than a guess — see the whitelist above.
+
+    **THIS FUNCTION WAS CALLED `heading_lines`, IT YIELDED EVERY HEADING, AND
+    ITS DOCSTRING LICENSED THE TWO DEFECTS THIS ONE CLOSES.** What it said,
+    verbatim:
+
+        *"**Its reach, stated:** this is a line grammar, not a Markdown
+        parser. It does not know setext headings (`Release\\n=======`), a
+        fence opened with a longer run than it is closed with, or an HTML
+        comment opened inside a fence. Those are all shapes `CHANGELOG.md`
+        does not use, and a heading it misses is stepped past — which is the
+        direction :func:`newest_heading` refuses, so a miss here becomes a
+        refusal there rather than a silent older reading."*
+
+    **THE LAST CLAUSE IS FALSE IN THE PERMISSIVE DIRECTION, AND IT IS THE
+    SENTENCE THAT LICENSED LEAVING BOTH SHAPES UNHANDLED.** A miss does not
+    become a refusal. The scan steps past the heading it missed and reaches a
+    LATER `## ` line, which parses, agrees with the tag, and returns rc=0 —
+    with the document's real newest heading naming a different release, or
+    naming nothing at all because it is inside a code block. Driven against
+    `markdown-it-py`'s CommonMark preset, at the old reader:
+
+        `` ``` `` / `~~~` / `## 0.2.1 — 2026-08-28`
+            old reader -> ('0.2.1', '2026-08-28');  renderer -> no <h2> at all
+        `text` / `---` / `## 0.2.1 — 2026-08-28`
+            old reader -> ('0.2.1', '2026-08-28');  renderer -> the <h2> is 'text'
+
+    **WHAT THIS READER DOES INSTEAD, and it is refusal rather than
+    CommonMark.** The fence rule IS implemented, because it is exact and small
+    — a fence closes only on the same character, a run at least as long, and
+    no info string. Setext is NOT implemented and is not meant to be: a
+    `---` or `===` line above the first heading is a shape whose first
+    character is not on the whitelist, so it stops the scan. So does `>`, so
+    does `- `, so does `<div>`, so does a leading tab. The line grammar's
+    answer to "I cannot decide this" is now a named refusal instead of a step.
+
+    **THE MEASUREMENT, dated, because the paragraph above is an argument and
+    this is the evidence.** Taken 2026-08-28 at this branch's tree, with
+    `markdown-it-py` 4.2.0's CommonMark preset as the oracle, over every
+    document of at most three lines on a TWENTY-token alphabet — 8420 of them
+    — carrying the shapes `tests/_changelog_renderer_corpus.py`'s own
+    twelve-token alphabet cannot reach: an indented heading, a tab-indented
+    one, a backtick run of four, a block quote, a bullet list, an ordered
+    list, a `<div>`, a fourth-level ATX heading and a link reference
+    definition. The bash gate driven here is the real extracted step body of
+    `.github/workflows/release.yml`, not a copy of it.
+
+        readers                     unsound   twin drift   refusals the
+                                                            renderer reads
+        this branch                       0            0            1408
+        `a90862b` (Python twin only)    112            —             906
+
+    **Zero and 1408 is the whole trade in two numbers.** Nothing is read that
+    a renderer does not read; a great deal that a renderer reads is refused.
+    The 8420 are not in the suite — what is in the suite is the 1884-document
+    corpus, at
+    `tests/test_release_gates.py::test_the_two_readers_agree_over_the_whole_corpus`,
+    where the same two numbers are 0 and 56 and the `a90862b` readers are 35
+    and 20.
+
+    **WHAT IT STILL CANNOT SEE.**
+
+    * **The ATX closing sequence.** `## 0.2.0 — 2026-08-25 ##` renders with
+      the trailing `##` stripped; :data:`_HEADING` keeps it, so the two
+      READINGS differ. The VERDICT does not: `2026-08-25 ##` is not an ISO
+      date and is not the word *unreleased*, so every caller refuses it, and
+      :func:`test_both_halves_of_the_coupling_are_driven` drives that rather
+      than asserting it here. It is outside the corpus for that reason.
+    * **Anything below the heading it returns.** The scan stops there.
+    * **Whether `CHANGELOG.md` is the document the release ships.** That is
+      `pyproject.toml`'s allowlist and `tests/test_sdist_contents.py`.
+    """
+    fence: tuple[str, int] | None = None
     in_comment = False
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(_lines(text), 1):
         if in_comment:
             if "-->" in line:
                 in_comment = False
             continue
-        if _FENCE_LINE.match(line):
-            fenced = not fenced
+        delimiter = _FENCE_LINE.match(line)
+        if fence is not None:
+            if delimiter is not None:
+                run, info = delimiter.group("run"), delimiter.group("info")
+                if (run[0] == fence[0] and len(run) >= fence[1]
+                        and not info.strip()):
+                    fence = None
             continue
-        if not fenced and "<!--" in line and "-->" not in line:
-            in_comment = True
-            continue
-        if fenced:
+        if delimiter is not None:
+            run, info = delimiter.group("run"), delimiter.group("info")
+            # A BACKTICK fence's info string may not itself hold a backtick;
+            # `` ``` a`b `` is a paragraph, not a fence, and falls through to
+            # the whitelist below — where a leading backtick is a code span.
+            if run[0] != "`" or "`" not in info:
+                fence = (run[0], len(run))
+                continue
+        if _COMMENT_OPEN.match(line):
+            if "-->" not in line:
+                in_comment = True
             continue
         if _HEADING_LINE.match(line):
-            yield number, line
+            return number, line
+        if (_BLANK_LINE.match(line)
+                or _INDENTED_LINE.match(line)
+                or _ATX_LINE.match(line)
+                or (_PARAGRAPH_LINE.match(line)
+                    and not _ORDERED_LIST_LINE.match(line))):
+            continue
+        raise UndecidedChangelogShape(number, line)
+    return None
 
 
 def headings(text: str) -> list[tuple[str, str]]:
@@ -263,13 +451,16 @@ def newest_heading(text: str) -> tuple[str, str] | None:
     newest heading is a refusal and never a step past. The two readers now
     agree about what "newest" means, which they did not.
 
+    **THREE OUTCOMES, NOT TWO, AND THE THIRD ARRIVED WITH THE RENDERER.**
     `None` means **no `## ` line at all**; a line that is present and does not
-    parse raises :exc:`MalformedNewestHeading`, because a can't-read resolving
-    to the same answer as a nothing-to-read is how the two stop being
-    distinguishable — and they are the two cases the caller's message has to
-    tell apart.
+    parse raises :exc:`MalformedNewestHeading`; and a PREFIX above the heading
+    that this line grammar cannot decide raises
+    :exc:`UndecidedChangelogShape`, which :func:`newest_heading_line` explains
+    at length. A can't-read resolving to the same answer as a nothing-to-read
+    is how two cases stop being distinguishable, and each of these three is a
+    different thing for a maintainer to do.
     """
-    first = next(iter(heading_lines(text)), None)
+    first = newest_heading_line(text)
     if first is None:
         return None
     _, line = first
@@ -285,6 +476,45 @@ class MalformedNewestHeading(ValueError):
     Its own exception type rather than a `None`, so that a caller cannot
     handle it by accident with the same branch that handles an empty file.
     """
+
+
+class UndecidedChangelogShape(ValueError):
+    """A line ABOVE the newest heading that this line grammar cannot decide.
+
+    Its own exception type, and a THIRD outcome rather than a second spelling
+    of one of the other two, because the three are three different things a
+    maintainer has to do: `None` is *write a heading*,
+    :exc:`MalformedNewestHeading` is *fix the heading you wrote*, and this is
+    *the prefix above your heading uses a construct this gate will not guess
+    at — simplify it, or move the heading above it*.
+
+    **IT EXISTS BECAUSE THE ALTERNATIVE WAS A GUESS THAT WENT THE PERMISSIVE
+    WAY.** Before it, a shape the scan could not decide was simply stepped
+    over, and the scan then found a LATER heading that parsed and agreed with
+    the tag. The document's real newest heading — a setext `<h2>`, or nothing
+    at all because a fence the scan thought closed was still open — never
+    reached the comparison. See :func:`newest_heading_line`.
+    """
+
+    def __init__(self, number: int, line: str) -> None:
+        super().__init__(number, line)
+        self.number = number
+        self.line = line
+
+    def __str__(self) -> str:
+        return (
+            f"line {self.number} of the changelog is a shape this gate "
+            f"cannot decide, and it stands ABOVE the newest heading: "
+            f"{self.line!r}. This reader is a line grammar, not a CommonMark "
+            f"parser, and the shapes it steps over are a whitelist — blank, "
+            f"indented four spaces, another ATX level, or a paragraph line "
+            f"beginning with a letter, a digit or a code span. Everything "
+            f"else stops it here rather than being stepped past to a later "
+            f"heading that happens to agree with the tag. Setext underlines "
+            f"(`---`, `===`), block quotes, list markers and HTML blocks that "
+            f"are not comments all land here. Rewrite the prefix above the "
+            f"newest heading, or move the heading above it."
+        )
 
 
 def test_the_newest_changelog_heading_names_this_version():
@@ -461,8 +691,12 @@ def test_the_routed_date_check_is_in_this_workflow():
       never reaches its `exit 1` satisfies every assertion here. What decides
       that is
       `tests/test_release_gates.py::test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry`,
-      which runs this same extracted body against planted trees, and
-      `::test_the_changelog_gate_reads_the_NEWEST_heading_by_POSITION`.
+      which runs this same extracted body against planted trees,
+      `::test_the_changelog_gate_reads_the_NEWEST_heading_by_POSITION`, and
+      the two drives that hold the step's line grammar to a RENDERER rather
+      than to this module's twin of it —
+      `::test_BOTH_readers_of_the_newest_heading_agree` and
+      `::test_the_two_readers_agree_over_the_whole_corpus`.
     * IT CANNOT SEE WHETHER THE WORKFLOW RUNS AT ALL — the `on:` trigger, the
       repository's own branch protection, whether the `pypi` environment
       exists. That is the runner's furniture and no test here reaches it.
@@ -584,6 +818,19 @@ def test_both_halves_of_the_coupling_are_driven():
         "this check would pass forever on a changelog frozen at the moment "
         "before the release it documents"
     )
+    # THE ATX CLOSING SEQUENCE, which is the one CommonMark shape both
+    # readers read DIFFERENTLY from a renderer and neither refuses at the
+    # scan. `## 0.2.0 — 2026-08-25 ##` renders as an `<h2>` whose content is
+    # `0.2.0 — 2026-08-25`; :data:`_HEADING` keeps the trailing `##` in
+    # `rest`. The claim made about that beside
+    # :func:`newest_heading_line` — that the VERDICT is a refusal even though
+    # the READING differs — is driven here rather than asserted there, in both
+    # of the shapes a caller can be in. It is outside
+    # `tests/_changelog_renderer_corpus.py` for the same reason: the corpus
+    # holds readings to the renderer's, and this one is not one.
+    assert verdict("0.2.0", "## 0.2.0 — 2026-08-25 ##\n") == "should-be-dated"
+    assert verdict("0.2.0.dev0", "## 0.2.0 — unreleased ##\n") == "should-be-unreleased"
+
     # ... and the release-segment surgery is the thing both halves rest on.
     for build, release in (
         ("0.2.0.dev0", "0.2.0"), ("1.0.0rc1", "1.0.0"), ("0.9.0b2", "0.9.0"),

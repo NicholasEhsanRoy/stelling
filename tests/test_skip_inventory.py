@@ -540,6 +540,17 @@ DECLARED_OPTIONAL_DEPENDENCIES = frozenset(
         "maddening",  # the pinned-jax reproducer library, test-only
         "jaxfluids",  # the WENO5 acceptance subject, test-only
         "hypothesis",  # the property suite's driver, dev-group, test-only
+        # THE CHANGELOG GATE'S ORACLE, dev-group, test-only. A CommonMark
+        # renderer, and the only thing in this repository that can say the two
+        # readers of `CHANGELOG.md`'s newest heading are WRONG rather than
+        # merely in agreement with each other. It is installed in NONE of the
+        # three merge lanes — measured 2026-08-28, `import markdown_it` is
+        # `ModuleNotFoundError` on `stelling-jax`, `stelling-nojax` and
+        # `stelling-jax010` alike — so the corpus it produces is CHECKED IN
+        # (`tests/_changelog_renderer_corpus.py`) and both readers are driven
+        # against it in every lane. The one test that needs the library is the
+        # one that asks whether that recording is still what the renderer says.
+        "markdown_it",
     }
 )
 
@@ -594,6 +605,30 @@ PINNED = (
         "this module stays collectable there (48 of 52 rows still run) rather "
         "than taking `importorskip` at module scope for one transitive "
         "dependency of jax.",
+    ),
+    Pinned(
+        "tests/test_release_gates.py::"
+        "test_the_recorded_renderer_verdicts_are_still_the_renderers",
+        ("markdown_it",),
+        "the FRESHNESS half of the changelog-heading oracle. Two readers "
+        "decide which line of `CHANGELOG.md` is the newest heading — a bash "
+        "line grammar in `.github/workflows/release.yml` and its Python twin "
+        "— and held only to each other they can be found to DISAGREE but "
+        "never to be WRONG. What found them wrong was a CommonMark renderer, "
+        "and no merge lane has one. So the renderer's verdict on 1884 "
+        "documents is recorded in `tests/_changelog_renderer_corpus.py` and "
+        "driven in EVERY lane; this test is the only thing that re-derives "
+        "that column and can notice it has gone stale — a newer CommonMark, a "
+        "newer markdown-it-py, or a column edited by hand to agree with a "
+        "broken reader. WHAT THE SKIP COSTS, said plainly because 'the oracle "
+        "is absent' reads like 'nothing is checked': the lanes keep the whole "
+        "corpus and both drives over it, and lose only the check that the "
+        "recording is current. WHAT NO LANE HAS is a defence against an "
+        "author who edits a verdict AND the reader together; that is stated "
+        "in the corpus's own docstring and is why regeneration is one "
+        "command. `markdown-it-py` is in the dev group of `pyproject.toml` "
+        "for the same reason `hypothesis` is: routable rather than "
+        "remembered.",
     ),
 )
 
