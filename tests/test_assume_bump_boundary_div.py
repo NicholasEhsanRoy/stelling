@@ -877,6 +877,19 @@ _EXACT_RULES = {
     "div": lambda a, b: [x / y for x, y in zip(a, b)],
     "add": lambda a, b: [x + y for x, y in zip(a, b)],
     "sub": lambda a, b: [x - y for x, y in zip(a, b)],
+    # the 0.3.0 census additions that are elementwise binaries. `max`/`min`
+    # are here as VALUES; the rule's asymmetry (one certified operand is
+    # enough) is a claim about the rule, and this table is what decides
+    # whether that claim is true of the numbers.
+    "max": lambda a, b: [x if x > y else y for x, y in zip(a, b)],
+    "min": lambda a, b: [x if x < y else y for x, y in zip(a, b)],
+    # comparisons are EVALUATED rather than skipped, because `select_n`
+    # needs its selector's value. They were skipped when the only
+    # comparison in these queries was the assume's own predicate.
+    "gt": lambda a, b: [Fraction(int(x > y)) for x, y in zip(a, b)],
+    "lt": lambda a, b: [Fraction(int(x < y)) for x, y in zip(a, b)],
+    "ge": lambda a, b: [Fraction(int(x >= y)) for x, y in zip(a, b)],
+    "le": lambda a, b: [Fraction(int(x <= y)) for x, y in zip(a, b)],
 }
 
 # The UNARY half of the same table. Added when the boundary dial's
@@ -884,20 +897,60 @@ _EXACT_RULES = {
 # members of `propagate._STRICT_SIGN_PRIMITIVES`, so all three can mint a
 # certificate this oracle then has to be able to check. Exact rationals
 # throughout: `x * x` is exact in `Fraction`, so `square` needs no float.
+# The census branch then added the ROUTING members below — `copy`,
+# `stop_gradient`, `reshape`, `squeeze` — which are the identity on a
+# C-order-flat value, and `sqrt`, which is exact or refuses.
 _EXACT_UNARY = {
     "neg": lambda a: [-x for x in a],
-    "square": lambda a: [x * x for x in a],
     "abs": lambda a: [abs(x) for x in a],
+    "square": lambda a: [x * x for x in a],
+    "copy": lambda a: list(a),
+    "stop_gradient": lambda a: list(a),
+    "reshape": lambda a: list(a),      # C-order flat: the elements are the same
+    "squeeze": lambda a: list(a),      # ditto — only size-1 axes go away
 }
+
+
+def _exact_sqrt(q):
+    """The exact rational square root, or a refusal.
+
+    This evaluator is an EXACT witness or it is nothing: a floating
+    `math.sqrt` here would put the propagator's own rounding question back
+    into the instrument that is supposed to be independent of it. So the
+    queries that exercise the `sqrt` rule are built to square first, and a
+    non-square operand raises rather than being approximated."""
+    if q < 0:
+        raise AssertionError(f"sqrt of a negative rational: {q}")
+    n, d = q.numerator, q.denominator
+    rn, rd = math.isqrt(n), math.isqrt(d)
+    if rn * rn != n or rd * rd != d:
+        raise AssertionError(
+            f"sqrt({q}) is irrational and this evaluator is exact or it "
+            f"raises — build the query so the operand is a perfect square"
+        )
+    return Fraction(rn, rd)
+
 
 
 def _exact_eval(eqns, point, env=None):
     """Evaluate the arithmetic spine of a built query in exact Fractions.
 
     `point` is the list of Fractions bound to var 0. Returns
-    `var id -> list[Fraction]`. Only the primitives these queries use are
-    implemented; anything else raises, so a query that grows a new
-    primitive cannot silently skip its own check.
+    `var id -> list[Fraction]`, values held FLAT in C order. Only the
+    primitives these queries use are implemented; anything else raises, so
+    a query that grows a new primitive cannot silently skip its own check.
+
+    **WHAT THIS EVALUATOR DOES NOT REACH.** It is one-dimensional and
+    C-order-flat: `concatenate`, `slice` and `split` below are implemented
+    for rank-1 operands along axis 0, which is what the queries here build,
+    and a rank-2 operand would be evaluated WRONG rather than refused. That
+    is why the census's INDEXING members — `gather`, `scatter`,
+    `scatter-add`, `dynamic_slice`, `dynamic_update_slice` — are not
+    checked here at all: their admitted forms are row shapes over rank >= 1
+    operands with dimension-number params, and re-implementing that
+    geometry in this evaluator would be a second copy of the thing under
+    test. They are checked end-to-end against EXECUTED jax instead, in
+    `tests/test_strict_sign_census.py`.
 
     **IT DESCENDS A TRANSPARENT WRAPPER**, because the boundary dial gave
     the propagator a way to certify a value on the far side of one and
@@ -931,8 +984,13 @@ def _exact_eval(eqns, point, env=None):
     for e in eqns:
         prim = e.primitive
         if prim in ("stelling_any", "stelling_assume", "stelling_assert",
-                    "gt", "lt", "ge", "le"):
+                    "stelling_nonvacuity"):
             continue
+
+        def val(atom):
+            if isinstance(atom, ir.Literal):
+                return [Fraction(atom.val)]
+            return env[atom.id]
         if prim in DEFAULT_TRANSPARENT:
             body = next(v for k, v in e.params if k == "jaxpr")
             for inner_in, atom in zip(body.jaxpr.invars, e.invars):
@@ -950,8 +1008,45 @@ def _exact_eval(eqns, point, env=None):
         if prim == "reduce_sum":
             env[out] = [sum(val(e.invars[0]), Fraction(0))]
             continue
+        if prim == "sqrt":
+            env[out] = [_exact_sqrt(x) for x in val(e.invars[0])]
+            continue
         if prim in _EXACT_UNARY:
             env[out] = _EXACT_UNARY[prim](val(e.invars[0]))
+            continue
+        if prim == "select_n":
+            which = val(e.invars[0])
+            cases = [val(a) for a in e.invars[1:]]
+            n = len(cases[0])
+            if len(which) == 1:
+                which = which * n
+            env[out] = [cases[int(which[i])][i] for i in range(n)]
+            continue
+        if prim == "concatenate":
+            assert int(dict(e.params).get("dimension", 0)) == 0
+            flat = []
+            for a in e.invars:
+                flat.extend(val(a))
+            env[out] = flat
+            continue
+        if prim == "slice":
+            pr = dict(e.params)
+            src = val(e.invars[0])
+            lo = tuple(pr["start_indices"])[0]
+            hi = tuple(pr["limit_indices"])[0]
+            st = (tuple(pr["strides"]) or (1,))[0] if pr.get("strides") else 1
+            env[out] = list(src[lo:hi:st])
+            continue
+        if prim == "split":
+            src = val(e.invars[0])
+            assert int(dict(e.params).get("axis", 0)) == 0
+            off = 0
+            for v in e.outvars:
+                k = 1
+                for d in v.aval.shape:
+                    k *= d
+                env[v.id] = list(src[off:off + k])
+                off += k
             continue
         if prim in _EXACT_RULES:
             a, b = val(e.invars[0]), val(e.invars[1])
@@ -980,12 +1075,108 @@ def _assumed_points(n, lo, hi, steps):
     return [list(t) for t in product(base, repeat=n)]
 
 
+# --- the 0.3.0 census additions, in the same shape -------------------------
+#
+# Each build routes the divisor through ONE new rule so that a wrong rule
+# shows up as a certified var whose exact value has the other sign. The
+# INDEXING members of the routing class are deliberately not here; see
+# `_exact_eval`'s scope paragraph for why and for where they are checked.
+
+
+def _build_sub_opposite(nxt, eqns, x):
+    """`x - (-x)` = 2x. The OPPOSITE-sign arm of the new `sub` rule; the
+    same-sign arm has its own (still-refusing) test above."""
+    nx = nxt(x.aval)
+    eqns.append(eqn("neg", [x], nx))
+    d = nxt(x.aval)
+    eqns.append(eqn("sub", [x, nx], d))
+    return d
+
+
+def _build_sqrt_of_square(nxt, eqns, x):
+    """`sqrt(x*x)`. Squared first so the exact evaluator can take the root
+    without leaving the rationals."""
+    sq = nxt(x.aval)
+    eqns.append(eqn("mul", [x, x], sq))
+    r = nxt(x.aval)
+    eqns.append(eqn("sqrt", [sq], r))
+    return r
+
+
+def _build_max_one_sided(nxt, eqns, x):
+    """`max(x, -5.0)`. ONE certified operand — the asymmetry. If the rule
+    took `min`'s arm it would certify -1 here and the value is x > 0."""
+    d = nxt(x.aval)
+    eqns.append(eqn("max", [x, lit(-5.0)], d))
+    return d
+
+
+def _build_min_both_sided(nxt, eqns, x):
+    """`min(x, 5.0)`, both operands certified +1."""
+    d = nxt(x.aval)
+    eqns.append(eqn("min", [x, lit(5.0)], d))
+    return d
+
+
+def _build_select_both_cases(nxt, eqns, x):
+    """`select_n(x > 1, x, 2x)`. Both CASES certified; the selector is a
+    bool and carries nothing, which is the operand split under test."""
+    pred = nxt(BOOL)
+    eqns.append(eqn("gt", [x, lit(1.0)], pred))
+    two = nxt(x.aval)
+    eqns.append(eqn("mul", [lit(2.0), x], two))
+    d = nxt(x.aval)
+    eqns.append(eqn("select_n", [pred, x, two], d))
+    return d
+
+
+def _build_routing_chain(nxt, eqns, x):
+    """`sum(reshape(slice(concat(x*x, x*x))))` — the routing agreement rule
+    through four members at once, on a rank-1 operand."""
+    n = x.aval.shape[0]
+    sq = nxt(x.aval)
+    eqns.append(eqn("mul", [x, x], sq))
+    cat_aval = ir.Aval(kind="ShapedArray", shape=(2 * n,), dtype="float64")
+    cat = nxt(cat_aval)
+    eqns.append(eqn("concatenate", [sq, sq], cat, [("dimension", 0)]))
+    sl_aval = ir.Aval(kind="ShapedArray", shape=(n,), dtype="float64")
+    sl = nxt(sl_aval)
+    eqns.append(eqn(
+        "slice", [cat], sl,
+        [("start_indices", (1,)), ("limit_indices", (1 + n,)),
+         ("strides", None)],
+    ))
+    rs = nxt(sl_aval)
+    eqns.append(eqn("reshape", [sl], rs,
+                    [("new_sizes", (n,)), ("dimensions", None)]))
+    s = nxt()
+    eqns.append(eqn("reduce_sum", [rs], s, [("axes", (0,))]))
+    return s
+
+
+# name -> (build, declaration size, grid steps, THE RULES THIS CASE DRIVES).
+#
+# The fourth field is not decoration. Without it a case whose new rule
+# minted NOTHING still passed: `x` itself is always certified, so `signs`
+# is non-empty whatever the divisor did, and the check would have been
+# green over a rule it never reached. The test asserts a certified var
+# produced by each named primitive, which is what makes the extension
+# DRIVEN rather than merely present.
 SEMANTIC_CASES = {
-    "0.5*sum(x*x)": (_build_half_sumsq, 4, 3),
-    "mean(x*x)": (_build_mean_sq, 4, 3),
-    "2.0*x": (_build_two_x, 0, 40),
-    "x/2.0": (_build_x_half, 0, 40),
-    "sum(x*x)": (_build_sumsq, 4, 3),
+    "0.5*sum(x*x)": (_build_half_sumsq, 4, 3, ("mul", "reduce_sum")),
+    "mean(x*x)": (_build_mean_sq, 4, 3, ("div", "reduce_sum")),
+    "2.0*x": (_build_two_x, 0, 40, ("mul",)),
+    "x/2.0": (_build_x_half, 0, 40, ("div",)),
+    "sum(x*x)": (_build_sumsq, 4, 3, ("reduce_sum",)),
+    # the 0.3.0 census additions
+    "x-(-x)": (_build_sub_opposite, 0, 40, ("sub", "neg")),
+    "sqrt(x*x)": (_build_sqrt_of_square, 0, 40, ("sqrt",)),
+    "max(x,-5)": (_build_max_one_sided, 0, 40, ("max",)),
+    "min(x,5)": (_build_min_both_sided, 0, 40, ("min",)),
+    "select(x>1,x,2x)": (_build_select_both_cases, 0, 40, ("select_n",)),
+    "sum(slice(cat(x*x,x*x)))": (
+        _build_routing_chain, 3, 4, ("concatenate", "slice", "reshape"),
+    ),
 }
 
 
@@ -1001,12 +1192,23 @@ def test_strict_sign_certificate_is_TRUE_at_every_assumed_point(name):
     """
     from stelling.propagate import _Propagator
 
-    build, n, steps = SEMANTIC_CASES[name]
+    build, n, steps, driven = SEMANTIC_CASES[name]
     query, eqns = _coeff_query(build, n=n)
     p = _Propagator("constrain")
     p.run(query.jaxpr, list(query.consts), [])
     signs = dict(p.strict_sign)
     assert signs, f"{name}: nothing was certified, the check would be vacuous"
+    for prim in driven:
+        produced = {
+            e.outvars[0].id for e in eqns
+            if e.primitive == prim and e.outvars
+        }
+        assert produced, f"{name}: no {prim!r} equation in this query"
+        assert produced & set(signs), (
+            f"{name}: no {prim!r} output was certified, so this case does "
+            f"not exercise the {prim!r} rule and would pass with that rule "
+            f"deleted"
+        )
 
     points = _assumed_points(n, 0.0, 2.0, steps)
     assert points, "no sample points"
@@ -1031,9 +1233,16 @@ def test_strict_sign_certificate_is_TRUE_at_every_assumed_point(name):
 def test_the_semantic_check_catches_a_certificate_that_is_false():
     """POSITIVE CONTROL: the check above fails when the certificate lies.
 
-    Adding `sub` to the rules is the known break — `a - b` with both
-    positive can be anything — so a certificate minted through `sub` is
-    false at points of the assumed region. If this control ever stops
+    **THIS DOCSTRING READ "Adding `sub` to the rules is the known break".**
+    That stopped being true at 0.3.0: `sub` IS in the rules now, under the
+    OPPOSITE-sign condition (`a > 0`, `b < 0` gives `a - b > 0`), and the
+    census records it. What this control installs is not "sub" but the
+    SAME-sign version of it — the rule the 0.2.0 comment was right to
+    refuse — so it is now the per-rule mutation for `sub`, in the same
+    shape as the five in `MUTATIONS` below. The query is `Σx² − 8`, the
+    original false VERIFIED, and both its operands are certified `+1`, so
+    the shipped rule answers 0 and the mutant answers `+1` for a value that
+    is <= 0 at points of the assumed region. If this control ever stops
     finding violations, the check above is no longer checking anything.
     """
     from stelling import propagate as pm
@@ -1097,6 +1306,231 @@ def test_the_semantic_check_catches_a_certificate_that_is_false():
     finally:
         pm._Propagator._strict_sign_out = real_out
         pm._STRICT_SIGN_PRIMITIVES = old_set
+
+
+# --- per-rule mutation: every 0.3.0 rule's WRONG version, caught -------------
+#
+# The control above is `sub`'s. These five are the rest of the algebraic
+# additions. Each installs a deliberately wrong version of ONE rule, on a
+# query built so that the wrong version mints a certificate the exact
+# rationals contradict — and asserts BOTH halves: that the mutant really
+# minted it (a control that does not fire is not a control) and that the
+# semantic evaluator finds the violation.
+#
+# The INDEXING members of the routing class (`gather`, `scatter`,
+# `scatter-add`, `dynamic_slice`, `dynamic_update_slice`) are NOT here.
+# `_exact_eval` is rank-1 and C-order-flat by construction, so it cannot
+# evaluate their row geometry; their mutations are driven end-to-end
+# against executed jax in `tests/test_strict_sign_census.py`.
+
+
+def _bare_query(build, *, lo=0.0, hi=2.0, n=0):
+    """`assume(x > 0)`; `assert_(f(x) > 0)`, with NO division.
+
+    The mutation controls do not need `div` — they need a certified var and
+    an exact value for it — and a divisor that can be zero would make the
+    evaluator raise before it could report the violation."""
+    counter = [0]
+
+    def nxt(a=F64):
+        counter[0] += 1
+        return var(counter[0], a)
+
+    xa = ir.Aval(kind="ShapedArray", shape=(n,), dtype="float64") if n else F64
+    ba = ir.Aval(kind="ShapedArray", shape=(n,), dtype="bool") if n else BOOL
+    x = var(0, xa)
+    eqns = [any_eqn_shaped(x, lo, hi, (n,) if n else ())]
+    pa, ao = nxt(ba), nxt(ba)
+    eqns.append(eqn("gt", [x, lit(0.0)], pa))
+    eqns.append(eqn("stelling_assume", [pa], ao))
+    d = build(nxt, eqns, x)
+    out = nxt(BOOL)
+    eqns.append(eqn("stelling_assert", [ao], out))
+    return close(eqns, [out]), eqns, d
+
+
+def _build_sqrt_of_zero(nxt, eqns, x):
+    """`sqrt(0.0 * x)` — exactly 0, and `sqrt` is the primitive under test."""
+    z = nxt(x.aval)
+    eqns.append(eqn("mul", [lit(0.0), x], z))
+    r = nxt(x.aval)
+    eqns.append(eqn("sqrt", [z], r))
+    return r
+
+
+def _build_max_neg_x(nxt, eqns, x):
+    """`max(-x, x)` = x > 0. A `-1` and a `+1` operand, which is exactly
+    where `max` and `min` disagree."""
+    nx = nxt(x.aval)
+    eqns.append(eqn("neg", [x], nx))
+    m = nxt(x.aval)
+    eqns.append(eqn("max", [nx, x], m))
+    return m
+
+
+def _build_min_neg_x(nxt, eqns, x):
+    """`min(-x, x)` = -x < 0. The mirror."""
+    nx = nxt(x.aval)
+    eqns.append(eqn("neg", [x], nx))
+    m = nxt(x.aval)
+    eqns.append(eqn("min", [nx, x], m))
+    return m
+
+
+def _build_select_x_or_neg(nxt, eqns, x):
+    """`select_n(x > 1, x, -x)` — the two cases DISAGREE, so the shipped
+    rule mints nothing and a rule reading only the first case mints +1."""
+    pred = nxt(BOOL if x.aval.shape == () else
+               ir.Aval(kind="ShapedArray", shape=x.aval.shape, dtype="bool"))
+    eqns.append(eqn("gt", [x, lit(1.0)], pred))
+    nx = nxt(x.aval)
+    eqns.append(eqn("neg", [x], nx))
+    d = nxt(x.aval)
+    eqns.append(eqn("select_n", [pred, x, nx], d))
+    return d
+
+
+def _build_cat_x_and_neg(nxt, eqns, x):
+    """`concatenate(x, -x)` — operands disagree, so agreement mints nothing
+    and an ANY-instead-of-ALL rule mints the first operand's sign."""
+    n = x.aval.shape[0]
+    nx = nxt(x.aval)
+    eqns.append(eqn("neg", [x], nx))
+    cat = nxt(ir.Aval(kind="ShapedArray", shape=(2 * n,), dtype="float64"))
+    eqns.append(eqn("concatenate", [x, nx], cat, [("dimension", 0)]))
+    return cat
+
+
+# prim -> (wrong rule, build, declaration size, grid steps, what it is)
+MUTATIONS = {
+    "sqrt": (
+        lambda sgn, e, params, ins: 1,
+        _build_sqrt_of_zero, 0, 20,
+        "sqrt certifies +1 without requiring a certified-positive operand; "
+        "sqrt(0) is 0",
+    ),
+    "max": (
+        lambda sgn, e, params, ins: (
+            -1 if -1 in sgn else (1 if sgn == [1, 1] else 0)
+        ),
+        _build_max_neg_x, 0, 20,
+        "max takes MIN's arm: one certified-negative operand certifies the "
+        "max, and max(-x, x) is x > 0",
+    ),
+    "min": (
+        lambda sgn, e, params, ins: (
+            1 if 1 in sgn else (-1 if sgn == [-1, -1] else 0)
+        ),
+        _build_min_neg_x, 0, 20,
+        "min takes MAX's arm: one certified-positive operand certifies the "
+        "min, and min(-x, x) is -x < 0",
+    ),
+    "select_n": (
+        lambda sgn, e, params, ins: sgn[1] if len(sgn) > 1 else 0,
+        _build_select_x_or_neg, 0, 20,
+        "select_n reads only the FIRST case instead of requiring every case "
+        "to agree",
+    ),
+    "concatenate": (
+        lambda sgn, e, params, ins: next((v for v in sgn if v), 0),
+        _build_cat_x_and_neg, 3, 6,
+        "the routing rule takes ANY nonzero operand sign instead of "
+        "requiring all of them to agree",
+    ),
+}
+
+
+def _run_with_mutant(prim, rule, build, n):
+    """Install `rule` for `prim` only, run the query, return
+    (certified table, eqns, divisor var)."""
+    from stelling import propagate as pm
+
+    real = pm._Propagator._strict_sign_out
+
+    def mutated(self, e, params, ins):
+        if e.primitive == prim:
+            return rule([self.read_strict_sign(a) for a in e.invars],
+                        e, params, ins)
+        return real(self, e, params, ins)
+
+    pm._Propagator._strict_sign_out = mutated
+    try:
+        query, eqns, d = _bare_query(build, n=n)
+        p = pm._Propagator("constrain")
+        p.run(query.jaxpr, list(query.consts), [])
+        return dict(p.strict_sign), eqns, d
+    finally:
+        pm._Propagator._strict_sign_out = real
+
+
+@pytest.mark.parametrize("prim", sorted(MUTATIONS))
+def test_a_wrong_version_of_each_new_rule_is_CAUGHT(prim):
+    """PER-RULE MUTATION. A rule whose wrong version passes the tests is a
+    rule with no test."""
+    rule, build, n, steps, why = MUTATIONS[prim]
+    signs, eqns, d = _run_with_mutant(prim, rule, build, n)
+    assert signs.get(d.id), (
+        f"{prim}: the mutant ({why}) did not even mint the false "
+        f"certificate, so this control demonstrates nothing"
+    )
+    sgn = signs[d.id]
+    failures = cells = 0
+    for point in _assumed_points(n, 0.0, 2.0, steps):
+        env = _exact_eval(eqns, point)
+        for cell in env[d.id]:
+            cells += 1
+            if not ((cell > 0) if sgn > 0 else (cell < 0)):
+                failures += 1
+    assert failures > 0, (
+        f"{prim}: the mutant ({why}) certified sign={sgn} and the exact "
+        f"evaluator found NO violating point in {cells} cells — the "
+        f"semantic check would not have caught this rule"
+    )
+    if os.environ.get("STELLING_FUZZ_REPORT"):
+        print(f"FUZZREPORT mutation {prim} failures={failures} of {cells}")
+
+
+@pytest.mark.parametrize("prim", sorted(MUTATIONS))
+def test_the_SHIPPED_rule_answers_DIFFERENTLY_and_TRULY_on_that_query(prim):
+    """The other half of the battery, and it is two assertions.
+
+    **A mutation is only a mutation where the two rules DISAGREE**, so the
+    shipped rule's answer on the mutant's own query must differ from the
+    mutant's — otherwise the control above is demonstrating a property of
+    the query rather than of the rule.
+
+    And whatever the shipped rule does answer must be TRUE at every point,
+    by the same exact evaluator. Note this is NOT always "answers 0": on
+    `max(-x, x)` the shipped rule certifies `+1` and is right to (the value
+    IS `x > 0`), and on `min(-x, x)` it certifies `-1`. An earlier draft of
+    this test asserted "the shipped rule mints nothing on these queries"
+    and FAILED on exactly those two — the asymmetric rule is stronger than
+    a decline, which is the whole reason it was written.
+    """
+    from stelling import propagate as pm
+
+    rule, build, n, steps, why = MUTATIONS[prim]
+    mutant_signs, _me, _md = _run_with_mutant(prim, rule, build, n)
+    query, eqns, d = _bare_query(build, n=n)
+    p = pm._Propagator("constrain")
+    p.run(query.jaxpr, list(query.consts), [])
+    shipped = p.strict_sign.get(d.id, 0)
+    assert shipped != mutant_signs.get(d.id, 0), (
+        f"{prim}: the shipped rule and the mutant ({why}) agree on this "
+        f"query, so the control above tests the query and not the rule"
+    )
+    if not shipped:
+        return
+    checks = 0
+    for point in _assumed_points(n, 0.0, 2.0, steps):
+        env = _exact_eval(eqns, point)
+        for cell in env[d.id]:
+            checks += 1
+            assert ((cell > 0) if shipped > 0 else (cell < 0)), (
+                f"{prim}: the SHIPPED rule certified sign={shipped} but the "
+                f"value is {cell} at assumed point {point}"
+            )
+    assert checks, f"{prim}: no point was checked"
 
 
 # --- the disclosure must name the wrapper people actually write -------------

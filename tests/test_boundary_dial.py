@@ -582,12 +582,31 @@ def baseline_rows():
     return out
 
 
-#: **THE BASELINE, MEASURED ON THE TREE THIS BRANCH IS BASED ON.** Produced
-#: at `8dae8cb` — the commit `wip/0.3.0-p1-boundary` starts from, and the
-#: last commit before the boundary dial existed — on 2026-08-28, by running
-#: THIS MODULE's own `baseline_rows()` against that tree's `src/`:
+#: **THE BASELINE IS THE TREE WITHOUT THE DIAL, AND THE COMMIT IT NAMES
+#: MOVED AT A MERGE.** It was produced at `8dae8cb` — the commit
+#: `wip/0.3.0-p1-boundary` starts from, and the last commit before the
+#: boundary dial existed. It is produced at **`e698abb`** now, and the
+#: reason is the whole point of this fixture.
 #:
-#:     git archive 8dae8cb src | tar -x -C $T
+#: The strict-sign CENSUS landed on a sibling branch and ships **default-on**:
+#: it is about WHICH primitives keep the certificate, not about where it
+#: travels, so it is not behind this dial. The carrying set went from ten
+#: primitives to thirty-one, which moves the DEFAULT — legitimately, and for
+#: a reason that has nothing to do with `boundary`. Against `8dae8cb` this
+#: battery went red on the merge, correctly: *"a red here is not
+#: automatically a defect in the boundary dial … it is a red that has to be
+#: EXPLAINED"*, and this paragraph is the explanation.
+#:
+#: So the baseline is re-taken at `e698abb` — **the census WITHOUT the dial**
+#: — and the question the fixture asks is unchanged and now exact: *does
+#: adding the boundary dial move any default answer?* Re-pinning it to the
+#: merge itself would have made it tautological; re-pinning it to the census
+#: keeps it a statement about this change.
+#:
+#: Produced on 2026-08-28 by running THIS MODULE's own `baseline_rows()`
+#: against that tree's `src/`:
+#:
+#:     git archive e698abb src | tar -x -C $T
 #:     env PYTHONPATH=$T/src:$PWD/tests python -c \
 #:         "import test_boundary_dial as B, pprint; pprint.pprint(B.baseline_rows())"
 #:
@@ -613,92 +632,81 @@ def baseline_rows():
 #: change that legitimately moves a decline message or a note will redden
 #: it. It is a red that has to be EXPLAINED, which is the whole of what a
 #: regression baseline buys.
-BASELINE_AT_8dae8cb = {
-    'cond-certifying-branch': (
-        ('unknown',),
-        '9 eqns: 7 known (78%); 1 ⊤ across 1 primitives (div ×1); 1 assume(s) CONSTRAINED (stelling_assume ×1)',
-        '925bf64fda32df7d7175f3c3744983291f7924169c3099c69b287ad5e460bd6f',
-        '298e3153f4764be4e3e3f44cee742fbbb4efa370fda41bdda79f5c248fc70e48',
-    ),
-    'cond-in-jit': (
-        ('unknown', 'unknown', 'unknown'),
-        '15 eqns: 11 known (73%); 1 transparent; 2 ⊤ across 1 primitives (div ×2); 1 assume(s) CONSTRAINED (stelling_assume ×1)',
-        '58bbbb06db544350fcd17773e7b4f7763b7b19d2ba1fbe2307d51cf196c43711',
-        '34a4c73a61d7dcd0327620c213e7e2365271a8a19007acc2cc338476e47b7e48',
-    ),
-    'ieee-jit-assume-outside': (
-        ('unknown',),
-        '9 eqns: 5 known (56%); 1 transparent; 2 ⊤ across 2 primitives (div ×1, reduce_sum ×1); 1 assume(s) CONSTRAINED (stelling_assume ×1)',
-        '90d760d2a936e53e8339aa6f630729f485c90a90592e3e2b74bbd6d27c02533f',
-        '40b6d8b0b137e3355a969729dd44a2f63c8c87a0d70e1e403cedbb750485186e',
-    ),
-    'ieee-straddle': (
-        ('unknown',),
-        '4 eqns: 3 known (75%); 1 ⊤ across 1 primitives (div ×1)',
-        '45505bedf73c29b7edd3b1cabf97e8cda9baeeb4a857b5d1223b960a83724aa0',
-        '6a937f8da0379d3e834f2c598297f2674994d07c8c23a9412332c2dbe808c113',
-    ),
-    'jit-assume-inside': (
-        ('unknown',),
-        '9 eqns: 6 known (67%); 1 transparent; 1 ⊤ across 1 primitives (div ×1); 1 assume(s) CONSTRAINED (stelling_assume ×1)',
-        '69b670aa6724004bdb9365e39d8fb574545d7c1fb703a1373b4f089e21022df8',
-        '1bd255ebf4ab4e6437d7c3b4dffa794d2a593e56b2421c6edae9567c290fa599',
-    ),
-    'jit-assume-outside': (
-        ('unknown',),
-        '9 eqns: 6 known (67%); 1 transparent; 1 ⊤ across 1 primitives (div ×1); 1 assume(s) CONSTRAINED (stelling_assume ×1)',
-        '90d760d2a936e53e8339aa6f630729f485c90a90592e3e2b74bbd6d27c02533f',
-        '900e1577976f57317deb3c9598b0870d351a1c3809f9f834b7a7300e86e0313f',
-    ),
-    'jit-certifying-body': (
-        ('unknown',),
-        '7 eqns: 4 known (57%); 1 transparent; 1 ⊤ across 1 primitives (div ×1); 1 assume(s) CONSTRAINED (stelling_assume ×1)',
-        '194ff15a11f91372146b28e877975ae08e7d00fc4f31f464c65b042a3e17eed5',
-        '1c938a2d520152e45cb677c9718a9a074405db5be853c0e4f5db986920c267e7',
-    ),
-    'jit-in-cond': (
-        ('unknown', 'unknown', 'unknown'),
-        '16 eqns: 11 known (69%); 2 transparent; 2 ⊤ across 1 primitives (div ×2); 1 assume(s) CONSTRAINED (stelling_assume ×1)',
-        '0dff25bef3a7dfad48a4a5820b3b922901bfa45e26e39710655564ac0b7a07c8',
-        '86cc172fffff0191f154077ea2a6660c3c8d054546dec82a6960e20e8c0e6459',
-    ),
-    'jit-in-jit': (
-        ('unknown',),
-        '10 eqns: 6 known (60%); 2 transparent; 1 ⊤ across 1 primitives (div ×1); 1 assume(s) CONSTRAINED (stelling_assume ×1)',
-        'd916a9b89913abbf12e4c4948a3487dca91160a89076b4b99ee5d788a960ed99',
-        '7ba836cd59c04266e4698d743308a75a5a3ebe962a682da0bea4bd4ff5630f7a',
-    ),
-    'no-certificate': (
-        ('discharged',),
-        '4 eqns: 4 known (100%)',
-        'd87a7c672ee8c8036d8cda218fc4c0bc0e7f4d24ba95bf75a94936304e831530',
-        'f0fa01f7913a9dea0203048ce9142b94e1223dd762ab51dbe63ee808ad5fef97',
-    ),
-    'refuted': (
-        ('violated-over-set',),
-        '3 eqns: 3 known (100%)',
-        '0800c66b228b3201bff2a29c56f86152d4a62024598335c91659b5be55ec515c',
-        '3a7213d3e099c3a51af423ed4d9d38b9bfe0f424eda067e588dab822f18b4726',
-    ),
-    'remat2-assume-outside': (
-        ('unknown',),
-        '9 eqns: 6 known (67%); 1 transparent; 1 ⊤ across 1 primitives (div ×1); 1 assume(s) CONSTRAINED (stelling_assume ×1)',
-        '4320f343fe28825c555148f1dd984c6cb8a0dcc9ba7bcb320f2204be8403cde6',
-        '770c7bb256373e67a52fe7afed95b684ea022ddc436e177eaa245ef2b3ca60cb',
-    ),
-    'straddle': (
-        ('unknown',),
-        '4 eqns: 3 known (75%); 1 ⊤ across 1 primitives (div ×1)',
-        '45505bedf73c29b7edd3b1cabf97e8cda9baeeb4a857b5d1223b960a83724aa0',
-        '892b9d50d253d5b63b71b4f043645b1e8c3a7eaa5c3fee1d7523d0bbdac7d743',
-    ),
-    'sumsq-no-wrapper': (
-        ('discharged',),
-        '8 eqns: 7 known (88%); 1 assume(s) CONSTRAINED (stelling_assume ×1)',
-        '3d5af97ec0f2c66db453a4c142adbfcbaba0ac5aa69e45a5a2e6edf08cb2e7c1',
-        'b5c790c779cfb976204eae0e894b6e503518f7b8a70eb2a7e28ded01e924a41f',
-    ),
-}
+BASELINE_WITHOUT_THE_DIAL = {'cond-certifying-branch': (('unknown',),
+                            '9 eqns: 7 known (78%); 1 ⊤ across 1 primitives '
+                            '(div ×1); 1 assume(s) CONSTRAINED '
+                            '(stelling_assume ×1)',
+                            '925bf64fda32df7d7175f3c3744983291f7924169c3099c69b287ad5e460bd6f',
+                            'b2af7379ac369b85afc12bab2744e6a804d3d80d99871ddf28a3a11e1ed4b7f3'),
+ 'cond-in-jit': (('unknown', 'unknown', 'unknown'),
+                 '15 eqns: 11 known (73%); 1 transparent; 2 ⊤ across 1 '
+                 'primitives (div ×2); 1 assume(s) CONSTRAINED '
+                 '(stelling_assume ×1)',
+                 '58bbbb06db544350fcd17773e7b4f7763b7b19d2ba1fbe2307d51cf196c43711',
+                 '27e0d5afd2c1299fe257ca8cfaa981ab603e8a4bc4dfe38d6ad2b2330b7c1868'),
+ 'ieee-jit-assume-outside': (('unknown',),
+                             '9 eqns: 5 known (56%); 1 transparent; 2 ⊤ '
+                             'across 2 primitives (div ×1, reduce_sum ×1); 1 '
+                             'assume(s) CONSTRAINED (stelling_assume ×1)',
+                             '90d760d2a936e53e8339aa6f630729f485c90a90592e3e2b74bbd6d27c02533f',
+                             '40b6d8b0b137e3355a969729dd44a2f63c8c87a0d70e1e403cedbb750485186e'),
+ 'ieee-straddle': (('unknown',),
+                   '4 eqns: 3 known (75%); 1 ⊤ across 1 primitives (div ×1)',
+                   '45505bedf73c29b7edd3b1cabf97e8cda9baeeb4a857b5d1223b960a83724aa0',
+                   '6a937f8da0379d3e834f2c598297f2674994d07c8c23a9412332c2dbe808c113'),
+ 'jit-assume-inside': (('unknown',),
+                       '9 eqns: 6 known (67%); 1 transparent; 1 ⊤ across 1 '
+                       'primitives (div ×1); 1 assume(s) CONSTRAINED '
+                       '(stelling_assume ×1)',
+                       '69b670aa6724004bdb9365e39d8fb574545d7c1fb703a1373b4f089e21022df8',
+                       'dcdf1cde24be8d16de40473bf5cd1f0e7fed910ba70fe06e02e40fc30fec24e1'),
+ 'jit-assume-outside': (('unknown',),
+                        '9 eqns: 6 known (67%); 1 transparent; 1 ⊤ across 1 '
+                        'primitives (div ×1); 1 assume(s) CONSTRAINED '
+                        '(stelling_assume ×1)',
+                        '90d760d2a936e53e8339aa6f630729f485c90a90592e3e2b74bbd6d27c02533f',
+                        'e78d511a7cec2b2ac2a6e6f73077c9ba1aa2ca6053e52df00673026deba31015'),
+ 'jit-certifying-body': (('unknown',),
+                         '7 eqns: 4 known (57%); 1 transparent; 1 ⊤ across 1 '
+                         'primitives (div ×1); 1 assume(s) CONSTRAINED '
+                         '(stelling_assume ×1)',
+                         '194ff15a11f91372146b28e877975ae08e7d00fc4f31f464c65b042a3e17eed5',
+                         'c8fabcb7b0963bcd1cf999073dd20fc13598e7279392e5947815b976129421c6'),
+ 'jit-in-cond': (('unknown', 'unknown', 'unknown'),
+                 '16 eqns: 11 known (69%); 2 transparent; 2 ⊤ across 1 '
+                 'primitives (div ×2); 1 assume(s) CONSTRAINED '
+                 '(stelling_assume ×1)',
+                 '0dff25bef3a7dfad48a4a5820b3b922901bfa45e26e39710655564ac0b7a07c8',
+                 '8ab56ee8138ac3d800eb202e9555b073f6abe3b493bae380c9b1563b24077636'),
+ 'jit-in-jit': (('unknown',),
+                '10 eqns: 6 known (60%); 2 transparent; 1 ⊤ across 1 '
+                'primitives (div ×1); 1 assume(s) CONSTRAINED '
+                '(stelling_assume ×1)',
+                'd916a9b89913abbf12e4c4948a3487dca91160a89076b4b99ee5d788a960ed99',
+                '8e7aac25468d17b0a3ef1d33ff6f3e45aa92bac40cccddb09bdcf9b82c03fd32'),
+ 'no-certificate': (('discharged',),
+                    '4 eqns: 4 known (100%)',
+                    'd87a7c672ee8c8036d8cda218fc4c0bc0e7f4d24ba95bf75a94936304e831530',
+                    'f0fa01f7913a9dea0203048ce9142b94e1223dd762ab51dbe63ee808ad5fef97'),
+ 'refuted': (('violated-over-set',),
+             '3 eqns: 3 known (100%)',
+             '0800c66b228b3201bff2a29c56f86152d4a62024598335c91659b5be55ec515c',
+             '3a7213d3e099c3a51af423ed4d9d38b9bfe0f424eda067e588dab822f18b4726'),
+ 'remat2-assume-outside': (('unknown',),
+                           '9 eqns: 6 known (67%); 1 transparent; 1 ⊤ across '
+                           '1 primitives (div ×1); 1 assume(s) CONSTRAINED '
+                           '(stelling_assume ×1)',
+                           '4320f343fe28825c555148f1dd984c6cb8a0dcc9ba7bcb320f2204be8403cde6',
+                           'de3b1ebe1703f4c1c7443696fd72ad9b0318d1bb948a71271e1365f638e349b9'),
+ 'straddle': (('unknown',),
+              '4 eqns: 3 known (75%); 1 ⊤ across 1 primitives (div ×1)',
+              '45505bedf73c29b7edd3b1cabf97e8cda9baeeb4a857b5d1223b960a83724aa0',
+              '892b9d50d253d5b63b71b4f043645b1e8c3a7eaa5c3fee1d7523d0bbdac7d743'),
+ 'sumsq-no-wrapper': (('discharged',),
+                      '8 eqns: 7 known (88%); 1 assume(s) CONSTRAINED '
+                      '(stelling_assume ×1)',
+                      '3d5af97ec0f2c66db453a4c142adbfcbaba0ac5aa69e45a5a2e6edf08cb2e7c1',
+                      'b5c790c779cfb976204eae0e894b6e503518f7b8a70eb2a7e28ded01e924a41f')}
 
 
 def test_the_DEFAULT_battery_is_byte_for_byte_the_base_tree():
@@ -707,20 +715,20 @@ def test_the_DEFAULT_battery_is_byte_for_byte_the_base_tree():
     `boundary="opaque"` is the default and must be the base tree's
     behaviour with nothing added. This runs the battery THROUGH THE
     DEFAULT — no keyword — and compares every artifact against the values
-    the base tree produced. See `BASELINE_AT_8dae8cb` for what the
+    the base tree produced. See `BASELINE_WITHOUT_THE_DIAL` for what the
     comparison reaches and what it does not.
     """
     live = baseline_rows()
-    assert set(live) == set(BASELINE_AT_8dae8cb), (
+    assert set(live) == set(BASELINE_WITHOUT_THE_DIAL), (
         f"the battery and the baseline name different queries: "
-        f"only live {sorted(set(live) - set(BASELINE_AT_8dae8cb))}, "
-        f"only baseline {sorted(set(BASELINE_AT_8dae8cb) - set(live))}"
+        f"only live {sorted(set(live) - set(BASELINE_WITHOUT_THE_DIAL))}, "
+        f"only baseline {sorted(set(BASELINE_WITHOUT_THE_DIAL) - set(live))}"
     )
     bad = []
     for name in sorted(live):
-        if live[name] != BASELINE_AT_8dae8cb[name]:
+        if live[name] != BASELINE_WITHOUT_THE_DIAL[name]:
             bad.append(
-                f"{name}:\n    base {BASELINE_AT_8dae8cb[name]}\n"
+                f"{name}:\n    base {BASELINE_WITHOUT_THE_DIAL[name]}\n"
                 f"    live {live[name]}\n"
                 f"    live row:\n"
                 + "\n".join(
