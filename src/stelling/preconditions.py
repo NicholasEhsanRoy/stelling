@@ -299,11 +299,33 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     that shipped without the keyword. Under ``"transparent"`` the
     strict-sign certificate crosses the sub-jaxpr boundaries the walk
     already enters (IN and OUT for the unconditional wrappers, IN only for
-    a ``cond`` branch), which can turn an UNKNOWN into a VERIFIED on a
-    query whose division sits inside a ``jit``; that function's docstring
-    carries the argument, the exclusions and the ieee behaviour. The
-    verdict discloses the position in its stamped assumption lines when it
-    is off the default.
+    a ``cond`` branch); that function's docstring carries the argument,
+    the exclusions and the ieee behaviour.
+
+    **IT MOVES VERDICTS IN BOTH DIRECTIONS, AND THIS SENTENCE USED TO NAME
+    ONLY ONE.** It read *"which can turn an UNKNOWN into a VERIFIED on a
+    query whose division sits inside a ``jit``"* — true, and the reason
+    the dial exists, but half of what a caller switching it on is signing
+    up for. It can equally turn an UNKNOWN into a **REFUTED**, because
+    :func:`stelling.interval.boundary_div` returns a HALF-INFINITE box and
+    a half-infinite box can make an upper-bound obligation definitely
+    false where ⊤ left it undecided. That second direction is a property
+    of the certificate rather than of the dial — driven at `8dae8cb`, with
+    no wrapper and no dial: ``x ∈ [0, 2]``, ``assert_(1/x < 0.4)`` is
+    ``unknown`` without the ``assume`` and ``violated-over-set`` with it —
+    but the dial makes the certificate reach queries it did not reach
+    before, and therefore makes that direction reach them too. Pinned at
+    ``tests/test_boundary_dial.py::test_the_dial_can_also_move_UNKNOWN_to_REFUTED``.
+    Neither direction can be a WRONG answer for the reason the certificate
+    is sound; both are answers the default does not give.
+
+    The verdict discloses the position in its stamped assumption lines
+    when it is off the default, and ``docs/reading-a-verdict.md`` says how
+    to read a stamp that carries no such line. Under ``semantics="ieee"``
+    the dial is INERT — the certificate is a claim about ℝ — and a run
+    that asked for it there stamps a line saying so rather than the
+    position line, which would otherwise tell the reader that a rule
+    unsound under ieee had been allowed.
 
     **IT IS NOT ACCEPTED BY THE TWO SIBLING DOORS**,
     :func:`stelling.contracts.check_contract` and
@@ -461,11 +483,27 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     )
 
     # the boundary dial, validated by the SAME function `propagate` uses
-    # rather than by a second spelling of its value set here. It is
-    # validated in this shared helper and not in `check` because
-    # `check_contract` reaches the pipeline without passing through
-    # `check`, and a dial checked at only one of two doors is a dial that
-    # is unchecked at the other.
+    # rather than by a second spelling of its value set here.
+    #
+    # **THE REASON GIVEN FOR VALIDATING IT HERE RATHER THAN IN `check` WAS
+    # WRONG, AND THE SITING IS RIGHT ANYWAY.** It read: *"validated in
+    # this shared helper and not in `check` because `check_contract`
+    # reaches the pipeline without passing through `check`, and a dial
+    # checked at only one of two doors is a dial that is unchecked at the
+    # other."* The first clause is true and the inference does not follow:
+    # `check_contract` has no `boundary` parameter at all — pinned by
+    # `tests/test_boundary_dial_jax.py::test_the_two_SIBLING_doors_deliberately_do_not_take_the_dial`
+    # — so it cannot supply a bad value and there is no second door to be
+    # unchecked. The check placed there today is a check of `check`'s own
+    # argument reached one frame down.
+    #
+    # It stays here because THIS is the function every door's boundary
+    # argument must pass through, whichever door grows one next: a door
+    # that gains the keyword and forwards it acquires the refusal by
+    # forwarding, and cannot ship an unvalidated dial by forgetting a line
+    # at its own entry. Eager either way — this runs before the trace, so
+    # a typo raises where it was written and not as a decline three layers
+    # down.
     _check_boundary(boundary)
     libm_budget = resolve_libm_budget(libm_budget)
     if libm_budget is not None and semantics != "ieee":

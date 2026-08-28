@@ -8204,17 +8204,38 @@ class _Propagator:
             return _literal_strict_sign(atom)
         return self.strict_sign.get(atom.id, 0)
 
-    def _carries_signs(self) -> bool:
-        """Does a sub-jaxpr boundary carry the strict-sign certificate?
+    def _carry_refusal(self) -> str | None:
+        """Why a walk that ASKED for the carry nonetheless carries nothing,
+        as the sentence a verdict stamps — or ``None`` when it does carry.
 
-        THE ONE GATE, read by every descent that could carry one, so the
-        dial and the real-mode restriction cannot end up spelled
-        differently at two sites. Both conjuncts are load-bearing:
+        **THE GATE AND THE STAMPED SENTENCE ARE ONE FUNCTION, AND THAT IS
+        THE REPAIR.** They used to be two things: :meth:`_carries_signs`
+        tested ``semantics != "ieee"`` and the stamping site in
+        :func:`propagate` tested only ``boundary != "opaque"``. So an
+        ``ieee`` run at ``boundary="transparent"`` — where this gate is
+        False at every descent and NOTHING crosses — stamped
+        :data:`BOUNDARY_TRANSPARENT_POSITION`, whose words are *"the
+        strict-sign certificate … was allowed to cross"*. The artifact of
+        record told its reader that the analysis had used a rule which
+        under ``ieee`` would be UNSOUND, on a run that had refused it.
+        Measured over 6656 ieee query shapes by the independent audit of
+        `5e525ce`: that line was the ONLY difference between the two dial
+        positions under ieee, and it appeared on every one of them. A
+        disclosure that is not conditioned on the act it reports is the
+        defect class this project keeps re-finding; this one was it,
+        one dial over from the `libm_declared` precedent that was
+        supposed to be its model.
 
-        * ``boundary == "transparent"`` — the caller asked for it. Under
-          the ``"opaque"`` default this returns False at every descent
-          and no line of the carry runs at all.
-        * ``semantics != "ieee"`` — the certificate is REAL-MODE ONLY
+        The dial's own ``"opaque"`` position is NOT a refusal and is not
+        answered here: it is the request itself, and it is tested by
+        :meth:`_carries_signs` below. This function answers only *"the
+        carry was asked for — did anything stop it?"*, so every string it
+        can return is a sentence about a walk whose caller wanted the
+        carry and did not get it.
+
+        ONE REASON TODAY, and it is the certificate's own scope:
+
+        * ``semantics == "ieee"`` — the certificate is REAL-MODE ONLY
           (see ``self.strict_sign``), and the restriction has to be
           re-stated *here* rather than left to the writers, because
           :meth:`read_strict_sign` answers for a LITERAL from its own
@@ -8225,8 +8246,30 @@ class _Propagator:
           on a flush-to-zero target (audit 0.2.0 S10, and the invariant
           ``tests/test_assume_bump_boundary_div.py::test_the_literal_sign_is_REAL_MODE_ONLY``
           states).
+
+        A SECOND REASON ADDED HERE LATER IS STAMPED BY BEING ADDED, which
+        is the property that makes this shape worth the extra function:
+        the walk cannot refuse for a reason the verdict does not say.
         """
-        return self.boundary == "transparent" and self.semantics != "ieee"
+        if self.semantics == "ieee":
+            return BOUNDARY_INERT_UNDER_IEEE
+        return None
+
+    def _carries_signs(self) -> bool:
+        """Does a sub-jaxpr boundary carry the strict-sign certificate?
+
+        THE ONE GATE, read by every descent that could carry one, so the
+        dial and the real-mode restriction cannot end up spelled
+        differently at two sites. Both conjuncts are load-bearing:
+
+        * ``boundary == "transparent"`` — the caller asked for it. Under
+          the ``"opaque"`` default this returns False at every descent
+          and no line of the carry runs at all.
+        * :meth:`_carry_refusal` answering ``None`` — nothing else stopped
+          it. That function carries the argument for each reason it can
+          give, and gives the verdict the sentence for it.
+        """
+        return self.boundary == "transparent" and self._carry_refusal() is None
 
     def _strict_sign_out(self, eqn: ir.JaxprEqn, params, ins) -> int:
         """The strict sign of this equation's output, from its operands'.
@@ -10566,14 +10609,45 @@ class _Propagator:
             # function exists to prevent (:data:`_BRANCH_SCOPED_REASON`, and
             # a ``branch_depth`` that is inherited rather than reset).
             #
-            # And the obvious repair — "carry out only what came in" — needs
-            # a fact the table cannot hold: its value is an ``int``, so
-            # ``+1`` from the caller and ``+1`` minted by a branch-body
-            # assume are the same entry. Distinguishing them is a PROVENANCE
-            # question and provenance is not in this data structure. So the
-            # OUT direction is refused here, as a decision with a reason
-            # rather than as an omission, and a sound version of it is its
-            # own scoped change with its own audit.
+            # TWO REPAIRS SUGGEST THEMSELVES AND NEITHER IS AVAILABLE. They
+            # fail for DIFFERENT reasons, and this comment used to give only
+            # the first reason — which is not the obstacle for the second,
+            # so a later reader weighing the second would have found the
+            # objection beside it answered (0.3.0 P1 audit).
+            #
+            #   1. "CARRY OUT ONLY WHAT CAME IN." Needs a fact the table
+            #      cannot hold: its value is an ``int``, so ``+1`` from the
+            #      caller and ``+1`` minted by a branch-body assume are the
+            #      same entry. Distinguishing them is a PROVENANCE question
+            #      and provenance is not in this data structure.
+            #
+            #   2. "CARRY OUT ONLY WHAT EVERY POSSIBLE BRANCH AGREES ON."
+            #      Needs no provenance at all, which is why the objection
+            #      above does not touch it — AND IT IS UNSOUND. Branch
+            #      certificates are licensed by BRANCH-LOCAL PREMISES, and
+            #      premises do not conjoin across a branch: two branches can
+            #      agree on the SIGN while their assumes CONTRADICT each
+            #      other, and their agreement then licenses nothing at all.
+            #      MEASURED — build the repair and this query discharges:
+            #
+            #          x ∈ [-1, 1], selector unforced
+            #          branch 0:  assume(v > 0);  return  v   -> +1, [0, 1]
+            #          branch 1:  assume(v < 0);  return -v   -> +1, [0, 1]
+            #          join [0, 1]; both agree +1;  1/cout > 0  DISCHARGED
+            #
+            #      and it is false at x = 1/2 through branch 1, where the
+            #      program computes 1/(-1/2) = -2. x = 1/2 is in the declared
+            #      box and neither assume is a precondition of the QUERY.
+            #      The witness is
+            #      ``tests/test_boundary_dial.py::test_the_AGREE_repair_is_unsound_too_and_here_is_the_point_it_misses``,
+            #      which carries the falsifying point in exact rationals and
+            #      is RED against that repair.
+            #
+            # So the OUT direction is refused here, as a decision with two
+            # reasons rather than as an omission. A sound version would have
+            # to establish that the certificate holds on the WHOLE assumed
+            # region and not merely on each branch's own slice of it; that is
+            # its own scoped change with its own audit.
             outer_sign = self.strict_sign
             # positional over `operands` — `eqn.invars[1:]`, i.e. the same
             # slice `op_flags`/`op_taints` take, because the index is
@@ -11345,6 +11419,20 @@ BOUNDARY_TRANSPARENT_POSITION = (
 # the same asymmetry the libm budget's stamp keeps (`p.libm_declared`
 # gates its line, and the profile is never stamped for transfers that did
 # not run).
+# The sentence for a run that ASKED for the carry and got none. It is a
+# stamped line like the two above, and it exists because its absence was a
+# false one: see :meth:`_Propagator._carry_refusal` for what was stamped
+# instead and what the audit measured.
+BOUNDARY_INERT_UNDER_IEEE = (
+    "boundary='transparent' was requested and is INERT under "
+    "semantics='ieee': the strict-sign certificate is a claim about \u211d "
+    "(\"every element of this value is certainly nonzero of this sign\"), and "
+    "it is FALSE on a flush-to-zero target, where a positive subnormal's "
+    "runtime value is 0 (audit 0.2.0 S10). Nothing crossed any sub-jaxpr "
+    "boundary on this run, and this verdict rests on exactly the rules a "
+    "boundary='opaque' run would have used"
+)
+
 BOUNDARY_CROSSED_DISCLOSURE = (
     "boundary='transparent' CARRIED {n} strict-sign certificate(s) across a "
     "sub-jaxpr boundary on this run (the count is of the carries performed, "
@@ -11474,6 +11562,17 @@ def interval_env(
     misdiagnosed as emission infidelity. Un-narrowed intervals are wider,
     so every guard judged on them is conservative — inert is always
     sound. Callers that want the constrained view ask for it explicitly.
+
+    **BOUNDARY-OPAQUE, AND THERE IS NO KEYWORD FOR IT** — the same
+    argument as the ``assume_mode`` default above, one dial over. This
+    accessor exists for the escalation layer's division guard, which must
+    decide *"the divisor definitely excludes 0"* over the DECLARED box;
+    the strict-sign certificate is a fact about the assumed region, so
+    carrying it across a sub-jaxpr boundary here could only narrow a
+    divisor interval the guard is required to judge un-narrowed. Opaque
+    is the wider answer and the wider answer is the conservative one,
+    exactly as ``"inert"`` is. A keyword would be a way to ask for the
+    narrower one, and nothing in this library has a use for it.
     """
     _check_assume_mode(assume_mode)
     p = _Propagator(assume_mode)
@@ -12617,35 +12716,68 @@ def propagate(
                 )
             assumptions.add(budget.render(sorted(p.libm_declared)))
     if boundary != "opaque":
-        # THE DIAL'S POSITION, stamped whenever it is off the position
-        # every recorded verdict in this project's history was taken in.
-        # It is NOT conditioned on anything having crossed: a
-        # boundary-transparent run on a query with no sub-jaxpr is still a
-        # run under a different rule, and a reader comparing it against
-        # the archive has to be told which rule.
-        #
-        # **AND THE `"opaque"` POSITION ADDS NO LINE AT ALL, WHICH IS A
-        # DECISION AND NOT AN OVERSIGHT.** The acceptance criterion this
-        # change was built to is that the default is byte-for-byte
-        # today's behaviour, and a stamped line on every default run
-        # moves the rendered stamp of every verdict in the archive. So
-        # the position is recorded UNCONDITIONALLY on the structured
-        # record (:attr:`Propagation.boundary`, which is what a
-        # programmatic reader should consult) and stamped in prose only
-        # where the prose would say something new. The cost is real and
-        # is stated here rather than left to be discovered: a rendered
-        # stamp with no boundary line means `"opaque"` BY CONVENTION, and
-        # a reader who does not know the convention cannot tell it from a
-        # stamp written before the dial existed — which is the same
-        # thing, and is exactly why the convention is safe.
-        assumptions.add(BOUNDARY_TRANSPARENT_POSITION)
-        if p.boundary_crossings:
-            # THE ACT, reported only where it happened. A disclosure that
-            # rode on the position rather than on the crossing would say
-            # "certificates crossed" about a run in which none did.
-            assumptions.add(
-                BOUNDARY_CROSSED_DISCLOSURE.format(n=p.boundary_crossings)
-            )
+        # THREE SENTENCES, AND WHICH ONE IS WRITTEN IS DECIDED BY THE GATE
+        # THE WALK ITSELF USED — not by a second reading of the dial. That
+        # second reading was the defect: this site tested only
+        # `boundary != "opaque"` and wrote the position line unconditioned
+        # on semantics, so an ieee run stamped "the certificate … was
+        # allowed to cross" about a walk in which `_carries_signs` was
+        # False at every descent. See :meth:`_Propagator._carry_refusal`
+        # for what the audit measured.
+        refusal = p._carry_refusal()
+        if refusal is not None:
+            # ASKED FOR AND REFUSED. The verdict says so, and says why in
+            # the refusal's own words: a caller who set the dial and got
+            # a boundary-opaque verdict is told that is what happened,
+            # which is the `vacuity instrument inert (mode=…)` idiom one
+            # layer up in `preconditions._pipeline` — an instrument that
+            # was asked for and could not act discloses the fact rather
+            # than the absence of one.
+            assumptions.add(refusal)
+        else:
+            # THE DIAL'S POSITION, stamped on every run whose walk could
+            # actually carry — NOT conditioned on anything having
+            # crossed. A boundary-transparent run on a query with no
+            # sub-jaxpr is still a run under a different rule, and a
+            # reader comparing it against the archive has to be told
+            # which rule.
+            #
+            # **AND THE `"opaque"` POSITION ADDS NO LINE AT ALL, WHICH IS
+            # A DECISION AND NOT AN OVERSIGHT.** The acceptance criterion
+            # this change was built to is that the default is
+            # byte-for-byte today's behaviour, and a stamped line on
+            # every default run moves the rendered stamp of every verdict
+            # in the archive.
+            #
+            # THE SILENCE IS DECIDABLE AND NOT MERELY CONVENTIONAL, which
+            # is the independent audit's own strengthening of this
+            # decision and is why it stands. Every stamp carries
+            # `stelling {version}` on its first rendered line, so a
+            # reader has two cases and no third: BELOW the release that
+            # ships this dial, no dial existed and the run is
+            # boundary-opaque because nothing else was possible; AT or
+            # ABOVE it with no boundary line, the run is boundary-opaque
+            # because one of the three lines above is written on every
+            # run that is not. The reasoning is written where a verdict's
+            # reader looks — `docs/reading-a-verdict.md`, under the
+            # `assumes:` line inventory — and not only here.
+            #
+            # `propagate` returns the position on
+            # :attr:`Propagation.boundary` for a programmatic reader of a
+            # PROPAGATION. That is not a route out of `check`, which
+            # returns a `Verdict`: `Stamp` has no boundary field and no
+            # `to_dict`, so the lines above are the whole of what a
+            # verdict-reader gets, and this comment used to send that
+            # reader somewhere they cannot go.
+            assumptions.add(BOUNDARY_TRANSPARENT_POSITION)
+            if p.boundary_crossings:
+                # THE ACT, reported only where it happened. A disclosure
+                # that rode on the position rather than on the crossing
+                # would say "certificates crossed" about a run in which
+                # none did.
+                assumptions.add(
+                    BOUNDARY_CROSSED_DISCLOSURE.format(n=p.boundary_crossings)
+                )
     return Propagation(
         obligations=tuple(p.obligations),
         nonvacuity_checks=tuple(p.nonvacuity_checks),

@@ -55,6 +55,7 @@ import dataclasses
 import hashlib
 import random
 import re
+from fractions import Fraction
 
 import pytest
 
@@ -260,6 +261,70 @@ def certifying_body_query(construct):
         eqn("stelling_assert", [pred], out),
     ]
     return close(eqns, [out]), d
+
+
+def disagreeing_premises_query():
+    """**THE QUERY THAT KILLS THE PLAUSIBLE REPAIR.**
+
+    ``x \u2208 [-1, 1]``, an unforced selector, and two branches that each
+    certify their own output but on PREMISES THAT CONTRADICT EACH OTHER:
+
+        branch 0:  assume(v > 0);  return v      \u2192 certified +1, box [0, 1]
+        branch 1:  assume(v < 0);  return -v     \u2192 certified +1, box [0, 1]
+
+    The join is ``[0, 1]`` \u2014 one-sided at zero, which is exactly the shape
+    the `div` boundary gate is about \u2014 and BOTH branches agree the output
+    is positive. So the repair that looks obviously sound, *"carry out
+    only what every possible branch agrees on"*, fires here and certifies
+    the cond's output.
+
+    It is wrong, and the counterexample is inside the declared box:
+    ``x = 1/2`` with the selector taking branch 1 gives ``-1/2``, and
+    ``1/(-1/2) = -2``, which is not ``> 0``. Nothing excludes that point.
+    The two ``assume``s are BRANCH-LOCAL, so neither is a precondition of
+    the query; their conjunction is empty, and a reader of the stamp sees
+    two `constrained assume` lines that cannot both hold.
+
+    Returns ``(closed, cond_outvar)``.
+    """
+    nxt = _ids()
+    x = nxt(F64)
+    w, sel = nxt(F64), nxt(I32)
+    b0, p0, o0 = nxt(F64), nxt(BOOL), nxt(BOOL)
+    branch_positive = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(), invars=(b0,), outvars=(b0,),
+            eqns=(
+                eqn("gt", [b0, lit(0.0)], p0),
+                eqn("stelling_assume", [p0], o0),
+            ),
+        )
+    )
+    b1, p1, o1, n1 = nxt(F64), nxt(BOOL), nxt(BOOL), nxt(F64)
+    branch_negated = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(), invars=(b1,), outvars=(n1,),
+            eqns=(
+                eqn("lt", [b1, lit(0.0)], p1),
+                eqn("stelling_assume", [p1], o1),
+                eqn("neg", [b1], n1),
+            ),
+        )
+    )
+    cout, q, pred, out = nxt(F64), nxt(F64), nxt(BOOL), nxt(BOOL)
+    eqns = [
+        any_eqn(x, -1.0, 1.0),
+        any_eqn(w, 0.0, 1.0),
+        eqn("convert_element_type", [w], sel, [("new_dtype", "int32")]),
+        eqn(
+            "cond", [sel, x], cout,
+            [("branches", (branch_positive, branch_negated))],
+        ),
+        eqn("div", [lit(1.0), cout], q),
+        eqn("gt", [q, lit(0.0)], pred),
+        eqn("stelling_assert", [pred], out),
+    ]
+    return close(eqns, [out]), cout
 
 
 def _straddle_query():
@@ -1040,6 +1105,75 @@ def test_a_branch_body_assume_NEVER_certifies_anything_outside_its_branch():
         )
 
 
+def test_the_AGREE_repair_is_unsound_too_and_here_is_the_point_it_misses():
+    """**THE SECOND PROHIBITION, AND IT ANSWERS AN OPEN QUESTION RATHER
+    THAN RESTATING THE FIRST.**
+
+    The test above pins the refusal against the UNCONDITIONAL out-carry —
+    "write whatever one branch minted". The independent audit of `5e525ce`
+    observed, correctly, that this left the *plausible* repair unpinned:
+    **"carry out only what every possible branch agrees on"** passes that
+    test, and passed the whole of this suite as it then stood (measured by
+    the audit: 98 passed). It also observed that the obstacle this
+    project's code gives for the refusal — *"provenance is not in this
+    data structure"* — is the obstacle for the first repair and not for
+    the second, which needs no provenance at all.
+
+    **THE AGREE REPAIR IS UNSOUND, AND THIS IS THE COUNTEREXAMPLE.** Two
+    branches can each certify their output from premises that CONTRADICT
+    each other; agreement about the SIGN is not agreement about anything
+    that holds when the cond runs. `disagreeing_premises_query` is the
+    witness, and the point it misses is arithmetic a reader can check:
+
+        x = 1/2, selector takes branch 1  ->  -1/2  ->  1/(-1/2) = -2
+        assert(-2 > 0)                    ->  FALSE
+
+    and `x = 1/2` is in the declared box `[-1, 1]`. Neither `assume` is a
+    precondition of the QUERY — both are branch-local, and their
+    conjunction is empty — so nothing excludes that point.
+
+    DRIVEN: with the agree repair built into the `cond` arm (every
+    possible branch's outvar sign collected, written onto the cond's
+    outvar when they are all equal and nonzero), this query comes back
+    `discharged` — "definitely true for all 1 element(s)" — carrying two
+    `constrained assume` lines that cannot both hold. The shipped code
+    refuses it, and refuses it for the reason written at the `cond` arm.
+
+    The falsifying point is COMPUTED here in exact `Fraction`s rather than
+    quoted, so a reader does not have to take the arithmetic on trust and
+    a later change to the query cannot leave a stale sentence behind.
+    """
+    from stelling.propagate import _Propagator
+
+    # the counterexample, in exact rationals, from the branch body itself
+    x_star = Fraction(1, 2)
+    branch1_out = -x_star                      # `neg` of the branch invar
+    quotient = Fraction(1) / branch1_out
+    assert branch1_out < 0 and quotient == -2
+    assert not (quotient > 0), (
+        "the counterexample does not falsify the obligation; this test is "
+        "about a point at which `1/cond_output > 0` is FALSE"
+    )
+    assert -1 <= x_star <= 1, "the point must be inside the declared box"
+
+    q, cond_out = disagreeing_premises_query()
+    p = _Propagator("constrain", "real", None, "transparent")
+    p.run(q.jaxpr, list(q.consts), [])
+    assert cond_out.id not in p.strict_sign, (
+        f"the cond's output was certified {p.strict_sign[cond_out.id]!r} "
+        f"because both branches agreed on the sign. They agreed on the "
+        f"sign and disagreed on the PREMISE: one holds where v > 0 and "
+        f"the other where v < 0, so their agreement licenses nothing at "
+        f"x = {x_star}, where the obligation is false."
+    )
+    for boundary in ("opaque", "transparent"):
+        r = propagate(q, semantics="real", boundary=boundary)
+        assert r.obligations[0].status != "discharged", (
+            f"boundary={boundary!r}: `1/cond_output > 0` discharged, and "
+            f"it is false at x = {x_star} through branch 1"
+        )
+
+
 def test_an_UNCONDITIONAL_body_may_certify_outside_itself():
     """THE CONTROL for the test above, and the anti-vacuity half.
 
@@ -1088,30 +1222,136 @@ def test_the_dial_is_INERT_under_ieee(assume_inside):
     """The certificate is REAL-MODE ONLY: under a flush-to-zero semantics
     `x > 0` does not imply "certainly nonzero" (audit 0.2.0 S10), so
     nothing may write or read the table there. The gate that enforces it
-    is `_Propagator._carries_signs`, whose `semantics != "ieee"` conjunct
+    is `_Propagator._carries_signs`, whose `_carry_refusal()` conjunct
     exists for this and is the only reason a LITERAL wrapper operand
-    cannot smuggle a sign across an ieee boundary."""
-    from stelling.propagate import _Propagator
+    cannot smuggle a sign across an ieee boundary.
+
+    **THIS TEST COMPARED FIVE THINGS AND NOT THE ONE THAT MOVED.** It
+    listed statuses, details, the coverage summary, the notes and the
+    crossing count — and not `assumptions`, which was the only field the
+    dial changed under ieee, on every ieee run. So it asserted inertness
+    while the artifact of record was not inert. It now compares EVERY
+    field of the `Propagation`, through `dataclasses.fields` so a field
+    added later joins with no edit here, with exactly one named and
+    checked exception: the assumption line that DISCLOSES the inertness.
+    """
+    from stelling.propagate import (
+        BOUNDARY_CROSSED_DISCLOSURE, BOUNDARY_INERT_UNDER_IEEE,
+        BOUNDARY_TRANSPARENT_POSITION, _Propagator,
+    )
 
     q, _ = wrapped_sumsq_query("jit", assume_inside=assume_inside)
-    rows = {}
+    runs = {}
     for boundary in ("opaque", "transparent"):
-        p = propagate(q, semantics="ieee", boundary=boundary)
-        rows[boundary] = (
-            tuple(o.status for o in p.obligations),
-            tuple(o.detail for o in p.obligations),
-            p.coverage.summary(),
-            p.notes,
-            p.boundary_crossings,
-        )
+        runs[boundary] = propagate(q, semantics="ieee", boundary=boundary)
         w = _Propagator("constrain", "ieee", None, boundary)
         w.run(q.jaxpr, list(q.consts), [])
         assert not w.strict_sign, (
             f"ieee mode with boundary={boundary!r} wrote the strict-sign "
             f"table: {w.strict_sign}"
         )
-    assert rows["opaque"] == rows["transparent"], rows
-    assert rows["opaque"][-1] == 0
+    opaque, transparent = runs["opaque"], runs["transparent"]
+
+    # EVERY field but the three the dial is allowed to move, and the two
+    # bookkeeping ones are checked by name below rather than skipped.
+    moved = [
+        f.name
+        for f in dataclasses.fields(opaque)
+        if f.name not in ("assumptions", "boundary", "boundary_crossings")
+        and getattr(opaque, f.name) != getattr(transparent, f.name)
+    ]
+    assert not moved, (
+        f"under ieee the dial moved {moved}; the certificate is a claim "
+        f"about \u211d and nothing may read or write it there"
+    )
+    assert opaque.boundary_crossings == transparent.boundary_crossings == 0
+    assert transparent.boundary == "transparent"
+
+    # ...and the assumption lines differ by EXACTLY the inertness
+    # disclosure. Set difference in both directions: a line that vanished
+    # under the dial would be as wrong as one that appeared.
+    added = set(transparent.assumptions) - set(opaque.assumptions)
+    removed = set(opaque.assumptions) - set(transparent.assumptions)
+    assert not removed, removed
+    assert added == {BOUNDARY_INERT_UNDER_IEEE}, added
+    assert BOUNDARY_TRANSPARENT_POSITION not in transparent.assumptions, (
+        "an ieee run stamped the POSITION line, whose words are \"the "
+        "certificate ... was allowed to cross\" \u2014 on a walk in which "
+        "`_carries_signs` was False at every descent and nothing crossed"
+    )
+    assert not any(
+        a.startswith(BOUNDARY_CROSSED_DISCLOSURE.split("{")[0])
+        for a in transparent.assumptions
+    ), transparent.assumptions
+
+
+def test_the_ieee_STAMP_does_not_claim_a_rule_the_walk_refused():
+    """**THE F1 DEFECT, NAMED AND DRIVEN.**
+
+    `BOUNDARY_TRANSPARENT_POSITION` says the certificate *"was allowed to
+    cross the sub-jaxpr boundaries this walk enters"*. Under
+    `semantics="ieee"` it was not: `_Propagator._carries_signs` is False
+    at every descent, and a certificate that HAD crossed there would be
+    false on a flush-to-zero target. Stamping that sentence on an ieee run
+    put a rule the analysis refused into the artifact a reader trusts.
+
+    The repair is that the stamping site consults the walk's own gate
+    (`_carry_refusal`) instead of re-reading the dial, so the three
+    sentences are mutually exclusive by construction. That is what this
+    test checks, on both faces: what an ieee run says, and what it does
+    not say.
+
+    REDDENS ON REVERT: restore the site to `assumptions.add(
+    BOUNDARY_TRANSPARENT_POSITION)` under a bare `boundary != "opaque"`
+    and the second assertion fails on every ieee query.
+    """
+    from stelling.propagate import (
+        BOUNDARY_INERT_UNDER_IEEE, BOUNDARY_TRANSPARENT_POSITION,
+    )
+
+    for build in (
+        lambda: wrapped_sumsq_query("jit", assume_inside=False)[0],
+        lambda: wrapped_sumsq_query("remat2", assume_inside=True)[0],
+        _straddle_query,
+        _no_certificate_query,
+        _cond_inside_jit_query,
+    ):
+        q = build()
+        p = propagate(q, semantics="ieee", boundary="transparent")
+        assert BOUNDARY_INERT_UNDER_IEEE in p.assumptions, p.assumptions
+        assert BOUNDARY_TRANSPARENT_POSITION not in p.assumptions, (
+            "an ieee verdict claims the certificate was allowed to cross"
+        )
+    # the sentence has to SAY the two things a reader needs: that nothing
+    # crossed, and that the verdict is the boundary-opaque one. Checked as
+    # content rather than as an identity, because a rename of the constant
+    # must not be able to satisfy this on its own.
+    assert "INERT under semantics='ieee'" in BOUNDARY_INERT_UNDER_IEEE
+    assert "Nothing crossed" in BOUNDARY_INERT_UNDER_IEEE
+    assert "boundary='opaque' run would have used" in BOUNDARY_INERT_UNDER_IEEE
+
+
+def test_the_inertness_disclosure_reaches_the_verdict():
+    """A line that stops at the `Propagation` is a line no reader of a
+    verdict ever sees. The ieee stamp is assembled by the same path the
+    real-mode one is, so this is the ieee half of
+    `::test_the_stamped_lines_reach_the_verdict`."""
+    from stelling.propagate import (
+        BOUNDARY_INERT_UNDER_IEEE, BOUNDARY_TRANSPARENT_POSITION,
+    )
+    from stelling.verdict import make_verdict
+
+    q, _ = wrapped_sumsq_query("jit", assume_inside=False)
+    versions = dict(
+        stelling_version="test", jax_version="none",
+        precision_config="jax_enable_x64=True",
+    )
+    v = make_verdict(
+        q, propagate(q, semantics="ieee", boundary="transparent"), **versions
+    )
+    assert BOUNDARY_INERT_UNDER_IEEE in v.stamp.assumptions
+    assert BOUNDARY_INERT_UNDER_IEEE in v.stamp.render()
+    assert BOUNDARY_TRANSPARENT_POSITION not in v.stamp.render()
 
 
 # ---------------------------------------------------------------------------
@@ -1286,7 +1526,40 @@ def _random_expr(rng, nxt, eqns, cur, n, depth, wrap_p=0.4):
 
 
 def _generated_query(rng, n=3, steps=4):
-    """`assume(x > 0)`; a random chain; `assert_(chain > 0)`."""
+    """`assume(x > 0)`; a random chain; `q = 1/chain`; `assert_(q > 0)`
+    AND `assert_(q < 0)`, in that order.
+
+    **BOTH FACES, AND THROUGH A DIVISION, AND BOTH CORRECTIONS CAME FROM
+    MEASUREMENT.**
+
+    The obligation was first stated as `assert_(chain > 0)` alone, and the
+    status split at this module's seed was 44 unknown / 16
+    violated-over-set / **0 discharged** — an obligation-level check that
+    exercised the false-REFUTED direction and never the false-VERIFIED
+    one, which is the direction a verifier is judged on.
+
+    Stating both faces of `chain` did not fix it: 60 unknown / 60
+    violated-over-set / **still 0 discharged**, and the reason is the
+    whole point of the certificate. A chain certified `-1` has a CLOSED
+    box like `[-8, 0]`, because the exclusion of zero lives in the
+    strict-sign table and not in the box — so `chain < 0` is not
+    definitely true ON THE BOX and stays unknown, while `chain > 0` is
+    definitely false and is violated. The asymmetry is structural, not a
+    property of this grammar.
+
+    The `div` is what reads the certificate. `1/chain` on a divisor box
+    that reaches zero is ⊤ WITHOUT a certificate and a half-infinite box
+    WITH one, so `q > 0` discharges exactly when the chain is certified
+    positive and `q < 0` exactly when it is certified negative — which
+    makes both obligations claims that the carry can move. Neither assert
+    is chosen by what the propagator answered; both are always emitted,
+    so nothing here is aimed at the tool's own reply.
+
+    Returns `(closed, outer_eqns, quotient_var)`. The two obligations are
+    recorded in walk order, so obligation 0 is the `> 0` face and
+    obligation 1 is the `< 0` face; the search asserts that count rather
+    than assuming it.
+    """
     nxt = _ids()
     xa, ba = _shaped(n), _boolshaped(n)
     x = nxt(xa)
@@ -1299,13 +1572,18 @@ def _generated_query(rng, n=3, steps=4):
     cur, cur_n = x, n
     for _ in range(steps):
         cur, cur_n = _random_expr(rng, nxt, eqns, cur, cur_n, depth=2)
-    pred = nxt(_boolshaped(cur_n) if cur_n else BOOL)
-    out = nxt(_boolshaped(cur_n) if cur_n else BOOL)
+    bo = _boolshaped(cur_n) if cur_n else BOOL
+    quotient = nxt(_shaped(cur_n) if cur_n else F64)
+    gt_pred, gt_out = nxt(bo), nxt(bo)
+    lt_pred, lt_out = nxt(bo), nxt(bo)
     eqns += [
-        eqn("gt", [cur, lit(0.0)], pred),
-        eqn("stelling_assert", [pred], out),
+        eqn("div", [lit(1.0), cur], quotient),
+        eqn("gt", [quotient, lit(0.0)], gt_pred),
+        eqn("stelling_assert", [gt_pred], gt_out),
+        eqn("lt", [quotient, lit(0.0)], lt_pred),
+        eqn("stelling_assert", [lt_pred], lt_out),
     ]
-    return close(eqns, [out]), eqns
+    return close(eqns, [gt_out, lt_out]), eqns, quotient
 
 
 def test_generated_boundary_certificates_are_TRUE_at_every_assumed_point():
@@ -1316,25 +1594,87 @@ def test_generated_boundary_certificates_are_TRUE_at_every_assumed_point():
     nothing, would otherwise print the same green line as one that
     searched. MEASURED on this tree at seed 20260828, over 27 sampled
     points of the assumed region: 60 queries, 49 of them carrying at least
-    one certificate across a boundary (8 at the most), 300 certified vars
-    and 19872 var-point cell checks. The floors are set well under each of
-    those, because a floor set at the measurement is a floor that reddens
-    on the next harmless change to the grammar.
+    one certificate across a boundary (8 at the most), 360 certified vars,
+    22896 var-point cell checks, and 120 obligations splitting 60
+    discharged / 60 violated-over-set / 0 unknown. The floors are set well
+    under each of those, because a floor set at the measurement is a floor
+    that reddens on the next harmless change to the grammar.
 
     THE PER-QUERY POSITIVE CONTROL is the negated table: if `v > 0` is
     true at a point then `v < 0` is false there, so a checker that is
     running at all must find a violation for every certificate it holds.
     A green run with the control silent would mean the exact evaluation
     never reached a certified var.
+
+    **IT ALSO CHECKS THE OBLIGATION AND NOT ONLY THE TABLE**, which is
+    the independent audit's own observation about this search: the
+    certificate is the mechanism and the obligation is the claim, and it
+    is the obligation-level property that catches an unsound carry
+    whatever route it took to the table. Every generated query ends
+    `assert_(chain > 0)`, so for each one:
+
+    * a `discharged` obligation must be TRUE at every sampled point of
+      the assumed region — the false-VERIFIED property, stated directly;
+    * a `violated-over-set` obligation must be FALSE at every one — the
+      false-REFUTED property, which the dial can also reach (see
+      `::test_the_dial_can_also_move_UNKNOWN_to_REFUTED`);
+    * an `unknown` obligation is asserted about in neither direction,
+      because withholding is always allowed.
+
+    **THE TWO FACES ARE COMPLEMENTARY AND NEITHER SUBSUMES THE OTHER**,
+    which is worth stating because "check the claim, not the mechanism"
+    reads like the obligation face should be strictly stronger. MEASURED,
+    against a mutant that FLIPS the sign the wrapper out-carry writes
+    (`self.strict_sign[out.id] = -out_signs[j]`), over these same 60
+    queries and 27 points:
+
+        certificate face   7803 violations
+        obligation face       0 violations
+
+    The certificate is wrong everywhere and no obligation moves, because
+    `_t_div`'s gate reads only whether the divisor's sign is NONZERO —
+    `stelling.interval.boundary_div` takes the DIRECTION from the box.
+    So a direction defect is invisible at the claim level through `div`
+    and visible only in the table; a defect that certified something
+    genuinely unsigned would be the other way round. Both faces run.
+
+    **AND THE SAMPLED REGION HAS TO MATCH THE QUERY'S.**
+    `_assumed_points` samples the HALF-OPEN region `(0, hi]` — the region
+    `assume(x > 0)` leaves — so every query this grammar builds must carry
+    that assume, and every one does. A query without it would be judged
+    over a region containing 0 while the oracle sampled one that does not,
+    and the check would be answering a different question from the
+    propagator's.
     """
     rng = random.Random(20260828)
     points = _assumed_points(3, 0.0, 2.0, 2)
     queries = crossed = certified = cells = 0
+    judged = {"discharged": 0, "violated-over-set": 0, "unknown": 0}
     for _ in range(60):
-        query, eqns = _generated_query(rng)
+        query, eqns, quotient = _generated_query(rng)
         queries += 1
         p = propagate(query, semantics="real", boundary="transparent")
         crossed += 1 if p.boundary_crossings else 0
+        # THE OBLIGATION-LEVEL PROPERTY, at every sampled assumed point,
+        # on both faces of the quotient. Obligation 0 is `q > 0` and
+        # obligation 1 is `q < 0` (walk order, checked here).
+        assert len(p.obligations) == 2, p.obligations
+        faces = ((0, lambda c: c > 0), (1, lambda c: c < 0))
+        for point in points:
+            env = _exact_eval(eqns, point)
+            for index, face in faces:
+                status = p.obligations[index].status
+                if status == "unknown":
+                    continue  # withholding is always allowed
+                want_true = status == "discharged"
+                for cell in env[quotient.id]:
+                    assert face(cell) is want_true, (
+                        f"obligation #{index} is {status!r} but its "
+                        f"predicate is {face(cell)} at assumed point "
+                        f"{point} (chain = {cell})"
+                    )
+        for o in p.obligations:
+            judged[o.status] = judged.get(o.status, 0) + 1
         signs, checks, bad = _certified_cells(
             query, eqns, points, boundary="transparent"
         )
@@ -1366,3 +1706,11 @@ def test_generated_boundary_certificates_are_TRUE_at_every_assumed_point():
     assert crossed >= 30, f"only {crossed} of {queries} carried anything"
     assert certified >= 60, certified
     assert cells >= 500, cells
+    # the obligation-level half must have had something to judge, in the
+    # direction that matters: a search in which nothing discharged would
+    # check the false-VERIFIED property over an empty set. MEASURED at
+    # seed 20260828 on this tree: the 60 split
+    # discharged/violated-over-set/unknown as the assertion below floors.
+    assert judged["discharged"] >= 10, judged
+    assert judged["violated-over-set"] >= 10, judged
+    assert sum(judged.values()) == 120, judged
