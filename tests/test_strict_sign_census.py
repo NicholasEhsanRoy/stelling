@@ -1019,55 +1019,281 @@ def test_boundary_div_tolerates_only_a_MATCHING_signed_zero():
         )
 
 
+# --- F4 CONTINUED: the table that could not draw its own class --------------
+
+
+class WrongSignedZeroUnderCertificate(AssertionError):
+    """Raised ONLY by the sign-bit comparison in the row runner below.
+
+    A dedicated type because the diverging rows are `xfail`ed and a blanket
+    amnesty over `AssertionError` would swallow this table's two VACUITY
+    guards as well — the "a certificate was minted" assert and the "an
+    executed zero was seen" assert. Under a blanket `xfail` a row that
+    stopped minting, or stopped producing a zero, would report XFAIL and
+    read green. That is the shape
+    `tests/property/test_suite_disclosure.py::
+    test_every_xfail_in_the_suite_is_strict_and_narrowed_by_raises`
+    forbids in the property suite, applied here by hand because that check
+    walks `tests/property/` and does not reach this file.
+    """
+
+
+class ZeroRow:
+    """One end-to-end chain: a declared box, a strict assume, a function,
+    and the sign bit the certificate claims for its output.
+
+    ``assumed`` and ``want`` are SEPARATE and that is the change that let
+    this table draw its own class. They used to be one field — the row
+    said ``"lt"`` and the runner used it both to pick the assume direction
+    and to pick the certified sign — which made a row whose output sign
+    DIFFERS from its input's inexpressible. `neg` downstream of a
+    reduction is exactly that row: assumed negative, certified positive.
+    """
+
+    def __init__(self, shape, build, bounds, assumed, want, *, producer,
+                 diverges=False, why=""):
+        self.shape = tuple(shape)
+        self.build = build
+        self.bounds = bounds
+        self.assumed = assumed
+        self.want = want
+        self.producer = producer
+        self.diverges = diverges
+        self.why = why
+
+
 # The rows the census admits whose ℝ value is nonzero where the target's is
-# zero, each with the sign bit the certificate claims. Not hypothetical: these
-# are the three DAZ-band rows named in `_t_div`'s standing-constraint
-# paragraph, driven end to end.
+# zero, each with the sign bit the certificate claims.
+#
+# **THIS TABLE USED TO BE SCALAR-ONLY AND THAT IS WHY IT COULD NOT DRAW THE
+# DEFECT IT WAS BUILT FOR.** It held exactly four rows, every one of them
+# `any_array((), jnp.float64, …)`, and its comment read: *"Not
+# hypothetical: these are the three DAZ-band rows named in `_t_div`'s
+# standing-constraint paragraph, driven end to end."* Both sentences were
+# true and the table was still blind, because the class it exists to detect
+# needs a REDUCTION, and a reduction over a scalar is not a reduction:
+# `reduce_sum` and `dot_general` are lowered as accumulations SEEDED with
+# `+0.0`, and in round-to-nearest `(+0) + (−0) = +0`, so the divergence
+# begins at a reduced extent of 2. MEASURED on jax 0.11.0 CPU binary64,
+# eager and under `jit` over an array operand:
+#
+#     jnp.sum([-0.0])                 -> -0.0   n=1 AGREES
+#     jnp.sum([-0.0, -0.0])           -> +0.0   n=2 DISAGREES
+#     jnp.sum(reshape(...,(2,1)), 1)  -> -0.0   two cells, one term each
+#     dot_general([-0.,-0.],[1.,1.])  -> +0.0   DISAGREES
+#     dot_general([-0.],[1.])         -> -0.0   n=1 AGREES
+#
+# The last two lines are why the guard is the REDUCED EXTENT and not the
+# operand's size: a `reduce_sum` over an operand of six elements whose
+# every output cell sums ONE term keeps the sign bit.
+#
+# **"OVER AN ARRAY OPERAND" IS A QUALIFIER AND NOT A HEDGE.** The same
+# equation compiles two ways: `jit(lambda v: sum(v))` over an array keeps
+# the seeded reduction and returns `+0.0`, and
+# `jit(lambda p, q: sum(stack([p, q])))` is rewritten by XLA into a bare
+# `add(p, q)` with no seed and returns `-0.0`. Both are measured in
+# `tests/test_executed_sign_bit_sweep.py::
+# test_the_SAME_reduction_compiles_two_ways_with_two_DIFFERENT_sign_bits`.
+# The rows below evaluate the traced `fn` at points, which is the first
+# form; the sign bit of an executed zero is not a function of the IR alone
+# and no row here should be read as if it were.
+#
+# Every row below therefore carries a SHAPE. The four original rows carry
+# `()` and are otherwise untouched, so this widening cannot have moved what
+# they measured.
+#
+# **WHAT THIS TABLE DOES NOT REACH.** It samples three points of a declared
+# box per row and reads the sign bit of what jax computes there. It is not
+# a proof and it is not a search: a row whose divergence needs a point this
+# table does not sample is invisible here. The per-primitive question —
+# *can this primitive produce a zero whose sign bit is not the certified
+# one* — is asked of every carrying primitive, with the operand values
+# chosen adversarially rather than sampled from a box, in
+# `tests/test_executed_sign_bit_sweep.py`. Nor does anything here reach a
+# certificate that is never CONSUMED: `boundary_div` is the one consumer,
+# and whether a wrong-signed zero reaches a verdict is
+# `test_boundary_div_tolerates_only_a_MATCHING_signed_zero`'s question.
+_C = 1e-200
+"""Half of the underflow chain: `(x * _C) * _C` is a zero carrying `x`'s own
+sign bit for every declared magnitude below a MEASURED bound, so a row's box
+can be ordinary and readable instead of subnormal.
+
+The bound, bisected on jax 0.11.0 CPU binary64 against
+`float(jnp.float64(x) * 1e-200 * 1e-200) == 0.0`: it flushes up to
+`2.225073858507201e+92` and does not at `2.2250738585072013e+92`. Every box
+below is between 0.25 and 1, so every row is inside it by ninety decades —
+this is a constant chosen with a margin, not a constant that happens to
+work."""
+
 ZERO_UNDER_CERTIFICATE = {
-    "mul (the cube that underflows)": (
-        lambda jnp: (lambda x: x * x * x), (-1e-100, -1e-200), "lt", -1,
+    # -- the four original rows, now carrying `shape=()` ------------------
+    "mul (the cube that underflows)": ZeroRow(
+        (), lambda jnp: (lambda x: x * x * x), (-1e-100, -1e-200), -1, -1,
+        producer="mul",
     ),
-    "sqrt (a flushed subnormal operand)": (
-        lambda jnp: (lambda x: jnp.sqrt(x)), (0.0, 1e-310), "gt", 1,
+    "sqrt (a flushed subnormal operand)": ZeroRow(
+        (), lambda jnp: (lambda x: jnp.sqrt(x)), (0.0, 1e-310), 1, 1,
+        producer="sqrt",
     ),
-    "max (a flushed subnormal operand)": (
-        lambda jnp: (lambda x: jnp.maximum(x, -1.0)), (0.0, 1e-310), "gt", 1,
+    "max (a flushed subnormal operand)": ZeroRow(
+        (), lambda jnp: (lambda x: jnp.maximum(x, -1.0)), (0.0, 1e-310), 1, 1,
+        producer="max",
     ),
-    "min (a flushed subnormal operand)": (
-        lambda jnp: (lambda x: jnp.minimum(x, 1.0)), (-1e-310, 0.0), "lt", -1,
+    "min (a flushed subnormal operand)": ZeroRow(
+        (), lambda jnp: (lambda x: jnp.minimum(x, 1.0)), (-1e-310, 0.0), -1, -1,
+        producer="min",
+    ),
+    # -- the controls that prove the probe is not simply always-red -------
+    "reduce_sum n=1 (the control: one term, no seed to lose to)": ZeroRow(
+        (1,), lambda jnp: (lambda x: jnp.sum(x * _C * _C)), (-1.0, -0.25),
+        -1, -1, producer="reduce_sum",
+        why="a one-term sum keeps the sign bit; if this row ever reds, the "
+            "probe is broken and not the target",
+    ),
+    "reduce_sum n=6 reduced to 1 term per cell (the control)": ZeroRow(
+        (6,), lambda jnp: (
+            lambda x: jnp.sum(jnp.reshape(x * _C * _C, (6, 1)), axis=1)
+        ), (-1.0, -0.25), -1, -1, producer="reduce_sum",
+        why="six elements, six output cells, ONE term each — the guard is "
+            "the reduced extent and not the operand's size",
+    ),
+    "dot_general n=1 (the control)": ZeroRow(
+        (1,), lambda jnp: (
+            lambda x: jnp.dot(x * _C * _C, jnp.ones((1,), jnp.float64))
+        ), (-1.0, -0.25), -1, -1, producer="dot_general",
+    ),
+    "reduce_sum n=2 POSITIVE (the safe direction, pinned)": ZeroRow(
+        (2,), lambda jnp: (lambda x: jnp.sum(x * _C * _C)), (0.25, 1.0),
+        1, 1, producer="reduce_sum",
+        why="`(+0) + (+0) = +0` and the seed is `+0.0`, so a POSITIVE "
+            "certificate survives the same reduction that destroys a "
+            "negative one. This asymmetry is the whole shape of the "
+            "eventual repair, and an instrument that cannot show the safe "
+            "direction cannot show that the repair kept it",
+    ),
+    # -- the class itself ---------------------------------------------------
+    "reduce_sum n=2 (THE CLASS)": ZeroRow(
+        (2,), lambda jnp: (lambda x: jnp.sum(x * _C * _C)), (-1.0, -0.25),
+        -1, -1, producer="reduce_sum", diverges=True,
+        why="the seeded accumulation: `(+0) + (−0) + (−0) = +0`",
+    ),
+    "reduce_sum n=5 (the same, wider)": ZeroRow(
+        (5,), lambda jnp: (lambda x: jnp.sum(x * _C * _C)), (-1.0, -0.25),
+        -1, -1, producer="reduce_sum", diverges=True,
+        why="not an n=2 artifact",
+    ),
+    "dot_general n=2 (THE CLASS)": ZeroRow(
+        (2,), lambda jnp: (
+            lambda x: jnp.dot(x * _C * _C, jnp.ones((2,), jnp.float64))
+        ), (-1.0, -0.25), -1, -1, producer="dot_general", diverges=True,
+        why="the same seed, reached through a contraction; the `ones` "
+            "operand is a CONSTVAR the propagator certifies `+1`, so the "
+            "product's certificate is `-1`",
+    ),
+    "neg DOWNSTREAM of a diverged reduction": ZeroRow(
+        (2,), lambda jnp: (lambda x: -jnp.sum(x * _C * _C)), (-1.0, -0.25),
+        -1, 1, producer="neg", diverges=True,
+        why="`neg(+0.0) = -0.0`, so a wrong `-1` becomes a wrong `+1` and "
+            "the defect travels. The assumed direction is NEGATIVE and the "
+            "certified sign is POSITIVE — the row shape the old one-field "
+            "table could not express",
     ),
 }
 
 
-@pytest.mark.parametrize("name", sorted(ZERO_UNDER_CERTIFICATE))
+def _zero_row_points(row):
+    """The sampled points of the declared box, on the ASSUMED side.
+
+    Three scalars — the two endpoints and the midpoint — filtered to the
+    assumed half, each broadcast to the row's shape, plus (for a row with
+    at least two elements) one NON-UNIFORM point built by alternating them,
+    so an all-elements-equal vector is not the only thing the row ever
+    sees.
+    """
+    lo, hi = row.bounds
+    scalars = [
+        v for v in (lo, hi, (lo + hi) / 2.0)
+        if (v > 0 if row.assumed > 0 else v < 0)
+    ]
+    assert scalars, row.bounds
+    n = 1
+    for d in row.shape:
+        n *= d
+    points = [tuple([v] * n) for v in scalars]
+    if n > 1 and len(scalars) > 1:
+        points.append(tuple(scalars[i % len(scalars)] for i in range(n)))
+    return points
+
+
+_DIVERGING_XFAIL = (
+    "OPEN DEFECT, not a gap in this test: XLA lowers `reduce_sum` and "
+    "`dot_general` as accumulations SEEDED with `+0.0`, so a value the "
+    "strict-sign certificate calls NEGATIVE whose every element flushes to "
+    "`-0.0` reduces to a `+0.0`. An opposite-signed zero falls outside "
+    "every arm of `interval.boundary_div` "
+    "(`test_boundary_div_tolerates_only_a_MATCHING_signed_zero`), which "
+    "turns it into a false VERIFIED on a lower-bound obligation and a "
+    "false REFUTED on an upper one. Disclosed here rather than deleted: "
+    "the row is the instrument the SEEDED-REDUCTION REPAIR item will be "
+    "measured by, and `strict=True` means the day that repair lands this "
+    "goes XPASS and reds instead of passing quietly. Making the rule right "
+    "is that item's work and is explicitly NOT this one's."
+)
+
+
+def _zero_row_params():
+    """The parametrize list, with the diverging rows marked.
+
+    Derived from `ZERO_UNDER_CERTIFICATE[...].diverges` rather than from a
+    second list of names, so a row cannot be reclassified in one place and
+    not the other.
+    """
+    out = []
+    for name in sorted(ZERO_UNDER_CERTIFICATE):
+        row = ZERO_UNDER_CERTIFICATE[name]
+        marks = ()
+        if row.diverges:
+            marks = (pytest.mark.xfail(
+                strict=True,
+                raises=WrongSignedZeroUnderCertificate,
+                reason=_DIVERGING_XFAIL,
+            ),)
+        out.append(pytest.param(name, marks=marks))
+    return out
+
+
+@pytest.mark.parametrize("name", _zero_row_params())
 def test_an_executed_zero_under_a_certificate_carries_the_CERTIFIED_sign_bit(name):
     """F4, the driven half, and the probe the audit asked for.
 
-    Each row here is a chain the census certifies whose executed value on the
-    target is ZERO. That is disclosed and costs no verdict — but only while
-    the zero's SIGN BIT agrees with the certificate (see `_t_div`). This is
-    the check that would tell the author of a future rule that theirs does
-    not.
+    Each row here is a chain the census certifies whose executed value on
+    the target is ZERO. That is disclosed and costs no verdict — but only
+    while the zero's SIGN BIT agrees with the certificate (see `_t_div`).
+    This is the check that would tell the author of a future rule that
+    theirs does not, and for four rows it is the check that says the
+    SHIPPED rules already do not.
 
-    NOT VACUOUS BY CONSTRUCTION: the test asserts both that a certificate was
-    minted AND that the executed value really is zero, so a row that stopped
-    producing a zero — or stopped being certified — reds here instead of
-    passing quietly."""
+    NOT VACUOUS BY CONSTRUCTION, and the guards are typed so the `xfail`
+    cannot eat them: the sign-bit comparison raises
+    :class:`WrongSignedZeroUnderCertificate` and everything else raises a
+    plain `AssertionError`. So a row that stops minting a certificate, or
+    stops producing a zero, or stops being produced by the primitive it
+    names, FAILS — including the rows that are expected to xfail."""
     pytest.importorskip("jax")
     jax, jnp, lax = _f64_lax()
     from stelling.harness import any_array, assert_, assume, trace
 
-    build, bounds, cmp_, want = ZERO_UNDER_CERTIFICATE[name]
-    fn = build(jnp)
+    row = ZERO_UNDER_CERTIFICATE[name]
+    fn = row.build(jnp)
 
     def h():
-        x = any_array((), jnp.float64, bounds)
-        if cmp_ == "gt":
+        x = any_array(row.shape, jnp.float64, row.bounds)
+        if row.assumed > 0:
             assume(x > 0)
         else:
             assume(x < 0)
         d = fn(x)
-        return assert_(d > 0 if want > 0 else d < 0)
+        return assert_(d > 0 if row.want > 0 else d < 0)
 
     cj = _at_x64(lambda: trace(h))
     p = _Propagator("constrain")
@@ -1079,33 +1305,78 @@ def test_an_executed_zero_under_a_certificate_carries_the_CERTIFIED_sign_bit(nam
         e for e in cj.jaxpr.eqns if e.outvars and e.outvars[0].id == pred.id
     )
     value = cmp_eqn.invars[0]
+    producer = next(
+        (e for e in cj.jaxpr.eqns if any(o.id == value.id for o in e.outvars)),
+        None,
+    )
+    assert producer is not None and producer.primitive == row.producer, (
+        f"{name}: the compared value is produced by "
+        f"{producer.primitive if producer else None!r}, not by "
+        f"{row.producer!r} — this row does not exercise what it names"
+    )
     sign = p.strict_sign.get(value.id, 0)
-    assert sign == want, (
-        f"{name}: certified {sign}, expected {want} — this row no longer "
-        f"exercises the constraint it is here to guard"
+    assert sign == row.want, (
+        f"{name}: certified {sign}, expected {row.want} — this row no "
+        f"longer exercises the constraint it is here to guard"
     )
 
-    lo, hi = bounds
-    pts = [p_ for p_ in (lo, hi, (lo + hi) / 2.0) if (p_ > 0 if want > 0 else p_ < 0)]
-    assert pts, bounds
     zeros = 0
-    for pt in pts:
-        v = _at_x64(lambda pt=pt: float(fn(jnp.float64(pt))))
-        if v == 0.0:
-            zeros += 1
-            assert math.copysign(1.0, v) == float(want), (
-                f"{name}: the certificate says {want:+d} and the target "
-                f"computes {v!r} at x={pt!r}, whose sign bit is "
-                f"{math.copysign(1.0, v)}. An opposite-signed zero falls "
-                f"outside every arm of boundary_div and is the one route "
-                f"from this gap to a wrong verdict"
+    for pt in _zero_row_points(row):
+        arr = _at_x64(
+            lambda pt=pt: jnp.reshape(
+                jnp.array(pt, dtype=jnp.float64), row.shape
             )
-        else:
-            assert (v > 0) if want > 0 else (v < 0), (v, pt)
+        )
+        vals = _at_x64(lambda arr=arr: [float(v) for v in jnp.ravel(fn(arr))])
+        assert vals, (name, pt)
+        for v in vals:
+            if v == 0.0:
+                zeros += 1
+                if math.copysign(1.0, v) != float(row.want):
+                    raise WrongSignedZeroUnderCertificate(
+                        f"{name}: the certificate says {row.want:+d} and the "
+                        f"target computes {v!r} at x={pt!r}, whose sign bit "
+                        f"is {math.copysign(1.0, v)}. An opposite-signed "
+                        f"zero falls outside every arm of boundary_div and "
+                        f"is the one route from this gap to a wrong verdict"
+                        + (f" — {row.why}" if row.why else "")
+                    )
+            else:
+                assert (v > 0) if row.want > 0 else (v < 0), (name, v, pt)
     assert zeros, (
         f"{name}: no sampled point executed as zero, so this row did not "
         f"exercise the sign-bit constraint at all"
     )
+
+
+def test_the_zero_table_has_a_control_in_BOTH_directions():
+    """The absence half of the table itself.
+
+    A table of only-diverging rows would be indistinguishable from a probe
+    that is broken; a table of only-agreeing rows is the table this file
+    shipped with, and it could not see the defect. Both halves are required
+    here, derived from the rows rather than counted by hand."""
+    rows = ZERO_UNDER_CERTIFICATE.values()
+    assert any(r.diverges for r in rows), (
+        "no row diverges — either the seeded-reduction defect is repaired "
+        "(in which case the xfails above are XPASSing and this suite is "
+        "already red) or this table lost the rows that saw it"
+    )
+    assert any(not r.diverges for r in rows), "no row agrees"
+    assert any(r.diverges and r.want > 0 for r in rows), (
+        "no row shows the defect travelling INTO a positive certificate; "
+        "`neg` downstream of a reduction is that row"
+    )
+    assert any(not r.diverges and r.want > 0 and len(r.shape) == 1
+               and r.shape[0] > 1 for r in rows), (
+        "no row pins the SAFE direction of a real reduction, so nothing "
+        "here could show that a repair kept it"
+    )
+    assert any(r.shape == () for r in rows), (
+        "the scalar rows this table shipped with are gone; the widening was "
+        "supposed to keep them"
+    )
+
 
 
 # --- F3: the decline message may not claim a COUNT it cannot keep -----------

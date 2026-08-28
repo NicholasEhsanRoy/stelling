@@ -16,8 +16,32 @@ can mint a false REFUTED as well as a false VERIFIED. That is why this
 property checks the CERTIFICATE and not a verdict: the certificate is
 upstream of both directions.
 
+**THE FIRST ENTRY IN THE LIST BELOW IS THE ONE THAT WAS MISSING, AND IT IS
+THE ONE THAT MATTERS MOST.** This module's NOT-covered list used to open at
+`sqrt` and say nothing at all about what an EXACT-RATIONAL oracle is
+structurally unable to express. A reader who took a null from this search as
+a statement about signed zeros was being misled by an instrument that could
+not have spoken, and that is exactly what happened: a seeded-reduction
+defect — a `-1`-certified value whose executed zero carries the `+` sign bit
+— sat under this search and under
+`tests/test_strict_sign_census.py::ZERO_UNDER_CERTIFICATE` at the same time,
+and neither could draw it.
+
 NOT covered:
 
+* **ANY DEFECT WHOSE SUBJECT IS A FLOAT SIGN BIT, AND NO WIDENING OF THIS
+  SEARCH CAN CHANGE THAT.** The oracle evaluates in `Fraction`, and ℚ has no
+  signed zero: `(+0) + (−0)` is `0`, full stop, and `Fraction(0) < 0` is
+  False whichever way the bits went. So this property cannot express the
+  proposition "the executed zero carries the wrong sign bit", let alone
+  falsify it. Drawing more primitives here — which the entry below does —
+  closes an ℝ-side coverage gap and does NOT make this the guard for that
+  class. The guard for it must EXECUTE on the target and read the sign bit:
+  `tests/test_executed_sign_bit_sweep.py` does that for every carrying
+  primitive, and `tests/test_strict_sign_census.py::
+  test_an_executed_zero_under_a_certificate_carries_the_CERTIFIED_sign_bit`
+  does it end to end. **A null from this file is evidence about ℝ and about
+  nothing else.**
 * **`sqrt`, `exp`, `pow`** — anything whose value leaves the rationals. The
   evaluator here is exact or it is nothing, and a floating `math.sqrt` would
   put the propagator's own rounding question back inside the instrument. The
@@ -30,19 +54,28 @@ NOT covered:
   that geometry inside this evaluator would make the instrument a second
   copy of the thing under test. They are checked against EXECUTED jax in
   `tests/test_strict_sign_census.py`.
-* **`dot_general`, `reduce_sum` over generated shapes** — every value here
+* *`dot_general` and `reduce_sum` USED TO BE HERE.* The entry read:
+  *"**`dot_general`, `reduce_sum` over generated shapes** — every value here
   has one fixed extent, so no contraction or reduction is drawn. Both rules
-  have hand cases elsewhere.
+  have hand cases elsewhere."* That was true and it is no longer: the extent
+  is DRAWN (`k` in `_specs`, 1 to 4), and `sum_broadcast` and
+  `dot_broadcast` emit a real `reduce_sum` / `dot_general` down to a scalar
+  and a `broadcast_in_dim` back to `(k,)`, so both rules and both of their
+  SIZE guards are searched over generated extents including `k = 1`. What
+  the widening does not buy is the entry above it: in ℚ a reduction of
+  negatives is negative at every extent, so the sign-bit class stays
+  invisible here by construction.
 * **ieee semantics.** The certificate is never written under ieee (the call
   site short-circuits), so there is nothing here to search.
 * **anything about VERDICTS.** This property never runs
   `preconditions.check`; a rule that is sound and useless passes it.
-* **rank > 1.** Every drawn value is rank 1 with a fixed extent, so a
-  routing rule that is wrong only on a multi-axis operand is not reached.
+* **rank > 1.** Every drawn value is rank 1, so a routing rule that is wrong
+  only on a multi-axis operand is not reached. *This entry used to add "with
+  a fixed extent"; the extent is drawn now and the rank is not.*
 
-The search is over PROGRAMS and BOXES both: the declared upper bound, the
-operator chain, the constants, the operand picks and the sample points are
-all drawn.
+The search is over PROGRAMS and BOXES both: the declared extent, the declared
+upper bound, the operator chain, the constants, the operand picks and the
+sample points are all drawn.
 """
 
 from __future__ import annotations
@@ -63,14 +96,29 @@ from stelling import ir  # noqa: E402
 from stelling.propagate import _Propagator  # noqa: E402
 
 
-K = 3
-"""The one extent every drawn value has. Rank 1, fixed, by construction —
-see the module docstring's NOT-covered list."""
+EXTENTS = (1, 2, 3, 4)
+"""The rank-1 extents a spec may draw.
 
-F64 = ir.Aval(kind="ShapedArray", shape=(K,), dtype="float64")
-CAT = ir.Aval(kind="ShapedArray", shape=(2 * K,), dtype="float64")
-BOOLK = ir.Aval(kind="ShapedArray", shape=(K,), dtype="bool")
+**THIS USED TO BE `K = 3`, A MODULE CONSTANT**, whose docstring read *"The
+one extent every drawn value has. Rank 1, fixed, by construction — see the
+module docstring's NOT-covered list."* Fixed by construction is what kept
+`reduce_sum` and `dot_general` out of the grammar: with one extent there is
+no contraction or reduction to draw. `1` is in the list deliberately — an
+extent-1 reduction is the SIZE guard's boundary on the admitting side, and
+an empty one cannot be drawn at all because no size-0 value is ever
+certified.
+"""
+
 SCALAR = ir.Aval(kind="ShapedArray", shape=(), dtype="float64")
+
+
+def _avals(k):
+    """``(value, concatenated, boolean)`` avals for extent ``k``."""
+    return (
+        ir.Aval(kind="ShapedArray", shape=(k,), dtype="float64"),
+        ir.Aval(kind="ShapedArray", shape=(2 * k,), dtype="float64"),
+        ir.Aval(kind="ShapedArray", shape=(k,), dtype="bool"),
+    )
 
 # Every op preserves the rank-1 extent, which is what lets the chain be
 # drawn freely without a shape solver. `concat_slice` and `concat_split`
@@ -80,6 +128,12 @@ UNARY = ("neg", "abs", "square", "copy", "stop_gradient", "reshape")
 BINARY = ("add", "sub", "mul", "max", "min")
 OPS = UNARY + BINARY + (
     "div_by_const", "integer_pow", "select_n", "concat_slice", "concat_split",
+    # The two REDUCTIONS, each a round trip: down to a scalar and back to
+    # `(k,)` through `broadcast_in_dim`, so the pool stays homogeneous the
+    # way `concat_slice` keeps it. The scalar itself is certified and is
+    # checked — it is in `produced` — so the reduction's own output is what
+    # the property reads, not only the broadcast copy of it.
+    "sum_broadcast", "dot_broadcast",
     # `sub_opposite` is a BIASED draw and is here for a measured reason:
     # `sub`'s rule fires only on OPPOSITE-signed operands, and the unbiased
     # grammar produced that pair 2 times in 401 examples (measured
@@ -103,6 +157,7 @@ def _specs(draw):
     Drawn as a tuple rather than through `st.data()` so that `@example`
     below is possible — the suite's rule 3."""
     sign = draw(st.sampled_from((1, -1)))
+    k = draw(st.sampled_from(EXTENTS))
     hi = draw(st.sampled_from((1, 2, 4)))
     depth = draw(st.integers(min_value=1, max_value=6))
     ops = tuple(draw(st.sampled_from(OPS)) for _ in range(depth))
@@ -111,14 +166,14 @@ def _specs(draw):
     ys = tuple(draw(st.sampled_from((0, 2, 3))) for _ in range(depth))
     picks = tuple(draw(st.integers(0, 30)) for _ in range(2 * depth))
     pts = tuple(
-        tuple(draw(st.integers(1, 8)) for _ in range(K))
+        tuple(draw(st.integers(1, 8)) for _ in range(k))
         for _ in range(draw(st.integers(min_value=2, max_value=4)))
     )
-    return sign, hi, ops, consts, nz, ys, picks, pts
+    return sign, k, hi, ops, consts, nz, ys, picks, pts
 
 
 EXAMPLE = (
-    1, 2,
+    1, 3, 2,
     ("neg", "sub", "concat_slice", "max"),
     (Fraction(1), Fraction(1), Fraction(1), Fraction(1)),
     (Fraction(1), Fraction(1), Fraction(1), Fraction(1)),
@@ -126,10 +181,30 @@ EXAMPLE = (
     (0, 0, 1, 0, 0, 1, 0, 1),
     ((1, 4, 8), (8, 1, 4)),
 )
-"""PINNED: `x`, `-x`, `x - (-x)`, a concat/slice round trip and a `max`.
-The unbiased search does draw `sub` on opposite-signed operands, but not
-reliably at depth 4 with the round trip present, so the shape that motivated
-the `sub` rule is pinned rather than left to the draw."""
+"""PINNED: `x`, `-x`, `x - (-x)`, a concat/slice round trip and a `max`, at
+the extent this file used to fix for every spec. The unbiased search does
+draw `sub` on opposite-signed operands, but not reliably at depth 4 with the
+round trip present, so the shape that motivated the `sub` rule is pinned
+rather than left to the draw."""
+
+EXAMPLE_REDUCTIONS = (
+    -1, 2, 2,
+    ("sum_broadcast", "dot_broadcast", "neg"),
+    (Fraction(1), Fraction(1), Fraction(1)),
+    (Fraction(1), Fraction(1), Fraction(1)),
+    (2, 2, 2),
+    (0, 0, 0, 1, 0, 1),
+    ((1, 4), (8, 1)),
+)
+"""PINNED: a NEGATIVE declaration reduced by `reduce_sum` at extent 2, then
+contracted by `dot_general`, then negated.
+
+This is the exact ℝ shape of the executed-sign-bit defect
+`tests/test_executed_sign_bit_sweep.py` reports — and it PASSES here, at
+every drawn point, because in ℚ the sum of two negatives is negative and no
+`Fraction` carries a sign bit. Pinned for that reason: the reader who wants
+to know why this search says nothing about signed zeros can run this one
+example and watch it come back clean."""
 
 
 def _lit(v):
@@ -140,12 +215,13 @@ def _build(spec):
     """The IR for one spec: `assume(x > 0)` (or `< 0`), then the chain.
 
     Returns ``(ClosedJaxpr, eqns, {var id: producing primitive})``."""
-    sign, hi, ops, consts, nz, ys, picks, _pts = spec
+    sign, k, hi, ops, consts, nz, ys, picks, _pts = spec
+    F64, CAT, BOOLK = _avals(k)
     counter = [0]
 
-    def nxt(aval=F64):
+    def nxt(aval=None):
         counter[0] += 1
-        return ir.Var(id=counter[0], aval=aval)
+        return ir.Var(id=counter[0], aval=F64 if aval is None else aval)
 
     def eqn(prim, ins, outs, params=()):
         return ir.JaxprEqn(primitive=prim, invars=tuple(ins),
@@ -153,7 +229,7 @@ def _build(spec):
 
     x = ir.Var(id=0, aval=F64)
     eqns = [eqn("stelling_any", (), (x,),
-                (("shape", (K,)), ("dtype", "float64"),
+                (("shape", (k,)), ("dtype", "float64"),
                  ("lo", 0.0 if sign > 0 else float(-hi)),
                  ("hi", float(hi) if sign > 0 else 0.0)))]
     pa, ao = nxt(BOOLK), nxt(BOOLK)
@@ -166,14 +242,19 @@ def _build(spec):
     def pick(i):
         return pool[picks[i] % len(pool)]
 
-    for k, op in enumerate(ops):
-        a = pick(2 * k)
-        b = pick(2 * k + 1)
+    # `step`, not `k`: `k` is the drawn EXTENT and it is read inside this
+    # loop (the `slice` limit, the `split` sizes, the `broadcast_in_dim`
+    # shape). Shadowing it with the loop index made every `slice` a size-0
+    # window, which certifies nothing — measured as `slice=0` in the census
+    # while `concatenate` was 82.
+    for step, op in enumerate(ops):
+        a = pick(2 * step)
+        b = pick(2 * step + 1)
         if op in UNARY:
             o = nxt()
             params = ()
             if op == "reshape":
-                params = (("new_sizes", (K,)), ("dimensions", None))
+                params = (("new_sizes", (k,)), ("dimensions", None))
             eqns.append(eqn(op, (a,), (o,), params))
             pool.append(o)
             produced[o.id] = op
@@ -184,17 +265,17 @@ def _build(spec):
             produced[o.id] = op
         elif op == "div_by_const":
             o = nxt()
-            eqns.append(eqn("div", (a, _lit(nz[k])), (o,)))
+            eqns.append(eqn("div", (a, _lit(nz[step])), (o,)))
             pool.append(o)
             produced[o.id] = "div"
         elif op == "integer_pow":
             o = nxt()
-            eqns.append(eqn("integer_pow", (a,), (o,), (("y", ys[k]),)))
+            eqns.append(eqn("integer_pow", (a,), (o,), (("y", ys[step]),)))
             pool.append(o)
             produced[o.id] = "integer_pow"
         elif op == "select_n":
             pr = nxt(BOOLK)
-            eqns.append(eqn("gt", (a, _lit(consts[k])), (pr,)))
+            eqns.append(eqn("gt", (a, _lit(consts[step])), (pr,)))
             o = nxt()
             eqns.append(eqn("select_n", (pr, a, b), (o,)))
             pool.append(o)
@@ -206,7 +287,7 @@ def _build(spec):
             o = nxt()
             eqns.append(eqn(
                 "slice", (c,), (o,),
-                (("start_indices", (0,)), ("limit_indices", (K,)),
+                (("start_indices", (0,)), ("limit_indices", (k,)),
                  ("strides", None)),
             ))
             pool.append(o)
@@ -220,13 +301,35 @@ def _build(spec):
             eqns.append(eqn("sub", (a, nb), (o,)))
             pool.append(o)
             produced[o.id] = "sub"
+        elif op == "sum_broadcast":
+            sc = nxt(SCALAR)
+            eqns.append(eqn("reduce_sum", (a,), (sc,), (("axes", (0,)),)))
+            produced[sc.id] = "reduce_sum"
+            o = nxt()
+            eqns.append(eqn("broadcast_in_dim", (sc,), (o,),
+                            (("shape", (k,)), ("broadcast_dimensions", ()))))
+            pool.append(o)
+            produced[o.id] = "broadcast_in_dim"
+        elif op == "dot_broadcast":
+            sc = nxt(SCALAR)
+            eqns.append(eqn(
+                "dot_general", (a, b), (sc,),
+                (("dimension_numbers", (((0,), (0,)), ((), ()))),
+                 ("precision", None), ("preferred_element_type", None)),
+            ))
+            produced[sc.id] = "dot_general"
+            o = nxt()
+            eqns.append(eqn("broadcast_in_dim", (sc,), (o,),
+                            (("shape", (k,)), ("broadcast_dimensions", ()))))
+            pool.append(o)
+            produced[o.id] = "broadcast_in_dim"
         else:  # concat_split
             c = nxt(CAT)
             eqns.append(eqn("concatenate", (a, b), (c,), (("dimension", 0),)))
             produced[c.id] = "concatenate"
             o1, o2 = nxt(), nxt()
             eqns.append(eqn("split", (c,), (o1, o2),
-                            (("sizes", (K, K)), ("axis", 0))))
+                            (("sizes", (k, k)), ("axis", 0))))
             pool.extend((o1, o2))
             produced[o1.id] = "split"
             produced[o2.id] = "split"
@@ -240,10 +343,16 @@ def _build(spec):
     return closed, eqns, produced
 
 
-def _evaluate(eqns, point):
+def _evaluate(eqns, point, k):
     """The same program in exact `Fraction`s. `var id -> list[Fraction]`,
     flat, C order. Raises on any primitive it does not implement, so the
-    grammar cannot grow past the instrument in silence."""
+    grammar cannot grow past the instrument in silence.
+
+    **EXACT, AND THEREFORE BLIND TO ONE WHOLE CLASS.** `Fraction(0)` has no
+    sign bit: the reduction below sums `-0` and `-0` to `0`, exactly as it
+    sums `+0` and `+0`, and the propagator's certificate is judged against
+    that. The target does not agree with either — see the module docstring's
+    first NOT-covered entry."""
     env: dict[int, list[Fraction]] = {0: list(point)}
 
     def val(atom):
@@ -313,8 +422,25 @@ def _evaluate(eqns, point):
             src = val(e.invars[0])
             off = 0
             for v in e.outvars:
-                env[v.id] = list(src[off:off + K])
-                off += K
+                env[v.id] = list(src[off:off + k])
+                off += k
+        elif prim == "reduce_sum":
+            env[o] = [sum(val(e.invars[0]), Fraction(0))]
+        elif prim == "dot_general":
+            a, b = val(e.invars[0]), val(e.invars[1])
+            env[o] = [sum(
+                (p * q for p, q in zip(a, b)), Fraction(0)
+            )]
+        elif prim == "broadcast_in_dim":
+            src = val(e.invars[0])
+            n = 1
+            for d in dict(e.params)["shape"]:
+                n *= d
+            assert len(src) == 1, (
+                "this evaluator only broadcasts a scalar; the grammar has "
+                "outgrown it"
+            )
+            env[o] = list(src) * n
         else:
             raise AssertionError(f"no exact rule for {prim!r}")
     return env
@@ -323,7 +449,8 @@ def _evaluate(eqns, point):
 def test_a_certified_sign_is_TRUE_at_every_assumed_point():
     """THE property.
 
-    MEASURED on 2026-08-28 on this branch, at the `ci` profile (budget 400,
+    **THE BUDGET MOVED FROM 400 TO 800 AND THE REASON IS A MEASUREMENT, not
+    a preference.** This docstring recorded, at the `ci` profile (budget 400,
     derandomized), by wrapping `_runner.Census.require` to print its report:
 
         drawn=401 examined=401 compared=16080
@@ -332,18 +459,43 @@ def test_a_certified_sign_is_TRUE_at_every_assumed_point():
               select_n 207, stop_gradient 207, abs 205, div 203, max 202,
               square 174, min 172, sub 130, slice 123}
 
-    and no violation. The floors below are TRIPWIRES for a search that
-    collapsed, not claims of thoroughness — they are set an order of
-    magnitude under every one of those numbers on purpose. The nightly
-    profile also passes (68 s, same date, same tree)."""
+    Adding `sum_broadcast` and `dot_broadcast` to `OPS` and drawing the
+    extent changes the whole derandomized stream, and at budget 400 the new
+    stream gives **`slice: 4`** — the search still reaches the op, but four
+    certified slices is not a search of it, and the floor caught it. At 800
+    the same stream gives `slice: 485`. That 120x jump for a 2x budget is
+    hypothesis's staged generation broadening late, and it is the honest
+    reason the budget is where it is: not "more is better" but "the ci
+    stream needs this much to reach the rarest op in the grammar".
+
+    MEASURED on 2026-08-28 on this branch, `ci` profile, budget 800,
+    derandomized, hypothesis 6.165.10, by the same wrapping:
+
+        drawn=802 examined=802 compared=30927
+        tags={declaration 2290, neg 977, broadcast_in_dim 924, concatenate
+              844, split 718, reduce_sum 573, div 561, slice 485, max 485,
+              mul 427, abs 426, square 392, sub 364, dot_general 351,
+              reshape 343, stop_gradient 330, add 320, min 307, copy 299,
+              integer_pow 276, select_n 156}
+
+    and no violation — which is the OTHER half of the correction: the two
+    reduction rules are now drawn, in ℚ, and ℚ says they are sound. That is
+    not a statement about the executed sign bit, and the module docstring's
+    first NOT-covered entry is where a reader is told so.
+
+    The floors below are TRIPWIRES for a search that collapsed, not claims
+    of thoroughness — they are set an order of magnitude under every one of
+    those numbers on purpose, and they are unchanged in value from before
+    the widening, so this change cannot have loosened one."""
     census = _runner.Census("strict-sign/certified-is-true")
 
-    @_profiles.current().settings(400)
+    @_profiles.current().settings(800)
     @given(_specs())
     @example(EXAMPLE)
+    @example(EXAMPLE_REDUCTIONS)
     def search(spec):
         census.draw()
-        sign, hi, _ops, _c, _nz, _ys, _picks, pts = spec
+        sign, k, hi, _ops, _c, _nz, _ys, _picks, pts = spec
         closed, eqns, produced = _build(spec)
         p = _Propagator("constrain")
         p.run(closed.jaxpr, list(closed.consts), [])
@@ -355,7 +507,7 @@ def test_a_certified_sign_is_TRUE_at_every_assumed_point():
             [Fraction(sign * n, 8) * hi for n in pt] for pt in pts
         ]
         for point in points:
-            env = _evaluate(eqns, point)
+            env = _evaluate(eqns, point, k)
             for vid, sgn in signs.items():
                 assert vid in env, (
                     f"var {vid} was certified but this evaluator does not "
@@ -379,4 +531,7 @@ def test_a_certified_sign_is_TRUE_at_every_assumed_point():
         add=5, sub=5, mul=5, neg=5, abs=5, square=5, max=5, min=5,
         select_n=5, concatenate=5, slice=5, split=5, div=5, integer_pow=5,
         copy=5, stop_gradient=5, reshape=5,
+        # the two the NOT-covered list used to exclude, plus the round
+        # trip's return leg — floored on the same terms as the rest
+        reduce_sum=5, dot_general=5, broadcast_in_dim=5,
     )
