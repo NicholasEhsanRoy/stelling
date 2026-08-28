@@ -217,8 +217,11 @@ _SUPERSEDED_BY = re.compile(r"(?<!\w)::(test_[A-Za-z0-9_]+)")
 #: the same list under :func:`_shipped_roots`'s allowlist gives 378, and the
 #: 379th member is the `PKG-INFO` the backend writes, which
 #: `tests/test_sdist_contents.py` records as the one member in neither the
-#: allowlist nor WITHHELD. (Not `_shipped_text_files`, which is 363 here
-#: because it keeps only text suffixes — a different question.)
+#: allowlist nor WITHHELD. (Not `_shipped_text_files`, which answers a
+#: different question — it keeps only the text suffixes — and whose value is
+#: deliberately not quoted here: it was 363 when this sentence was written
+#: and 364 by the merge that carried it, which is the whole subject of the
+#: census note in :func:`_citation_census`.)
 #:
 #: The rule to apply generally: put the reason and the rule side by side and
 #: see whether they have the same SHAPE. These did not.
@@ -351,8 +354,8 @@ def _prose_only(text: str) -> str:
 
     **AND IT IS LOAD-BEARING, DRIVEN RATHER THAN ARGUED.** Turning this
     function off — `_citation_sources` yielding the raw text for a `.py`
-    file — and running the widened scan on this tree (2026-08-28) gives
-    **27** dangling `path::name` citations, in three files and no others:
+    file — and running the widened scan gives **27** dangling `path::name`
+    citations at `8dae8cb` on 2026-08-28, in three files and no others:
     14 in `tests/test_state_guard.py`, 2 in `tests/test_skip_inventory.py`
     and 11 in this module's own probes. Those are exactly the plants the
     old exclusion was written to protect, and they are exactly what a
@@ -480,6 +483,75 @@ def _citation_sources():
 #: THE TWO SPELLINGS AGREED ON ALL 311, WHICH IS FALSE AND WAS WRITTEN
 #: BEFORE IT WAS RUN; the eight are what running it said.
 _BLANK_LINE = re.compile(r"\n[ \t]*\n")
+
+
+#: The anti-vacuity floors of the two citation gates. A floor is a CHOSEN
+#: THRESHOLD, not a measurement, which is why these four are written down
+#: while the counts they stand under are not — see :func:`_citation_census`
+#: for what happened to the counts.
+_PATH_CITATION_FLOOR = 90
+_PATH_CITATION_FILE_FLOOR = 25
+_BARE_MENTION_FLOOR = 500
+_BARE_MENTION_FILE_FLOOR = 60
+
+
+def _citation_census(count_in):
+    """`(total, files, outside_tests, outside_files)` for one matcher, DERIVED.
+
+    **THIS FUNCTION EXISTS BECAUSE THE FIGURES IT RETURNS WERE ONCE TYPED,
+    AND WERE FALSE WITHIN DAYS.** The two citation gates each carried a
+    sentence of the form *"Measured on this tree on 2026-08-28, with
+    `tests/` inside the scan: 112 `path::name` citations across 33 files, of
+    which 97 across 21 files are outside `tests/`"*, and *"`tests/`
+    contributes 15 of the 112 here"*. Four of those five figures were wrong
+    by the time the branch that wrote them was merged, and — this is the
+    part worth keeping — they matched **neither the merge nor the parent**.
+    They were that branch's TIP, falsified by the sibling branches that
+    added citations while it was being written.
+
+    Driven, both halves, so that the failure is a measurement and not a
+    story. This census over the merge, `8dae8cb`: **126 across 36 files,
+    104 across 21 outside `tests/`**. The same census over an export of the
+    branch's parent — `git archive 9b5b496 | tar -x` into a scratch tree
+    with this module copied in, so the scan is held fixed and only the tree
+    moves — **111 across 31**. The figure that was written was 112. (A
+    blinded audit reported 117 across 32 for the parent; it was pairing the
+    MERGED module with that tree, and this module has moved since. Two
+    numbers for one tree, from two spellings of the same scan, is the
+    second-order form of the same lesson: a citation count is a fact about
+    a pairing, not a constant.)
+
+    A count of the citations in this repository is the DEFINITION of a
+    figure that moves with the tree, and it was written as a present-tense
+    sentence inside the module whose subject is present-tense sentences that
+    move with the tree. So it is not written any more. Every message under
+    every floor carries the census taken by the run that printed it, and a
+    reader who wants the number takes it from a run.
+
+    `count_in` is the matcher, so the two gates get one implementation and
+    one semantic: whatever counts a citation for the gate counts one here.
+    That agreement is asserted rather than assumed — both gates check the
+    total against their own loop's `seen` — because a census that measured a
+    different population from the floor it prints under would be a figure
+    that is derived and still wrong.
+
+    **The `tests/` split is by PATH PREFIX, and that is not the mistake this
+    module is about.** The question here really is *"how much of this does
+    the `tests/` directory contribute"* — a question about a directory, to
+    which a prefix is the right answer. What may not be spelled as a
+    directory is the EXCLUSION, and it is not: see :func:`_prose_only`.
+    """
+    total = files = outside = outside_files = 0
+    for source, text in _citation_sources():
+        n = count_in(text)
+        if not n:
+            continue
+        total += n
+        files += 1
+        if not source.startswith("tests/"):
+            outside += n
+            outside_files += 1
+    return total, files, outside, outside_files
 
 
 def _enclosing_paragraph(text: str, index: int) -> tuple[int, str]:
@@ -686,26 +758,39 @@ def test_every_test_cited_in_core_prose_still_exists():
         "it, or drop the claim it was supporting."
     )
     # ... and it is not vacuous: the citations really are there to check.
-    # Measured on this tree on 2026-08-28, with `tests/` inside the scan:
-    # 112 `path::name` citations across 33 files, of which 97 across 21
-    # files are outside `tests/`.
+    # THE CENSUS IS TAKEN BY THIS RUN AND NOT WRITTEN HERE — the sentence
+    # that used to stand in this comment, and what it cost, are in
+    # :func:`_citation_census`.
     #
-    # BOTH FLOORS BELOW ARE ANTI-VACUITY AND NOTHING MORE, which is worth
-    # saying because a floor beside a widening reads like a check of the
-    # widening. `tests/` contributes 15 of the 112 here — inside ordinary
-    # churn — so no floor can tell "the scan lost `tests/`" from "somebody
-    # deleted a few citations". That question is decided EXACTLY instead,
-    # by the derived reach assertion in
+    # NEITHER FLOOR BELOW IS THE INSTRUMENT FOR THE WIDENING, which is worth
+    # saying because a floor beside a widening reads like a check of one.
+    # They say the pattern still matches something. Whether either would
+    # HAPPEN to red if `tests/` left the scan depends on the split between
+    # the two halves on the day you ask, so it is printed rather than
+    # claimed. The reach question is decided EXACTLY, by the derived
+    # assertion in
     # `test_the_citation_sweep_covers_the_whole_allowlist_and_the_resolver_works`.
-    assert seen >= 90, (
+    total, in_files, outside, outside_files = _citation_census(
+        lambda text: len(_TEST_REF_WRAPPED.findall(text))
+    )
+    census = (
+        f"census at this run: {total} `path::name` citation(s) across "
+        f"{in_files} file(s), of which {outside} across {outside_files} "
+        f"file(s) are outside `tests/`"
+    )
+    assert total == seen, (
+        f"the census counted {total} citation(s) and this gate walked over "
+        f"{seen}. They must be the same population, or every figure printed "
+        f"below is about something other than the thing being checked."
+    )
+    assert seen >= _PATH_CITATION_FLOOR, (
         f"only {seen} test citation(s) found across {list(_CITATION_ROOTS)} "
         f"and the root pages; the pattern has stopped matching how they are "
-        f"written, or the scan has stopped reaching them"
+        f"written, or the scan has stopped reaching them. {census}"
     )
-    assert len({
-        source for source, text in _citation_sources()
-        if _TEST_REF_WRAPPED.search(text)
-    }) >= 25, "the citations have collapsed into one or two files"
+    assert in_files >= _PATH_CITATION_FILE_FLOOR, (
+        f"the citations have collapsed into {in_files} file(s). {census}"
+    )
     # ... and the RESOLVER is not satisfied by text that only LOOKS like a
     # definition. These are the three rows that were green at `faefc48`,
     # written out rather than described, plus the honest shape it must accept
@@ -1328,9 +1413,12 @@ _PATH_FORM_OVERLAPS = 0
 #: could. **Fifteen** of the 162 resolved to nothing. **Three were defects**
 #: and are repaired; the twelve that were not are here, together with the
 #: three defect names, which the repairs now quote as the ORIGINALS in the
-#: notes recording each rename. So the table is fifteen, and every one of the
-#: fifteen sits in a sentence whose SUBJECT is that the name is gone. Three
-#: shapes:
+#: notes recording each rename. So the table was FIFTEEN AT `5ad906f`, and
+#: every one of the fifteen sat in a sentence whose SUBJECT is that the name
+#: is gone. (It is not fifteen now, and no number is written here: the
+#: widening into `tests/` appended to it and so will the next one.
+#: `test_the_declared_absences_are_still_absent` derives the size and prints
+#: it.) Three shapes at that revision:
 #:
 #:   * a rename or removal the sentence itself records (eleven),
 #:   * another project's test name, cited as another project's (two),
@@ -1412,13 +1500,29 @@ _NAMES_DECLARED_ABSENT: dict[str, str] = {
         "branch could see it: on the branch that deleted the test, `tests/` "
         "was still scoped out of this check, and on the branch that widened "
         "the check, the test still existed",
-    # --- and thirteen that arrived with `tests/`, 2026-08-28 -------------
+    # --- and those that arrived with `tests/`, 2026-08-28 ----------------
     # Every one was ALREADY in the tree and already unresolvable; what
-    # changed is that something can now read them. Eleven are rename or
-    # supersession records in a docstring whose subject IS the old name --
-    # the same shape as the eleven above, written by the same convention --
-    # and two are placeholders in prose about the SHAPE of a nodeid rather
-    # than about any test.
+    # changed is that something can now read them. THREE shapes, and the
+    # third is the one this comment left out when it said "thirteen" over a
+    # block of fourteen:
+    #
+    #   * a rename or supersession record, in a docstring whose subject IS
+    #     the old name -- the same shape as the block above, written by the
+    #     same convention;
+    #   * a PLACEHOLDER in prose about the shape of a nodeid rather than
+    #     about any test (`test_x`, `test_one`);
+    #   * a SYNTHETIC name, written into a page to drive a gate red and
+    #     never a test at any revision (`test_a_name_this_tree_has_never_
+    #     had`) -- which is neither a rename nor a placeholder, and is the
+    #     entry the count of thirteen was missing.
+    #
+    # The shapes are named and NOT counted, here or anywhere else. A count
+    # of this table is a figure every branch that widens a scan appends to:
+    # the count "thirteen" was wrong before the branch that wrote it was
+    # merged, and "fifteen" and "29 entries" elsewhere in this file were
+    # falsified by that same branch. `test_the_declared_absences_are_still_
+    # absent` derives the size and prints it, which is where a reader takes
+    # it from.
     "test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation":
         "superseded by `test_the_two_pairing_gates_bind_the_ESCALATION_AND_"
         "the_propagation`; quoted in this file's own `_TEST_REF_WRAPPED` and "
@@ -1616,11 +1720,15 @@ def test_every_bare_test_name_in_shipped_prose_resolves():
     against every test function and every test module under `tests/`, with no
     path to key on — which is the only thing that can read the form the prose
     actually uses. The cost is that a name legitimately mentioned as absent
-    has to be declared: :data:`_NAMES_DECLARED_ABSENT`, fifteen of them,
-    each with the reason, each held to still being absent by
-    `test_the_declared_absences_are_still_absent`. That table is the
-    honest price and it is bounded — eleven of the fifteen are rename records
-    in a ledger that is never rewritten, and those do not churn.
+    has to be declared: :data:`_NAMES_DECLARED_ABSENT`, each with the
+    reason, each held to still being absent by
+    `test_the_declared_absences_are_still_absent` — which is also where its
+    SIZE comes from, derived and printed rather than written here. That
+    table is the honest price and it is bounded by its shape rather than by
+    a number: most of it is rename records in a ledger that is never
+    rewritten, and those do not churn. (This read *"fifteen of them … eleven
+    of the fifteen are rename records"*, which was true at `5ad906f` and was
+    falsified by the widening into `tests/` that this same commit made.)
 
     **THE RESIDUE, STATED RATHER THAN LEFT TO BE FOUND.** Six things this
     does not do. This read *"Four things … each driven or reasoned rather
@@ -1632,10 +1740,14 @@ def test_every_bare_test_name_in_shipped_prose_resolves():
       would be exempt, because the table cannot tell that mention from the
       one it was written for. Keying it to `(file, name)` would be tighter
       and would also make every entry a position-bearing claim with no line
-      number in it; it is not done because all fifteen are names no test in
+      number in it; it is not done because EVERY entry is a name no test in
       this tree currently has, so the widened licence covers nothing real —
       and `test_the_declared_absences_are_still_absent` is what keeps that a
-      measurement rather than an assumption.
+      measurement rather than an assumption, over whatever the table holds
+      on the day it runs. (This said *"all fifteen"*; the count was
+      falsified by the widening into `tests/`, and the claim never needed
+      one — it is a statement about every entry, which is exactly what that
+      test checks.)
     * **It resolves EXISTENCE, not identity.** A name that resolves may be a
       different test that happens to share the name, in a different file
       from the one the sentence means. The `path::name` form does not have
@@ -1722,7 +1834,10 @@ def test_every_bare_test_name_in_shipped_prose_resolves():
 
           17 mentions of 14 names whose sentence's SUBJECT is that the
              name is gone -- now in :data:`_NAMES_DECLARED_ABSENT`, which
-             is why that table is 29 entries and not fifteen
+             is why that table is no longer the fifteen it held at
+             `5ad906f` (its size is derived and printed by
+             `test_the_declared_absences_are_still_absent`; this clause
+             said "29 entries", a figure that was stale at the merge)
            5 citations of names NO REVISION of this tree has ever
              defined (`git log -S` finds no commit that wrote the `def`),
              each repointed at the test its sentence means
@@ -1774,26 +1889,37 @@ def test_every_bare_test_name_in_shipped_prose_resolves():
         "SUBJECT is that the name is gone -- declare it in "
         "`_NAMES_DECLARED_ABSENT` with the reason."
     )
-    # ... and it is not vacuous. Measured on this tree on 2026-08-28: 788
-    # backticked bare mentions across 110 files, of which 214 across 32
-    # files are outside `tests/` — this is the form the widening moved
-    # most, by more than three to one.
+    # ... and it is not vacuous. THE CENSUS IS TAKEN BY THIS RUN, for the
+    # reason :func:`_citation_census` gives: the figures that used to stand
+    # in this comment were a branch tip, and were false of both the branch's
+    # parent and the merge that carried it.
     #
-    # UNLIKE THE `path::name` FLOORS, THESE TWO DO BRACKET THE WIDENING:
-    # losing `tests/` from the scan takes 788 to 214 and 110 files to 32,
-    # so both would red on it. They are still not the instrument for it —
-    # that is the derived reach assertion named beside the other pair —
-    # and they are set between the two measurements rather than at some
-    # fraction of one, so what they mean can be stated.
-    assert seen >= 500, (
+    # This is the form the widening moved most — by a wide margin, which the
+    # printed split shows and this sentence does not quantify. The floors are
+    # anti-vacuity; the reach question is the derived assertion named beside
+    # the `path::name` pair.
+    total, in_files, outside, outside_files = _citation_census(
+        lambda text: sum(1 for _ in _bare_mentions(text))
+    )
+    census = (
+        f"census at this run: {total} bare mention(s) across {in_files} "
+        f"file(s), of which {outside} across {outside_files} file(s) are "
+        f"outside `tests/`"
+    )
+    assert total == seen, (
+        f"the census counted {total} mention(s) and this gate walked over "
+        f"{seen}. They must be the same population, or every figure printed "
+        f"below is about something other than the thing being checked."
+    )
+    assert seen >= _BARE_MENTION_FLOOR, (
         f"only {seen} bare test-name mention(s) found across "
         f"{list(_CITATION_ROOTS)} and the root pages; the pattern has stopped "
         f"matching how they are written, or the scan has stopped reaching "
-        f"them"
+        f"them. {census}"
     )
-    assert len(files) >= 60, (
+    assert len(files) >= _BARE_MENTION_FILE_FLOOR, (
         f"bare test names were found in {len(files)} file(s); they have "
-        f"collapsed into one or two, or the scan has narrowed"
+        f"collapsed into one or two, or the scan has narrowed. {census}"
     )
     # ... and the resolver really resolves: a name that IS a live test, and a
     # name that is a live test MODULE, both come back resolvable, so "not in
@@ -1856,22 +1982,34 @@ def test_the_declared_absences_are_still_absent():
     So the direction is inverted: this asserts the exemptions do NOT resolve.
     The table can only shrink by deleting an entry, never by drifting into
     one that covers something real.
+
+    **AND THIS IS WHERE THE TABLE'S SIZE COMES FROM.** It is not written
+    down anywhere in this module, and the prose that used to write it —
+    "fifteen of them", "29 entries", "thirteen that arrived with `tests/`" —
+    was falsified three times over by the branches that appended to it, once
+    before the branch that wrote the figure had even merged. A count of an
+    exemption table is a figure that moves whenever anyone widens a scan, so
+    it is derived here and printed in every message below, and the prose
+    points at this test instead of repeating it.
     """
+    size = len(_NAMES_DECLARED_ABSENT)
     resolvable = _resolvable_test_names()
     resurrected = sorted(n for n in _NAMES_DECLARED_ABSENT if n in resolvable)
     assert not resurrected, (
         f"name(s) declared absent in `_NAMES_DECLARED_ABSENT` that now "
         f"resolve under `tests/`: {resurrected}. An exemption for a name "
         f"that exists is a live citation nothing checks. Delete the entry "
-        f"and let the gate read the name."
+        f"and let the gate read the name. The table holds {size} name(s) at "
+        f"this run."
     )
     for name, reason in _NAMES_DECLARED_ABSENT.items():
         assert len(reason) >= 40, (
             f"the exemption for {name!r} gives no real reason. Every entry "
             f"here is a claim that a sentence MEANS to name something gone, "
-            f"and a claim needs its argument beside it."
+            f"and a claim needs its argument beside it. The table holds "
+            f"{size} name(s) at this run."
         )
     # ... and it is not vacuous: the table really has entries to check, and
     # the resolver it checks them against really is populated.
-    assert len(_NAMES_DECLARED_ABSENT) >= 10
+    assert size >= 10, f"the exemption table holds {size} name(s)"
     assert len(_resolvable_test_names()) >= 1000

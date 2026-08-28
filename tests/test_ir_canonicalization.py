@@ -783,12 +783,24 @@ def test_a_metaclass_that_FORGES_the_mro_cannot_forge_a_payload():
 
     A metaclass may override ``mro()``. CPython's own layout check refuses
     the result for every base whose instances have their own layout, which
-    is every base this door asks ``issubclass`` against; the single
-    exception among the types it stores is ``bool``, which shares
-    ``int``'s layout, so a REAL ``int`` subclass can forge
-    ``issubclass(cls, bool)``. Under the identity read this file removed,
-    that object was STORED; under ``int.__index__`` it is stored as the
-    exact ``int`` it actually carries, which is the truth about it."""
+    is every base this door asks ``issubclass`` against. **That half holds
+    on every interpreter and is asserted below unconditionally.**
+
+    The ``bool`` exception does not. ``bool`` shares ``int``'s layout, so a
+    REAL ``int`` subclass can forge ``issubclass(cls, bool)`` — **from
+    CPython 3.12**. Measured 2026-08-28 on the three interpreters
+    ``requires-python`` admits: 3.12.3 permits it; 3.10.20 and 3.11.15 raise
+    ``TypeError: mro() returned base with unsuitable layout ('bool')`` at
+    construction. This paragraph said *"the single exception among the types
+    it stores is ``bool``"* in the present tense and the assertion below said
+    *"CPython no longer permits this forgery"* — **both are about 3.12 and
+    the second names the wrong direction**, since the permission ARRIVED
+    there rather than being about to leave. The suite ships inside the sdist
+    and this test failed on two of the three declared interpreters.
+
+    Where the forgery IS permitted: under the identity read this file
+    removed, that object was STORED; under ``int.__index__`` it is stored as
+    the exact ``int`` it actually carries, which is the truth about it."""
     for base in (tuple(b for b, _ in ir._CANONICAL_READS)
                  + tuple(ir._SHAPE_PARAM_CONTAINERS)):
         class M(type):
@@ -802,11 +814,24 @@ def test_a_metaclass_that_FORGES_the_mro_cannot_forge_a_payload():
         def mro(cls):
             return [cls, bool, int, object]
 
-    forged = MBool("ForgedBool", (int,), {})
+    try:
+        forged = MBool("ForgedBool", (int,), {})
+    except TypeError:
+        # The reason string is shared, verbatim, with
+        # `tests/test_canonicalization_routes.py`'s sibling skip, and is
+        # disclosed ONCE in `tests/test_skip_inventory.py`'s `RULES` — which
+        # is reason-keyed precisely so one condition needs one entry however
+        # many tests meet it. The rule's predicate re-takes the measurement
+        # rather than reading `sys.version_info`.
+        pytest.skip(
+            "this interpreter refuses the bool-from-int-subclass "
+            "forgery; it is permitted from CPython 3.12 and this test is "
+            "about what the door does with it WHEN it is permitted"
+        )
     assert issubclass(forged, bool), (
-        "CPython no longer permits this forgery, so the identity read this "
-        "test justifies removing has one fewer reason to be gone — the "
-        "other reason (`isinstance` reads `__class__`) still stands"
+        "the forgery was CONSTRUCTED and yet does not subclass `bool`, which "
+        "is a different fact from the interpreter refusing it — the skip "
+        "above is the refusal; this is the forgery not doing what it is for"
     )
     stored = ir._canonical(forged(7))
     assert type(stored) is int and stored == 7, stored
