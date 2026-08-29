@@ -1096,7 +1096,7 @@ jobs:
       #     drives this extracted body and its Python twin over one corpus,
       #     and `::test_the_two_readers_agree_over_the_whole_corpus` drives
       #     both over all 2954 documents of that corpus, and a third
-      #     sweeps the WHITESPACE alphabet in all five positions this
+      #     sweeps the WHITESPACE alphabet in all nine positions this
       #     grammar has one. And what holds them
       #     is no longer only each other: the corpus's verdicts come from
       #     `markdown_it.MarkdownIt("commonmark")`, recorded in
@@ -1295,6 +1295,19 @@ jobs:
           #   ('1. item', '    ## 9.9.9 - 2000-01-01',
           #               '## 0.2.1 - 2026-08-28')         renderer: the 9.9.9
           #
+          # AND TWO MORE AFTER THAT, BOTH IN THE CODE THIS STEP IMPLEMENTS
+          # RATHER THAN REFUSES, WHICH IS WHERE EVERY ONE OF ITS OWN DEFECTS
+          # HAS BEEN. (1) A BARE CARRIAGE RETURN IS A LINE ENDING to
+          # CommonMark 0.31.2 and was not one to `read -r` or to the Python
+          # twin, so one invisible CR after a paragraph line in this
+          # repository's own CHANGELOG.md took this step to rc=0 printing the
+          # PREVIOUS release's heading -- and the corpus certified it sound,
+          # because both readers pointed at the same line NUMBER while holding
+          # different text. (2) `read -r` DROPS A NUL and CommonMark replaces
+          # it with U+FFFD, so `#<NUL># 0.2.0 - 2026-08-25` -- which renders no
+          # <h2> at all -- was read here as a heading. Both are refused now,
+          # the first by making the lines properly and the second by name.
+          #
           # 42 of the 2954, and each one is rc=0 from this step with the tag's
           # own version and date echoed, over a document whose newest RENDERED
           # heading names a different release or is not a heading at all. And
@@ -1366,15 +1379,37 @@ jobs:
           #
           # SWEPT AND NOT ARGUED: `SEPARATOR_FORMS` in
           # `tools/changelog_renderer_corpus.py` builds one document per
-          # (whitespace character, position) pair for all five positions this
+          # (whitespace character, position) pair for all nine positions this
           # grammar has, the renderer's verdict on each is recorded in
           # `tests/_changelog_renderer_corpus.py`, and
           # `tests/test_release_gates.py::test_the_whitespace_alphabet_is_swept_in_every_position`
           # drives this body over every one of them in every lane.
-          heading_any='^##([[:blank:]]|$)'
-          heading_re='^[[:blank:]]*##[[:blank:]]+([0-9][0-9A-Za-z._+!-]*)[[:blank:]]+—[[:blank:]]+([^[:blank:]].*[^[:blank:]]|[^[:blank:]])[[:blank:]]*$'
-          atx_any='^#{1,6}([[:blank:]]|$)'
-          ordered_li='^[0-9]{1,9}[.)]([[:blank:]]|$)'
+          #
+          # AND THE CLASS IS SPELLED OUT RATHER THAN NAMED, because
+          # `[[:blank:]]` IS LOCALE-DEPENDENT and this repair would otherwise
+          # rest entirely on the `export LC_ALL=C` at the top of this step.
+          # Measured on the machine this was written on: under `C` and `POSIX`
+          # the class is 2 characters; under `C.utf8`, `en_GB.utf8` and
+          # `en_US.utf8` it is 17, including U+1680, U+2000-U+2006, U+205F and
+          # U+3000 -- so the fix above would be undone by a runner image with
+          # a different default locale. Driven with the export REMOVED and
+          # `LANG=C.UTF-8`: rc=0 on the document the shipped step refuses by
+          # name. `tb` is a literal tab built with `$'...'` so that no tab
+          # character has to survive this YAML file, a diff and a copy-paste.
+          #
+          # `export LC_ALL=C` IS STILL THERE AND IS STILL LOAD-BEARING for the
+          # `[A-Za-z]` ranges below, whose collation is locale-dependent too;
+          # it is pinned as a needle for THIS step by
+          # `tests/test_release_gates.py::test_the_drives_are_reading_the_real_step_bodies`,
+          # which pinned it for the tag step -- where this file says it is NOT
+          # what fixes that step's defect -- and not for this one, where it is.
+          tb=$'\t'
+          bl='[ '"${tb}"']'
+          nbl='[^ '"${tb}"']'
+          heading_any='^##('"${bl}"'|$)'
+          heading_re='^'"${bl}"'*##'"${bl}"'+([0-9][0-9A-Za-z._+!-]*)'"${bl}"'+—'"${bl}"'+('"${nbl}"'.*'"${nbl}"'|'"${nbl}"')'"${bl}"'*$'
+          atx_any='^#{1,6}('"${bl}"'|$)'
+          ordered_li='^[0-9]{1,9}[.)]('"${bl}"'|$)'
           bt='`'
           # THE TILDE IS HERE FOR THE BACKTICK'S REASON and the twin's
           # `_PARAGRAPH_LINE` carries it too: a run of one or two of either
@@ -1388,19 +1423,52 @@ jobs:
           undecided_at=0
           if [ ! -f CHANGELOG.md ] || [ ! -r CHANGELOG.md ]; then
             problems+=("there is no readable regular file called CHANGELOG.md at the root of the tagged tree, so the release note this tag claims to carry cannot be read at all.")
+          elif [ "$(wc -c < CHANGELOG.md)" -ne "$(tr -d '\0' < CHANGELOG.md | wc -c)" ]; then
+            # A NUL BYTE, REFUSED BEFORE ANYTHING IS READ. `read -r` DROPS a
+            # NUL -- a bash variable cannot hold one -- so every line below
+            # would be a line this document does not contain, and CommonMark
+            # does not drop it: it replaces it with U+FFFD. Driven, on the
+            # body this file shipped before this line: a CHANGELOG.md reading
+            # `#<NUL># 0.2.1 - 2026-08-28` renders NO <h2> at all and took
+            # this step to rc=0 with `version=0.2.1`. Counted rather than
+            # matched, because there is no way to write a NUL into a bash
+            # pattern either; `tr -d` and `wc -c` are the two coreutils this
+            # step's drives already require.
+            problems+=("CHANGELOG.md contains a NUL byte. CommonMark replaces one with U+FFFD; this step reads the file with bash's own line reader, which DROPS it silently, so every line it went on to read would be a line the document does not contain. A reader that cannot represent its input must not read it. Remove the NUL.")
           else
             fence_char=""
             fence_run=0
             in_comment=0
             lineno=0
-            while IFS= read -r line || [ -n "${line}" ]; do
+            # THE LINES, BUILT BEFORE THE SCAN, BECAUSE `read` AND COMMONMARK
+            # DISAGREE ABOUT WHERE ONE ENDS. CommonMark 0.31.2, *Characters
+            # and lines*: "a line ending is a line feed, A CARRIAGE RETURN NOT
+            # FOLLOWED BY A LINE FEED, or a carriage return and a following
+            # line feed." `read -r` splits on the line feed alone, so a CRLF
+            # leaves its carriage return on the end of the line -- stripped
+            # here -- and a BARE carriage return stays in the middle of one,
+            # where it is a line boundary this loop has to make itself.
+            #
+            # THAT SECOND CASE WAS A SOUNDNESS DEFECT IN BOTH READERS AND THE
+            # CORPUS COULD NOT SEE IT, because they agreed with each other and
+            # pointed at the same line NUMBER while holding different text.
+            # Driven, one invisible CR inserted into this repository's own
+            # CHANGELOG.md after a paragraph line: the renderer's newest <h2>
+            # is the PREVIOUS release's and this step printed rc=0 with the
+            # tag's own version. The Python twin splits on the same rule,
+            # which is `markdown-it`'s own `NEWLINES_RE` imported rather than
+            # copied.
+            lines=()
+            while IFS= read -r raw || [ -n "${raw}" ]; do
+              raw="${raw%$'\r'}"
+              while [ "${raw#*$'\r'}" != "${raw}" ]; do
+                lines+=( "${raw%%$'\r'*}" )
+                raw="${raw#*$'\r'}"
+              done
+              lines+=( "${raw}" )
+            done < CHANGELOG.md
+            for line in ${lines[@]+"${lines[@]}"}; do
               lineno=$(( lineno + 1 ))
-              # `read -r` keeps a CRLF file's carriage return on the line and
-              # nothing below tolerates one in the middle of a pattern, so it
-              # comes off here. The Python twin splits on '\n' and does the
-              # same, rather than on `str.splitlines()`, which breaks on eight
-              # boundaries neither CommonMark nor `read` knows.
-              line="${line%$'\r'}"
               if [ "${in_comment}" -eq 1 ]; then
                 case "${line}" in *'-->'*) in_comment=0 ;; esac
                 continue
@@ -1410,7 +1478,7 @@ jobs:
               # SPACES, so the indent is measured once, here.
               lead=""
               rest="${line}"
-              if [[ "${line}" =~ ^([[:blank:]]*)(.*)$ ]]; then
+              if [[ "${line}" =~ ^([ ${tb}]*)(.*)$ ]]; then
                 lead="${BASH_REMATCH[1]}"
                 rest="${BASH_REMATCH[2]}"
               fi
@@ -1441,7 +1509,7 @@ jobs:
                 if [ "${lead_tab}" -eq 0 ] && [ "${#lead}" -le 3 ] \
                    && [ "${fchar}" = "${fence_char}" ] \
                    && [ "${frun}" -ge "${fence_run}" ] \
-                   && [ -z "${finfo//[[:blank:]]/}" ]; then
+                   && [ -z "${finfo//[ ${tb}]/}" ]; then
                   fence_char=""
                   fence_run=0
                 fi
@@ -1493,7 +1561,7 @@ jobs:
                 continue
               fi
               undecided="${line}"; undecided_at="${lineno}"; break
-            done < CHANGELOG.md
+            done
             # THE FLAG IS THE LINE NUMBER AND NOT THE LINE. `[ -n
             # "${undecided}" ]` reads a refused line as "nothing was refused"
             # if that line is empty, and while nothing above can set it empty

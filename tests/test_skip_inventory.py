@@ -616,7 +616,7 @@ PINNED = (
         "— and held only to each other they can be found to DISAGREE but "
         "never to be WRONG. What found them wrong was a CommonMark renderer, "
         "and no merge lane has one. So the renderer's verdict on 2954 "
-        "generated documents, 40 named ones and a 140-document sweep of the "
+        "generated documents, 46 named ones and a 252-document sweep of the "
         "whitespace alphabet is recorded in "
         "`tests/_changelog_renderer_corpus.py` and "
         "driven in EVERY lane; this test is the only thing that re-derives "
@@ -630,7 +630,20 @@ PINNED = (
         "in the corpus's own docstring and is why regeneration is one "
         "command. `markdown-it-py` is in the dev group of `pyproject.toml` "
         "for the same reason `hypothesis` is: routable rather than "
-        "remembered.",
+        "remembered. AND THAT IS WHERE THE PARALLEL STOPS, said here rather "
+        "than left to be inferred: `ci.yml`'s `property` job INSTALLS "
+        "hypothesis and runs `tests/property`, so that skip has a lane that "
+        "clears it. NO JOB ANYWHERE INSTALLS `markdown-it-py` - not in "
+        "`ci.yml`, not in `release.yml`'s own `test` job - so the test above "
+        "runs only when a human follows CONTRIBUTING.md's `--group dev`. It "
+        "was broken for a whole review cycle in exactly that gap: `render()` "
+        "grew two return values and the call site did not, so it raised "
+        "`ValueError` wherever the library exists and skipped, green, "
+        "everywhere else. A check that every entry in "
+        "DECLARED_OPTIONAL_DEPENDENCIES is installed by some job or carries a "
+        "named exemption would have caught it the day the library was "
+        "declared; this file does not have one, and that absence is an "
+        "omission rather than an unsolved problem.",
     ),
 )
 

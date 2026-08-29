@@ -182,7 +182,7 @@ def documents(alphabet: tuple[str, ...], max_lines: int) -> list[str]:
     return out
 
 
-#: The FIVE positions in this project's heading grammar where one reader or the
+#: The NINE positions in this project's heading grammar where one reader or the
 #: other spelled "a separator" with a character class BORROWED FROM ITS HOST
 #: LANGUAGE instead of the one CommonMark defines.
 #:
@@ -200,16 +200,47 @@ def documents(alphabet: tuple[str, ...], max_lines: int) -> list[str]:
 #: :func:`whitespace_alphabet` finds, in every one of these positions, with the
 #: renderer's own verdict recorded beside it.
 SEPARATOR_FORMS = (
+    # THE INDENT, which decides `lead` and so decides every bound below it.
+    ("indent", "{sep}## 0.2.1 — 2026-08-28\n## 9.9.9 — 2000-01-01\n"),
     # the ATX run's follower — `heading_any` / `_HEADING_LINE`
     ("atx-run", "##{sep}0.2.1 — 2026-08-28\n## 9.9.9 — 2000-01-01\n"),
+    # the OTHER ATX levels' follower — `atx_any` / `_ATX_LINE`, which decides
+    # whether such a line is stepped over or refused
+    ("atx-other-run", "#{sep}notes\n## 0.2.1 — 2026-08-28\n"),
     # the two separators inside the heading grammar — `heading_re` / `_HEADING`
     ("version-em-dash", "## 0.2.1{sep}— 2026-08-28\n"),
     ("em-dash-date", "## 0.2.1 —{sep}2026-08-28\n"),
-    # what a closing fence may be followed by — `${finfo//...}` / `info.strip()`
-    ("fence-closer", "```\n```{sep}\n## 0.2.1 — 2026-08-28\n"),
     # and the tail, which both readers strip before parsing
     ("heading-tail", "## 0.2.1 — 2026-08-28{sep}\n"),
+    # what a closing fence may be followed by — `${finfo//...}` / `info.strip()`
+    ("fence-closer", "```\n```{sep}\n## 0.2.1 — 2026-08-28\n"),
+    # WHAT COUNTS AS A BLANK LINE — `_BLANK_LINE` / `[ -z "${rest}" ]`. A blank
+    # line CLOSES an HTML block of type 6, so this document has an `<h2>` if
+    # and only if the separator is one.
+    ("blank-line", "<div>\n{sep}\n## 0.2.1 — 2026-08-28\n"),
+    # the ordered-list marker's follower — `ordered_li` / `_ORDERED_LIST_LINE`.
+    # If it is a list, line 2 is its content at four columns and IS an <h2>;
+    # if it is not, line 2 is a lazy continuation and the <h2> is line 3.
+    ("ordered-list-marker",
+     "1.{sep}item\n    ## 9.9.9 — 2000-01-01\n## 0.2.1 — 2026-08-28\n"),
 )
+"""The positions where this grammar has a whitespace class, and every one of
+them is a place these readers IMPLEMENT a rule rather than refusing it.
+
+**THIS LIST SAID FIVE AND THERE ARE NINE, AND AN AUDITOR COUNTED RATHER THAN
+THE AUTHOR.** The five it had were the two the audit before it had found
+soundness breaks in, plus three neighbours. The four added here — the INDENT,
+the OTHER-ATX-LEVEL follower, the BLANK LINE and the ORDERED-LIST MARKER — are
+where two further findings landed, and none of them was swept. A list of
+positions written by the person who wrote the positions is the same shape of
+instrument as a table of expected readings written by the person who wrote the
+readers, which is the thing this whole corpus exists to replace; what makes
+this one checkable is that `tests/test_release_gates.py` holds a FLOOR of
+required positions from outside this file, and that every one of the nine is
+driven over the whole alphabet.
+
+**WHAT IT IS STILL NOT.** Nine is what a careful reading of two readers found.
+It is not a proof that there is no tenth."""
 
 
 def whitespace_alphabet() -> tuple[str, ...]:
@@ -233,13 +264,41 @@ def separator_documents(chars: tuple[str, ...]) -> list[str]:
     return [shape.format(sep=char) for char in chars for _, shape in SEPARATOR_FORMS]
 
 
-def newest_h2(renderer, text: str) -> tuple[int | None, str | None]:
-    """`(1-based line, inline content)` of the FIRST `<h2>`, or `(None, None)`.
+def renderer_lines(text: str) -> list[str]:
+    """`text` split into lines by THE RENDERER'S OWN RULE, imported not copied.
 
-    **THE LINE IS THE ORACLE AND THE CONTENT IS FOR THE MESSAGE, AND THAT
-    SPLIT WAS BOUGHT.** This returned the CONTENT alone, and the tests
-    compared it — parsed by this project's `<version> — <date>` grammar —
-    against what our readers read. Driven over the whitespace alphabet, that
+    `markdown_it.rules_core.normalize` is the first thing the renderer does to
+    a document: `NEWLINES_RE.sub("\\n", src)` then `NULL_RE.sub("\\ufffd",
+    …)`. Both regexes are imported here rather than re-spelled, because the
+    question this corpus decides is *which line* — and a generator with its
+    own opinion about where a line ends would be answering a different
+    question from the oracle it is quoting.
+
+    `NEWLINES_RE` is `\\r\\n?|\\n`, which is CommonMark 0.31.2's *Characters
+    and lines* exactly: a line ending is a line feed, a carriage return not
+    followed by a line feed, or a carriage return and a following line feed.
+    **A BARE CARRIAGE RETURN IS A LINE ENDING**, and that sentence is the whole
+    of a soundness regression this corpus could not see until the column below
+    grew a second half.
+    """
+    from markdown_it.rules_core.normalize import (  # noqa: PLC0415
+        NEWLINES_RE, NULL_RE,
+    )
+
+    return NULL_RE.sub("\ufffd", NEWLINES_RE.sub("\n", text)).split("\n")
+
+
+def newest_h2(renderer, text: str):
+    """`(1-based line, that line's SOURCE, inline content)` of the first `<h2>`.
+
+    `(None, None, None)` is "this document has no `<h2>` at all", still a
+    different answer from "it has one that does not parse as a release
+    heading".
+
+    **THE LINE IS THE ORACLE, THE SOURCE LINE IS WHAT MAKES IT ONE, AND THE
+    CONTENT IS FOR THE MESSAGE.** This returned the CONTENT alone, and the
+    tests compared it — parsed by this project's `<version> — <date>` grammar
+    — against what our readers read. Driven over the whitespace alphabet, that
     put 25 documents in the false column that are not defects in either
     reader: `markdown-it` is a port of a JavaScript library and its ATX rule
     ends in `.trim()`, which in ECMAScript and in Python alike strips the
@@ -247,22 +306,47 @@ def newest_h2(renderer, text: str) -> tuple[int | None, str | None]:
     `## 0.2.1 — 2026-08-28<NBSP>` renders with the NBSP GONE, our readers keep
     it, and **our readers are the ones following the specification**.
 
-    Comparing content was importing the oracle's own deviation into the
-    comparison. The question this corpus exists to ask has always been
-    *"which LINE of this document is the newest heading"* — CommonMark decides
-    that and has nothing to say about `<version> — <date>`, which is this
-    project's grammar and is held between the two readers by the drives. So
-    the recorded oracle is `token.map[0] + 1`, which is exact, carries no
-    trimming, and is what `newest_heading_line` answers with.
+    **CONFIRMED AGAINST THE SPECIFICATION AND AGAINST A CORRECTED RENDERER,
+    which is why that is stated as a fact and not as a reading.** An auditor
+    took CommonMark 0.31.2's own text and `markdown-it-py` 4.2.0 with the one
+    line named here corrected -- `heading.py`, `.strip()` -> `.strip(" \\t")`
+    -- and diffed both columns over this whole corpus:
 
-    `(None, None)` is "this document has no `<h2>` at all", still a different
-    answer from "it has one that does not parse as a release heading".
+        product  n=2954   LINE differs 0   CONTENT differs 0
+        sep      n=140    LINE differs 0   CONTENT differs 25
+        named    n=40     LINE differs 0   CONTENT differs 0
+
+    Exactly 25, every one a `heading-tail` document, content-only, LINE
+    identical in all of them, the readers correct in all of them. The column
+    change concealed no defect; it removed a comparison that was measuring the
+    oracle. (`sep` was 140 rows and 5 positions when that was taken; it is 252
+    and 9 now.)
+
+    **AND THE LINE ALONE WAS NOT ENOUGH, WHICH IS THE DEFECT THAT BOUGHT THE
+    SECOND COLUMN.** Two readers that disagree about *what a line is* can
+    agree about the line NUMBER and be reading different text. Driven:
+    `'text\\r## 9.9.9 — 2000-01-01\\n## 0.2.1 — 2026-08-28\\n'` — a bare
+    carriage return, which CommonMark makes a line ending and this branch's
+    readers did not — has its first `<h2>` on line 2, and the readers pointed
+    at line 2 as well, holding a different line. A line-only relation
+    certified that sound. So the recorded oracle is the line NUMBER and that
+    line's SOURCE TEXT, sliced out of the renderer's own normalisation by
+    :func:`renderer_lines`, and a reader must agree about both.
+
+    **WHAT THIS ORACLE CANNOT SEE, and it is a property of the query rather
+    than of the renderer.** It takes the first `heading_open` TOKEN, so an
+    `<h2>` produced by INLINE raw HTML — `notes <h2>9.9.9</h2>` inside a
+    paragraph — is invisible to it: that is an inline token, not a block. No
+    block-level route to a heading escapes it, and every inline route is
+    inside a paragraph line, which these readers step over rather than read.
+    Recorded because an auditor had to construct it to find out.
     """
     tokens = renderer.parse(text)
     for at, token in enumerate(tokens):
         if token.type == "heading_open" and token.tag == "h2":
-            return token.map[0] + 1, tokens[at + 1].content
-    return None, None
+            line = token.map[0]
+            return line + 1, renderer_lines(text)[line], tokens[at + 1].content
+    return None, None, None
 
 
 def render(corpus):
@@ -287,13 +371,13 @@ def _lit(value) -> str:
 
 
 def _verdict(value) -> str:
-    line, content = value
-    return f"({_lit(line)}, {_lit(content)})"
+    line, source, content = value
+    return f"({_lit(line)}, {_lit(source)}, {_lit(content)})"
 
 
 def emit(corpus, product, named, separators, chars, version, today) -> str:
     """The whole corpus module, as text."""
-    verdicts: list[tuple[int | None, str | None]] = [(None, None)]
+    verdicts: list[tuple] = [(None, None, None)]
     for verdict in [*product, *separators]:
         if verdict not in verdicts:
             verdicts.append(verdict)

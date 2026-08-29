@@ -155,7 +155,9 @@ ROUTED_STEP = "the tag and the changelog heading must agree"
 #: `tools/changelog_renderer_corpus.py` and
 #: `tests/test_release_gates.py::test_the_whitespace_alphabet_is_swept_in_every_position`.
 _HEADING = re.compile(
-    r"^##[ \t]+(?P<version>\d[\w.+!-]*)[ \t]+—[ \t]+(?P<rest>.+?)[ \t]*$", re.M
+    r"^##[ \t]+(?P<version>[0-9][0-9A-Za-z._+!-]*)[ \t]+—[ \t]+(?P<rest>.+?)"
+    r"[ \t]*$",
+    re.M,
 )
 
 #: PEP 440's pre-release and development spellings, which are what separates
@@ -283,6 +285,24 @@ _COMMENT_OPEN = re.compile(r"^ {0,3}<!--")
 #   `_PARAGRAPH_LINE` widened to `<>=*+-`                 10 failed
 #   bash closer indent `-le 3` -> `-le 4`                 1 failed
 #
+# And the six a SECOND audit found, each re-driven after its repair, over
+# `tests/test_changelog_names_the_version.py tests/test_release_gates.py`:
+#
+#   mutation                                             result
+#   `_lines` back to `split("\n")` + trailing-CR strip    3 failed
+#   the NUL guard removed, both readers                   2 failed
+#   `export LC_ALL=C` deleted from the changelog step     1 failed
+#   four `SEPARATOR_FORMS` deleted and regenerated        1 failed
+#   four indent-boundary `NAMED` rows deleted, regen'd    1 failed
+#   `\d`/`\w` restored to `_HEADING`/`_ORDERED_LIST_LINE` 2 failed
+#
+# THE LAST THREE ARE MUTATIONS OF THE INSTRUMENT AND NOT OF THE READERS, which
+# is the shape this branch keeps having to learn: every authored surface of
+# the corpus -- the alphabet, the named documents, the swept positions -- can
+# be shrunk by an edit plus the documented regeneration command, and the
+# smaller corpus agrees with a live renderer perfectly. Each of the three now
+# has a floor asserted from outside the generated file.
+#
 # The first two rows and the last are the ones that MATTER, because they are
 # the ones an auditor found SURVIVING at 39 passed apiece before the
 # indent-boundary documents were added to `NAMED`: no document anywhere placed
@@ -325,36 +345,72 @@ _PARAGRAPH_LINE = re.compile(r"^ {0,3}[A-Za-z0-9`~]")
 #: still a heading to a renderer and is invisible to a reader bounded at three.
 #: Driven: `1. text` / blank / `    ## 9.9.9 — 2000-01-01` renders an `<h2>`
 #: this scan would step over.
-_ORDERED_LIST_LINE = re.compile(r"^ {0,3}\d{1,9}[.)](?:[ \t]|$)")
+_ORDERED_LIST_LINE = re.compile(r"^ {0,3}[0-9]{1,9}[.)](?:[ \t]|$)")
+
+
+#: A LINE ENDING, spelled the way CommonMark 0.31.2 spells one in *Characters
+#: and lines*: *"a line feed, a carriage return not followed by a line feed, or
+#: a carriage return and a following line feed."* It is character-for-character
+#: `markdown-it`'s own `NEWLINES_RE`, which is how the renderer decides the
+#: same question.
+_LINE_ENDING = re.compile(r"\r\n?|\n")
+
+#: The character neither reader can carry. CommonMark replaces it with U+FFFD;
+#: bash's `read` DROPS it, silently, because a bash variable cannot hold one.
+_NUL = "\x00"
 
 
 def _lines(text: str) -> list[str]:
-    """`text` split the way `read -r` in `release.yml` splits it.
+    """`text` split into lines, by CommonMark's rule and `release.yml`'s alike.
 
-    `str.splitlines()` — what this used to call — breaks on eight boundaries
-    CommonMark does not know and `read` does not either: `\\v`, `\\f`,
-    `\\x1c`, `\\x1d`, `\\x1e`, `\\x85`, `\\u2028`, `\\u2029`. A form feed made
-    this twin see two lines where the bash gate and the renderer both see one,
-    and read a `## ` heading out of the second half of one paragraph.
-    Splitting on `\\n` and dropping a trailing `\\r` is exactly `IFS= read -r
-    line`, which is the point: these two readers are twins and the line
-    boundary is part of the grammar.
+    **THIS CALLED `str.splitlines()`, THEN IT SPLIT ON `\\n` ALONE, AND THE
+    SECOND WAS A SOUNDNESS REGRESSION THIS MODULE INTRODUCED.** The reasoning
+    written here for the change was:
 
-    DRIVEN, not reasoned: the corpus row *"a form feed is not a line break"*
-    in `tests/_changelog_renderer_corpus.py`, red on the `splitlines()`
-    reading at
-    `tests/test_release_gates.py::test_BOTH_readers_of_the_newest_heading_agree`
-    — the twin reads `9.9.9` out of the second half of one paragraph where
-    the renderer reads `0.2.0`. Measured on that document: the bash gate,
-    which never had this, reads `0.2.0 — 2026-08-25` and returns rc=0, so the
-    two readers had DRIFTED as well as one of them being wrong. That row
-    reddens on the twin's assertion first, which is why this paragraph states
-    the drift rather than pointing at a second red.
+        *"`str.splitlines()` — what this used to call — breaks on eight
+        boundaries CommonMark does not know and `read` does not either: `\\v`,
+        `\\f`, `\\x1c`, `\\x1d`, `\\x1e`, `\\x85`, `\\u2028`, `\\u2029`."*
+
+    **That list is correct and it is INCOMPLETE.** `splitlines()` also breaks
+    on a bare `\\r`, and that break CommonMark **does** know — *"a carriage
+    return not followed by a line feed"* is a line ending. Splitting on `\\n`
+    and stripping a trailing `\\r` corrected eight boundaries and broke one,
+    and the corpus could not see it, because the reader still pointed at the
+    same line NUMBER while holding different text:
+
+        'text\\r## 9.9.9 — 2000-01-01\\n## 0.2.1 — 2026-08-28\\n'
+            renderer   line 2, '## 9.9.9 — 2000-01-01'
+            that reader line 2, '## 0.2.1 — 2026-08-28'   <- certified sound
+
+    End to end, one invisible CR inserted into this repository's own
+    `CHANGELOG.md` after a paragraph line took the bash gate to rc=0 printing
+    *"newest heading: 0.2.1 — 2026-08-28"* over a document whose newest
+    rendered heading is the 9.9.9.
+
+    **AND WHAT SAVED THE RELEASE PATH WAS AN ACCIDENT THIS MODULE ALREADY
+    REFUSES TO RELY ON.** The caller reads `CHANGELOG.md` with
+    `read_text(encoding="utf-8")`, whose universal-newline translation
+    converts the CR before this function ever sees it — so the coupling check
+    reddened on the planted tree and `build: needs: test` would have stopped
+    the release. `_one_line_break` in `tests/test_release_gates.py` says of
+    exactly that shape: *"these checks are correct because of how the file was
+    OPENED and not because of anything they do."* The corpus drives STRINGS
+    and has no such protection.
+
+    So the split is :data:`_LINE_ENDING`, which is `markdown-it`'s own rule and
+    CommonMark's sentence. The eight spurious boundaries stay corrected: `\\v`,
+    `\\f`, `\\x1c`, `\\x1d`, `\\x1e`, `\\x85`, `\\u2028` and `\\u2029` are
+    ordinary characters here, to the renderer, and to `read -r` in
+    `release.yml`.
+
+    DRIVEN: the corpus rows *"a bare carriage return is a line ending"* and
+    *"a form feed is not a line break"*, which are red on the two readings
+    this docstring records and green on this one.
     """
-    out = text.split("\n")
+    out = _LINE_ENDING.split(text)
     if out and out[-1] == "":
         out.pop()
-    return [line[:-1] if line.endswith("\r") else line for line in out]
+    return out
 
 
 def newest_heading_line(text: str) -> tuple[int, str] | None:
@@ -452,6 +508,28 @@ def newest_heading_line(text: str) -> tuple[int, str] | None:
     * **Whether `CHANGELOG.md` is the document the release ships.** That is
       `pyproject.toml`'s allowlist and `tests/test_sdist_contents.py`.
     """
+    # THE NUL, REFUSED BEFORE ANYTHING IS READ, and it is the bash twin this
+    # is for. CommonMark replaces U+0000 with U+FFFD; `read -r` DROPS it,
+    # because a bash variable cannot hold one — so the gate parsed a line the
+    # document does not contain. Driven: `'#\x00# 0.2.1 — 2026-08-28\n'`
+    # renders NO <h2> at all and took the bash step to rc=0 with
+    # `version=0.2.1`. Python CAN hold it and would refuse this document by
+    # the whitelist anyway; it is refused HERE, by name, in both readers,
+    # because a line grammar that cannot represent its input must not read it
+    # — and because the two readers refusing for different reasons is how they
+    # stop being twins.
+    if _NUL in text:
+        raise UndecidedChangelogShape(
+            len(_lines(text[: text.index(_NUL)] + "x")),
+            _lines(text[: text.index(_NUL)] + "x")[-1],
+            why=(
+                "it holds a NUL byte. CommonMark replaces one with U+FFFD and "
+                "the bash half of this gate cannot hold one at all — `read` "
+                "drops it silently, so that reader would parse a line this "
+                "document does not contain. A line grammar that cannot "
+                "represent its input must not read it."
+            ),
+        )
     fence: tuple[str, int] | None = None
     in_comment = False
     for number, line in enumerate(_lines(text), 1):
@@ -583,12 +661,18 @@ class UndecidedChangelogShape(ValueError):
     reached the comparison. See :func:`newest_heading_line`.
     """
 
-    def __init__(self, number: int, line: str) -> None:
-        super().__init__(number, line)
+    def __init__(self, number: int, line: str, why: str | None = None) -> None:
+        super().__init__(number, line, why)
         self.number = number
         self.line = line
+        self.why = why
 
     def __str__(self) -> str:
+        if self.why is not None:
+            return (
+                f"the changelog cannot be read at all, from line "
+                f"{self.number}: {self.why}"
+            )
         return (
             f"line {self.number} of the changelog is a shape this gate "
             f"cannot decide, and it stands ABOVE the newest heading: "
