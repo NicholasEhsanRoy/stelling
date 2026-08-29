@@ -643,7 +643,19 @@ PINNED = (
         "DECLARED_OPTIONAL_DEPENDENCIES is installed by some job or carries a "
         "named exemption would have caught it the day the library was "
         "declared; this file does not have one, and that absence is an "
-        "omission rather than an unsolved problem.",
+        "omission rather than an unsolved problem. IT IS NOT BUILT HERE, and "
+        "that is a scope call rather than a judgement that it should not "
+        "exist: it would read every workflow in `.github/`, which is a "
+        "cross-cutting instrument this branch does not own. Writing the shape "
+        "of a check into a comment instead of building it is what let the "
+        "last instance run a whole review cycle, and that sentence is left "
+        "standing here rather than softened. THE LIVE STATE IS DRIVEN AND NOT "
+        "REMEMBERED: with `markdown-it-py` on the path at this commit the "
+        "test above RUNS and passes - 138 passed, 1 skipped over this module, "
+        "`tests/test_release_gates.py` and "
+        "`tests/test_changelog_names_the_version.py`, measured 2026-08-29 - "
+        "so the failure mode this paragraph warns about is a hazard and not a "
+        "current state.",
     ),
 )
 

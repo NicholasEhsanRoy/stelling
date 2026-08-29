@@ -272,6 +272,19 @@ _COMMENT_OPEN = re.compile(r"^ {0,3}<!--")
 # maintainer one edit. Passing one costs a wrong release note standing beside
 # an artefact that cannot be unpublished, only yanked.
 #
+# AND THERE IS A STRUCTURAL REASON THE WHITELIST HOLDS, which an audit
+# supplied and which is worth having beside the drives rather than instead of
+# them. Every CommonMark construct that can open a block or move a heading
+# begins with one of `#`, `>`, `-`, `+`, `*`, `_`, `=`, `~`, a backtick, `<`,
+# `[`, four spaces, or a digit followed by `.` or `)`. The admitted class is
+# `[A-Za-z0-9`~]` with the ordered-list marker carved out, so it intersects
+# that set only where the fence branch has already declined. **And because
+# UTF-8 is self-synchronising, no byte of a multi-byte character can BE one of
+# those markers** — so the bash reader's byte-level matching under `LC_ALL=C`
+# cannot be fooled by a non-ASCII document either. Driven rather than left as
+# an argument: 20 000 invalid-UTF-8 documents, 3 988 of them read, 0 unsound.
+# That measurement was taken elsewhere, 2026-08-29, and is a dated record.
+#
 # Every member below is DRIVEN INERT against a real CommonMark renderer rather
 # than argued from a reading of the specification — see
 # `tests/_changelog_renderer_corpus.py` and
@@ -334,8 +347,13 @@ _COMMENT_OPEN = re.compile(r"^ {0,3}<!--")
 # because both NUL documents were refused by the whitelist anyway -- the half
 # carrying the DRIFT obligation was unpinned by rows that could not tell guard
 # from whitelist. And a present-construct needle read over the whole extracted
-# body is satisfied by the body's own PROSE about the construct: 237 of its
-# 407 lines are comments and three of them say `export LC_ALL=C`.
+# body is satisfied by the body's own PROSE about the construct: MOST of that
+# body is comment, and more than one of those comments says `export LC_ALL=C`
+# while discussing it. The live figures are derived and printed by
+# `tests/test_release_gates.py::test_the_drives_are_reading_the_real_step_bodies`
+# rather than restated here; a numeral typed beside a body that grows every
+# time somebody explains it is a numeral that is false one commit later, which
+# is what happened to the two copies of it that stood here.
 #
 # The first two rows and the last are the ones that MATTER, because they are
 # the ones an auditor found SURVIVING at 39 passed apiece before the
@@ -359,12 +377,24 @@ _INDENTED_LINE = re.compile(r"^ {4}")
 #: above it and opens nothing.
 _ATX_LINE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|$)")
 
-#: A paragraph line: nothing that begins a CommonMark block begins with a
-#: letter, a digit, or a backtick or tilde run shorter than three, EXCEPT the
-#: ordered list below. A run of three or more of either has already been taken
-#: as a fence delimiter above; a shorter run begins no block at all — a
-#: backtick opens a code SPAN, which is inline and cannot swallow the line
-#: beneath it, and one or two tildes are ordinary text to CommonMark.
+#: A paragraph line: nothing that begins a CommonMark block begins with an
+#: ASCII letter, an ASCII digit, or **a leading backtick or tilde that did not
+#: open a fence**, EXCEPT the ordered list below.
+#:
+#: **THAT LAST CLAUSE SAID "a run shorter than three" AND THE RUN CAN BE
+#: THREE.** What stood here was *"a run of three or more of either has already
+#: been taken as a fence delimiter above; a shorter run begins no block at
+#: all"*, and the code three lines up in :func:`newest_heading_line` says
+#: otherwise in as many words: a BACKTICK fence whose info string holds a
+#: backtick is not a fence, so ```` ``` a`b ```` falls through to this rule
+#: with a leading run of exactly three and is admitted as a paragraph — which
+#: is correct, and is what both renderers do with it, and is a corpus row.
+#: The BEHAVIOUR was right and the sentence was narrower than the class it
+#: was justifying, which is the same defect as a sentence wider than one.
+#:
+#: The reason a leading backtick or tilde is inert once the fence branch has
+#: declined it: a backtick opens a code SPAN, which is inline and cannot
+#: swallow the line beneath it, and tildes are ordinary text to CommonMark.
 #:
 #: **THE TILDE WAS MISSING AND THE TWO ARE ONE RULE**, which an auditor noted:
 #: the class admitted a short backtick run and refused a short tilde run, on
@@ -543,11 +573,15 @@ def newest_heading_line(text: str) -> tuple[int, str] | None:
     **WHAT IT STILL CANNOT SEE.**
 
     * **The ATX closing sequence.** `## 0.2.0 — 2026-08-25 ##` renders with
-      the trailing `##` stripped; :data:`_HEADING` keeps it, so the two
-      READINGS differ. The VERDICT does not: `2026-08-25 ##` is not an ISO
-      date and is not the word *unreleased*, so every caller refuses it, and
-      :func:`test_both_halves_of_the_coupling_are_driven` drives that rather
-      than asserting it here. It is outside the corpus for that reason.
+      the trailing `##` stripped; :data:`_HEADING` keeps it, so the PARSED
+      `rest` differs from the rendered content. It is not "the reading" that
+      differs, which is what this bullet used to say: the LINE and its SOURCE
+      TEXT are identical, and those are the two things the corpus compares —
+      which is exactly why no growth of the corpus can surface this and why
+      the bullet is here. The VERDICT does not differ either: `2026-08-25 ##`
+      is not an ISO date and is not the word *unreleased*, so every caller
+      refuses it, in all four variants driven at
+      :func:`test_both_halves_of_the_coupling_are_driven`.
     * **Anything below the heading it returns.** The scan stops there.
     * **Whether `CHANGELOG.md` is the document the release ships.** That is
       `pyproject.toml`'s allowlist and `tests/test_sdist_contents.py`.
@@ -723,11 +757,14 @@ class UndecidedChangelogShape(ValueError):
             f"{self.line!r}. This reader is a line grammar, not a CommonMark "
             f"parser, and the shapes it steps over are a whitelist — blank, "
             f"indented four spaces, another ATX level, or a paragraph line "
-            f"beginning with an ASCII letter or digit or a short backtick or "
-            f"tilde run. (That last clause used to say `a letter, a digit or "
-            f"a code span`, which is WIDER than the class `[A-Za-z0-9`~]` "
-            f"actually admits: `École` is refused. The direction is safe and "
-            f"the sentence was not true.) Everything "
+            f"beginning with an ASCII letter or digit, or a leading backtick "
+            f"or tilde that did not open a fence. (That clause has been wrong "
+            f"in both directions: it said `a letter, a digit or a code span`, "
+            f"which is WIDER than `[A-Za-z0-9`~]` — `École` is refused — and "
+            f"then `a short backtick or tilde run`, which is NARROWER, since "
+            f"a three-backtick run whose info string holds a backtick is no "
+            f"fence and lands here. Both readings were safe and neither was "
+            f"true.) Everything "
             f"else stops it here rather than being stepped past to a later "
             f"heading that happens to agree with the tag. Setext underlines "
             f"(`---`, `===`), block quotes, list markers and HTML blocks that "

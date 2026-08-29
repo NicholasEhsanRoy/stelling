@@ -2863,9 +2863,12 @@ def test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry(tmp_path):
     red = _drive(body, only_v, GITHUB_REF_NAME="v")
     assert red.returncode != 0, (
         f"THE CHANGELOG GATE PASSED a tree tagged `v` whose heading names "
-        f"9.9.9. Nothing was compared: the version half of this step is "
+        f"9.9.9. The VERSION was never compared: that half of this step is "
         f"skipped when `tag_version` is empty, and `${{tag#v}}` on `v` is "
-        f"empty.\n{red.stdout}"
+        f"empty. The DATE half is guarded on `heading_rest`/`tag_date` and "
+        f"does run — which is why this plant gives the heading the tag's own "
+        f"date, so the date arm agrees and only the missing version is "
+        f"left.\n{red.stdout}"
     )
     assert "nothing but the leading 'v'" in red.stdout, (
         f"the refusal does not name what is wrong with the tag:\n{red.stdout}"
@@ -3607,24 +3610,42 @@ _SWEPT_WITNESSES = (
 #: per position, asserted to be a member of `separator_documents(chars)`. A
 #: re-pointed shape drops a witness rather than only a label.
 _SWEPT_POSITIONS = (
-    ("indent",
+    ("indent", "\xa0",
      "\xa0## 0.2.1 — 2026-08-28\n## 9.9.9 — 2000-01-01\n"),
-    ("atx-run",
+    ("atx-run", "\x0b",
      "##\x0b0.2.1 — 2026-08-28\n## 9.9.9 — 2000-01-01\n"),
-    ("atx-other-run",
+    ("atx-other-run", "\xa0",
      "#\xa0notes\n## 0.2.1 — 2026-08-28\n"),
-    ("version-em-dash",
+    ("version-em-dash", "\xa0",
      "## 0.2.1\xa0— 2026-08-28\n"),
-    ("em-dash-date",
+    ("em-dash-date", "\xa0",
      "## 0.2.1 —\xa02026-08-28\n"),
-    ("heading-tail",
+    ("heading-tail", "\xa0",
      "## 0.2.1 — 2026-08-28\xa0\n"),
-    ("fence-closer",
+    ("fence-closer", "\xa0",
      "```\n```\xa0\n## 0.2.1 — 2026-08-28\n"),
-    ("blank-line",
+    ("blank-line", "\xa0",
      "<div>\n\xa0\n## 0.2.1 — 2026-08-28\n"),
-    ("ordered-list-marker",
+    ("ordered-list-marker", "\xa0",
      "1.\xa0item\n    ## 9.9.9 — 2000-01-01\n## 0.2.1 — 2026-08-28\n"),
+)
+
+#: The whitespace alphabet, derived HERE from `str.isspace()` and not from the
+#: tool that writes the corpus.
+#:
+#: **THE FLOOR ABOVE PINS ONE CHARACTER PER POSITION AND THAT IS NOT A FLOOR ON
+#: THE ALPHABET.** `separator_documents` is built from
+#: `whitespace_alphabet()`, which lives in the tool; narrowing that function to
+#: the four characters the witnesses happen to name takes the sweep from 252
+#: rows over 28 characters to 36 over 4, regenerates clean, and passes every
+#: floor. An auditor built it and established the cap on it as well: the
+#: witness characters are the DISCRIMINATING ones, so all three demonstrated
+#: mutants stay caught under that shrink and nothing already found is
+#: un-pinned. It is a narrowing of reach and not a false verdict — and it is
+#: closed here rather than left, because "no defect is reachable through it
+#: today" is the sentence every one of this branch's four rounds started from.
+_LIVE_WHITESPACE = frozenset(
+    c for c in map(chr, range(0x110000)) if c.isspace() and c != "\n"
 )
 
 #: DOCUMENTS `NAMED` MUST STILL CONTAIN, for the third time and the last
@@ -3703,7 +3724,7 @@ def test_the_corpus_still_carries_the_rows_and_positions_that_catch_mutants():
     """
     swept = set(_corpus_tool.separator_documents(
         tuple(chr(point) for point in _corpus.SEPARATOR_CHARS)))
-    missing = [name for name, _ in _SWEPT_POSITIONS
+    missing = [name for name, _, _ in _SWEPT_POSITIONS
                if name not in _corpus.SEPARATOR_FORM_NAMES]
     assert not missing, (
         f"the whitespace sweep no longer declares {missing}. It has "
@@ -3712,14 +3733,37 @@ def test_the_corpus_still_carries_the_rows_and_positions_that_catch_mutants():
         f"readers IMPLEMENT a rule rather than refusing it, which is where "
         f"every soundness break this branch has had was found."
     )
-    inert = [name for name, witness in _SWEPT_POSITIONS if witness not in swept]
-    assert not inert, (
-        f"the whitespace sweep still NAMES {inert} and no longer produces the "
-        f"document that tests them. A position whose shape has been re-pointed "
-        f"— the separator moved out of the thing it was there to separate — "
-        f"keeps its name, keeps the row count, and stops catching anything. "
-        f"That is a one-line edit and it un-pins both of the whitespace "
-        f"defects this branch has fixed."
+    chars = {chr(point) for point in _corpus.SEPARATOR_CHARS}
+    repointed = [name for name, char, witness in _SWEPT_POSITIONS
+                 if witness not in swept and char in chars]
+    dropped = [(name, char) for name, char, witness in _SWEPT_POSITIONS
+               if witness not in swept and char not in chars]
+    # TWO CAUSES, TOLD APART, because one message naming one of them is a
+    # diagnosis that is wrong half the time it fires. A witness can leave the
+    # swept set because its POSITION's shape was re-pointed, or because its
+    # CHARACTER left the alphabet — and the remedies are opposite.
+    assert not repointed, (
+        f"the whitespace sweep still NAMES {repointed} and no longer produces "
+        f"the document that tests them, with every character still in the "
+        f"alphabet. A position whose shape has been re-pointed — the "
+        f"separator moved out of the thing it was there to separate — keeps "
+        f"its name, keeps the row count, and stops catching anything. That is "
+        f"a one-line edit and it un-pins both of the whitespace defects this "
+        f"branch has fixed."
+    )
+    assert not dropped, (
+        f"{dropped} — these positions' witness CHARACTERS are no longer in "
+        f"the swept alphabet, which now has {len(chars)}. The shapes are "
+        f"untouched; what shrank is what they are swept over."
+    )
+    shapeless = [name for name, shape in _corpus_tool.SEPARATOR_FORMS
+                 if "{sep}" not in shape]
+    assert not shapeless, (
+        f"{shapeless} declare a whitespace position and their shape has no "
+        f"`{{sep}}` in it, so every character of the alphabet produces the "
+        f"same document and the position is swept 28 times over nothing. A "
+        f"form with no placeholder is the shape re-pointing above with the "
+        f"separator removed rather than moved."
     )
     documents = {row[1] for row in _corpus.NAMED}
     gone = [name for name, text in _NAMED_FLOOR if text not in documents]
@@ -3768,29 +3812,50 @@ def test_the_recorded_whitespace_alphabet_is_the_live_one():
 
     `SEPARATOR_CHARS` is generated, so it is shrinkable in exactly the way
     `ALPHABET` is. It is not authored anywhere: it is `str.isspace()` minus
-    the line separator, re-derived here from the interpreter running the
-    suite and compared to the recorded copy as a SET.
+    the line separator.
+
+    **AND IT IS DERIVED HERE RATHER THAN CALLED OUT OF THE TOOL, WHICH IS THE
+    WHOLE OF THE REPAIR.** This read `live = _corpus_tool.whitespace_alphabet()`
+    — the same function that BUILT the recorded copy — so narrowing that
+    function and regenerating moved both sides together and the comparison
+    held. An auditor built it: narrowed to the four characters
+    `_SWEPT_POSITIONS`' witnesses happen to name, the sweep goes from 252 rows
+    over 28 characters to 36 over 4, every floor passes, and the corpus is
+    perfectly consistent with a live renderer. It was capped rather than
+    exploitable — the witness characters are the discriminating ones, so all
+    three demonstrated mutants stay caught — but "no defect is reachable
+    through it today" is the sentence every round of this branch has started
+    from. :data:`_LIVE_WHITESPACE` is `str.isspace()`, evaluated in THIS file,
+    which the generator never writes.
 
     A mismatch is not automatically a defect — a new CPython could add a
     whitespace character — but it is always a regeneration, and the message
-    says which.
+    says which. The tool's own derivation is held to the same set, so it
+    cannot drift either.
     """
-    live = _corpus_tool.whitespace_alphabet()
-    recorded = tuple(chr(point) for point in _corpus.SEPARATOR_CHARS)
-    assert set(recorded) == set(live), (
+    recorded = frozenset(chr(point) for point in _corpus.SEPARATOR_CHARS)
+    assert recorded == _LIVE_WHITESPACE, (
         f"the recorded whitespace alphabet has {len(recorded)} characters and "
-        f"this interpreter finds {len(live)}. Only in the recording: "
-        f"{sorted(set(recorded) - set(live))!r}; only live: "
-        f"{sorted(set(live) - set(recorded))!r}. If a character was DROPPED "
-        f"from the generated file, the sweep below stopped covering it and "
+        f"`str.isspace()` on this interpreter finds "
+        f"{len(_LIVE_WHITESPACE)}. Only in the recording: "
+        f"{sorted(recorded - _LIVE_WHITESPACE)!r}; only live: "
+        f"{sorted(_LIVE_WHITESPACE - recorded)!r}. If characters were DROPPED "
+        f"from the generated file, the sweep stopped covering them and "
         f"nothing else would say so. Regenerate with `python "
         f"tools/changelog_renderer_corpus.py --write`."
     )
-    assert len(_corpus.SEPARATORS) == len(live) * len(_corpus.SEPARATOR_FORM_NAMES), (
+    assert frozenset(_corpus_tool.whitespace_alphabet()) == _LIVE_WHITESPACE, (
+        f"`whitespace_alphabet()` in the generator returns "
+        f"{len(_corpus_tool.whitespace_alphabet())} characters where "
+        f"`str.isspace()` finds {len(_LIVE_WHITESPACE)}. Narrowing that "
+        f"function and regenerating moves the recorded copy with it, so the "
+        f"comparison above would hold and the sweep would quietly cover less."
+    )
+    expected = len(_LIVE_WHITESPACE) * len(_corpus.SEPARATOR_FORM_NAMES)
+    assert len(_corpus.SEPARATORS) == expected, (
         f"the separator column has {len(_corpus.SEPARATORS)} verdicts and "
-        f"{len(live)} characters times {len(_corpus.SEPARATOR_FORM_NAMES)} "
-        f"forms is {len(live) * len(_corpus.SEPARATOR_FORM_NAMES)}. "
-        f"Regenerate."
+        f"{len(_LIVE_WHITESPACE)} characters times "
+        f"{len(_corpus.SEPARATOR_FORM_NAMES)} forms is {expected}. Regenerate."
     )
 
 
@@ -4211,18 +4276,40 @@ def test_the_drives_are_reading_the_real_step_bodies():
     # BELOW ALREADY WERE AND THESE WERE NOT. The reason given there is *"the
     # paragraphs beside the step have to be able to say what they refuse"* —
     # and the symmetric hazard was never taken: the paragraphs beside the step
-    # can also say what it DOES. The extracted body is 407 lines and 237 of
-    # them are comments; three of those comments contain the string `export
-    # LC_ALL=C`, discussing it. Driven by an auditor: delete the CODE line and
-    # this test stays green, with only a `_NAMED_FLOOR` row reddening
-    # elsewhere. Two of these eight survive on comments alone —
-    # `CHANGELOG.md` and `export LC_ALL=C` — and a present-construct pin that
-    # a comment can satisfy is a pin on the prose.
+    # can also say what it DOES. Most of the extracted body is comment, and
+    # more than one of those comments contains the string `export LC_ALL=C`
+    # while discussing it. Driven by an auditor: delete the CODE line and this
+    # test stayed green, with only a `_NAMED_FLOOR` row reddening elsewhere.
+    # Two of these eight survived on comments alone — `CHANGELOG.md` and
+    # `export LC_ALL=C` — and a present-construct pin that a comment can
+    # satisfy is a pin on the prose.
+    #
+    # THE SIZE IS DERIVED BELOW AND NOT TYPED HERE, AND THAT IS A CORRECTION.
+    # This paragraph said *"the extracted body is 407 lines and 237 of them
+    # are comments"*, and the commit that wrote that sentence was the last
+    # commit at which it was true: explaining the defect grew the body by 22
+    # lines. A DATED RECORD of how fast it moves, which cannot rot because
+    # every row names a commit:
+    #
+    #     a90862b  154 lines,  50 comments
+    #     b967a08  303        146
+    #     c9037d8  339        182
+    #     e5442d1  407        237
+    #     3721ded  429        256
+    #
+    # The claim survives all five rows and needs none of the numerals: the
+    # body is mostly comment, so a needle over the whole of it is a needle
+    # over prose. The assertion's own message computes today's figures.
     #
     # THE SAME HAZARD IS UNTAKEN FOR THE SDIST, TAG AND MANIFEST NEEDLES
     # ABOVE, which read the whole body. Those three steps are outside this
-    # branch's subject and are left as they are rather than repaired here, and
-    # this paragraph is the record that they were looked at.
+    # branch's subject and are left as they are rather than repaired here.
+    # MEASURED BY AN AUDITOR RATHER THAN GUESSED AT, which is the difference
+    # between a scope call and a shrug: of the 33 needles those three steps
+    # pin, **5** would survive deletion of their code line on prose alone —
+    # `tar tzf`, `explained.txt`, `mktemp -d`, `basename`, `cut -d- -f2` — and
+    # all 33 are present in code today, so the exposure is latent and not
+    # live. Read 2026-08-29 at `3721ded`.
     changelog_code = "\n".join(
         line for line in changelog.splitlines()
         if not line.lstrip().startswith("#")
@@ -4231,7 +4318,10 @@ def test_the_drives_are_reading_the_real_step_bodies():
                    "%(objecttype)", "GITHUB_REF_NAME", "problems+=",
                    "refs/tags/", "export LC_ALL=C"):
         assert needle in changelog_code, (
-            f"{needle!r} is gone from the changelog step body. The date this "
+            f"{needle!r} is gone from the CODE of the changelog step body — "
+            f"{len(changelog_code.splitlines())} code lines of "
+            f"{len(changelog.splitlines())}, the rest comment. It may still "
+            f"be in a comment; a comment is not the check. The date this "
             "gate compares against is the TAG OBJECT's tagger date, chosen "
             "over the commit's committer date on the argument beside the "
             "step; a rewrite to `git log -1 --format=%cd` refuses a release "
