@@ -226,16 +226,16 @@ FLOAT_BOX_DEFECT = (
 #: THE PARTITION, as a dated record rather than a present-tense claim, and
 #: with the column that decides a repair beside the one that does not.
 #:
-#: Measured 2026-08-29 on the tree THIS COMMIT creates — jax 0.11.0, jaxlib
-#: 0.11.0, numpy 2.5.2, CPython 3.12.3, hypothesis 6.165.10, pytest 9.1.1,
+#: Measured 2026-08-29 at ``4c8c835`` — jax 0.11.0, jaxlib 0.11.0, numpy
+#: 2.5.2, CPython 3.12.3, hypothesis 6.165.10, pytest 9.1.1,
 #: ``JAX_PLATFORMS=cpu``, x64 forced on by this module's fixture — by running
 #: THIS FILE's residual leg at ``STELLING_PROPERTY_SCALE=12.5``, i.e. 1500
-#: examples, and reading its own census. Re-derivable by anyone with this tree
-#: and that command. (A commit cannot contain its own hash; the commit that
-#: follows this one replaces this sentence with the sha and changes nothing
-#: else, so the numbers stay reproducible at the commit they name. That is the
-#: second time this branch has done it and it is cheaper than the defect the
-#: paragraph below records.)
+#: examples, and reading its own census. Re-derivable by anyone with that tree
+#: and that command. ``4c8c835`` is the commit BEFORE this one, and this
+#: commit changes only the sentence you are reading: a commit cannot contain
+#: its own hash, and a sha typed at a guess is the defect the paragraph below
+#: records. That is the second time this branch has split a commit for it, and
+#: it is still cheaper than the defect.
 #:
 #: **AND THE TABLE IS UNCHANGED FROM THE ONE MEASURED AT ``eb86def``**, which
 #: is asserted rather than assumed: the fix to ``_exact_apply``'s conversion
