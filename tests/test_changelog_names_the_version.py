@@ -162,12 +162,21 @@ _HEADING = re.compile(
 
 #: PEP 440's pre-release and development spellings, which are what separates
 #: "this build is of 0.2.0" from "0.2.0 has happened".
-_UNSHIPPED = re.compile(r"(?:\.dev\d+|[ab]\d+|rc\d+)$")
+_UNSHIPPED = re.compile(r"(?:\.dev[0-9]+|[ab][0-9]+|rc[0-9]+)$")
 
 #: The word a heading uses for a release that has not happened.
 _UNRELEASED = "unreleased"
 
-_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+#: **`\d` HERE WAS THE LAST OF THE BORROWED ALPHABETS IN THIS MODULE**, and it
+#: was still `\d` in the commit that replaced `\d` with `[0-9]` twenty lines
+#: up for exactly this reason. Python's `\d` is Unicode-aware, so
+#: `## 0.2.0 — <ARABIC-INDIC 2>026-08-25` satisfied "a released version's
+#: heading carries a date" here while the bash gate — which compares the
+#: heading's date to the tag's by STRING EQUALITY — would refuse it, so no
+#: release could ever have shipped one. A repair applied to two of the four
+#: places one rule lives is a repair nobody can check; driven at
+#: :func:`test_both_halves_of_the_coupling_are_driven`.
+_ISO_DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
 
 def release_segment(version: str) -> str:
@@ -303,6 +312,31 @@ _COMMENT_OPEN = re.compile(r"^ {0,3}<!--")
 # smaller corpus agrees with a live renderer perfectly. Each of the three now
 # has a floor asserted from outside the generated file.
 #
+# AND A THIRD AUDIT FOUND THE FLOORS THEMSELVES WERE BUILT AGAINST THE ATTACK
+# AND NOT AGAINST THE CLASS. Each was written the round after somebody shrank
+# the surface it guards, and the third one bounded the NAMES of the whitespace
+# positions while the SHAPES those names stand for stayed unbounded -- so one
+# line, every name intact, 252 rows intact, re-pointed a position out of the
+# thing it was there to test and un-pinned the previous round's finding. It
+# bounds documents now, as the other two do. Re-driven, each repair reverted
+# on its own:
+#
+#   mutation                                             result
+#   the `fence-closer` shape re-pointed, name kept        1 failed
+#   the NUL guard removed from PYTHON alone               1 failed
+#   the `export LC_ALL=C` CODE line deleted, comments
+#     left saying `export LC_ALL=C` three times           1 failed
+#   the `v`-only tag refusal removed                      1 failed
+#   `_ISO_DATE` back to `\d{4}-\d{2}-\d{2}`                1 failed
+#
+# THE SECOND AND THIRD ROWS ARE THE INTERESTING ONES. Deleting the NUL guard
+# from BASH reddened two rows and deleting it from PYTHON reddened nothing,
+# because both NUL documents were refused by the whitelist anyway -- the half
+# carrying the DRIFT obligation was unpinned by rows that could not tell guard
+# from whitelist. And a present-construct needle read over the whole extracted
+# body is satisfied by the body's own PROSE about the construct: 237 of its
+# 407 lines are comments and three of them say `export LC_ALL=C`.
+#
 # The first two rows and the last are the ones that MATTER, because they are
 # the ones an auditor found SURVIVING at 39 passed apiece before the
 # indent-boundary documents were added to `NAMED`: no document anywhere placed
@@ -406,6 +440,16 @@ def _lines(text: str) -> list[str]:
     DRIVEN: the corpus rows *"a bare carriage return is a line ending"* and
     *"a form feed is not a line break"*, which are red on the two readings
     this docstring records and green on this one.
+
+    **AND THE MODEL IS EXHAUSTIVELY THE RENDERER'S, WHICH IS AN OUTSIDE
+    MEASUREMENT AND IS DATED FOR THAT REASON.** An independent audit compared
+    this function, the `release.yml` loop that builds `lines`, and
+    `renderer_lines` element-by-element over **all 1093 strings on
+    `{a, \\r, \\n}` of length at most 6**: 0 mismatches, all three. It also
+    confirmed `NEWLINES_RE` is `\\r\\n?|\\n` at markdown-it-py 3.0.0 and 4.2.0
+    alike, and that markdown-it splits the NORMALISED source on `\\n` — so the
+    indices `renderer_lines` produces are the indices `token.map` uses.
+    Measured 2026-08-29, elsewhere, on the readers this commit ships.
     """
     out = _LINE_ENDING.split(text)
     if out and out[-1] == "":
@@ -679,7 +723,11 @@ class UndecidedChangelogShape(ValueError):
             f"{self.line!r}. This reader is a line grammar, not a CommonMark "
             f"parser, and the shapes it steps over are a whitelist — blank, "
             f"indented four spaces, another ATX level, or a paragraph line "
-            f"beginning with a letter, a digit or a code span. Everything "
+            f"beginning with an ASCII letter or digit or a short backtick or "
+            f"tilde run. (That last clause used to say `a letter, a digit or "
+            f"a code span`, which is WIDER than the class `[A-Za-z0-9`~]` "
+            f"actually admits: `École` is refused. The direction is safe and "
+            f"the sentence was not true.) Everything "
             f"else stops it here rather than being stepped past to a later "
             f"heading that happens to agree with the tag. Setext underlines "
             f"(`---`, `===`), block quotes, list markers and HTML blocks that "
@@ -999,6 +1047,15 @@ def test_both_halves_of_the_coupling_are_driven():
     # of the shapes a caller can be in. It is outside
     # `tests/_changelog_renderer_corpus.py` for the same reason: the corpus
     # holds readings to the renderer's, and this one is not one.
+    # THE DATE'S DIGITS ARE ASCII, and `_ISO_DATE` said `\d` until an auditor
+    # read it. A heading dated with Arabic-Indic digits satisfied a
+    # Unicode-aware `\d{4}-\d{2}-\d{2}` and would be refused by the bash gate,
+    # which compares the heading's date to the tag's by string equality — so
+    # this was a divergence between the two readers rather than a route to a
+    # release, and it is driven here rather than described.
+    assert verdict("0.2.0", "## 0.2.0 — \u0662026-08-25\n") == "should-be-dated"
+    assert verdict("0.2.0.dev0", "## 0.2.0 — unreleased\n") is None
+
     assert verdict("0.2.0", "## 0.2.0 — 2026-08-25 ##\n") == "should-be-dated"
     assert verdict("0.2.0.dev0", "## 0.2.0 — unreleased ##\n") == "should-be-unreleased"
 

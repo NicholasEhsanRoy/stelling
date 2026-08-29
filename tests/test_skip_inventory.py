@@ -616,7 +616,7 @@ PINNED = (
         "— and held only to each other they can be found to DISAGREE but "
         "never to be WRONG. What found them wrong was a CommonMark renderer, "
         "and no merge lane has one. So the renderer's verdict on 2954 "
-        "generated documents, 46 named ones and a 252-document sweep of the "
+        "generated documents, 48 named ones and a 252-document sweep of the "
         "whitespace alphabet is recorded in "
         "`tests/_changelog_renderer_corpus.py` and "
         "driven in EVERY lane; this test is the only thing that re-derives "

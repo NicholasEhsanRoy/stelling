@@ -1216,6 +1216,28 @@ jobs:
             problems+=("GITHUB_REF_NAME is empty or unset, so this step has no tag to compare anything to. On a 'release: published' event the runner sets it to the tag's own short name.")
           else
             tag_version="${tag#v}"
+            # A TAG THAT IS NOTHING BUT THE `v` THIS STRIPS. `${tag#v}` on a
+            # tag named exactly `v` yields the empty string, and every
+            # comparison below is guarded on `[ -n "${tag_version}" ]` -- a
+            # guard whose stated reason is "each made only where BOTH sides
+            # were read", which is FALSE here: the tag was read, the ref
+            # resolved, the tagger date read. Only the VERSION is missing, and
+            # missing because this line consumed the whole name. Driven at
+            # a90862b and at every commit since, on a tree tagged `v` whose
+            # heading is `## 9.9.9 - <the tag's date>`:
+            #
+            #   rc=0   tag=v version= tagged=2026-08-28;
+            #          CHANGELOG.md newest heading: 9.9.9 - 2026-08-28
+            #
+            # A guard that checks a claim is WELL-FORMED but never that it is
+            # TRUE is a defect class this repository keeps re-finding, and
+            # this was an instance of it inside the refusal it protects. The
+            # `- name: the tag and the artifacts must agree` step refuses a
+            # tag named `v` on its own account, so nothing shipped through it;
+            # that is containment and not a reason for this gate to be open.
+            if [ -z "${tag_version}" ]; then
+              problems+=("GITHUB_REF_NAME is '${tag}', which is nothing but the leading 'v' this step strips off, so there is no version left in it to compare the changelog heading against. Every version comparison below is skipped when this is empty, so without this refusal the step would print a heading and exit 0 having compared nothing. A release tag names a version.")
+            fi
             ref="refs/tags/${tag}"
             # STDOUT ONLY — git's stderr goes to this step's log and never
             # into the value, for the reason the manifest step below gives
@@ -1570,7 +1592,7 @@ jobs:
             # a guard one edit from being wrong. `undecided_at` is 0 or a real
             # line number.
             if [ "${undecided_at}" -ne 0 ]; then
-              problems+=("line ${undecided_at} of CHANGELOG.md stands ABOVE the newest heading and is a shape this step cannot decide: [${undecided}]. This is a line grammar, not a CommonMark parser, and the shapes it will step over are a whitelist -- blank, indented four spaces, another ATX level, or a paragraph line beginning with a letter, a digit or a code span. A setext underline (--- or ===), a block quote, a list marker, an HTML block that is not a comment and a leading tab all stop it here, because each of them can put a heading somewhere this reader cannot see, and stepping past one is how a gate returns rc=0 over a document whose real newest heading names another release. Rewrite the prefix above the newest heading, or move the heading above it.")
+              problems+=("line ${undecided_at} of CHANGELOG.md stands ABOVE the newest heading and is a shape this step cannot decide: [${undecided}]. This is a line grammar, not a CommonMark parser, and the shapes it will step over are a whitelist -- blank, indented four spaces, another ATX level, or a paragraph line beginning with an ASCII letter or digit or a short backtick or tilde run (this sentence used to say 'a letter, a digit or a code span', which is wider than the class actually admits -- ASCII letters and digits, a backtick and a tilde, and nothing else -- so a leading E-acute is refused, safely, and the sentence was not true. A backtick cannot be written into this message at all: it is a double-quoted bash string and one would open a command substitution, which is the same hazard this step's fence matching is written around.). A setext underline (--- or ===), a block quote, a list marker, an HTML block that is not a comment and a leading tab all stop it here, because each of them can put a heading somewhere this reader cannot see, and stepping past one is how a gate returns rc=0 over a document whose real newest heading names another release. Rewrite the prefix above the newest heading, or move the heading above it.")
             elif [ -z "${heading}" ]; then
               problems+=("CHANGELOG.md holds no '## ' heading at all, so there is no newest release heading for this tag to agree with. A fenced block or an HTML comment left open swallows everything below it and reads the same way, which is what a renderer does with it too.")
             elif [[ "${heading}" =~ $heading_re ]]; then

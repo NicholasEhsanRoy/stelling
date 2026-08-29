@@ -582,6 +582,18 @@ NAMED = (
         (3, '## 9.9.9 — 2000-01-01', '9.9.9 — 2000-01-01'),
     ),
     (
+        'an <h2> from INLINE raw HTML, which the ORACLE cannot see either',
+        'notes <h2>9.9.9 — 2000-01-01</h2>\n\n## 0.2.0 — 2026-08-25\n',
+        True,
+        (3, '## 0.2.0 — 2026-08-25', '0.2.0 — 2026-08-25'),
+    ),
+    (
+        'a NUL byte inside a paragraph line the whitelist admits',
+        'te\x00xt\n## 0.2.0 — 2026-08-25\n',
+        False,
+        (2, '## 0.2.0 — 2026-08-25', '0.2.0 — 2026-08-25'),
+    ),
+    (
         'a NUL byte cannot be represented and is refused',
         '#\x00# 0.2.0 — 2026-08-25\n',
         False,

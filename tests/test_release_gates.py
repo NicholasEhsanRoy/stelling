@@ -2843,6 +2843,34 @@ def test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry(tmp_path):
                 f"release log does not name what to fix:\n{red.stdout}"
             )
 
+    # A TAG THAT IS NOTHING BUT THE `v` THIS STEP STRIPS, driven separately
+    # because the loop above plants `GITHUB_REF_NAME=v0.2.0` for every row.
+    #
+    # `${tag#v}` on a tag named exactly `v` is the empty string, and every
+    # version comparison in the step is guarded on `[ -n "${tag_version}" ]`
+    # — a guard whose written reason is *"each made only where BOTH sides were
+    # read"*, which is false here: the tag WAS read, the ref resolved, the
+    # tagger date read. Found by an auditor, and the shape it takes is the
+    # one this repository keeps re-finding — a guard that checks a claim is
+    # well-formed and never that it is true. Measured before the repair, on
+    # this exact tree: `rc=0`, `tag=v version= tagged=2026-08-28; CHANGELOG.md
+    # newest heading: 9.9.9 — 2026-08-28`. The tag-and-artifacts step refuses
+    # a tag named `v` on its own account, so nothing shipped through it; that
+    # is containment and not a reason for this gate to be open.
+    only_v = _tagged_tree(tmp_path, "red-tag-is-just-v", tag="v",
+                          tagger_date="2026-08-28",
+                          changelog="## 9.9.9 — 2026-08-28\n")
+    red = _drive(body, only_v, GITHUB_REF_NAME="v")
+    assert red.returncode != 0, (
+        f"THE CHANGELOG GATE PASSED a tree tagged `v` whose heading names "
+        f"9.9.9. Nothing was compared: the version half of this step is "
+        f"skipped when `tag_version` is empty, and `${{tag#v}}` on `v` is "
+        f"empty.\n{red.stdout}"
+    )
+    assert "nothing but the leading 'v'" in red.stdout, (
+        f"the refusal does not name what is wrong with the tag:\n{red.stdout}"
+    )
+
     # THE ENVIRONMENT ITSELF, in both of its absent spellings. `set -u` on a
     # bare `${GITHUB_REF_NAME}` is rc=1 with NO annotation, which is a red
     # this gate does not own; `${GITHUB_REF_NAME:-}` plus a named complaint is
@@ -3540,20 +3568,63 @@ _SWEPT_WITNESSES = (
 )
 
 
-#: POSITIONS THE WHITESPACE SWEEP MUST COVER, typed here for
-#: :data:`_SWEPT_WITNESSES`' reason and for a sharper one.
+#: POSITIONS THE WHITESPACE SWEEP MUST COVER, each pinned by a DOCUMENT and
+#: not by a name.
 #:
 #: `SEPARATOR_FORMS` lives in `tools/changelog_renderer_corpus.py` and the
 #: corpus's `SEPARATOR_FORM_NAMES` is written FROM it, so the two shrink in
 #: lockstep and `len(SEPARATORS) == len(chars) * len(FORM_NAMES)` goes on
 #: holding as they do. Driven by an auditor: four lines deleted from the tool
 #: plus the documented `--write` takes the sweep from 252 rows to 28,
-#: `atx-run` only, and the merge lane is green and identical. The separator
-#: family is the newest and most load-bearing thing in this branch — both of
-#: its soundness breaks lived in exactly these positions — and it had no floor.
+#: `atx-run` only, and the merge lane is green and identical.
+#:
+#: **AND THE FIRST FLOOR BUILT AGAINST THAT WAS BUILT AGAINST THE ATTACK AND
+#: NOT AGAINST THE CLASS, WHICH IS WHY IT LOOKS LIKE THIS NOW.** It was
+#: `[name for name in _SWEPT_POSITIONS if name not in SEPARATOR_FORM_NAMES]`
+#: — a floor over the NAMES, while the SHAPES those names stand for stay
+#: authored in the tool with nothing bounding them. `_NAMED_FLOOR` below says
+#: in its own words why that is not enough: *"matched by DOCUMENT rather than
+#: by label, because a label is a name and a name can be changed."* The same
+#: sentence was true here and was not applied. Driven by an auditor, ONE LINE,
+#: every name still present, 252 rows, 28 characters, the floor green:
+#:
+#:     -    ("fence-closer", "```\n```{sep}\n## 0.2.1 — 2026-08-28\n"),
+#:     +    ("fence-closer", "```\n```\n{sep}## 0.2.1 — 2026-08-28\n"),
+#:
+#: The separator moves out of the closing fence's info string and into the
+#: indent of the line below, so the position stops testing its position — and
+#: `info.strip(" \t")` reverted to `info.strip()`, the exact break of the
+#: round before, is then GREEN at 83 passed. The nine-shape version of the
+#: same edit also re-hides the bash `[[:space:]]` break.
+#:
+#: **`test_the_whitespace_alphabet_is_swept_in_every_position` IS THE SOLE
+#: TEST THAT CATCHES EITHER OF THOSE**, measured one mutation at a time:
+#: `info.strip(" \t")` -> `info.strip()`, `_HEADING`'s `[ \t]` -> `\s`, and
+#: bash's `bl` -> `[[:space:]]` each redden that test and nothing else, 1
+#: failed and 82 passed apiece. So this floor is the whole of what stands
+#: between a one-line edit and the un-pinning of both of the previous round's
+#: findings, and it is pinned the way the other two are: one WITNESS DOCUMENT
+#: per position, asserted to be a member of `separator_documents(chars)`. A
+#: re-pointed shape drops a witness rather than only a label.
 _SWEPT_POSITIONS = (
-    "indent", "atx-run", "atx-other-run", "version-em-dash", "em-dash-date",
-    "heading-tail", "fence-closer", "blank-line", "ordered-list-marker",
+    ("indent",
+     "\xa0## 0.2.1 — 2026-08-28\n## 9.9.9 — 2000-01-01\n"),
+    ("atx-run",
+     "##\x0b0.2.1 — 2026-08-28\n## 9.9.9 — 2000-01-01\n"),
+    ("atx-other-run",
+     "#\xa0notes\n## 0.2.1 — 2026-08-28\n"),
+    ("version-em-dash",
+     "## 0.2.1\xa0— 2026-08-28\n"),
+    ("em-dash-date",
+     "## 0.2.1 —\xa02026-08-28\n"),
+    ("heading-tail",
+     "## 0.2.1 — 2026-08-28\xa0\n"),
+    ("fence-closer",
+     "```\n```\xa0\n## 0.2.1 — 2026-08-28\n"),
+    ("blank-line",
+     "<div>\n\xa0\n## 0.2.1 — 2026-08-28\n"),
+    ("ordered-list-marker",
+     "1.\xa0item\n    ## 9.9.9 — 2000-01-01\n## 0.2.1 — 2026-08-28\n"),
 )
 
 #: DOCUMENTS `NAMED` MUST STILL CONTAIN, for the third time and the last
@@ -3589,6 +3660,19 @@ _NAMED_FLOOR = (
      "#\x00# 0.2.0 — 2026-08-25\n"),
     ("a NUL byte above a heading the renderer does read",
      "#\x00# 0.2.0 — 2026-08-25\n## 9.9.9 — 2000-01-01\n"),
+    # AND THIS ONE PINS THE PYTHON HALF OF THAT GUARD, WHICH THE TWO ABOVE DO
+    # NOT. In both of them the NUL sits between two hashes, where the line
+    # matches neither `_HEADING_LINE` nor `_ATX_LINE` nor `_PARAGRAPH_LINE` and
+    # the WHITELIST refuses it whether the guard exists or not — so deleting
+    # the guard from Python reddened nothing, and the half carrying the DRIFT
+    # obligation was unpinned. Here the NUL is inside an ordinary paragraph
+    # line: Python steps over it and reads the heading below, bash never sees
+    # it because `read` drops it and reads the same heading, and the two agree
+    # on a document neither of them can represent. Measured with the Python
+    # guard removed: the twin reads `('0.2.0', '2026-08-25')` where the corpus
+    # says refuse.
+    ("a NUL byte inside a paragraph line the whitelist admits",
+     "te\x00xt\n## 0.2.0 — 2026-08-25\n"),
     ("a non-ASCII digit in an ordered-list marker",
      "1\u0662. item\n    ## 9.9.9 — 2000-01-01\n## 0.2.0 — 2026-08-25\n"),
     ("a non-ASCII digit in a version",
@@ -3617,14 +3701,25 @@ def test_the_corpus_still_carries_the_rows_and_positions_that_catch_mutants():
     nobody has thought of. It is membership over values typed in THIS file,
     which the generator never writes.
     """
-    missing = [name for name in _SWEPT_POSITIONS
+    swept = set(_corpus_tool.separator_documents(
+        tuple(chr(point) for point in _corpus.SEPARATOR_CHARS)))
+    missing = [name for name, _ in _SWEPT_POSITIONS
                if name not in _corpus.SEPARATOR_FORM_NAMES]
     assert not missing, (
-        f"the whitespace sweep no longer covers {missing}. It has "
+        f"the whitespace sweep no longer declares {missing}. It has "
         f"{len(_corpus.SEPARATOR_FORM_NAMES)} positions and "
         f"{len(_corpus.SEPARATORS)} rows. Every one of these is a place these "
         f"readers IMPLEMENT a rule rather than refusing it, which is where "
-        f"both of this branch's soundness breaks were found."
+        f"every soundness break this branch has had was found."
+    )
+    inert = [name for name, witness in _SWEPT_POSITIONS if witness not in swept]
+    assert not inert, (
+        f"the whitespace sweep still NAMES {inert} and no longer produces the "
+        f"document that tests them. A position whose shape has been re-pointed "
+        f"— the separator moved out of the thing it was there to separate — "
+        f"keeps its name, keeps the row count, and stops catching anything. "
+        f"That is a one-line edit and it un-pins both of the whitespace "
+        f"defects this branch has fixed."
     )
     documents = {row[1] for row in _corpus.NAMED}
     gone = [name for name, text in _NAMED_FLOOR if text not in documents]
@@ -3849,6 +3944,15 @@ def test_the_recorded_renderer_verdicts_are_still_the_renderers():
     that the recorded column has gone STALE — a newer CommonMark, a newer
     `markdown-it-py`, a corpus edited by hand to match a broken reader. That
     is this test and only this test.
+
+    **AND A SECOND COMMONMARK IMPLEMENTATION AGREES WITH IT ABOUT EVERY LINE
+    IN THIS CORPUS.** An independent audit cross-checked all 3252 corpus
+    documents against `cmark-gfm`: **0 LINE disagreements**. Over a wider
+    75 894-document set there are 61, every one of them a type-7 HTML block
+    inside a list item, and **not one of the 61 is a document the twin reads**
+    — so the readers never rest on a case where two implementations of
+    CommonMark differ. Measured 2026-08-29, elsewhere; what runs in this suite
+    is the one renderer, and that is the limit this test declares.
 
     **AND THE COLUMN DOES NOT MOVE BETWEEN THE TWO VERSIONS THAT WERE TRIED.**
     Regenerated 2026-08-28 under `markdown-it-py` 3.0.0 and 4.2.0, same
@@ -4102,10 +4206,31 @@ def test_the_drives_are_reading_the_real_step_bodies():
     # it, which is why a drive alone could never have found this. The blank
     # class is spelled `[ $'\t']` now so that half of the repair does not
     # depend on the runner at all — and this needle holds the other half.
+    #
+    # AND THESE ARE READ ON THE CODE LINES, WHICH THE ABSENT-CONSTRUCT PINS
+    # BELOW ALREADY WERE AND THESE WERE NOT. The reason given there is *"the
+    # paragraphs beside the step have to be able to say what they refuse"* —
+    # and the symmetric hazard was never taken: the paragraphs beside the step
+    # can also say what it DOES. The extracted body is 407 lines and 237 of
+    # them are comments; three of those comments contain the string `export
+    # LC_ALL=C`, discussing it. Driven by an auditor: delete the CODE line and
+    # this test stays green, with only a `_NAMED_FLOOR` row reddening
+    # elsewhere. Two of these eight survive on comments alone —
+    # `CHANGELOG.md` and `export LC_ALL=C` — and a present-construct pin that
+    # a comment can satisfy is a pin on the prose.
+    #
+    # THE SAME HAZARD IS UNTAKEN FOR THE SDIST, TAG AND MANIFEST NEEDLES
+    # ABOVE, which read the whole body. Those three steps are outside this
+    # branch's subject and are left as they are rather than repaired here, and
+    # this paragraph is the record that they were looked at.
+    changelog_code = "\n".join(
+        line for line in changelog.splitlines()
+        if not line.lstrip().startswith("#")
+    )
     for needle in ("CHANGELOG.md", "git for-each-ref", "%(taggerdate:short)",
                    "%(objecttype)", "GITHUB_REF_NAME", "problems+=",
                    "refs/tags/", "export LC_ALL=C"):
-        assert needle in changelog, (
+        assert needle in changelog_code, (
             f"{needle!r} is gone from the changelog step body. The date this "
             "gate compares against is the TAG OBJECT's tagger date, chosen "
             "over the commit's committer date on the argument beside the "
@@ -4131,12 +4256,10 @@ def test_the_drives_are_reading_the_real_step_bodies():
     # check out of the suite precisely because the only date available there
     # is `date.today()`, so a `$(date …)` arriving HERE would be the same
     # defect one file over — and it would be invisible to every text pin that
-    # only asserts what IS present. Read on CODE lines: the paragraphs beside
-    # the step have to be able to say what they refuse.
-    changelog_code = "\n".join(
-        line for line in changelog.splitlines()
-        if not line.lstrip().startswith("#")
-    )
+    # only asserts what IS present. Read on the same CODE lines the needles
+    # above are read on: the paragraphs beside the step have to be able to say
+    # what they refuse, and — since an auditor found the other half of it —
+    # what they do.
     for construct in ("$(date", "`date ", "date +%"):
         assert construct not in changelog_code, (
             f"{construct!r} has appeared in the changelog step. The date this "

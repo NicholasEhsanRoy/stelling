@@ -239,8 +239,14 @@ this one checkable is that `tests/test_release_gates.py` holds a FLOOR of
 required positions from outside this file, and that every one of the nine is
 driven over the whole alphabet.
 
-**WHAT IT IS STILL NOT.** Nine is what a careful reading of two readers found.
-It is not a proof that there is no tenth."""
+**WHAT IT IS STILL NOT — and an auditor answered this one rather than leaving
+it open.** Nine is what a careful reading of two readers found. It is not a
+proof that there is no tenth, and the check for one is not in this repository:
+an independent enumeration of every place either reader consults a whitespace
+class found **32** positions and swept them against all 28 characters, with 0
+unsound readings and 0 disagreements between the readers. Nine is the subset
+whose shapes are driven HERE, in every lane; the 32 are a dated measurement
+taken once, elsewhere, 2026-08-29."""
 
 
 def whitespace_alphabet() -> tuple[str, ...]:
@@ -339,7 +345,18 @@ def newest_h2(renderer, text: str):
     paragraph — is invisible to it: that is an inline token, not a block. No
     block-level route to a heading escapes it, and every inline route is
     inside a paragraph line, which these readers step over rather than read.
-    Recorded because an auditor had to construct it to find out.
+
+    **AND IT IS A ROW OF THE CORPUS NOW, WHICH IS THE ONLY HONEST WAY TO CARRY
+    IT.** `NAMED`'s *"an <h2> from INLINE raw HTML, which the ORACLE cannot
+    see either"* is
+    `'notes <h2>9.9.9 — 2000-01-01</h2>\\n\\n## 0.2.0 — 2026-08-25\\n'`, whose
+    rendered output really does open an `<h2>` on line 1 — and the recorded
+    verdict is line 3, the ATX heading, because the inline one is an
+    `html_inline` token and this function looks for `heading_open`. The row is
+    GREEN, and it is green because **the oracle shares the blindness**, not
+    because the readers are right about the HTML. That is worth a row rather
+    than a sentence for one reason: no growth of the corpus can ever surface
+    this, so the only place it can be seen is beside the query that has it.
     """
     tokens = renderer.parse(text)
     for at, token in enumerate(tokens):
