@@ -28,8 +28,17 @@ execution oracles in general. It is true of the wrap and of anything else that
 rewrites the program before tracing. It says nothing about a defect in the
 ANALYSIS of a faithfully traced program, where there is no second reading to be
 stronger than — see ``test_float_oracle.py``, which executes the program and
-pins nine harnesses, in six distinct causes, that this file cannot express at
-all.
+pins nine harnesses, in FIVE distinct causes, that this file cannot express at
+all. (Five, and it said six. The count is the number of distinct values in the
+cause column of ``_float_oracle.MEMBERS``, which computes it —
+``collections.Counter(entry[1] for entry in MEMBERS.values())`` is
+``{flush-or-subnormal: 5, nan: 1, reduction-reassociation: 1,
+narrow-format-rounding: 1, assume-narrowing: 1}`` — and a numeral typed here
+beside a registry that derives it is the thing that rots. It also collided
+with a DIFFERENT six next door: the six independent situations
+``FLOAT_ORACLE_MEASURED`` reports once the falsified-discharge count is
+crossed with the strategy that drew each program. Those are two unrelated
+counts and they were one word apart.)
 
 **Why integers only — AND WHAT THAT DOES NOT MEAN ANY MORE.**
 ``SOUNDNESS.md`` records that real mode judges floats in exact real arithmetic

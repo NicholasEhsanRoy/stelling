@@ -226,16 +226,26 @@ FLOAT_BOX_DEFECT = (
 #: THE PARTITION, as a dated record rather than a present-tense claim, and
 #: with the column that decides a repair beside the one that does not.
 #:
-#: Measured 2026-08-29 at ``eb86def`` — jax 0.11.0, jaxlib 0.11.0, numpy
-#: 2.5.2, CPython 3.12.3, hypothesis 6.165.10, pytest 9.1.1,
+#: Measured 2026-08-29 on the tree THIS COMMIT creates — jax 0.11.0, jaxlib
+#: 0.11.0, numpy 2.5.2, CPython 3.12.3, hypothesis 6.165.10, pytest 9.1.1,
 #: ``JAX_PLATFORMS=cpu``, x64 forced on by this module's fixture — by running
 #: THIS FILE's residual leg at ``STELLING_PROPERTY_SCALE=12.5``, i.e. 1500
-#: examples, and reading its own census. Re-derivable by anyone with that tree
-#: and that command. ``eb86def`` is the commit BEFORE this one, and this
-#: commit changes only the sentence you are reading: a commit cannot contain
-#: its own hash, and a sha typed at a guess is the defect the paragraph below
-#: records. The instrument is byte-identical at both, so the command gives the
-#: same table here.
+#: examples, and reading its own census. Re-derivable by anyone with this tree
+#: and that command. (A commit cannot contain its own hash; the commit that
+#: follows this one replaces this sentence with the sha and changes nothing
+#: else, so the numbers stay reproducible at the commit they name. That is the
+#: second time this branch has done it and it is cheaper than the defect the
+#: paragraph below records.)
+#:
+#: **AND THE TABLE IS UNCHANGED FROM THE ONE MEASURED AT ``eb86def``**, which
+#: is asserted rather than assumed: the fix to ``_exact_apply``'s conversion
+#: entry is a correction to the exact reading, and the way to know whether a
+#: correction to the reading moves the partition is to run the command again
+#: and diff the census. Done — **identical, every key**. The conversion defect
+#: was PLAUSIBLE and not live: of 573 traced draws of
+#: :func:`_float_oracle.uniform_float_programs`, 271 carry an ``assume``, 8
+#: carry a float→int cast, 4 carry one inside an assume's dependency cone, and
+#: in all 4 the walk refused for another reason.
 #:
 #: **THE ANCHOR ITSELF WAS WRONG AND THAT IS WHY THIS SENTENCE IS SO CAREFUL.**
 #: It read *"Measured 2026-08-28 at ``03b2dbe``"* while the table it introduced
@@ -280,12 +290,22 @@ FLOAT_BOX_DEFECT = (
 #:     PROGRAMS"** — the sentence every consumer of this module quotes as the
 #:     denominator — is **100 events over 5 programs from the pinned
 #:     ``@example``s**, **16 over 16 from the aimed cancelling-sum strategy**,
-#:     and **0 from the unbiased leg**. The 16 are shrink neighbours of one
-#:     construction, which is measured and not asserted: 15 of the 16 have the
-#:     same vector length and 13 the same pinned envelope, and of the 69 pairs
-#:     that share both, **10 differ in at most 4 of their 33 elements, 7 in at
-#:     most 2, and one pair in exactly ONE element**. A repair team reading
-#:     "21 independent situations" is reading **six**;
+#:     and **0 from the unbiased leg**. The 16 are **16 draws of ONE aimed
+#:     construction**, which is what the strategy's own docstring says it
+#:     builds, and that is the whole argument. A repair team reading "21
+#:     independent situations" is reading **six**;
+#:
+#:     THIS READ "SHRINK NEIGHBOURS" AND THE DISTRIBUTION SAYS OTHERWISE. All
+#:     16 constant vectors are DISTINCT; 15 of the 16 share a vector length
+#:     and 13 a pinned envelope, and of the 69 pairs sharing both the
+#:     differing-element histogram is ``{1: 1, 2: 6, 3: 1, 4: 2, 9: 2, 10: 1,
+#:     11: 2, 12: 2, 13: 3, 15: 2, 30: 2, 31: 1, 32: 20, 33: 24}`` — so 10
+#:     pairs differ in at most 4 of their 33 elements and **47 differ in 30 or
+#:     more**. The four close numbers were right and the word over them was
+#:     not: these are independent draws of one template, not shrunk copies of
+#:     one program. The conclusion does not need the distribution — it follows
+#:     from the strategy finding one class and nothing else — and the
+#:     distribution ships as the secondary observation it is;
 #:   * **"by distinct programs reassoc(30) is second"** rests on **29 draws of
 #:     the aimed strategy**, against a leg this module PROVES cannot reach the
 #:     class at all — the residual leg asserts that premise against
@@ -293,6 +313,20 @@ FLOAT_BOX_DEFECT = (
 #:     are a statement about the TOOL rather than about a strategy someone
 #:     aimed are the unbiased column: nan 30, narrow 8, flush 7, overflow 7,
 #:     reassoc 0.
+#:
+#: **AND SIX SITUATIONS IS NOT SIX PIECES OF WORK — THREE OF THEM ARE ONE
+#: REPAIR.** "Six" is true of the PROGRAMS and false of the effort, which is
+#: the next thing a repair team asks. Derived from
+#: :data:`_float_oracle.MEMBERS`' own cause column rather than typed:
+#:
+#:     flush-or-subnormal       3   ftz-subnormal-sum, f32-underflow, f32-exp
+#:     narrow-format-rounding   1   f32-single-multiply
+#:     assume-narrowing         1   assume-narrows-past-the-program
+#:     reduction-reassociation  1   the cancelling-sum construction
+#:
+#: **Four distinct causes over the six situations, and the largest of them is
+#: three of the six.** That is the single most useful line for whoever scopes
+#: the work, and it is one column away from the figure everybody was quoting.
 #:
 #: The unbiased leg's zero in the discharge column is NOT floorable — a floor
 #: on zero is not a floor — so it is written into the table as an explicit
@@ -376,8 +410,10 @@ BY STRATEGY, WHICH IS WHERE THE HEADLINE COMES APART
     pinned probes               2      2           3         0          0
                                                           ----       ----
                                                            116         21
-    The 16 cancelling programs are shrink neighbours of one construction.
-    "21 distinct programs" is six independent situations.
+    The 16 cancelling programs are 16 draws of ONE aimed construction.
+    "21 distinct programs" is six independent situations -- and those six
+    carry FOUR causes, three of them flush-or-subnormal, so the six are
+    four pieces of work and the largest is half of them.
 
 DISTINCT PROGRAMS, BY CAUSE AND BY STRATEGY
                            uniform  cancelling  member  probe     all
@@ -610,6 +646,115 @@ def _report(program, reading, violation) -> str:
     )
 
 
+#: ``(value, source dtype, target dtype)`` for the conversion row of the exact
+#: reading. Every entry is a case the grammar can build: it draws ``cast``
+#: nodes over every dtype in ``_grammar.ALL_DTYPES``, and 8 of 573 traced
+#: uniform draws carried a float->int one.
+CONVERSIONS = (
+    (0.5, "float64", "int32"),      # truncates toward zero — 0, not 0.5
+    (-1.7, "float64", "int32"),     # toward zero, so -1, not -2
+    (2.0, "float64", "int32"),      # already integral: the one case the
+                                    # identity happened to get right
+    (7, "int64", "int32"),          # in range: the identity
+    (2 ** 40, "int64", "int32"),    # out of range: WRAPS. refused
+    (2 ** 62, "int64", "int8"),     # ditto, far out
+    (0.5, "float64", "bool"),       # `a != 0`, so 1, not 0.5
+    (0.0, "float64", "bool"),
+    (1e30, "float64", "int32"),     # clamps or wraps; refused
+    (3, "int32", "int64"),          # widening: the identity
+)
+
+#: The three cases above this reader refuses BY DESIGN — outside the target's
+#: range, where jax clamps or wraps and ``_float_oracle._exact_convert`` will
+#: not guess which. Named so the check below can tell a designed refusal from
+#: a reader that has quietly stopped answering.
+CONVERSIONS_REFUSED_BY_DESIGN = frozenset({
+    (2 ** 40, "int64", "int32"),
+    (2 ** 62, "int64", "int8"),
+    (1e30, "float64", "int32"),
+})
+
+
+def _assert_the_exact_reading_of_a_conversion_is_what_the_cast_computes():
+    """A PREMISE OF THE LEG BELOW, ASSERTED WHERE IT IS SPENT.
+
+    ``_float_oracle._exact_apply``'s table is a set of claims that this module
+    computes the same real number each primitive is specified to compute, and
+    the conversion's entry was ``lambda a: a``. That is false for a float→int
+    cast, which truncates toward zero, and for a narrowing int→int cast, which
+    wraps. The consequence is not cosmetic and it lands in THIS property: the
+    exact walk feeds :func:`_float_oracle.assumes_hold_over_reals`, which is
+    :data:`_float_oracle.NARROWING`'s third fact, and a wrong answer there
+    either mints ``(assume-narrowing, proved)`` or suppresses the fall-through
+    that would prove ``UNEXPLAINED`` — the one answer this leg forbids.
+
+    IT IS A FUNCTION AND NOT A ``test_``, FOR THE REASON THE SUITE ITSELF
+    ENFORCES. ``test_suite_disclosure.py`` refuses any property that ships
+    without a registered positive control, and ``tools/property_check.py``
+    materialises only ``src/`` from a revision — the properties always come
+    from the checkout — so a mutant control CANNOT reach a file under
+    ``tests/property/``. A new ``test_`` here would therefore have to be
+    exempted from that rule by name, which is a hole in the one mechanism that
+    keeps a green property from being indistinguishable from a search that
+    generates nothing. Asserted inside a property that HAS a control instead,
+    beside the ``_grammar.SHAPES`` premise below, which is there for the same
+    reason.
+
+    IT IS DECIDED BY EXECUTION, NOT BY A SECOND MODEL OF THE CAST, because a
+    check that models a behaviour is one indirection behind it and this file's
+    whole subject is the gap between a model and an execution. Where the
+    reader answers at all, jax's own conversion must produce that number.
+    Driven both ways with the entry restored to the identity: ``0.5`` as
+    ``float64 -> int32`` reads ``1/2`` where jax executes ``0``, and this
+    raises; with the fix it passes.
+
+    WHAT IT DOES NOT REACH, and it is the larger half. Only conversions into
+    an INTEGER or ``bool`` dtype are checked, because those outputs are exact
+    integers and the reader's answer must equal one. Into a FLOAT format the
+    reader answers the real value and the format rounds it — that difference
+    is exactly ``narrow-format-rounding`` and asserting equality there would
+    forbid the class this module exists to find. A conversion the reader
+    REFUSES is skipped rather than failed: a refusal is never a finding.
+    """
+    import jax.numpy as jnp
+    import numpy as np
+
+    checked = []
+    for value, src, dst in CONVERSIONS:
+        operand = np.asarray(value, dtype=getattr(np, src))
+        exact = fo.exact_value("convert_element_type", (operand,), 0, 1, dst)
+        if exact is None or dst in fo.FLOAT_TYPES:
+            continue
+        executed = int(
+            np.asarray(jnp.asarray(operand).astype(dst)).reshape(-1)[0]
+        )
+        if exact.denominator != 1 or int(exact) != executed:
+            raise AssertionError(
+                "THE EXACT READING OF A CONVERSION IS NOT WHAT THE CONVERSION "
+                "COMPUTES. %r as %s -> %s: this module reads %s, jax executes "
+                "%d. `_float_oracle._exact_apply`'s entry for "
+                "`convert_element_type` is a claim that the two are the same "
+                "number, and `exact_walk` spends that claim on "
+                "`assumes_hold_over_reals`, which decides whether an "
+                "`assume-narrowing` is proved or an `UNEXPLAINED` is "
+                "suppressed — and `UNEXPLAINED` is the answer this leg exists "
+                "to forbid." % (value, src, dst, exact, executed)
+            )
+        checked.append((value, src, dst))
+    # THE ABSENCE HALF. Every entry the reader refuses is skipped above, so a
+    # reader that refused EVERYTHING would satisfy the loop vacuously — the
+    # shape this suite exists to prevent. The list of cases it is SUPPOSED to
+    # answer is derived from the table rather than typed.
+    want = [c for c in CONVERSIONS
+            if c[2] not in fo.FLOAT_TYPES
+            and c not in CONVERSIONS_REFUSED_BY_DESIGN]
+    assert checked == want, (
+        "the conversion reader refused a case it is supposed to answer, so "
+        "the check above was vacuous for it: wanted %r, checked %r"
+        % (want, checked)
+    )
+
+
 @pytest.mark.xfail(strict=True, raises=ExecutedValueOutsideBox,
                    reason=FLOAT_BOX_DEFECT)
 def test_the_executed_value_lies_inside_the_computed_box():
@@ -674,6 +819,11 @@ def test_every_violation_it_finds_has_a_known_ieee_cause():
     """
     census = _runner.Census("float-oracle/residual")
     distinct: dict = {}
+    # A PREMISE, BEFORE THE SEARCH SPENDS 120 EXAMPLES ON IT. The exact
+    # reading of a conversion is what `assumes_hold_over_reals` — and so every
+    # `assume-narrowing` answer below — rests on. See the function's own
+    # docstring for why it is a function and not a `test_`.
+    _assert_the_exact_reading_of_a_conversion_is_what_the_cast_computes()
 
     @_profiles.current().settings(120)
     @given(fo.float_oracle_inputs())

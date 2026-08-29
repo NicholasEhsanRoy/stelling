@@ -290,10 +290,21 @@ Two consequences worth keeping in mind:
   **100 of the 116 events, over 5 programs, are pinned `@example`s; 16 over 16
   are shrink neighbours of one aimed cancelling-sum construction; and the
   unbiased grammar contributes none at all.** Six independent situations, not
-  21. "Shrink neighbours" is measured: 15 of those 16 have the same vector
-  length and 13 the same pinned envelope, and of the 69 pairs sharing both, 10
-  differ in at most 4 of their 33 elements and one pair in exactly one
-  element. The same crossing undoes the cause ranking's other headline — the 30
+  21. They are **16 draws of one aimed construction** — which is what that
+  strategy's own docstring says it builds, and the argument needs nothing
+  else. (This read "shrink neighbours". All 16 constant vectors are distinct,
+  and of the 69 pairs that share a length and an envelope the
+  differing-element histogram is `{1: 1, 2: 6, 3: 1, 4: 2, 9: 2, 10: 1, 11: 2,
+  12: 2, 13: 3, 15: 2, 30: 2, 31: 1, 32: 20, 33: 24}`: 10 pairs differ in at
+  most 4 of 33 elements and **47 differ in 30 or more**. Independent draws of
+  one template, not shrunk copies of one program.)
+
+  **And six situations is not six pieces of work.** Derived from the
+  registry's own cause column: `flush-or-subnormal` covers three of the six
+  (`ftz-subnormal-sum`, `f32-underflow`, `f32-exp`), `narrow-format-rounding`
+  one, `assume-narrowing` one, and the cancelling-sum construction contributes
+  `reduction-reassociation`. **Four causes over six situations, and half of
+  them are one repair** — the line to scope the work on. The same crossing undoes the cause ranking's other headline — the 30
   distinct reassociation programs are 29 draws of the strategy built to find
   that class and one pinned member, against a leg that PROVABLY cannot reach
   it — so the only column in that table which is a statement about the tool
@@ -492,11 +503,14 @@ dominated by jax dispatch — the op-by-op walk always, one `jax.jit` compile
 for each program whose first route found a violation, a second forward
 propagation for the same programs to read their un-narrowed boxes, and a third
 walk in exact rationals for the ones where an `assume` narrowed the box. At
-the `ci` profile the whole module costs **12.89-12.90 s**, three runs at load
-average 2.1 (`pytest -q -ra tests/property/test_float_oracle.py`, `1 passed,
+the `ci` profile the whole module costs **13.10-13.67 s**, three runs at load
+average 2.4 (`pytest -q -ra tests/property/test_float_oracle.py`, `1 passed,
 1 xfailed`, zero warnings) —
 the containment leg stops at its first violation and then shrinks, and the
-residual leg runs its full 120 examples plus 11 pinned ones.
+residual leg runs its full 120 examples plus 11 pinned ones, after asserting
+the two premises it spends: `_grammar.SHAPES` still cannot reach `jnp.sum`'s
+two-window split, and the exact reading of a conversion is what the
+conversion computes.
 
 **The nearest thing in `src/`, and what it does with these nine.**
 `stelling.falsify.probe` (`check(..., falsify="sample")`) also executes the

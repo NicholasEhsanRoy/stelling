@@ -1022,24 +1022,41 @@ def staged_runner(jax_closed):
     interpreter identical to it except that the points are CLOSED OVER instead
     of passed in — driver in the builder's scratchpad, not in the tree — and
     counting box-violating ``(round, equation, output, element)`` sites and
-    :func:`_contradicted_obligations` under each:
+    :func:`_contradicted_obligations` under each. **EACH ROUTE IS GATED ON ITS
+    OWN ``assume``s**, which is the correction below:
 
-        member                             sites ARG  FOLDED   discharges
-        underflow-reciprocal                       9       0      0 -> 0
-        ftz-subnormal-sum                          6       0      2 -> 0
-        f32-underflow                              3       1      1 -> 0
-        nan-from-y-over-y                          1       1      0 -> 0
-        reassociation-n33                          1       1      0 -> 0
-        f32-single-multiply                        3       3      1 -> 1
-        f32-exp                                    4       1      1 -> 0
-        subnormal-comparison                       2       0      0 -> 0
-        assume-narrows-past-the-program            3       3      1 -> 1
+        member                          adm ARG  adm FLD  sites  FOLDED  disch
+        underflow-reciprocal                  3        3      9       0  0 -> 0
+        ftz-subnormal-sum                     2        2      6       0  2 -> 0
+        f32-underflow                         3        3      3       1  1 -> 0
+        nan-from-y-over-y                     3        3      1       1  0 -> 0
+        reassociation-n33                     1        1      1       1  0 -> 0
+        f32-single-multiply                   1        1      3       3  1 -> 1
+        f32-exp                               3        3      4       1  1 -> 0
+        subnormal-comparison                  1        1      2       0  0 -> 0
+        assume-narrows-past-the-program       3        2      3       0  1 -> 0
 
-    **3 of the 5 discharge-falsifying members lose the falsified discharge
-    entirely**, 5 of the 9 lose violating sites, and 3 of those lose every
-    site they had. The audit that asked for this fact to be preserved reported
-    "4 of the 5" for the discharge column; the re-derivation above gives 3, by
-    the method stated, and the consequence is the same one.
+    **4 of the 5 discharge-falsifying members lose the falsified discharge
+    entirely**, 6 of the 9 lose violating sites, and 4 of those lose every
+    site they had.
+
+    THE LAST ROW READ ``1 -> 1`` AND IT IS THE ROW THIS TABLE EXISTS FOR. The
+    first run of this driver gated BOTH routes on the EAGER walk's admission —
+    it mirrored :func:`_compare`'s asymmetry, which gates on the eager route
+    and counts on the compiled one, and that asymmetry is wrong for the
+    question THIS table asks. ``assume-narrows-past-the-program``'s whole
+    mechanism is that the compiled comparison flushes the subnormal:
+
+        route with ``x0`` a jit ARGUMENT   ``x0 >= 5e-324``  ->  True
+        route with ``x0`` CLOSED OVER      ``x0 >= 5e-324``  ->  False
+
+    Folded, ``0.0 >= 5e-324`` is constant-folded in full precision, the point
+    LEAVES the admitted set, and the folded program has no violation there and
+    no falsified discharge — so the row is ``1 -> 0`` and the count is 4, not
+    3. Every other row is byte-identical under both gatings. The ungated
+    reading told a repair team that this member survives constant folding; it
+    does not, and they would have folded it in, seen nothing, and had no way
+    to tell that from a fix. The conclusion is unchanged and gets stronger.
     """
     import jax
     import jax.extend.core as jex
@@ -1187,8 +1204,12 @@ _EXACT_UNARY = {
     "neg": lambda a: -a,
     "abs": abs,
     "copy": lambda a: a,
-    "convert_element_type": lambda a: a,
 }
+
+#: ``convert_element_type`` IS NOT IN THE TABLE ABOVE, and it was, as the
+#: identity. See :func:`_exact_convert` — an entry that needs the dtypes on
+#: both sides cannot be a one-argument lambda, and the identity is FALSE for
+#: half the conversions this grammar draws.
 _EXACT_BINARY = {
     "add": lambda a, b: a + b,
     "sub": lambda a, b: a - b,
@@ -1219,25 +1240,43 @@ class _Exact:
     differ only in how they build one.
     """
 
-    __slots__ = ("vals",)
+    __slots__ = ("vals", "dtype")
 
-    def __init__(self, vals):
+    def __init__(self, vals, dtype: str = ""):
         self.vals = tuple(vals)
+        #: The operand's own dtype NAME, or ``""`` where it is not known.
+        #: Carried because one entry in the table — the conversion — is a
+        #: claim about the pair of dtypes and not about the value alone, and
+        #: a dispatch that cannot see the source dtype has to guess.
+        self.dtype = dtype
 
     @staticmethod
     def of(operand) -> "_Exact":
-        """One numpy operand (or ``None``, or a python scalar) as ``_Exact``."""
+        """One numpy operand (or ``None``, or a python scalar) as ``_Exact``.
+
+        INTEGERS DO NOT GO THROUGH ``float`` HERE, AND THEY DID. ``float(w)``
+        is lossy above 2**53 and at 2**63 it rounds to a value the dtype
+        cannot hold, so an ``int64`` operand's "exact" rational was the
+        rounded one — the same defect :func:`sample_points` records having had
+        one function over, in the sampler that builds these very arrays.
+        Python integers are exact and :class:`~fractions.Fraction` takes them
+        directly.
+        """
         if operand is None:
             return _Exact((None,))
         arr = np.asarray(operand)
         name = str(arr.dtype)
         if name not in FLOAT_TYPES and name != "bool" and name not in INT_DTYPES:
-            return _Exact((None,) * max(1, arr.size))
+            return _Exact((None,) * max(1, arr.size), name)
         out = []
-        for w in arr.reshape(-1):
-            w = float(w)
-            out.append(Fraction(w) if math.isfinite(w) else None)
-        return _Exact(out)
+        if name in INT_DTYPES or name == "bool":
+            for w in arr.reshape(-1).tolist():
+                out.append(Fraction(int(w)))
+        else:
+            for w in arr.reshape(-1):
+                w = float(w)
+                out.append(Fraction(w) if math.isfinite(w) else None)
+        return _Exact(out, name)
 
     def element(self, idx: int, n_out: int):
         """This operand's contribution to output element ``idx``, or ``None``.
@@ -1257,18 +1296,128 @@ class _Exact:
         return None if any(v is None for v in self.vals) else self.vals
 
 
-def _exact_apply(primitive: str, ops, idx: int, n_out: int):
+def _int_bounds(dtype: str):
+    """``(lo, hi)`` as exact Python integers for an integer-valued dtype.
+
+    READ OUT OF ``numpy`` RATHER THAN TYPED. A table of per-dtype ranges here
+    would be a second copy of one ``src/`` also keeps, and two copies is one
+    place for them to disagree — but the range of ``int32`` is not a fact
+    about stelling either, so the answer comes from ``np.iinfo`` and belongs
+    to neither. ``bool`` is the one numpy will not answer for.
+    """
+    if dtype == "bool":
+        return 0, 1
+    if dtype in INT_DTYPES:
+        info = np.iinfo(getattr(np, dtype))
+        return int(info.min), int(info.max)
+    return None
+
+
+def _exact_convert(a, src: str, dst: str):
+    """The exact real value of ``convert_element_type`` on one element.
+
+    ────────────────────────────────────────────────────────────────────────
+    THIS WAS ``lambda a: a`` IN THE UNARY TABLE, AND THE IDENTITY IS FALSE
+    FOR HALF THE CONVERSIONS THIS GRAMMAR DRAWS
+    ────────────────────────────────────────────────────────────────────────
+
+    A float→int conversion TRUNCATES TOWARD ZERO and a narrowing int→int
+    conversion WRAPS; neither is the identity, and both were being reported as
+    one. :func:`exact_walk` promises *"where this walk answers at all, it
+    answers exactly"* and :func:`_exact_apply` promises every entry *"computes
+    the same real number the primitive is specified to compute"*. Neither
+    promise survived the entry.
+
+    IT IS NOT A JUDGEMENT CALL ABOUT ℝ, WHICH IS WHAT MAKES IT A DEFECT AND
+    NOT A POSTURE. ``stelling.propagate._t_convert`` models this same
+    primitive as ``math.trunc`` on both endpoints, so the instrument and the
+    analysis it audits disagreed about the real value of the same equation, by
+    construction. Driven at the classifier, before the fix::
+
+        cast(int32, x0) <= 0  at x0 = 0.5   [x0 : float64 (0.0, 1.0)]
+          assumes_hold_over_reals -> False
+          TRUTH over ℝ            -> True    (trunc(0.5) = 0, and 0 <= 0)
+          the compiled assume admits the point too
+
+    A wrong ``False`` there mints ``(assume-narrowing, proved)`` and
+    SUPPRESSES the fall-through that would have proved ``UNEXPLAINED`` — the
+    one answer the residual leg forbids. A wrong ``True`` runs the other way.
+
+    REACH, MEASURED RATHER THAN GUESSED: of 573 traced draws of
+    :func:`uniform_float_programs`, 271 carry an ``assume``, 8 carry a
+    float→int cast, and **4 carry one inside an assume's dependency cone — in
+    all 4 the walk refused for another reason.** Every live
+    ``assume-narrowing/proved`` event is the pinned member, whose assume
+    contains no cast. So the defect is PLAUSIBLE and was not driven end to end
+    (reaching a wrong ``PROVED`` also needs a live ``propagate`` narrowing
+    defect, which is not constructible on a clean tree). It is repaired
+    because a table entry that is false is false whether or not today's search
+    reaches it.
+
+    THE RULE, AND IT IS DERIVED FROM THE PRIMITIVE RATHER THAN FROM
+    ``_t_convert``. What ``convert_element_type`` computes is a fact about
+    jax, not about stelling, so this reader states it independently and agrees
+    with that transfer rather than importing it — an instrument that imported
+    the analysis's own whitelist could not see a defect in it:
+
+    * **into a float format** — the identity. Converting a real number into a
+      binary format does not change the real number; the rounding into the
+      format is the IEEE difference :data:`NARROW` names, and the whole
+      ``narrow-format-rounding`` rule depends on this reading;
+    * **into ``bool``** — ``a != 0``, which is what the primitive computes;
+    * **from a float into an integer dtype** — ``trunc(a)``, and only while
+      that lands inside the target's range. Outside it jax clamps or wraps
+      rather than truncating, and this reader will not guess which;
+    * **from an integer or ``bool`` into an integer dtype** — the identity
+      while the value fits the target, a REFUSAL when it does not, because
+      the narrowing wraps;
+    * anything else, or either dtype unknown — a refusal.
+    """
+    if not src or not dst:
+        return None
+    if src == dst:
+        return a
+    if dst in FLOAT_TYPES:
+        return a
+    if dst == "bool":
+        return Fraction(0) if a == 0 else Fraction(1)
+    bounds = _int_bounds(dst)
+    if bounds is None:
+        return None
+    lo_b, hi_b = bounds
+    if src in FLOAT_TYPES:
+        out = Fraction(math.trunc(a))
+    elif src in INT_DTYPES or src == "bool":
+        out = a
+    else:
+        return None
+    return out if lo_b <= out <= hi_b else None
+
+
+def _exact_apply(primitive: str, ops, idx: int, n_out: int,
+                 out_dtype: str = ""):
     """The EXACT REAL value of one output element from ``_Exact`` operands.
 
     The one dispatch. The table is deliberately small — the four field
-    operations, the two lattice operations, magnitude and negation, a format
-    conversion, the six comparisons, and ``reduce_sum`` — because every entry
-    is a claim that this function computes the same real number the primitive
-    is specified to compute, and a wrong entry would manufacture an
-    ``UNEXPLAINED`` out of its own arithmetic. ``sqrt``, ``exp``, ``sign``,
-    ``integer_pow``, the boolean connectives, every reduction other than
-    ``reduce_sum`` and everything not listed answer ``None``.
+    operations, the two lattice operations, magnitude and negation, the
+    format conversion (:func:`_exact_convert`, which needs the dtypes on both
+    sides and is therefore not a lambda), the six comparisons, and
+    ``reduce_sum`` — because every entry is a claim that this function
+    computes the same real number the primitive is specified to compute, and a
+    wrong entry would manufacture an ``UNEXPLAINED`` out of its own
+    arithmetic. ``sqrt``, ``exp``, ``sign``, ``integer_pow``, the boolean
+    connectives, every reduction other than ``reduce_sum`` and everything not
+    listed answer ``None``.
+
+    ``out_dtype`` is the dtype of the output element under judgement. Only the
+    conversion reads it, and without it the conversion REFUSES rather than
+    assuming the identity — which is the direction that costs evidence instead
+    of soundness.
     """
+    if primitive == "convert_element_type" and len(ops) == 1:
+        a = ops[0].element(idx, n_out)
+        return None if a is None else _exact_convert(a, ops[0].dtype,
+                                                     out_dtype)
     if primitive == "reduce_sum":
         if n_out != 1 or len(ops) != 1:
             return None
@@ -1296,15 +1445,18 @@ def _exact_apply(primitive: str, ops, idx: int, n_out: int):
     return None
 
 
-def exact_value(primitive: str, operands, idx: int, n_out: int):
+def exact_value(primitive: str, operands, idx: int, n_out: int,
+                out_dtype: str = ""):
     """The EXACT REAL value of one output element, or ``None``.
 
     ``None`` is a refusal to answer and it is what separates
     :data:`UNEXPLAINED` from :data:`UNCLASSIFIED`. See :func:`_exact_apply`
-    for the table and for why it is small.
+    for the table and for why it is small, and :func:`_exact_convert` for why
+    ``out_dtype`` is not optional in spirit even though it defaults: a caller
+    that omits it gets a REFUSAL from the conversion rather than a guess.
     """
     return _exact_apply(primitive, [_Exact.of(o) for o in operands], idx,
-                        n_out)
+                        n_out, out_dtype)
 
 
 def exact_walk(jax_closed, points):
@@ -1352,8 +1504,11 @@ def exact_walk(jax_closed, points):
                 size = 1
                 for d in eqn.outvars[0].aval.shape:
                     size *= int(d)
+                out_dtype = str(eqn.outvars[0].aval.dtype)
                 res = [_Exact(
-                    _exact_apply(name, ops, e, size) for e in range(size)
+                    (_exact_apply(name, ops, e, size, out_dtype)
+                     for e in range(size)),
+                    out_dtype,
                 )]
         for j, (ov, val) in enumerate(zip(eqn.outvars, res)):
             env[ov] = val
@@ -1469,7 +1624,8 @@ def _flushed(operands):
     return tuple(out)
 
 
-def _operand_flush_explains(primitive, operands, idx, n_out, v, lo, hi) -> bool:
+def _operand_flush_explains(primitive, operands, idx, n_out, v, lo, hi,
+                            out_dtype="") -> bool:
     """Does flushing the subnormal OPERANDS to zero explain ``v``?
 
     TWO CONDITIONS, AND THE FIRST ONE USED TO BE MISSING. This rule read
@@ -1497,10 +1653,10 @@ def _operand_flush_explains(primitive, operands, idx, n_out, v, lo, hi) -> bool:
     """
     if not _subnormal_elements(operands):
         return False
-    exact = exact_value(primitive, operands, idx, n_out)
+    exact = exact_value(primitive, operands, idx, n_out, out_dtype)
     if exact is None or not _exact_in_box(exact, lo, hi):
         return False
-    flushed = exact_value(primitive, _flushed(operands), idx, n_out)
+    flushed = exact_value(primitive, _flushed(operands), idx, n_out, out_dtype)
     if flushed is None:
         return False
     return float(flushed) == v
@@ -1515,7 +1671,8 @@ def _same_side_of_zero(v: float, lo: float, hi: float) -> bool:
     return True
 
 
-def _exact_of_equation(primitive: str, inputs, idx: int, n_out: int, v: float):
+def _exact_of_equation(primitive: str, inputs, idx: int, n_out: int, v: float,
+                       out_dtype: str = ""):
     """:func:`exact_value`, plus the one equation whose operands cannot say it.
 
     A ``stelling_any`` COMPUTES NOTHING: its value is the sampled point, and
@@ -1546,7 +1703,7 @@ def _exact_of_equation(primitive: str, inputs, idx: int, n_out: int, v: float):
     """
     if primitive == "stelling_any":
         return Fraction(v) if math.isfinite(v) else None
-    return exact_value(primitive, inputs, idx, n_out)
+    return exact_value(primitive, inputs, idx, n_out, out_dtype)
 
 
 def _left_to_right_fold(operand, dtype: str):
@@ -1707,7 +1864,7 @@ def classify(primitive: str, dtype: str, v: float, lo: float, hi: float,
         # narrowing dropped it anyway — so the narrowed box is wrong about the
         # reals, and the ladder below proves it. Fall through.
 
-    exact = _exact_of_equation(primitive, inputs, element, n_out, v)
+    exact = _exact_of_equation(primitive, inputs, element, n_out, v, dtype)
     in_box = exact is not None and _exact_in_box(exact, lo, hi)
     mn = MIN_NORMAL.get(dtype)
     T = FLOAT_TYPES.get(dtype)
@@ -1732,7 +1889,7 @@ def classify(primitive: str, dtype: str, v: float, lo: float, hi: float,
             # what ran.
             return NARROW, PROVED
         if _operand_flush_explains(primitive, inputs, element, n_out, v,
-                                   lo, hi):
+                                   lo, hi, dtype):
             # PROVED operand flush, and the only way a COMPARISON's violation
             # can be explained at all: a ``bool`` output has no format and no
             # subnormal band of its own.
@@ -2656,6 +2813,18 @@ assert set(SEVEN) <= set(MEMBER_NAMES), sorted(set(SEVEN) - set(MEMBER_NAMES))
 #: contradict no verdict at all. The same five, and the same one, that the
 #: v0.1.0 re-derivation below names — so the class does not merely still
 #: exist, it still reaches the same verdicts through today's ``src/``.
+#:
+#: **READ THE CAUSE COLUMN BESIDE IT, BECAUSE FIVE PROGRAMS ARE NOT FIVE
+#: REPAIRS.** These five carry THREE distinct causes —
+#: ``flush-or-subnormal`` three times (``ftz-subnormal-sum``,
+#: ``f32-underflow``, ``f32-exp``), ``narrow-format-rounding`` once
+#: (``f32-single-multiply``) and ``assume-narrowing`` once
+#: (``assume-narrows-past-the-program``) — and the sixth independent situation
+#: the census reports, the aimed cancelling-sum construction, adds
+#: ``reduction-reassociation``. **Four causes over six situations, and half of
+#: the six are one repair.** Both facts are computed from this registry rather
+#: than typed beside it: ``Counter(MEMBERS[n][1] for n in
+#: DISCHARGE_FALSIFYING)``.
 DISCHARGE_FALSIFYING = tuple(
     name for name, entry in MEMBERS.items() if entry[3] == "discharge"
 )

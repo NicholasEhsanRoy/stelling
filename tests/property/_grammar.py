@@ -1132,8 +1132,26 @@ def general_specs(draw, *, max_decls=3, max_stmts=4, dtypes=ALL_DTYPES):
     and for ``test_float_oracle.py``, which does point an execution oracle at
     it. This docstring used to end *"Pointing an execution oracle at it would
     measure the declared ℝ-vs-IEEE posture, not a defect"* — **withdrawn**.
-    Measured 2026-08-28 over 1500 derandomised draws of THIS strategy alone,
-    the executed value falls outside the propagator's box in **146** of them.
+    THE FIGURE THAT STOOD HERE COULD NOT BE RE-DERIVED, WHICH IS THE ONE
+    THING EVERY OTHER NUMBER IN THIS CHANGE CAN BE. It read *"Measured
+    2026-08-28 over 1500 derandomised draws of THIS strategy alone, the
+    executed value falls outside the propagator's box in 146 of them"*, with
+    no commit and no command beside it — and a standalone driver's
+    derandomised seed is a function of the DRIVING TEST's own source
+    (``_profiles`` says so), so a re-take gets a different sample of the same
+    population and cannot confirm or contradict it. An independent re-take
+    gave 95. Neither number is wrong; neither is checkable.
+
+    What replaces it is the same fact read off a census the shipped command
+    produces: ``STELLING_PROPERTY_SCALE=12.5`` on
+    ``test_float_oracle.py``'s residual leg draws **773** programs from this
+    strategy, reads **391** of them, and finds **255 box-containment
+    violations over 51 distinct programs** — ``strategy/uniform``,
+    ``read/uniform``, ``violations/uniform`` and ``distinct/any/uniform`` in
+    that leg's own census, and in
+    ``test_float_oracle.FLOAT_ORACLE_MEASURED``. Anyone with this tree and
+    that command gets those four numbers.
+
     What this grammar has no oracle for is the EXACT reading:
     :func:`eval_expr_exact` cannot evaluate a float harness, which is why the
     float question is answered by running the program instead.

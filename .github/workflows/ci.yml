@@ -1452,6 +1452,7 @@ jobs:
   # 234 s on a box at load average 11.5. The 3482822 row above is left as it
   # was measured rather than edited to agree, because what it records is a run
   # of a tree that no longer exists.
+
   #
   # AND THE DEFECT IS STILL BEING FOUND, which is the half a green tick
   # cannot say on its own: an XFAIL here means the test body RAISED
@@ -1823,11 +1824,16 @@ jobs:
               that drew each program — the crossing is in
               `tests/property/test_float_oracle.py`'s `_record` and the table
               is in its `FLOAT_ORACLE_MEASURED` — it is 100 events over 5
-              programs from pinned `@example`s, 16 over 16 shrink neighbours
-              of ONE aimed cancelling-sum construction, and NOTHING AT ALL
-              from the unbiased leg. Six independent situations. A repair
-              scoped on 21 would be scoped on how often an example was
-              re-drawn.
+              programs from pinned `@example`s, 16 over 16 that are draws of
+              ONE aimed cancelling-sum construction, and NOTHING AT ALL from
+              the unbiased leg. Six independent situations. A repair scoped on
+              21 would be scoped on how often an example was re-drawn.
+            * AND SIX SITUATIONS IS FOUR PIECES OF WORK. Derived from the
+              registry's cause column: flush-or-subnormal covers THREE of the
+              six, narrow-format-rounding one, assume-narrowing one, and the
+              cancelling-sum construction contributes
+              reduction-reassociation. Half the six are one repair, and that
+              is the line to scope on rather than the count of programs.
             * WHAT A GREEN FLOAT-ORACLE LEG DOES NOT SAY. Of 13041 boxes read
               in a 1500-example run, only 5491 (42 %) are compared at all:
               4015 are TOP (a box that admits every value its dtype can take —
