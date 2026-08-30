@@ -214,12 +214,14 @@ purpose is an environment with nothing in it — could not import one.
 from __future__ import annotations
 
 import gzip
+import importlib.util
 import io
 import os
 import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import zipfile
 
@@ -2951,7 +2953,15 @@ _CHANGELOG_STEP = "the tag and the changelog heading must agree"
 #: allowlist, so this module runs there), and would move under anyone who
 #: re-cut a tag. They are a dated record of two tags, which is what the green
 #: rows need.
-_REAL_RELEASES = (("v0.2.0", "2026-08-25"), ("v0.1.0", "2026-08-12"))
+_REAL_RELEASES = (("v0.2.1", "2026-08-28"), ("v0.2.0", "2026-08-25"),
+                  ("v0.1.0", "2026-08-12"))
+
+# THIS HELD TWO OF THE THREE AND `v0.2.1` IS A REAL ANNOTATED TAG. Read
+# 2026-08-28 at this branch's checkout: `git for-each-ref
+# --format='%(objecttype) %(taggerdate:short)' refs/tags/v0.2.1` is `tag
+# 2026-08-28`, and the newest heading of the `CHANGELOG.md` this tree ships is
+# `## 0.2.1 — 2026-08-28`. A green-row table that stops one release short is a
+# table describing the releases somebody remembered.
 
 
 # THE IDENTITY AND THE THREE SETTINGS THAT WOULD MAKE THESE DRIVES' VERDICTS A
@@ -3274,6 +3284,37 @@ def test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry(tmp_path):
                 f"{label}: the refusal does not say {needle!r}, so the "
                 f"release log does not name what to fix:\n{red.stdout}"
             )
+
+    # A TAG THAT IS NOTHING BUT THE `v` THIS STEP STRIPS, driven separately
+    # because the loop above plants `GITHUB_REF_NAME=v0.2.0` for every row.
+    #
+    # `${tag#v}` on a tag named exactly `v` is the empty string, and every
+    # version comparison in the step is guarded on `[ -n "${tag_version}" ]`
+    # — a guard whose written reason is *"each made only where BOTH sides were
+    # read"*, which is false here: the tag WAS read, the ref resolved, the
+    # tagger date read. Found by an auditor, and the shape it takes is the
+    # one this repository keeps re-finding — a guard that checks a claim is
+    # well-formed and never that it is true. Measured before the repair, on
+    # this exact tree: `rc=0`, `tag=v version= tagged=2026-08-28; CHANGELOG.md
+    # newest heading: 9.9.9 — 2026-08-28`. The tag-and-artifacts step refuses
+    # a tag named `v` on its own account, so nothing shipped through it; that
+    # is containment and not a reason for this gate to be open.
+    only_v = _tagged_tree(tmp_path, "red-tag-is-just-v", tag="v",
+                          tagger_date="2026-08-28",
+                          changelog="## 9.9.9 — 2026-08-28\n")
+    red = _drive(body, only_v, GITHUB_REF_NAME="v")
+    assert red.returncode != 0, (
+        f"THE CHANGELOG GATE PASSED a tree tagged `v` whose heading names "
+        f"9.9.9. The VERSION was never compared: that half of this step is "
+        f"skipped when `tag_version` is empty, and `${{tag#v}}` on `v` is "
+        f"empty. The DATE half is guarded on `heading_rest`/`tag_date` and "
+        f"does run — which is why this plant gives the heading the tag's own "
+        f"date, so the date arm agrees and only the missing version is "
+        f"left.\n{red.stdout}"
+    )
+    assert "nothing but the leading 'v'" in red.stdout, (
+        f"the refusal does not name what is wrong with the tag:\n{red.stdout}"
+    )
 
     # THE ENVIRONMENT ITSELF, in both of its absent spellings. `set -u` on a
     # bare `${GITHUB_REF_NAME}` is rc=1 with NO annotation, which is a red
@@ -4110,124 +4151,984 @@ def test_the_changelog_gate_reads_the_tag_THROUGH_the_checkout_that_rewrites_its
             f"silently. Both are held now."
         )
 
+# THE ORACLE, AND WHY IT IS NOT IN THIS FILE ANY MORE.
+#
+# WHAT STOOD HERE WAS `_HEADING_SHAPES`: ten rows of `(label, changelog,
+# expected reading)` whose `expected` column was **typed**. Its own comment
+# said what it was for — *"`.github/workflows/release.yml` decides 'the newest
+# heading' in bash and `tests/test_changelog_names_the_version.py` decides it
+# in Python, and until an auditor drove them side by side the two were
+# `^##[[:space:]]` and `^##\s` over a whole document"* — and it was right about
+# the danger and wrong about the cure. Two implementations of one idea, plus
+# one person's reading of CommonMark as the referee, is a system that can find
+# a DRIFT between the two readers and can never find that both are WRONG.
+#
+# It was wrong about FOUR classes and not one of them was in the table. Driven
+# with `markdown_it.MarkdownIt("commonmark")` over every document of at most
+# three lines on a fourteen-token alphabet — 2954 of them — against the readers
+# this repository shipped at `a90862b`:
+#
+#     2954 documents   unsound readings 42   refusals the renderer reads 132
+#       ('```',  '~~~',   '## 0.2.1 — 2026-08-28')  renderer: NO <h2> at all
+#       ('```',  '``` t', '## 0.2.1 — 2026-08-28')  renderer: NO <h2> at all
+#       ('````', '```',   '## 0.2.1 — 2026-08-28')  renderer: NO <h2> at all
+#       ('text', '---',   '## 0.2.1 — 2026-08-28')  renderer: the <h2> is 'text'
+#       ('<div>',         '## 0.2.1 — 2026-08-28')  renderer: NO <h2> at all
+#       ('1. item', '    ## 9.9.9 — 2000-01-01',
+#                         '## 0.2.1 — 2026-08-28')  renderer: the 9.9.9
+#
+# Every one of those returned `rc=0` from the gate with the tag's own version
+# and date echoed, over a document whose newest rendered heading names a
+# different release or is not a heading at all. `build` succeeds and `publish`
+# uploads.
+#
+# **THE LAST ROW IS THE FOURTH CLASS AND THIS COMMENT SAID "THREE" UNTIL AN
+# AUDITOR COUNTED.** A `## ` heading at indent four inside a list item is a
+# heading to a renderer and invisible to a reader bounded at three, and it is
+# the stated reason for the ordered-list carve-out in the whitelist — so the
+# repair was there while the count was not. It was outside the sweep because
+# the alphabet had no list token, which is why the alphabet has one now: a
+# class the corpus cannot REACH is a class narrated rather than counted.
+#
+# So the `expected` column is gone and `tests/_changelog_renderer_corpus.py`
+# holds the renderer's own, generated by `tools/changelog_renderer_corpus.py`.
+# The ten labelled documents survive — they are the first ten rows of that
+# file's `NAMED` — and what they are held to is no longer this file's opinion.
+# The lane problem that makes a checked-in oracle necessary at all, and the
+# doctoring it cannot rule out, are argued in that module's docstring.
 
-#: SHAPES BOTH READERS MUST AGREE ABOUT, and the reason this table exists is
-#: that they did not. `.github/workflows/release.yml` decides "the newest
-#: heading" in bash and `tests/test_changelog_names_the_version.py` decides it
-#: in Python, and until an auditor drove them side by side the two were
-#: `^##[[:space:]]` and `^##\s` over a whole document — which agreed on the
-#: shapes anybody had thought to try and disagreed on five, three of them in
-#: the direction that returns rc=0 over a real tag/heading disagreement.
-#:
-#: Each row is `(label, changelog text, expected reading)`, where the reading
-#: is the `(version, rest)` pair or `None` for "refuses". The two readers are
-#: run over the SAME rows, so the table cannot describe one of them.
-_HEADING_SHAPES = (
-    ("plain",
-     "## 0.2.0 — 2026-08-25\n", ("0.2.0", "2026-08-25")),
-    ("older below the newest",
-     "## 0.2.0 — 2026-08-25\n\nbody\n\n## 0.1.0 — 2026-08-12\n",
-     ("0.2.0", "2026-08-25")),
-    # A CommonMark <h2> may carry one to three leading spaces. Both readers
-    # missed this, and a NEWER heading written this way was stepped past.
-    ("indented one space",
-     "  ## 0.2.0 — 2026-08-25\n\n## 0.1.0 — 2026-08-12\n",
-     ("0.2.0", "2026-08-25")),
-    ("indented three spaces",
-     "   ## 0.2.0 — 2026-08-25\n\n## 0.1.0 — 2026-08-12\n",
-     ("0.2.0", "2026-08-25")),
-    # Four is an indented code block, not a heading -- so the real heading
-    # below it is the newest, and that is a reading rather than a miss.
-    ("indented four spaces is a code block",
-     "    ## 9.9.9 — 2000-01-01\n\n## 0.2.0 — 2026-08-25\n",
-     ("0.2.0", "2026-08-25")),
-    # `CHANGELOG.md` opens with an HTML comment, so this route is always one
-    # edit away.
-    ("inside an HTML comment",
-     "<!--\n## 9.9.9 — 2000-01-01\n-->\n\n## 0.2.0 — 2026-08-25\n",
-     ("0.2.0", "2026-08-25")),
-    ("inside a fenced block",
-     "```\n## 9.9.9 — 2000-01-01\n```\n\n## 0.2.0 — 2026-08-25\n",
-     ("0.2.0", "2026-08-25")),
-    # `##` alone IS a heading line and does not parse: refusing beats reading
-    # past to an older one. In Python `\s` used to match the newline and fuse
-    # the two lines into one heading.
-    ("bare ## above a real heading",
-     "##\n0.2.0 — 2026-08-25\n\n## 0.1.0 — 2026-08-12\n", None),
-    ("no em dash", "## 0.2.0 - 2026-08-25\n", None),
-    ("no heading at all", "nothing here\n", None),
-)
+# THE CORPUS AND THE TOOL THAT MAKES IT, imported HERE rather than inside the
+# tests, so that a corpus that stopped importing is a collection error naming
+# this module and not three skips. `tools/` is on the sdist allowlist, so this
+# import resolves in an unpacked sdist too — which matters, because
+# `ci.yml`'s `sdist-suite` job runs this file from one. The tool imports only
+# the standard library at module scope; `markdown_it` is reached lazily inside
+# `render()`, which is the one function no merge lane can call.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _changelog_renderer_corpus as _corpus  # noqa: E402
+
+
+def _load_by_path(name: str, path: pathlib.Path):
+    """Import a module from a path WITHOUT touching `sys.path` or `sys.modules`.
+
+    `sys.path.insert(0, tools)` is the obvious spelling and it is a leak this
+    repository already has a test for:
+    `tests/test_solver_battery.py::test_loading_the_tool_leaves_nothing_behind_in_this_session`
+    asserts `tools/` is NOT on `sys.path` after the suite has loaded a tool,
+    because `tests/_state_guard.py` lists `sys.path` and `sys.modules` among
+    the channels it does not watch — so nothing else in the session would
+    notice. Driven: with the insert, that test fails in a whole-suite run and
+    passes when run alone, which is the shape of a leak rather than a bug in
+    the test.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_corpus_tool = _load_by_path("stelling_changelog_renderer_corpus_tool",
+                             REPO / "tools" / "changelog_renderer_corpus.py")
+
+
+def _python_heading(changelog: str) -> tuple[int, str] | None:
+    """`(line, that line's text)` the Python twin calls the newest heading.
+
+    This is the reading the corpus's oracle column is comparable with, and the
+    reason is in `newest_h2` in `tools/changelog_renderer_corpus.py`:
+    CommonMark decides which LINE of a document is a heading and says nothing
+    at all about `<version> — <date>`, which is this project's own grammar.
+    All three refusals — no heading, a malformed one, an undecidable prefix —
+    collapse to `None` here, because a refusal is always sound.
+    """
+    from test_changelog_names_the_version import (  # noqa: PLC0415
+        UndecidedChangelogShape, newest_heading_line,
+    )
+
+    try:
+        return newest_heading_line(changelog)
+    except UndecidedChangelogShape:
+        return None
+
+
+def _python_reading(changelog: str) -> tuple[str, str] | None:
+    """What the Python twin PARSES, with all three refusals folded to `None`.
+
+    The parse is this project's release-heading grammar, not CommonMark's, so
+    nothing here is compared against the renderer — it is what the bash gate
+    is driven against, and what `must_read` demands exists.
+    """
+    from test_changelog_names_the_version import (  # noqa: PLC0415
+        MalformedNewestHeading, UndecidedChangelogShape, newest_heading,
+    )
+
+    try:
+        return newest_heading(changelog)
+    except (MalformedNewestHeading, UndecidedChangelogShape):
+        return None
+
+
+def _sound(changelog: str, verdict) -> str | None:
+    """`None` if the twin points at the renderer's line AND holds its text.
+
+    **THE SOUNDNESS RELATION, IN ONE PLACE, because it is asserted from three
+    tests and a relation spelled three times is three relations.** A refusal
+    is always sound. A reading is sound only if the renderer puts an `<h2>` on
+    exactly that line AND the reader is holding the text the renderer has
+    there.
+
+    **THE SECOND HALF IS NEW AND IT IS WHAT THIS RELATION WAS MISSING.** It
+    compared the LINE NUMBER alone, which cannot see two readers that agree
+    about the number and disagree about *what a line is* — the most
+    fundamental thing either of them implements, and the one they got wrong
+    identically, so holding them to each other could never say so. Driven:
+    `'text\\r## 9.9.9 — 2000-01-01\\n## 0.2.1 — 2026-08-28\\n'`, where a bare
+    carriage return is a CommonMark line ending and was not one to these
+    readers. Both the renderer and the reader answered "line 2"; the renderer
+    meant `## 9.9.9 — 2000-01-01` and the reader meant `## 0.2.1 —
+    2026-08-28`, and this function returned `None`. The renderer's own line —
+    sliced by its own normalisation, see `renderer_lines` in
+    `tools/changelog_renderer_corpus.py` — is the second column now.
+
+    Not the heading's rendered CONTENT, which is a third thing and is the
+    oracle's own deviation from CommonMark rather than anybody's reading;
+    `newest_h2` there carries that measurement.
+    """
+    line, source, content = verdict
+    found = _python_heading(changelog)
+    if found is None:
+        return None
+    number, text = found
+    if line is None:
+        return (f"the twin reads line {number} of {changelog!r} as the newest "
+                f"heading and the renderer makes NO <h2> anywhere in it")
+    if number != line:
+        return (f"the twin reads line {number} of {changelog!r} as the newest "
+                f"heading and the renderer's first <h2> is line {line} "
+                f"({content!r})")
+    if text != source:
+        return (f"the twin and the renderer both say line {line} of "
+                f"{changelog!r} and they are not holding the same line: the "
+                f"twin has {text!r} and the renderer has {source!r}. They "
+                f"disagree about where a line ENDS, which is the one thing "
+                f"neither of them can be held to the other about")
+    return None
 
 
 @_needs_a_shell
 @pytest.mark.parametrize(
-    "label,changelog,expected", _HEADING_SHAPES,
-    ids=[row[0].replace(" ", "-") for row in _HEADING_SHAPES],
+    "label,changelog,must_read,verdict", _corpus.NAMED,
+    ids=[row[0].replace(" ", "-") for row in _corpus.NAMED],
 )
-def test_BOTH_readers_of_the_newest_heading_agree(label, changelog, expected, tmp_path):
-    """The bash gate and the Python gate, over one table of shapes.
+def test_BOTH_readers_of_the_newest_heading_agree(label, changelog, must_read,
+                                                  verdict, tmp_path):
+    """The bash gate and the Python gate, over documents a RENDERER judged.
 
     **TWO READERS OF ONE RULE, WRITTEN IN TWO LANGUAGES, HELD TO EACH OTHER BY
-    NOTHING** — until an auditor ran them side by side and found five shapes
-    they disagree about. Three of those five are the direction that matters:
-    the bash gate returned `rc=0` on a tree whose newest heading names a
-    DIFFERENT version from the tag, because the heading was indented one
-    space and neither reader called it a heading.
+    NOTHING** — that is why this test exists, and holding them to each other
+    was never enough. It is now three things at once:
 
-    So the rule is one table now and both readers are driven over it. The
-    Python side is compared by its return value; the bash side by whether it
-    refuses, and — where it does not — by the version and date it read, which
-    are recovered from its own complaint when it is made to disagree with a
-    tag it should agree with.
+    * the Python twin reads what the RENDERER read, or refuses;
+    * the bash gate agrees with the Python twin about which of those it is;
+    * and where the corpus says `must_read`, refusing is not allowed. That
+      flag is the corpus's one authored field, and what it can and cannot do
+      is worth being exact about, because a looser sentence here would be the
+      same defect this branch is repairing. It cannot supply a READING:
+      `True` demands the renderer's reading exactly and `False` demands a
+      refusal, so no value of it can make a reader's wrong reading pass. It
+      is therefore incapable of weakening the SOUNDNESS half at all.
 
-    What this does NOT hold: that either reader implements CommonMark. Both
-    are line grammars, both say so, and shapes neither handles (setext
-    headings, an unbalanced fence) are outside the table rather than pinned
-    to a behaviour.
+      **IT CAN WEAKEN THE LIVENESS HALF, and that is stated rather than
+      defended.** Flipping a row from `True` to `False` after a reader stopped
+      reading it turns a red green, and nothing here can tell that from a
+      deliberate decision to be more conservative. Two things stand against
+      it: the flip is a one-line diff to a generated file, and the liveness
+      floor that is NOT authored is in
+      :func:`test_the_two_readers_agree_over_the_whole_corpus`, which derives
+      its positive controls from the corpus ALPHABET, plus this repository's
+      own `CHANGELOG.md` at
+      `tests/test_changelog_names_the_version.py::test_the_newest_changelog_heading_names_this_version`
+      and the two real releases driven green at
+      :func:`test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry`.
+
+    **CONSERVATIVE REFUSAL IS A PASS HERE AND THAT IS THE POINT.** Several
+    rows are documents a renderer reads without difficulty — a heading inside
+    a block quote, a `text`/`===` setext `<h1>`, a bullet list — and both
+    readers refuse them, because a line grammar cannot decide them and this is
+    a release gate. The direction is argued at
+    `tests/test_changelog_names_the_version.py::newest_heading_line`.
+
+    **THE INDENT BOUNDARIES ARE ROWS HERE BECAUSE THEY WERE MUTANTS THAT
+    SURVIVED.** An auditor mutated `_INDENTED_LINE` from `^ {4}` to `^ {3}`
+    and the bash fence closer's `-le 3` to `-le 4`, and the whole instrument
+    stayed green at 39 passed apiece: nothing in the corpus placed a
+    non-heading whitelist member at indent one to three, or a fence closer at
+    indent four. The `>= 4` admission is the most load-bearing of the four
+    whitelist rules and its boundary was the one thing not driven. Five rows
+    now sit on it — a setext underline, a block quote and a `<div>` at indent
+    three, a closer at indent four, and the short tilde run — and both mutants
+    are caught: 3 failed and 1 failed respectively.
+
+    **AND THE TWO READERS ARE NOT SYMMETRIC UNDER MUTATION, which matters
+    exactly because they are held to each other.** The bash twin tests the
+    indent BEFORE the heading and the Python twin tests the heading BEFORE the
+    indent, so the first mutation above is caught in bash by a different route
+    from Python's. Held-to-each-other is not the same as identical, and a row
+    that reddens one reader is not evidence about the other.
+
+    What this does NOT hold: that either reader implements CommonMark. It
+    holds that neither reader ever points at a line the renderer puts no
+    `<h2>` on.
     """
-    from test_changelog_names_the_version import (
-        MalformedNewestHeading, newest_heading,
-    )
+    line, source, content = verdict
+    got = _python_reading(changelog)
 
-    # THE PYTHON READER.
-    try:
-        got = newest_heading(changelog)
-    except MalformedNewestHeading:
-        got = None
-    assert got == expected, f"{label}: python read {got!r}, table says {expected!r}"
+    # SOUNDNESS FIRST, and it is asked of EVERY row regardless of `must_read`:
+    # the twin either refuses or points at the renderer's own line.
+    unsound = _sound(changelog, verdict)
+    assert unsound is None, f"{label}: {unsound}"
 
-    # THE BASH GATE, over the same text. It is driven against a real annotated
-    # tag whose version and date are the table's expected reading, so it must
-    # be GREEN exactly where the table says a reading exists.
+    if must_read:
+        assert line is not None, (
+            f"{label}: the corpus says this document must be READ and the "
+            f"renderer makes no <h2> in it at all, so there is nothing for "
+            f"the readers to read. The row is self-contradictory — fix "
+            f"`must_read` or fix the document in "
+            f"`tests/_changelog_renderer_corpus.py`."
+        )
+        assert (_python_heading(changelog) or (None,))[0] == line, (
+            f"{label}: the renderer's newest <h2> is line {line} "
+            f"({content!r}) and the Python twin refuses the document. This "
+            f"row is marked `must_read`, so being conservative here is a "
+            f"failure — it is a release that cannot happen."
+        )
+        assert got is not None, (
+            f"{label}: the twin finds the renderer's heading on line {line} "
+            f"and then cannot parse it as `## <version> — <rest>`. A row "
+            f"marked `must_read` has to survive both halves."
+        )
+    else:
+        assert got is None, (
+            f"{label}: the corpus marks this document as one both readers "
+            f"must REFUSE and the Python twin read {got!r} from it. The "
+            f"renderer's own newest <h2> is line {line} ({content!r})."
+        )
+
+    # THE BASH GATE, over the same text, driven against a real annotated tag.
     body = _step_body(_CHANGELOG_STEP)
-    if expected is None:
+    if got is None:
         tree = _tagged_tree(tmp_path, f"{label}-none", tag="v0.2.0",
                             tagger_date="2026-08-25", changelog=changelog)
         done = _drive(body, tree, GITHUB_REF_NAME="v0.2.0")
         assert done.returncode == 1, (
             f"{label}: the python reader refuses this and the bash gate "
-            f"accepted it:\n{done.stdout}"
+            f"accepted it. The two readers have drifted, which is the whole "
+            f"reason this test is parametrised over one table.\n{done.stdout}"
         )
         return
 
-    version, rest = expected
+    version, rest = got
     tree = _tagged_tree(tmp_path, f"{label}-ok", tag=f"v{version}",
                         tagger_date=rest, changelog=changelog)
     done = _drive(body, tree, GITHUB_REF_NAME=f"v{version}")
     assert done.returncode == 0, (
-        f"{label}: python read {expected!r} and the bash gate refused a tag "
+        f"{label}: python read {got!r} and the bash gate refused a tag "
         f"carrying exactly that:\n{done.stdout}"
     )
 
     # ... and it must REFUSE the same text against a tag that disagrees, or
     # the green above is a gate that accepts everything rather than one that
     # read the same heading.
-    other = _tagged_tree(tmp_path, f"{label}-bad", tag="v9.9.9",
-                         tagger_date="2000-01-01", changelog=changelog)
-    done = _drive(body, other, GITHUB_REF_NAME="v9.9.9")
+    #
+    # THE DISAGREEING TAG IS DERIVED FROM THE READING AND WAS A CONSTANT.
+    # `v9.9.9` dated `2000-01-01` was hardcoded here, and the corpus grew a
+    # row whose correct reading IS `9.9.9` over `2000-01-01` — a
+    # carriage-return document standing over exactly that heading — so the
+    # control agreed with the gate and this assertion failed on a green gate.
+    # A "wrong" answer typed once and reused across a table is a wrong answer
+    # the table can grow into.
+    other = _tagged_tree(tmp_path, f"{label}-bad", tag=f"v{version}0",
+                         tagger_date="1999-12-31", changelog=changelog)
+    done = _drive(body, other, GITHUB_REF_NAME=f"v{version}0")
     assert done.returncode == 1, (
         f"{label}: the bash gate accepted a tag naming neither the version "
         f"nor the date the python reader found:\n{done.stdout}"
+    )
+
+
+#: The tag the exhaustive drive below plants, and the heading
+#: `_corpus.ALPHABET` is built around. Written once: the bash gate has no way
+#: to report the heading it READ except by agreeing or disagreeing with a tag,
+#: so "the gate accepted this document" and "the gate read exactly this pair"
+#: are the same sentence only while these two lines and the alphabet's first
+#: token say the same thing, which
+#: :func:`test_the_two_readers_agree_over_the_whole_corpus` asserts before it
+#: drives anything.
+_SWEEP_TAG = "v0.2.1"
+_SWEEP_DATE = "2026-08-28"
+
+
+@_needs_a_shell
+def test_the_two_readers_agree_over_the_whole_corpus(tmp_path):
+    """Every document of the corpus, both readers, against the renderer.
+
+    2954 documents at the commit that wrote this — every document of one to
+    :data:`MAX_LINES` lines over `tests/_changelog_renderer_corpus.py`'s
+    fourteen-token alphabet, DERIVED here by the same function the generator
+    used rather than stored, so the corpus cannot be re-labelled by a
+    reordering. The count is read off the corpus rather than typed, and the
+    corpus's REACH is held from outside it by
+    :func:`test_the_corpus_still_reaches_every_class_it_was_built_for` —
+    without which the alphabet is one edit and the documented regeneration
+    command away from covering nothing, in a way even the renderer cannot
+    see.
+
+    **THE RELATION, in the two halves that make it a soundness claim.**
+
+    * PYTHON, at full strength: for every document, if the twin reads a
+      heading at all, it is on the LINE the renderer puts its first `<h2>`
+      on. Refusing is always allowed — see the `must_read` rows above for
+      where it is not. The comparison is the LINE and not the heading's text,
+      and `newest_h2` in `tools/changelog_renderer_corpus.py` carries the
+      measurement that bought that distinction.
+    * BASH, by agreement: the gate has no channel for "the heading I read"
+      except its verdict against a tag, so it is driven against one real
+      annotated tag — :data:`_SWEEP_TAG` dated :data:`_SWEEP_DATE`, which is
+      what the alphabet's heading token names — and its `rc=0` must coincide
+      exactly with the Python twin reading that pair.
+
+    Composed, those give the thing that matters: **the bash gate returns
+    `rc=0` only on documents whose newest rendered `<h2>` is the tag's own
+    version and date.** At `a90862b` it did not, and the readers went wrong
+    together: measured by driving this same corpus against that commit's two
+    line grammars, **42 of the 2954 are read as a heading the renderer does
+    not put there, and the bash gate returns `rc=0` on all 42** — the two
+    readers agreeing, with nothing to be right about (drift between them: 0).
+    This branch's readers are 0 and 0 on the same corpus, and refuse 205
+    documents whose newest `<h2>` the renderer reads without difficulty, which
+    is the trade taken deliberately. Of those 205, **20 are documents
+    `a90862b` also refused and this branch now READS** — the widened-refusal
+    class, the comment opener inside a code span.
+
+    **WHAT THIS CANNOT SEE.** The alphabet. Fourteen tokens of at most three
+    lines is not the space of Markdown documents, and a construct not spelled
+    by one of those tokens is not driven here — the block quotes, tabs, form
+    feeds, seven-hash lines and indent-three boundary cases are single rows in
+    `NAMED` above and are not swept against each other. The WHITESPACE
+    alphabet has a sweep of its own, because that is where the two soundness
+    breaks of this branch were found:
+    :func:`test_the_whitespace_alphabet_is_swept_in_every_position`. And a
+    wider structural sweep was taken by hand at this commit and is recorded at
+    `tests/test_changelog_names_the_version.py::newest_heading_line`; what is
+    IN the suite is this.
+    """
+    documents = _corpus_tool.documents(_corpus.ALPHABET, _corpus.MAX_LINES)
+    assert len(documents) == len(_corpus.PRODUCT), (
+        f"the corpus records {len(_corpus.PRODUCT)} verdicts and its alphabet "
+        f"produces {len(documents)} documents. One of the two moved without "
+        f"the other; regenerate with `python "
+        f"tools/changelog_renderer_corpus.py --write`."
+    )
+    target_heading = f"## {_SWEEP_TAG[1:]} — {_SWEEP_DATE}"
+    assert target_heading in _corpus.ALPHABET, (
+        f"this drive reads the bash gate's VERDICT as its READING, and the "
+        f"two are the same sentence only while the tag it is driven against "
+        f"— {_SWEEP_TAG} dated {_SWEEP_DATE} — names a heading the alphabet "
+        f"can actually produce. {target_heading!r} is not in the alphabet."
+    )
+    body = _step_body(_CHANGELOG_STEP)
+    tree = _tagged_tree(tmp_path, "corpus", tag=_SWEEP_TAG,
+                        tagger_date=_SWEEP_DATE, changelog="")
+    target = (_SWEEP_TAG[1:], _SWEEP_DATE)
+
+    unsound, drift, accepted = [], [], 0
+    for text, code in zip(documents, _corpus.PRODUCT):
+        complaint = _sound(text, _corpus.VERDICTS[code])
+        if complaint is not None:
+            unsound.append(complaint)
+        got = _python_reading(text)
+        if got is not None:
+            accepted += 1
+        (tree / "CHANGELOG.md").write_text(text, encoding="utf-8")
+        done = _drive(body, tree, GITHUB_REF_NAME=_SWEEP_TAG)
+        if (done.returncode == 0) != (got == target):
+            drift.append((text, got, done.returncode, done.stdout))
+
+    assert not unsound, (
+        f"{len(unsound)} of {len(documents)} documents are read by the Python "
+        f"twin as a heading the renderer does not put there:\n"
+        + "\n".join(f"  {row}" for row in unsound[:8])
+    )
+    assert not drift, (
+        f"{len(drift)} of {len(documents)} documents split the two readers: "
+        f"the bash gate and the Python twin disagree about whether the newest "
+        f"heading is {target!r}. Each row is (document, twin, rc, stdout):\n"
+        + "\n".join(f"  {row!r}" for row in drift[:4])
+    )
+    assert accepted, (
+        f"the Python twin read NO heading in any of {len(documents)} corpus "
+        f"documents, so the relation above is satisfied vacuously. A reader "
+        f"that refuses everything passes every soundness claim ever made "
+        f"about it."
+    )
+
+    # THE LIVENESS FLOOR, DERIVED AND NOT AUTHORED. `assert accepted` above is
+    # a floor of one and could be met by any single document; the corpus's
+    # `must_read` column is a stronger floor and is the one field in this
+    # system a human types, so it is not the only one. These documents are
+    # built out of ALPHABET's own heading token: a file that is nothing but
+    # that heading, one line, then two, then three. If those are not read,
+    # this project cannot release at all, and no edit to `must_read` reaches
+    # them.
+    for count in range(1, _corpus.MAX_LINES + 1):
+        plain = "\n".join([_corpus.ALPHABET[0]] * count) + "\n"
+        assert _python_reading(plain) == target, (
+            f"the Python twin does not read a `CHANGELOG.md` that is {count} "
+            f"copies of {_corpus.ALPHABET[0]!r} and nothing else. That is not "
+            f"conservatism; it is a gate no release can pass."
+        )
+        (tree / "CHANGELOG.md").write_text(plain, encoding="utf-8")
+        done = _drive(body, tree, GITHUB_REF_NAME=_SWEEP_TAG)
+        assert done.returncode == 0, (
+            f"the bash gate refuses a `CHANGELOG.md` that is {count} copies "
+            f"of {_corpus.ALPHABET[0]!r} under the tag that names exactly "
+            f"that heading:\n{done.stdout}"
+        )
+
+
+#: DOCUMENTS THE SWEEP MUST REACH, TYPED HERE, IN A FILE THE GENERATOR DOES NOT
+#: WRITE — and that placement is the whole of the mechanism.
+#:
+#: **THE CORPUS CAN BE SHRUNK 200-FOLD BY A ONE-CHARACTER EDIT AND THE
+#: DOCUMENTED REGENERATION COMMAND, AND NOTHING INSIDE IT CAN SEE THAT.**
+#: `ALPHABET` and `MAX_LINES` live in the generated file. Cut the alphabet to
+#: two tokens, run `python tools/changelog_renderer_corpus.py --write`, and the
+#: product falls from four figures to 14 rows — a corpus perfectly consistent
+#: with a LIVE RENDERER, so
+#: :func:`test_the_recorded_renderer_verdicts_are_still_the_renderers` stays
+#: green too. `MAX_LINES = 3 -> 2` is the same move, and worse: nearly every
+#: discriminating document is three lines long. An auditor built both.
+#:
+#: That is a strictly better attack than the one this corpus already declares
+#: — it needs no reader edited and no verdict falsified — so the floor cannot
+#: live inside the corpus. These are the documents each closed class is
+#: represented by; every one of them must be a member of the swept set, in
+#: EVERY lane, renderer or no renderer.
+_SWEPT_WITNESSES = (
+    ("a fence the closer does not match by CHARACTER",
+     "```\n~~~\n## 0.2.1 — 2026-08-28\n"),
+    ("a fence whose closer carries an INFO STRING",
+     "```\n``` t\n## 0.2.1 — 2026-08-28\n"),
+    ("a fence the closer does not match by RUN LENGTH",
+     "````\n```\n## 0.2.1 — 2026-08-28\n"),
+    ("a setext <h2> above a later ATX heading",
+     "text\n---\n## 0.2.1 — 2026-08-28\n"),
+    ("an HTML block that is not a comment",
+     "<div>\n## 0.2.1 — 2026-08-28\n"),
+    ("a heading at indent four inside a list item",
+     "1. item\n    ## 9.9.9 — 2000-01-01\n## 0.2.1 — 2026-08-28\n"),
+    ("the comment opener inside a code span",
+     "`<!--`\n## 0.2.1 — 2026-08-28\n"),
+    ("an unclosed fence",
+     "```\n## 0.2.1 — 2026-08-28\n"),
+    ("an unclosed comment",
+     "<!--\n## 0.2.1 — 2026-08-28\n"),
+)
+
+
+#: POSITIONS THE WHITESPACE SWEEP MUST COVER, each pinned by a DOCUMENT and
+#: not by a name.
+#:
+#: `SEPARATOR_FORMS` lives in `tools/changelog_renderer_corpus.py` and the
+#: corpus's `SEPARATOR_FORM_NAMES` is written FROM it, so the two shrink in
+#: lockstep and `len(SEPARATORS) == len(chars) * len(FORM_NAMES)` goes on
+#: holding as they do. Driven by an auditor: four lines deleted from the tool
+#: plus the documented `--write` takes the sweep from 252 rows to 28,
+#: `atx-run` only, and the merge lane is green and identical.
+#:
+#: **AND THE FIRST FLOOR BUILT AGAINST THAT WAS BUILT AGAINST THE ATTACK AND
+#: NOT AGAINST THE CLASS, WHICH IS WHY IT LOOKS LIKE THIS NOW.** It was
+#: `[name for name in _SWEPT_POSITIONS if name not in SEPARATOR_FORM_NAMES]`
+#: — a floor over the NAMES, while the SHAPES those names stand for stay
+#: authored in the tool with nothing bounding them. `_NAMED_FLOOR` below says
+#: in its own words why that is not enough: *"matched by DOCUMENT rather than
+#: by label, because a label is a name and a name can be changed."* The same
+#: sentence was true here and was not applied. Driven by an auditor, ONE LINE,
+#: every name still present, 252 rows, 28 characters, the floor green:
+#:
+#:     -    ("fence-closer", "```\n```{sep}\n## 0.2.1 — 2026-08-28\n"),
+#:     +    ("fence-closer", "```\n```\n{sep}## 0.2.1 — 2026-08-28\n"),
+#:
+#: The separator moves out of the closing fence's info string and into the
+#: indent of the line below, so the position stops testing its position — and
+#: `info.strip(" \t")` reverted to `info.strip()`, the exact break of the
+#: round before, is then GREEN at 83 passed. The nine-shape version of the
+#: same edit also re-hides the bash `[[:space:]]` break.
+#:
+#: **`test_the_whitespace_alphabet_is_swept_in_every_position` IS THE SOLE
+#: TEST THAT CATCHES EITHER OF THOSE**, measured one mutation at a time:
+#: `info.strip(" \t")` -> `info.strip()`, `_HEADING`'s `[ \t]` -> `\s`, and
+#: bash's `bl` -> `[[:space:]]` each redden that test and nothing else, 1
+#: failed and 82 passed apiece. So this floor is the whole of what stands
+#: between a one-line edit and the un-pinning of both of the previous round's
+#: findings, and it is pinned the way the other two are: one WITNESS DOCUMENT
+#: per position, asserted to be a member of `separator_documents(chars)`. A
+#: re-pointed shape drops a witness rather than only a label.
+_SWEPT_POSITIONS = (
+    ("indent", "\xa0",
+     "\xa0## 0.2.1 — 2026-08-28\n## 9.9.9 — 2000-01-01\n"),
+    ("atx-run", "\x0b",
+     "##\x0b0.2.1 — 2026-08-28\n## 9.9.9 — 2000-01-01\n"),
+    ("atx-other-run", "\xa0",
+     "#\xa0notes\n## 0.2.1 — 2026-08-28\n"),
+    ("version-em-dash", "\xa0",
+     "## 0.2.1\xa0— 2026-08-28\n"),
+    ("em-dash-date", "\xa0",
+     "## 0.2.1 —\xa02026-08-28\n"),
+    ("heading-tail", "\xa0",
+     "## 0.2.1 — 2026-08-28\xa0\n"),
+    ("fence-closer", "\xa0",
+     "```\n```\xa0\n## 0.2.1 — 2026-08-28\n"),
+    ("blank-line", "\xa0",
+     "<div>\n\xa0\n## 0.2.1 — 2026-08-28\n"),
+    ("ordered-list-marker", "\xa0",
+     "1.\xa0item\n    ## 9.9.9 — 2000-01-01\n## 0.2.1 — 2026-08-28\n"),
+)
+
+#: The whitespace alphabet, derived HERE from `str.isspace()` and not from the
+#: tool that writes the corpus.
+#:
+#: **THE FLOOR ABOVE PINS ONE CHARACTER PER POSITION AND THAT IS NOT A FLOOR ON
+#: THE ALPHABET.** `separator_documents` is built from
+#: `whitespace_alphabet()`, which lives in the tool; narrowing that function to
+#: the four characters the witnesses happen to name takes the sweep from 252
+#: rows over 28 characters to 36 over 4, regenerates clean, and passes every
+#: floor. An auditor built it and established the cap on it as well: the
+#: witness characters are the DISCRIMINATING ones, so all three demonstrated
+#: mutants stay caught under that shrink and nothing already found is
+#: un-pinned. It is a narrowing of reach and not a false verdict — and it is
+#: closed here rather than left, because "no defect is reachable through it
+#: today" is the sentence every one of this branch's four rounds started from.
+_LIVE_WHITESPACE = frozenset(
+    c for c in map(chr, range(0x110000)) if c.isspace() and c != "\n"
+)
+
+#: DOCUMENTS `NAMED` MUST STILL CONTAIN, for the third time and the last
+#: authored surface in the corpus.
+#:
+#: `must_read` was called *"the ONE authored field in this file"* and a row's
+#: PRESENCE is authored too — deleting a row is strictly stronger than
+#: flipping its flag, because it removes the question rather than answering it
+#: differently. Driven by an auditor: delete the four indent-boundary rows,
+#: leave both readers untouched, regenerate, and the suite is 71 passed; put
+#: the two indent mutants back on top of that and it is still 71 passed in the
+#: merge lane. The rows below are the ones whose absence resurrects a mutant
+#: or drops a closed class, and they are matched by DOCUMENT rather than by
+#: label, because a label is a name and a name can be changed.
+_NAMED_FLOOR = (
+    ("setext underline at indent three",
+     "text\n   ---\n## 0.2.0 — 2026-08-25\n"),
+    ("block quote at indent three",
+     "   > ## 9.9.9 — 2000-01-01\n\n## 0.2.0 — 2026-08-25\n"),
+    ("HTML block at indent three",
+     "   <div>\n## 0.2.0 — 2026-08-25\n"),
+    ("fence closer at indent four",
+     "```\n    ```\n## 0.2.0 — 2026-08-25\n"),
+    ("a bare carriage return is a line ending",
+     "text\r## 9.9.9 — 2000-01-01\n## 0.2.0 — 2026-08-25\n"),
+    # THE VERSION AND DATE IN THESE TWO ARE THE ONES THE REFUSAL BRANCH BELOW
+    # DRIVES, and that is not decoration. `read -r` drops the NUL, so the bash
+    # gate sees `## 0.2.0 — 2026-08-25`; if the row named any OTHER release the
+    # gate would refuse it for the wrong reason — a version mismatch — and the
+    # drop would be invisible. Written with `0.2.1` first, and the NUL guard
+    # removed, the whole module was GREEN.
+    ("a NUL byte",
+     "#\x00# 0.2.0 — 2026-08-25\n"),
+    ("a NUL byte above a heading the renderer does read",
+     "#\x00# 0.2.0 — 2026-08-25\n## 9.9.9 — 2000-01-01\n"),
+    # AND THIS ONE PINS THE PYTHON HALF OF THAT GUARD, WHICH THE TWO ABOVE DO
+    # NOT. In both of them the NUL sits between two hashes, where the line
+    # matches neither `_HEADING_LINE` nor `_ATX_LINE` nor `_PARAGRAPH_LINE` and
+    # the WHITELIST refuses it whether the guard exists or not — so deleting
+    # the guard from Python reddened nothing, and the half carrying the DRIFT
+    # obligation was unpinned. Here the NUL is inside an ordinary paragraph
+    # line: Python steps over it and reads the heading below, bash never sees
+    # it because `read` drops it and reads the same heading, and the two agree
+    # on a document neither of them can represent. Measured with the Python
+    # guard removed: the twin reads `('0.2.0', '2026-08-25')` where the corpus
+    # says refuse.
+    ("a NUL byte inside a paragraph line the whitelist admits",
+     "te\x00xt\n## 0.2.0 — 2026-08-25\n"),
+    ("a non-ASCII digit in an ordered-list marker",
+     "1\u0662. item\n    ## 9.9.9 — 2000-01-01\n## 0.2.0 — 2026-08-25\n"),
+    ("a non-ASCII digit in a version",
+     "## \u06620.0 — 2026-08-25\n"),
+    ("a form feed is not a line break",
+     "note\x0c## 9.9.9 — 2000-01-01\n\n## 0.2.0 — 2026-08-25\n"),
+)
+
+
+def test_the_corpus_still_carries_the_rows_and_positions_that_catch_mutants():
+    """`NAMED` and `SEPARATOR_FORMS` have floors now, and they had none.
+
+    Three surfaces of this corpus are authored: the ALPHABET, the set of
+    NAMED documents, and the set of whitespace POSITIONS. The first got a
+    floor when an auditor shrank it; these two are the same construction one
+    move over, and each was demonstrated: four `NAMED` rows deleted resurrects
+    two indent mutants at 71 passed, and four `SEPARATOR_FORMS` deleted takes
+    the whitespace sweep from 252 rows to 28 with the merge lane unchanged.
+    Neither shrink needs a reader edited or a verdict falsified, and neither
+    is visible to the renderer, because the smaller corpus is regenerated and
+    perfectly self-consistent.
+
+    **WHAT THIS DOES NOT DO**, and it is the same paragraph the alphabet's
+    floor carries: it bounds these sets from BELOW and says nothing about
+    whether they are good ones, and it cannot notice a position or a class
+    nobody has thought of. It is membership over values typed in THIS file,
+    which the generator never writes.
+    """
+    swept = set(_corpus_tool.separator_documents(
+        tuple(chr(point) for point in _corpus.SEPARATOR_CHARS)))
+    missing = [name for name, _, _ in _SWEPT_POSITIONS
+               if name not in _corpus.SEPARATOR_FORM_NAMES]
+    assert not missing, (
+        f"the whitespace sweep no longer declares {missing}. It has "
+        f"{len(_corpus.SEPARATOR_FORM_NAMES)} positions and "
+        f"{len(_corpus.SEPARATORS)} rows. Every one of these is a place these "
+        f"readers IMPLEMENT a rule rather than refusing it, which is where "
+        f"every soundness break this branch has had was found."
+    )
+    chars = {chr(point) for point in _corpus.SEPARATOR_CHARS}
+    repointed = [name for name, char, witness in _SWEPT_POSITIONS
+                 if witness not in swept and char in chars]
+    dropped = [(name, char) for name, char, witness in _SWEPT_POSITIONS
+               if witness not in swept and char not in chars]
+    # TWO CAUSES, TOLD APART, because one message naming one of them is a
+    # diagnosis that is wrong half the time it fires. A witness can leave the
+    # swept set because its POSITION's shape was re-pointed, or because its
+    # CHARACTER left the alphabet — and the remedies are opposite.
+    assert not repointed, (
+        f"the whitespace sweep still NAMES {repointed} and no longer produces "
+        f"the document that tests them, with every character still in the "
+        f"alphabet. A position whose shape has been re-pointed — the "
+        f"separator moved out of the thing it was there to separate — keeps "
+        f"its name, keeps the row count, and stops catching anything. That is "
+        f"a one-line edit and it un-pins both of the whitespace defects this "
+        f"branch has fixed."
+    )
+    assert not dropped, (
+        f"{dropped} — these positions' witness CHARACTERS are no longer in "
+        f"the swept alphabet, which now has {len(chars)}. The shapes are "
+        f"untouched; what shrank is what they are swept over."
+    )
+    shapeless = [name for name, shape in _corpus_tool.SEPARATOR_FORMS
+                 if "{sep}" not in shape]
+    assert not shapeless, (
+        f"{shapeless} declare a whitespace position and their shape has no "
+        f"`{{sep}}` in it, so every character of the alphabet produces the "
+        f"same document and the position is swept 28 times over nothing. A "
+        f"form with no placeholder is the shape re-pointing above with the "
+        f"separator removed rather than moved."
+    )
+    documents = {row[1] for row in _corpus.NAMED}
+    gone = [name for name, text in _NAMED_FLOOR if text not in documents]
+    assert not gone, (
+        f"`NAMED` no longer carries {gone}. It has {len(_corpus.NAMED)} rows. "
+        f"Deleting a row removes the question rather than answering it "
+        f"differently, and every one of these is a row whose absence lets a "
+        f"mutation of the readers through."
+    )
+
+
+def test_the_corpus_still_reaches_every_class_it_was_built_for():
+    """The floor the corpus cannot contain, because the corpus is the subject.
+
+    Each of :data:`_SWEPT_WITNESSES` is a document one of the closed classes
+    is represented by, and each must be a MEMBER of
+    `documents(ALPHABET, MAX_LINES)`. Shrinking either input — the attack an
+    auditor demonstrated, one character and the documented regeneration
+    command, with the renderer lane staying green because the smaller corpus
+    is perfectly self-consistent — drops at least one of these and reddens
+    HERE, in every lane.
+
+    **WHAT THIS DOES NOT DO.** It does not bound the corpus from above, it
+    does not say the alphabet is a good one, and it cannot notice a class
+    nobody has thought of going unrepresented — a floor is a floor. It is a
+    membership test over documents typed in THIS file, which the generator
+    never writes, and that is the only property it has.
+
+    Needs no shell and no renderer: it is set membership over derived text.
+    """
+    swept = set(_corpus_tool.documents(_corpus.ALPHABET, _corpus.MAX_LINES))
+    missing = [label for label, text in _SWEPT_WITNESSES if text not in swept]
+    assert not missing, (
+        f"{len(missing)} of {len(_SWEPT_WITNESSES)} witness documents are no "
+        f"longer reachable by the corpus sweep: {missing}. The alphabet has "
+        f"{len(_corpus.ALPHABET)} tokens and MAX_LINES is "
+        f"{_corpus.MAX_LINES}, giving {len(_corpus.PRODUCT)} documents. A "
+        f"corpus that no longer contains the shapes it was built for is "
+        f"green because it stopped looking, and regenerating it does not "
+        f"show that — the smaller corpus agrees with the renderer perfectly."
+    )
+
+
+def test_the_recorded_whitespace_alphabet_is_the_live_one():
+    """The separator family's own floor, and it needs no renderer either.
+
+    `SEPARATOR_CHARS` is generated, so it is shrinkable in exactly the way
+    `ALPHABET` is. It is not authored anywhere: it is `str.isspace()` minus
+    the line separator.
+
+    **AND IT IS DERIVED HERE RATHER THAN CALLED OUT OF THE TOOL, WHICH IS THE
+    WHOLE OF THE REPAIR.** This read `live = _corpus_tool.whitespace_alphabet()`
+    — the same function that BUILT the recorded copy — so narrowing that
+    function and regenerating moved both sides together and the comparison
+    held. An auditor built it: narrowed to the four characters
+    `_SWEPT_POSITIONS`' witnesses happen to name, the sweep goes from 252 rows
+    over 28 characters to 36 over 4, every floor passes, and the corpus is
+    perfectly consistent with a live renderer. It was capped rather than
+    exploitable — the witness characters are the discriminating ones, so all
+    three demonstrated mutants stay caught — but "no defect is reachable
+    through it today" is the sentence every round of this branch has started
+    from. :data:`_LIVE_WHITESPACE` is `str.isspace()`, evaluated in THIS file,
+    which the generator never writes.
+
+    A mismatch is not automatically a defect — a new CPython could add a
+    whitespace character — but it is always a regeneration, and the message
+    says which. The tool's own derivation is held to the same set, so it
+    cannot drift either.
+    """
+    recorded = frozenset(chr(point) for point in _corpus.SEPARATOR_CHARS)
+    assert recorded == _LIVE_WHITESPACE, (
+        f"the recorded whitespace alphabet has {len(recorded)} characters and "
+        f"`str.isspace()` on this interpreter finds "
+        f"{len(_LIVE_WHITESPACE)}. Only in the recording: "
+        f"{sorted(recorded - _LIVE_WHITESPACE)!r}; only live: "
+        f"{sorted(_LIVE_WHITESPACE - recorded)!r}. If characters were DROPPED "
+        f"from the generated file, the sweep stopped covering them and "
+        f"nothing else would say so. Regenerate with `python "
+        f"tools/changelog_renderer_corpus.py --write`."
+    )
+    assert frozenset(_corpus_tool.whitespace_alphabet()) == _LIVE_WHITESPACE, (
+        f"`whitespace_alphabet()` in the generator returns "
+        f"{len(_corpus_tool.whitespace_alphabet())} characters where "
+        f"`str.isspace()` finds {len(_LIVE_WHITESPACE)}. Narrowing that "
+        f"function and regenerating moves the recorded copy with it, so the "
+        f"comparison above would hold and the sweep would quietly cover less."
+    )
+    expected = len(_LIVE_WHITESPACE) * len(_corpus.SEPARATOR_FORM_NAMES)
+    assert len(_corpus.SEPARATORS) == expected, (
+        f"the separator column has {len(_corpus.SEPARATORS)} verdicts and "
+        f"{len(_LIVE_WHITESPACE)} characters times "
+        f"{len(_corpus.SEPARATOR_FORM_NAMES)} forms is {expected}. Regenerate."
+    )
+
+
+@_needs_a_shell
+def test_the_whitespace_alphabet_is_swept_in_every_position(tmp_path):
+    """Every whitespace character, in every position this grammar has one.
+
+    **THE WHITELIST WAS THE RIGHT MECHANISM AND THIS IS WHERE IT DOES NOT
+    REACH.** Refusal protects a reader where it refuses. In the three or four
+    places these readers IMPLEMENT a rule instead of refusing it, they own
+    that rule's alphabet — and an auditor found both soundness breaks of this
+    branch there, both the same mistake: a character class borrowed from the
+    host language standing in for one CommonMark defines narrowly.
+
+    * `heading_any` was `[[:space:]]` and `_HEADING_LINE` was `\\s`, where
+      CommonMark says *spaces or tabs, or end of line*. `##<VT>0.2.1 —
+      2026-08-28` over `## 9.9.9 — 2000-01-01` was rc=0 from the gate with
+      the tag's version echoed; the renderer's newest `<h2>` is the 9.9.9.
+      Three characters did it in bash, twenty-six misread in the twin.
+    * `info.strip()` in the twin is Unicode-aware where CommonMark says a
+      closing fence *may be followed only by spaces or tabs* — and where the
+      bash twin, spelling it `${finfo//[[:blank:]]/}`, was already right. So
+      that one SPLIT THE TWO READERS as well as being unsound.
+
+    So the alphabet is swept rather than argued, which is the same treatment
+    the whitelist got and the reason the whitelist survived audit. NINE
+    positions, every character `str.isspace()` finds, 252 documents, the
+    renderer's verdict on each recorded in
+    `tests/_changelog_renderer_corpus.py`. The relation is the one the
+    whole-corpus sweep uses: the twin never points at a line the renderer puts
+    no `<h2>` on, and never holds different text for a line whose NUMBER they
+    agree about; and the bash gate's `rc=0` coincides exactly with the twin
+    reading the tag's own pair.
+
+    **IT SAID FIVE POSITIONS AND THERE WERE NINE.** The four it was missing —
+    the INDENT, the OTHER-ATX-LEVEL follower, the BLANK LINE and the
+    ORDERED-LIST MARKER — were found by an auditor, and two further findings
+    landed in exactly them. A list of positions written by whoever wrote the
+    positions is the same instrument as a table of expected readings written
+    by whoever wrote the readers, which is the thing this corpus replaced;
+    what makes this one checkable is
+    :func:`test_the_corpus_still_carries_the_rows_and_positions_that_catch_mutants`,
+    which holds a floor of required positions from outside the generated file.
+
+    **WHAT IT CANNOT SEE.** One character at a time, in a fixed frame. Two
+    whitespace characters interacting is not driven here, and neither is a
+    position nobody has named — nine is what a careful reading of two readers
+    found, and it is not a proof that there is no tenth.
+    """
+    chars = tuple(chr(point) for point in _corpus.SEPARATOR_CHARS)
+    docs = _corpus_tool.separator_documents(chars)
+    assert len(docs) == len(_corpus.SEPARATORS), (
+        f"{len(docs)} separator documents against {len(_corpus.SEPARATORS)} "
+        f"recorded verdicts. Regenerate the corpus."
+    )
+    body = _step_body(_CHANGELOG_STEP)
+    tree = _tagged_tree(tmp_path, "separators", tag=_SWEEP_TAG,
+                        tagger_date=_SWEEP_DATE, changelog="")
+    target = (_SWEEP_TAG[1:], _SWEEP_DATE)
+
+    unsound, drift, read = [], [], 0
+    for text, code in zip(docs, _corpus.SEPARATORS):
+        complaint = _sound(text, _corpus.VERDICTS[code])
+        if complaint is not None:
+            unsound.append(complaint)
+        got = _python_reading(text)
+        if got is not None:
+            read += 1
+        (tree / "CHANGELOG.md").write_text(text, encoding="utf-8")
+        done = _drive(body, tree, GITHUB_REF_NAME=_SWEEP_TAG)
+        if (done.returncode == 0) != (got == target):
+            drift.append((text, got, done.returncode))
+
+    assert not unsound, (
+        f"{len(unsound)} of {len(docs)} separator documents are read by the "
+        f"Python twin as a heading the renderer does not put there:\n"
+        + "\n".join(f"  {row}" for row in unsound[:8])
+    )
+    assert not drift, (
+        f"{len(drift)} of {len(docs)} separator documents split the two "
+        f"readers — one of them is spelling a whitespace class the other is "
+        f"not. Each row is (document, twin, rc):\n"
+        + "\n".join(f"  {row!r}" for row in drift[:8])
+    )
+    # THE POSITIVE HALF, DERIVED, AND THE RENDERER SAYS WHAT IT SHOULD BE. A
+    # space and a tab are the two characters CommonMark admits in these
+    # positions. In most of them they are INTERCHANGEABLE; in the INDENT they
+    # are not, because a tab is four columns there and three spaces are three
+    # — which is CommonMark's rule and not an exception to it. So the claim is
+    # a biconditional and the renderer supplies both sides: the twin
+    # distinguishes a space from a tab in exactly the positions the renderer
+    # does. No carve-out, nothing typed.
+    #
+    # IT USED TO DEMAND A READING FOR BOTH CHARACTERS IN EVERY FORM, and that
+    # was wrong twice: the `blank-line` document opens with `<div>`, which
+    # this whitelist refuses whatever the separator is, and the `indent`
+    # document is one CommonMark itself answers differently for the two. A
+    # positive control has to be a property of the POSITION.
+    forms = len(_corpus.SEPARATOR_FORM_NAMES)
+    space, tab = chars.index(" "), chars.index("\t")
+    for form, (name, _) in enumerate(_corpus_tool.SEPARATOR_FORMS):
+        renderer_agrees = (
+            _corpus.SEPARATORS[space * forms + form]
+            == _corpus.SEPARATORS[tab * forms + form]
+        )
+        twin_agrees = (_python_heading(docs[space * forms + form])
+                       == _python_heading(docs[tab * forms + form]))
+        assert twin_agrees == renderer_agrees, (
+            f"in the {name!r} position the renderer "
+            f"{'does not tell' if renderer_agrees else 'tells'} a space and a "
+            f"tab apart and the twin "
+            f"{'does not' if twin_agrees else 'does'}. Wherever CommonMark "
+            f"admits one of them it admits the other, except in the indent, "
+            f"where a tab is four columns — and which of those a position is "
+            f"is the renderer's answer here, not this file's."
+        )
+    # AND ONE ANCHOR, so the equality above cannot be met by refusing both.
+    # The `atx-run` document for a space is `## 0.2.1 — 2026-08-28` over an
+    # older heading: the plainest release note this project can have.
+    anchor = docs[space * forms + _corpus.SEPARATOR_FORM_NAMES.index("atx-run")]
+    anchor_line, anchor_source, _ = _corpus.VERDICTS[
+        _corpus.SEPARATORS[space * forms
+                           + _corpus.SEPARATOR_FORM_NAMES.index("atx-run")]
+    ]
+    assert _python_heading(anchor) == (anchor_line, anchor_source), (
+        f"the twin does not read {anchor!r} — an ATX heading with one space "
+        f"after its run — as the renderer's line {anchor_line} "
+        f"({anchor_source!r}). That is the plainest heading there is; a gate "
+        f"that refuses it refuses every changelog."
+    )
+    assert read, (
+        f"the Python twin read NO heading in any of {len(docs)} separator "
+        f"documents, so the two assertions above are vacuous."
+    )
+
+
+def test_the_recorded_renderer_verdicts_are_still_the_renderers():
+    """The checked-in oracle, re-derived from the renderer it came from.
+
+    **THIS IS THE ONE TEST IN THE SUITE THAT NEEDS `markdown-it-py`, AND NO
+    MERGE LANE HAS IT.** Measured 2026-08-28 on all three
+    (`/home/nick/venvs/stelling-jax`, `-nojax`, `-jax010`): `import
+    markdown_it` is `ModuleNotFoundError` in every one. So this skips where
+    merges are gated, and the skip is registered in
+    `tests/test_skip_inventory.py` with the paragraph that says what the skip
+    costs.
+
+    **WHAT THE OTHER LANES STILL HAVE, said because "the oracle is absent" is
+    exactly the sentence that gets read as "nothing is checked".** They have
+    the whole corpus and both drives over it. What they cannot do is notice
+    that the recorded column has gone STALE — a newer CommonMark, a newer
+    `markdown-it-py`, a corpus edited by hand to match a broken reader. That
+    is this test and only this test.
+
+    **AND A SECOND COMMONMARK IMPLEMENTATION AGREES WITH IT ABOUT EVERY LINE
+    IN THIS CORPUS.** An independent audit cross-checked all 3252 corpus
+    documents against `cmark-gfm`: **0 LINE disagreements**. Over a wider
+    75 894-document set there are 61, every one of them a type-7 HTML block
+    inside a list item, and **not one of the 61 is a document the twin reads**
+    — so the readers never rest on a case where two implementations of
+    CommonMark differ. Measured 2026-08-29, elsewhere; what runs in this suite
+    is the one renderer, and that is the limit this test declares.
+
+    **AND THE COLUMN DOES NOT MOVE BETWEEN THE TWO VERSIONS THAT WERE TRIED.**
+    Regenerated 2026-08-28 under `markdown-it-py` 3.0.0 and 4.2.0, same
+    alphabet, same documents: the two files are byte-identical apart from the
+    recorded `RENDERER_VERSION`. That is two versions, not a guarantee.
+
+    **AND THIS TEST WAS BROKEN IN THE ONLY LANE THAT RUNS IT, WHICH IS THE
+    HAZARD OF A TEST NO MERGE LANE EXECUTES.** `render()` grew from three
+    return values to five when the whitespace sweep landed; this call site
+    still unpacked three, so it raised `ValueError` wherever
+    `markdown-it-py` was installed — and skipped, green, in all three merge
+    lanes. Found by running it with the library on `PYTHONPATH`, which is the
+    only thing that finds it and is now part of this branch's evidence rather
+    than an afterthought.
+    """
+    pytest.importorskip("markdown_it")
+    product, named, separators, chars, version = _corpus_tool.render(_corpus)
+
+    assert tuple(chars) == tuple(chr(point) for point in _corpus.SEPARATOR_CHARS), (
+        f"the whitespace alphabet this interpreter derives is not the one "
+        f"recorded. That is a regeneration, not necessarily a defect — but "
+        f"the separator sweep is covering a different set from the one its "
+        f"column was taken over until it happens."
+    )
+    assert list(separators) == [_corpus.VERDICTS[code]
+                                for code in _corpus.SEPARATORS], (
+        f"markdown-it-py {version} does not agree with the recorded "
+        f"SEPARATORS column. These are the nine positions where these readers "
+        f"IMPLEMENT a rule rather than refusing it, so a verdict that moves "
+        f"here is a rule one of them may now be wrong about. Regenerate and "
+        f"read the diff."
+    )
+    assert list(product) == [_corpus.VERDICTS[code] for code in _corpus.PRODUCT], (
+        f"the renderer here (markdown-it-py {version}) does not agree with "
+        f"the column recorded in `tests/_changelog_renderer_corpus.py` "
+        f"(markdown-it-py {_corpus.RENDERER_VERSION}, generated "
+        f"{_corpus.GENERATED}). Either the renderer moved or the column was "
+        f"edited by hand. Regenerate with `python "
+        f"tools/changelog_renderer_corpus.py --write` and read the diff: a "
+        f"verdict that changes is a shape one of these two readers may now be "
+        f"wrong about."
+    )
+    assert list(named) == [row[3] for row in _corpus.NAMED], (
+        f"the recorded verdicts for the NAMED documents are not what "
+        f"markdown-it-py {version} returns for them. Same remedy, same "
+        f"warning: regenerate and read the diff."
     )
 
 
@@ -4495,11 +5396,77 @@ def test_the_drives_are_reading_the_real_step_bodies():
     # spends about forty lines on — was pinned by nothing in this module or in
     # `tests/test_changelog_names_the_version.py`, which carries the same
     # needle over the same whole body and is repaired the same way.
+    # `export LC_ALL=C` IS PINNED HERE AND IT IS PINNED FOR A DIFFERENT REASON
+    # FROM THE TAG STEP'S. There it is deterministic-but-not-the-fix, and
+    # `release.yml` says so in its own words. HERE IT IS PART OF THE FIX: the
+    # heading scan's `[A-Za-z]` ranges are collated by the locale, and
+    # `[[:blank:]]` — which the scan used until an auditor measured it — is
+    # 2 characters under `C` and `POSIX` and 17 under `C.utf8`, `en_GB.utf8`
+    # and `en_US.utf8`, including U+1680, U+2000-U+2006, U+205F and U+3000.
+    # Driven with the export removed and `LANG=C.UTF-8`: rc=0 on a document
+    # the shipped step refuses by name; with `LANG` unset the C default hides
+    # it, which is why a drive alone could never have found this. The blank
+    # class is spelled `[ $'\t']` now so that half of the repair does not
+    # depend on the runner at all — and this needle holds the other half.
+    #
+    # AND THESE ARE READ ON THE CODE LINES, WHICH THE ABSENT-CONSTRUCT PINS
+    # BELOW ALREADY WERE AND THESE WERE NOT. The reason given there is *"the
+    # paragraphs beside the step have to be able to say what they refuse"* —
+    # and the symmetric hazard was never taken: the paragraphs beside the step
+    # can also say what it DOES. Most of the extracted body is comment, and
+    # more than one of those comments contains the string `export LC_ALL=C`
+    # while discussing it. Driven by an auditor: delete the CODE line and this
+    # test stayed green, with only a `_NAMED_FLOOR` row reddening elsewhere.
+    # Two of these eight survived on comments alone — `CHANGELOG.md` and
+    # `export LC_ALL=C` — and a present-construct pin that a comment can
+    # satisfy is a pin on the prose.
+    #
+    # THE SIZE IS DERIVED BELOW AND NOT TYPED HERE, AND THAT IS A CORRECTION.
+    # This paragraph said *"the extracted body is 407 lines and 237 of them
+    # are comments"*, and the commit that wrote that sentence was the last
+    # commit at which it was true: explaining the defect grew the body by 22
+    # lines. A DATED RECORD of how fast it moves, which cannot rot because
+    # every row names a commit:
+    #
+    #     a90862b  154 lines,  50 comments
+    #     b967a08  303        146
+    #     c9037d8  339        182
+    #     e5442d1  407        237
+    #     3721ded  429        256
+    #
+    # The claim survives all five rows and needs none of the numerals: the
+    # body is mostly comment, so a needle over the whole of it is a needle
+    # over prose. The assertion's own message computes today's figures.
+    #
+    # THE SAME HAZARD WAS UNTAKEN FOR THE SDIST, TAG AND MANIFEST NEEDLES
+    # ABOVE ON THE BRANCH THAT MEASURED IT, AND IT IS TAKEN NOW. That branch
+    # scoped the other three steps out and MEASURED the cost rather than
+    # shrugging at it, which is the difference between a scope call and a
+    # shrug: of the 33 needles those three steps pin, **5** would survive
+    # deletion of their code line on prose alone — `tar tzf`,
+    # `explained.txt`, `mktemp -d`, `basename`, `cut -d- -f2` — with all 33
+    # present in code, so the exposure was latent and not live. Read
+    # 2026-08-29 at `3721ded`.
+    #
+    # THE OTHER BRANCH CLOSED THEM, AND THE MERGE IS WHERE THE TWO HALVES
+    # MEET. `_code_of` above projects ALL FOUR bodies onto their code lines,
+    # so `changelog` here is already comment-free and the local re-derivation
+    # this branch carried is gone: one projection, one definition of "code",
+    # four bodies. The sentence this paragraph replaces — *"Those three steps
+    # are outside this branch's subject and are left as they are rather than
+    # repaired here"* — was true on the branch and is FALSE on the merge,
+    # which is exactly the L24 shape, so it is corrected here rather than
+    # carried through. The denominator in the message below reads the RAW
+    # body, because the figure it reports is how much of that body is comment.
     for needle in ("CHANGELOG.md", "git for-each-ref", "%(taggerdate:short)",
                    "%(objecttype)", "GITHUB_REF_NAME", "problems+=",
-                   "refs/tags/"):
+                   "refs/tags/", "export LC_ALL=C"):
         assert needle in changelog, (
-            f"{needle!r} is gone from the changelog step body. The date this "
+            f"{needle!r} is gone from the CODE of the changelog step body — "
+            f"{len(changelog.splitlines())} code lines of "
+            f"{len(_step_body(_CHANGELOG_STEP).splitlines())}, the rest "
+            f"comment. It may still "
+            f"be in a comment; a comment is not the check. The date this "
             "gate compares against is the TAG OBJECT's tagger date, chosen "
             "over the commit's committer date on the argument beside the "
             "step; a rewrite to `git log -1 --format=%cd` refuses a release "
@@ -4528,14 +5495,12 @@ def test_the_drives_are_reading_the_real_step_bodies():
     # check out of the suite precisely because the only date available there
     # is `date.today()`, so a `$(date …)` arriving HERE would be the same
     # defect one file over — and it would be invisible to every text pin that
-    # only asserts what IS present. Read on CODE lines: the paragraphs beside
-    # the step have to be able to say what they refuse.
-    changelog_code = "\n".join(
-        line for line in changelog.splitlines()
-        if not line.lstrip().startswith("#")
-    )
+    # only asserts what IS present. Read on the same CODE lines the needles
+    # above are read on: the paragraphs beside the step have to be able to say
+    # what they refuse, and — since an auditor found the other half of it —
+    # what they do.
     for construct in ("$(date", "`date ", "date +%"):
-        assert construct not in changelog_code, (
+        assert construct not in changelog, (
             f"{construct!r} has appeared in the changelog step. The date this "
             "step compares must come from the TAG, never from the runner: a "
             "clock is the environment-dependence class that produced four of "
