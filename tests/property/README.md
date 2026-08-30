@@ -120,7 +120,7 @@ against ~60 s and is still green against a mutant a three-line probe catches.
 
 What the per-push job does buy, and it is worth having: the strategies still
 draw their boundary classes, the registered mutations still apply, every
-property still has a control, nine controls still fire, and the suite still
+property still has a control, ten controls still fire, and the suite still
 runs at all. **That is rot, caught on the push that causes it — not a soundness
 argument.**
 
@@ -129,12 +129,23 @@ argument.**
 `tests/test_skip_inventory.py::test_no_session_skip_is_undisclosed` claims the
 whole suite's skip set is complete. It **withdraws that claim** — by skipping,
 with its own reason — on any session that reported an `xfail`, and this suite
-ships one:
+ships two:
 
 ```
 the completeness pin is WITHDRAWN, not passed: this session reported
-1 test(s) as xfailed.
+2 test(s) as xfailed.
 ```
+
+**IT SAID ONE, AND SHIPPED ONE, UNTIL THE FLOAT ORACLE LANDED.** The quoted
+line above read `1 test(s) as xfailed`, and the sentence above it read "this
+suite ships one".
+`tests/property/test_float_oracle.py::test_the_executed_value_lies_inside_the_computed_box`
+is the second: `xfail(strict=True, raises=ExecutedValueOutsideBox)`, for the
+open class in which the value the compiled program computes falls outside the
+box the propagator computed for it. The count in that sentence is derived by
+the pin from `len(XFAILED)`, so nothing had to be edited for the line itself
+to stay true — which is exactly why the prose around it had to be, and is the
+reason this paragraph exists instead of a silently corrected numeral.
 
 Measured on the whole tree with hypothesis installed: `3910 passed, 13 skipped,
 1 xfailed`, exit 0, that pin among the skips — re-driven at `3482822` on jax
@@ -151,8 +162,10 @@ wrote down, and it is written down here, in `CONTRIBUTING.md` and in the
 lanes installs hypothesis, so every module under `tests/property/` gates at
 collection, no xfail is reported, and their `verdict=made` assertion holds. The
 pin is off for exactly the sessions that *can* run the property suite. It comes
-back the day the wrap remedy lands and the marker in `test_oracle.py` is
-deleted — narrowing the session does not bring it back, by the same rule.
+back the day BOTH remedies land and BOTH markers are deleted — the one in
+`test_oracle.py` and the one in `test_float_oracle.py`; narrowing the session
+does not bring it back, by the same rule. This sentence named one marker until
+the float oracle landed, and one is now not enough.
 
 **There is no nightly job.** Adding one needs a `schedule:` trigger in
 `.github/workflows/ci.yml`, and that file was being edited concurrently when
@@ -182,8 +195,22 @@ lives in the **translation** of the user's program to the jaxpr: an
 out-of-dtype-range integer literal is reduced mod `2**bits` before any stelling
 primitive binds it. An oracle that *executes* the user's program executes the
 same broken translation and cheerfully agrees with the wrong answer. Two runs
-that should agree still disagree. **Where a defect is in the translation,
-metamorphic properties are strictly stronger than an execution oracle.**
+that should agree still disagree. **For that defect — one that lives in the
+translation — a metamorphic property is strictly stronger than an execution
+oracle.**
+
+**NARROWED TO ITS SUBJECT, AND NOT DELETED.** That sentence used to end
+*"Where a defect is in the translation, metamorphic properties are strictly
+stronger than an execution oracle"*, stated over the whole class of
+translation defects, and it was read here as an argument about execution
+oracles in general. It is true of the integer-literal wrap it was written
+about, and it is exactly as true of any other defect that destroys the
+program before tracing. It says nothing about a defect that lives in the
+ANALYSIS of a program the trace represents faithfully — for which an execution
+oracle is not weaker but is the only instrument there is, because there is no
+second run to relate. `test_float_oracle.py` is that instrument, and the nine
+programs it pins are nine places where nothing metamorphic in this suite has
+anything to compare.
 
 ### The direction vocabulary, which every property uses
 
@@ -221,15 +248,312 @@ predicate is true refutes a `violated-over-set`; none confirms it.
 
 Two consequences worth keeping in mind:
 
-* **integers only.** `SOUNDNESS.md` records that real mode judges floats in
-  exact real arithmetic while integers are judged execution-faithfully. A float
-  harness can be correctly VERIFIED in ℝ and violated by IEEE execution — the
-  declared posture, not a defect. An oracle pointed at floats measures the
-  documentation.
+* **integers only — RETRACTED, AND HERE IS WHAT IT SAID.** This bullet read,
+  in full:
+
+  > **integers only.** `SOUNDNESS.md` records that real mode judges floats in
+  > exact real arithmetic while integers are judged execution-faithfully. A
+  > float harness can be correctly VERIFIED in ℝ and violated by IEEE
+  > execution — the declared posture, not a defect. **An oracle pointed at
+  > floats measures the documentation.**
+
+  Every clause of that is true except the last one, and the last one does not
+  follow. What the ℝ posture buys is that such a verdict is **disclosed**; it
+  does not make the verdict harmless, and it does not make an instrument
+  pointed at it an instrument pointed at prose. A VERIFIED that the compiled
+  program contradicts at a dtype-representable point of its own declared box
+  is unacceptable whatever ℝ says.
+
+  Measured after the argument was withdrawn and the instrument built
+  (`test_float_oracle.py`, 1500 examples at `STELLING_PROPERTY_SCALE=12.5`;
+  the dated record with its commit and command is that file's
+  `FLOAT_ORACLE_MEASURED`): **563 violations of box containment over 90
+  distinct programs and 110 distinct sites — 232 flush-or-subnormal (13
+  programs), 162 NaN (31), 83 narrow-format rounding (10), 46 reduction
+  reassociation (30), 25 overflow-to-inf (8), 15 assume-narrowing (1), 0
+  unexplained, 0 unclassified — of which 116 are an obligation whose box says
+  "definitely true for all elements" whose predicate executes FALSE at an
+  admitted point.** Nine programs are pinned as regression cases; eight of the
+  nine violate box containment against `v0.1.0`'s own `src/` as well, and five
+  of those falsify a discharge there. None of them needed a float harness to
+  be *mis*-documented to be a defect.
+
+  **The distinct-program column is the one a repair is scoped on**, and the
+  ranking inverts between the two: by events `flush(232) > reassoc(46)`, by
+  programs `reassoc(30) > flush(13)`, because one pinned example re-drawn
+  contributes as many events as it is re-drawn.
+
+  **AND THE DISTINCT COLUMN IS NOT A DENOMINATOR EITHER UNTIL IT IS CROSSED
+  WITH THE STRATEGY.** This bullet used to end the 116 with "over 21 distinct
+  programs", which is the number every consumer of that instrument quotes as
+  the scope of a repair. Crossed with the generator that drew each program:
+  **100 of the 116 events, over 5 programs, are pinned `@example`s; 16 over 16
+  are shrink neighbours of one aimed cancelling-sum construction; and the
+  unbiased grammar contributes none at all.** Six independent situations, not
+  21. They are **16 draws of one aimed construction** — which is what that
+  strategy's own docstring says it builds, and the argument needs nothing
+  else. (This read "shrink neighbours". All 16 constant vectors are distinct,
+  and of the 69 pairs that share a length and an envelope the
+  differing-element histogram is `{1: 1, 2: 6, 3: 1, 4: 2, 9: 2, 10: 1, 11: 2,
+  12: 2, 13: 3, 15: 2, 30: 2, 31: 1, 32: 20, 33: 24}`: 10 pairs differ in at
+  most 4 of 33 elements and **47 differ in 30 or more**. Independent draws of
+  one template, not shrunk copies of one program.)
+
+  **And six situations is not six pieces of work.** Derived from the
+  registry's own cause column: `flush-or-subnormal` covers three of the six
+  (`ftz-subnormal-sum`, `f32-underflow`, `f32-exp`), `narrow-format-rounding`
+  one, `assume-narrowing` one, and the cancelling-sum construction contributes
+  `reduction-reassociation`. **Four causes over six situations, and half of
+  them are one repair** — the line to scope the work on. The same crossing undoes the cause ranking's other headline — the 30
+  distinct reassociation programs are 29 draws of the strategy built to find
+  that class and one pinned member, against a leg that PROVABLY cannot reach
+  it — so the only column in that table which is a statement about the tool
+  rather than about a strategy someone aimed is the unbiased one: nan 30,
+  narrow 8, flush 7, overflow 7, reassociation 0.
+
+  The scope of THIS file's oracle (`test_oracle.py`) is still integers, and
+  that is now a statement about the exact-oracle machinery —
+  `_grammar.eval_pred_exact` works in unbounded Python integers — rather than
+  an argument that floats should not be checked. They are checked, next door.
 * **the box must be enumerable.** `_grammar.declared_points` returns `None`
   rather than a partial answer when the product of the declared boxes exceeds
   4096, and the caller discards the example. A refusal to answer, never a
   silent "no".
+
+---
+
+## The differential float oracle, and what a lane without it loses
+
+`test_float_oracle.py` asks the one question the rest of the repository does
+not: **is the value the compiled program computes inside the box the
+propagator computed for it?** That sentence is what every VERIFIED rests on,
+and it is false on this tree in nine pinned programs. The machinery is in
+`_float_oracle.py`; the two legs are the containment property (xfail-marked,
+strict, `raises=ExecutedValueOutsideBox` — the class is open) and the
+residual, which classifies every violation and forbids one that is **proved**
+to be a box wrong about ℝ.
+
+**It runs the program twice.** The op-by-op walk is the TRACE's granularity,
+not the program's: an equation whose operands are all compile-time constants
+is executed at runtime, where the backend flushes a subnormal, instead of
+being constant-folded in full precision the way the compiled program folds it
+(`jax.jit(lambda: jnp.sqrt(5e-324))()` is `2.2227587494850775e-162`;
+`jnp.sqrt(jnp.asarray(5e-324))` is `0.0`, and the box contains the first).
+Every candidate violation is re-checked against the same jaxpr staged into one
+`jax.jit` and declined if the compiled program does not have it — **9 of 572
+candidates** in a 1500-example run. (That read "76 of 639". It was correct at
+`03b2dbe` — re-derived by `git archive`ing that commit into a scratch tree and
+re-running the same command: 76 declines against 563 reported violations — and
+the tree that shipped it declines 9. A figure left behind by its own tree.)
+That second route copies
+`stelling.falsify._whole_program_route`, including the two properties that
+make it safe: it is consulted only after a violation, and it can only decline.
+
+**`UNEXPLAINED` is a proof, `unclassified` is a refusal, and they used to be one
+answer.** A violation is `UNEXPLAINED` only when the exact real value of the
+equation on the values it ran on is computable and is OUTSIDE the box — the
+box is wrong about ℝ. Where no exact reading exists (`sqrt`, `exp`, `sign`,
+every reduction but `reduce_sum`) the answer is `unclassified` and is censused.
+A green residual leg therefore says *no violation was PROVED to be a box wrong
+about ℝ*.
+
+**And `unclassified` is NOT the measure of how much the proof did not cover**,
+which is what this paragraph used to end with. `unclassified` is 0 in the
+shipped run and it measures the wrong thing: a violation an UNPROVED rule
+names is not unclassified, it is classified on no evidence. The census carries
+`_float_oracle.BASES` — proved / sound-by-construction / heuristic — and the
+**heuristic** row is the honest answer. `sound-by-construction` was overstated
+too: it means the rule needs no ℝ reading to be right, and three rules claimed
+it while making a claim about ℝ (`overflow-to-inf`, `assume-narrowing`, and
+the operand-NaN rule, which scanned every element of every operand instead of
+the ones the element under judgement depends on). All three are proved where
+they can be and heuristic where they cannot now.
+
+**Three things it is blind to, stated here because a reader of a null result
+will look here.** They are each a mechanism in `_float_oracle.py`, not a
+warning:
+
+1. **⊤ is unfalsifiable, and it is not the only bucket that is.** Every
+   decline lands as a ⊤ box — one that admits every value its dtype can
+   take — so this instrument sees nothing exactly where the propagator already
+   declined. The census counts boxes in FOUR buckets, because they are
+   unfalsifiable for entirely different reasons and only the last is a place
+   an executed value can be caught outside its box. Measured over 1500
+   examples, of **13041** boxes read: **4015 ⊤ (31 %), 1948 empty (15 %, a
+   size-0 declaration), 1587 integer (12 %, never compared — a binary64 box
+   endpoint cannot represent an `int64` above 2**53), 5491 compared (42 %).**
+   Both properties floor on the last alone, and on the last **restricted to
+   the unbiased generator** — floored on the whole, the leg stayed green with
+   a size-0 declaration standing in for the whole search.
+
+   **THAT FIGURE HAS BEEN WRONG TWICE, IN THE SAME DIRECTION.** It read 24 %
+   blind while the integer bucket was counted inside "76 % falsifiable" with
+   no census, no floor and no disclosure; it then read 41 % here and 39 % in
+   the module while `_float_oracle.is_top` tested for `±inf` and therefore
+   missed **the bool lattice's own top**. A `bool` box of `[0, 1]` admits both
+   values a bool can take, so no executed bool can fall outside it — and every
+   declined comparison, connective and obligation in this grammar produces
+   one. Measured 2026-08-29 with `is_top` instrumented to report the split it
+   was hiding: of the 7719 boxes the previous table called `compared`, **2228
+   were bool `[0, 1]`**, 1777 were a definite bool and 3714 were float. `is_top`
+   asks *"does this box admit every value the executed dtype can take"* now,
+   which is one rule rather than a list of dtype spellings, and **58 % of the
+   field of view is blind**. The pass rate is not a safety signal. NaN is the
+   only cause that survives a ⊤, because no box contains a NaN — which makes a
+   float ⊤ very slightly less blind than a bool one.
+2. **The sampler's grid.** `np.float32(1e-20)` is `9.9999997e-21`, *below* a
+   box declared `(1e-20, 1e-10)`; sampling there and comparing against a box
+   built for `[1e-20, …]` invents violations of the identity, with no
+   arithmetic in them. `_float_oracle.snap_inward` steps inward with
+   `nextafter` in the program's own format, and a declaration with no value of
+   its dtype inside its box is reported `unsampleable` and contributes
+   nothing — a refusal, not a null result. Driven both ways with the two
+   `nextafter` steps deleted on a copy of the tree, 600 draws of the unbiased
+   leg: **unsnapped, 246 violations of which 162 (66 %) land on `stelling_any`
+   itself; snapped, 148 violations and 0 on `stelling_any`.** Two thirds of
+   what an unsnapped instrument finds is its own sampler's rounding — and
+   nothing asserted that until an audit said so, because with the snap deleted
+   the containment leg still XFAILed and the residual leg failed only
+   incidentally. The guard is explicit now, and it asks whether an assume
+   NARROWED this declaration rather than whether the harness contains the word:
+   it tested presence, and a **vacuous** `assume(x0 >= -1e300)` disarmed it
+   (0 artefacts where no assume gives 2), exempting 172 of 1206 read programs.
+   It is not a blanket ban either: a `stelling_any` violation under a genuinely
+   narrowing assume is the ninth member. **THREE DEFECTS OF THAT SHAPE HAVE
+   NOW BEEN FOUND IN THIS ONE SAMPLER**: the float32 endpoint it was written
+   for; integer candidates routed through `float`, so
+   `any_array((), "int64", (1, 2**63 - 1))` sampled `-9223372036854775808`,
+   outside its own box; and an INFINITE endpoint, which under ℝ semantics means
+   *unbounded* and is not a member of the set — 71 of 33684 candidates were
+   ±inf and 51 of 563 violations occurred at one, every one of them in the NaN
+   row. `snap_inward` clamps to the format's largest finite magnitude now, the
+   way `falsify.probe`'s bool branch clamps, rather than refusing the way its
+   float branch does; the note there says why the two precedents differ.
+
+   **AND THE GUARD COULD NOT SEE THE THIRD OF THE THREE, WHICH IS WHY THERE IS
+   NOW A CHECK AT THE SOURCE.** `sampler_artefacts` fires only on a *violation*
+   at `stelling_any`, and an unbounded declaration's own box is ⊤ — so ±inf is
+   inside it, there is no violation to fire on, and the counter was
+   structurally blind to the very class it had just been extended for. Same
+   seed, `STELLING_PROPERTY_SCALE=12.5`, with the ±inf clamp removed *and* the
+   membership check removed (without which the run cannot finish): `nan` goes
+   from 162 to 164 events and from 30 to 35 distinct unbiased programs, every
+   other cause is identical, and **`sampler_artefacts` is 0 in both**.
+   `_float_oracle.sample_points` now asserts, where each point is BUILT, that
+   every element of every array it returns is a finite member of the declared
+   `(lo, hi)` — an `AssertionError`, not a counted violation, because a
+   sampler outside its own declared box is this module being wrong rather than
+   a finding about stelling. Also repaired there: an integer declaration of
+   `(inf, inf)` used to leave `snap_inward` as an `OverflowError` from
+   `math.ceil` rather than as a refusal; 8000 hypothesis examples over all 13
+   dtypes and all seven `SHAPES` find it, and none of the shipped generators
+   can.
+   (**Reported, not repaired here:**
+   the declared endpoints stelling stores are binary64 images and are *not*
+   snapped to the program's dtype grid, so a float32 box can have endpoints no
+   float32 can take. That is a declaration-layer defect; this instrument only
+   works around it.)
+3. **What the generator cannot reach.** The unbiased grammar cannot build the
+   reassociation class *at all* — `_grammar.SHAPES` tops out at four elements
+   and `jnp.sum` only splits into two windows at n ≥ 33 — so that is a proof
+   about the generator and not a zero in a table. **The premise of that proof
+   was stated in three docstrings and checked in none**; the residual leg
+   asserts it against `_grammar.SHAPES` on every run now, because the whole
+   weight of "reassociation is second by distinct programs" rests on the
+   unbiased leg being unable to reach the class rather than merely having
+   missed it.
+   `_float_oracle.cancelling_sum_programs` builds the shape deliberately, and
+   needs all three of a degenerate envelope, per-element constants and forced
+   cancellation at once. Measured, 200 programs of that construction per size:
+   **0/200 at each of n = 16, 30, 31, 32; 18/200 at n = 33; 15/200 at n = 34;
+   9/200 at n = 64; 0/200 at n = 128** — and every row is byte-identical on
+   jax 0.10.2, so the boundary is a property of the XLA lowering rather than of
+   one series. **The n = 128 row is quoted with the rest and is NOT
+   explained**: 64 exact pairs may simply re-cancel under whatever split XLA
+   picks there. It is a fact about this construction, not about the boundary,
+   and the n <= 32 rows are what establish the boundary. This paragraph
+   omitted that row and then concluded about the boundary anyway, which is
+   picking the rows that agree. It finds that class and nothing else, which is
+   why it is a separate strategy from the unbiased one.
+
+**How far back the class goes, re-derived rather than quoted.** With
+`git archive v0.1.0 src` on `PYTHONPATH` and v0.1.0's two-trace API
+(`harness.trace` plus `jax.make_jaxpr`, since `trace_with_jaxpr` did not exist
+yet) standing in for today's one: **nine of the ten pinned programs violate
+box containment at v0.1.0 too, and five of them falsify a DISCHARGE there** —
+`ftz-subnormal-sum`, `f32-underflow`, `f32-single-multiply`, `f32-exp` and
+`assume-narrows-past-the-program`.
+The one that does NOT reach v0.1.0 is the reassociation member, and the reason
+is worth knowing: v0.1.0's `interval.mul` was not exact, so `x * K` boxed to
+`[7.205759403792793e+16, 7.205759403792795e+16]` instead of to a point and the
+sum's box came out `[-570.0019531250001, 694.0029296875001]` — wide enough to
+contain the executed `9.0`. Tightening the multiply to the exact rational
+corner is what made that class visible. The slack was never soundness.
+
+Neither generator reaches `scan`/`while`/`cond`, `vmap`, `grad`, the affine
+refinement, the solver legs or `semantics="ieee"`, and integer-dtype outputs
+are counted but not compared (a box endpoint is a binary64 float and an
+`int64` past 2\*\*53 has no exact binary64 image, so the comparison would report
+its own rounding). The wrap class those dtypes carry is `test_oracle.py`'s
+subject and is judged there exactly.
+
+**Cost, and how it runs.** 31 ms per example: a 1500-example run of the
+residual leg takes 46.2 s at load average 2.4 on a 24-core box. The cost is
+dominated by jax dispatch — the op-by-op walk always, one `jax.jit` compile
+for each program whose first route found a violation, a second forward
+propagation for the same programs to read their un-narrowed boxes, and a third
+walk in exact rationals for the ones where an `assume` narrowed the box. At
+the `ci` profile the whole module costs **13.10-13.67 s**, three runs at load
+average 2.4 (`pytest -q -ra tests/property/test_float_oracle.py`, `1 passed,
+1 xfailed`, zero warnings) —
+the containment leg stops at its first violation and then shrinks, and the
+residual leg runs its full 120 examples plus 11 pinned ones, after asserting
+the two premises it spends: `_grammar.SHAPES` still cannot reach `jnp.sum`'s
+two-window split, and the exact reading of a conversion is what the
+conversion computes.
+
+**The nearest thing in `src/`, and what it does with these nine.**
+`stelling.falsify.probe` (`check(..., falsify="sample")`) also executes the
+program at concrete points — but it asks whether the OBLIGATION is false
+there, not whether each value is inside its box, and it is default-off and
+`experimental`. Driven over all nine members plus the overflow probe,
+2026-08-28: **it reports none of the ten.** Two are UNKNOWN, so the probe
+never runs (it fires only after a VERIFIED); one is REFUTED; seven are
+VERIFIED and stay VERIFIED. For five of those seven it SAW the executed
+violation and declined it, in its own words:
+
+```
+falsification probe: 28 point(s) executed … declined 28 float-rounding-artefact.
+28 EXECUTED VIOLATION(S) WERE DECLINED, NOT ABSENT: at those points the
+obligation evaluated FALSE and the probe would not report it
+(28 exact-replay-holds-over-the-rationals).
+```
+
+— 28 points for `ftz-subnormal-sum`, 12 for `f32-underflow`, 2 each for
+`f32-single-multiply` and `assume-narrows-past-the-program` (which executed 72
+points, 63 of them admitted), and 58 for `f32-exp` under
+`no-exact-reading-of-this-program`. That decline rule *is* the ℝ defence in
+instrument form, disclosed rather than hidden, and it is why the probe is not
+a stand-in for this oracle. The other two VERIFIED members produce no
+obligation violation at all: `1/Σ(…)` executes `inf > 0` and the float32
+square executes `inf > 0`, both TRUE, so the obligation holds while the box
+for the equation upstream of it excludes the value that was computed. **A
+box-containment oracle sees a defect one equation before an obligation oracle
+can.**
+
+**What a lane without hypothesis loses, and what stands in for it.**
+`hypothesis` is a dev-group dependency and is installed by **none** of the
+three whole-suite lanes, so on the jax, jax-0.10 and zero-dep lanes this module
+gates at collection like every other file here, and those lanes check box
+containment **not at all**. What stands in
+for it in a merge lane today is: the `property` job in `.github/workflows/ci.yml`
+(which installs hypothesis and runs both legs on every push, and whose xfail
+step asserts **exactly two** `XFAIL` lines so that a marker cannot be weakened
+silently), and `tools/property_check.py --control float-oracle-unexplained`,
+which is in that job's per-push control list. **There is no stand-in that runs
+in a lane without hypothesis**, and that is a gap, not an arrangement: a
+zero-dep or jax-lane green tick says nothing whatever about whether an executed
+value is inside its box.
 
 ---
 
@@ -522,11 +846,13 @@ refusals are recorded next to the clauses that replaced them:
 | file | what it is |
 |---|---|
 | `_grammar.py` | the harness IR, the strategies, the exact oracle, the mutations, and `render()` — which is what makes a shrunk counter-example a hand reproducer |
+| `_float_oracle.py` | the differential float oracle's machinery: the inward-snapping sampler, the op-by-op jaxpr interpreter, the box reader, the cause classifier, and the pinned members |
 | `_runner.py` | calling `check`, classifying refusals, and the `Census` that every property asserts a floor on |
 | `_profiles.py` | budgets and determinism, one environment variable |
 | `_corpus.py` | the deterministic corpus the cross-series differential needs, because two interpreters cannot share a Hypothesis search |
 | `positive_controls.py` | where every property is known to fail. Imports nothing |
 | `test_oracle.py` | the one-sided oracle, both directions |
+| `test_float_oracle.py` | is the executed value inside the box the propagator computed? Two legs: the containment property (xfail-marked, open) and the residual, which forbids a violation with no IEEE cause |
 | `test_metamorphic.py` | two runs related to each other |
 | `test_cvc5_protocol.py` | the cvc5 record protocol as a fuzz target, flat and stateful |
 | `test_cross_series.py` | jax 0.10.2 against jax 0.11.0 |

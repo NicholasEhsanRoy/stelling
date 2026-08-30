@@ -359,6 +359,8 @@ def test_the_registry_still_covers_the_defect_classes_it_was_built_for():
         "cvc5-exit-tell",       # a definite answer over a nonzero exit
         "cvc5-phantom-model",   # a harvested model the child never wrote
         "cross-series",         # jax 0.10.2 vs 0.11.0
+        "float-oracle-box",     # the executed value outside the computed box
+        "float-oracle-unexplained",  # a box wrong about the REALS
     }
     assert want <= have, f"positive controls have been removed: {sorted(want - have)}"
 
