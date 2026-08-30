@@ -1584,8 +1584,11 @@ def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
     `jobs.test.steps[0]` and `jobs.build.steps[0]`; `publish` checks
     nothing out, and `grep -c "uses: actions/"` reading EIGHT there counts
     two artefact steps and four comment mentions alongside them. Both
-    checkouts carry exactly `persist-credentials: false` and
-    `fetch-depth: 0`, and no `fetch-tags`, which `fetch-depth: 0` makes
+    checkouts carry `persist-credentials: false`, `ref: ${{ github.sha }}`
+    and `fetch-depth: 0` — the `ref:` input arrived later than this sentence,
+    which read "exactly `persist-credentials: false` and `fetch-depth: 0`",
+    and it is what stops the action re-fetching `+<github.sha>:refs/tags/<tag>`
+    and overwriting a tag ref — and no `fetch-tags`, which `fetch-depth: 0` makes
     inert because the all-history refspec already contains
     `+refs/tags/*:refs/tags/*`. Built the way that config builds a tree —
     `git init`, ONE fetch of `+refs/heads/*:refs/remotes/origin/*` and
@@ -1596,7 +1599,36 @@ def test_a_claim_about_the_tags_TREE_is_decided_against_the_tag():
     built from, not of the workflow, so it moves on every commit and no
     live value for it is pinned here; the two answers that are about the
     workflow are the two above.) So this check decides there rather than
-    skipping, and refusal point #1 is no longer blocked by it or by
+    skipping.
+
+    **AND THE SANDBOX THAT SENTENCE DESCRIBES IS THE WRONG SHAPE, WHICH IS
+    SAID HERE BECAUSE THE CONCLUSION SURVIVES AND THE METHOD DOES NOT.**
+    *"Built the way that config builds a tree -- `git init`, ONE fetch ..."*
+    is not how `actions/checkout@v4` builds one for a `release: published`
+    event: it fetches all refs and THEN re-fetches
+    `+<github.sha>:refs/tags/<tag>`, force-writing the release commit over
+    that one tag ref. A correct measurement of the wrong process is this
+    project's L28, and it is what let `release.yml`'s changelog gate refuse a
+    correctly annotated `v0.2.1` on 2026-08-28.
+    :func:`tests.test_release_gates._checkout_the_way_actions_checkout_does`
+    is the fixture that runs the action's own refspecs.
+
+    **WHAT IS ASSERTED HERE IS UNAFFECTED, AND THAT IS A MEASUREMENT AND NOT A
+    HOPE.** The second fetch rewrites the TRIGGERING tag's ref and no other.
+    Driven 2026-08-28 against a mirror of this repository with the real
+    two-fetch sequence for `v0.2.1`: `refs/tags/v0.1.0`,
+    `refs/tags/v0.1.0-scaffolding` and `refs/tags/v0.2.0` all still read
+    `tag`, only `refs/tags/v0.2.1` reads `commit`,
+    `git rev-parse --is-shallow-repository` is `false`, and
+    `v0.1.0^{commit}` resolves to `e67688e`. :data:`_TAG` here is `v0.1.0`,
+    which is not the tag any release run triggers on while a later version is
+    being cut -- so this check reads an intact ref. IT WOULD NOT IF `_TAG`
+    EVER BECAME THE TRIGGERING TAG, and every reader of it in this module
+    peels (`{_TAG}^{{commit}}`, `{_TAG}:<path>`, `merge-base --is-ancestor`),
+    which returns the same answer through a tag object or through the commit
+    itself -- driven side by side on a clobbered and an intact ref.
+
+    Refusal point #1 is therefore no longer blocked by this check or by
     `tests/test_proposed_page_headers.py`, whose ancestry check decides
     too: `deadbee` planted in a **Status:** paragraph is `1 failed` in
     that sandbox, named as a page defect.

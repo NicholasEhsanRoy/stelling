@@ -551,10 +551,43 @@
 # 186 lines and byte-identical at `0ba04ba`, `f470d96`, `5de3ac2`, `bcdec4a`
 # and `6fa2e7f` — one sha256,
 # ee62b9ec8353c8746351ae0bf15957f14b353ccddfa95502ebed2279cf890709, five
-# ways, and `eb26d48` before them is the last commit that moved it. It is
-# 188 lines now, sha256
-# 40a96feaf4394974a0ebdc2b9fc8357d27ab59b38e2701196dea215b02f5a055, and the
-# two added lines are the whole of the difference: `fetch-depth: 0` in each of
+# ways, and `eb26d48` before them is the last commit that moved it.
+#
+# THE SENTENCE THAT FOLLOWED READ *"It is 188 lines now, sha256
+# 40a96feaf4394974a0ebdc2b9fc8357d27ab59b38e2701196dea215b02f5a055"* — AND IT
+# ROTTED, which is this file's own named defect: a present-tense claim
+# standing where a dated record belongs. RE-DERIVED 2026-08-28 with that same
+# `_code_lines` (blank lines kept, joined with newlines, one trailing
+# newline): `6fa2e7f` reads 186 / ee62b9ec…, which is the figure above and
+# confirms the recipe; `a90862b` — THIS FILE AS RELEASED IN `v0.2.1`, several
+# release-machinery commits later — is 294 lines, sha256
+# 44b6e42d060b8d9dfb92a6a52118a711a8ac2de16a9305a56dfa7d98296e2334, so "188"
+# had been false for every one of those commits with nothing in the tree
+# reading it.
+#
+# THEN THE RECORD ITSELF MIS-ATTRIBUTED A FIGURE, WHICH IS THE SAME DEFECT ONE
+# SIZE SMALLER. It read *"the commit that made the tag reading below ask
+# `origin` first and infer from the object store only as a fallback makes it
+# 377 lines, sha256 ea01463a…"* — and 377 / ea01463a is the commit AFTER that
+# one. Attributed by commit rather than by description, 2026-08-28:
+#
+#   6fa2e7f  186  ee62b9ec…   the last comment-only commit in that chain
+#   a90862b  294  44b6e42d…   this file as released in `v0.2.1`
+#   a19b736  314  1a3591e0…   the tag ref re-fetched from `origin`
+#   fd03c02  361  b00fc827…   `origin` asked first, object store as fallback
+#   f39c35e  377  ea01463a…   the fallback rebuilt on three filters
+#   2b2607a  327  5b611d79…   the fallback DELETED; the checkout stops
+#                             overwriting the ref instead
+#   THIS     330  23e97fc3…   the pins under it derived from parsed
+#                             structure rather than from spellings
+#
+# NOTHING READS ANY OF THESE — `grep -rn` over `tests/` and `src/` for every
+# digest, 2026-08-28, finds no hit outside this comment — so they are a
+# record, not a pin, and a record has to carry its date and its commit.
+#
+# THE CLAIM IT WAS MAKING IS STILL TRUE OF ITS OWN COMMIT and is kept as one:
+# at `6fa2e7f` -> that commit, the
+# two added lines were the whole of the difference: `fetch-depth: 0` in each of
 # this file's two `actions/checkout@v4` steps. Parsed with PyYAML and compared
 # leaf by leaf against `6fa2e7f`, this workflow gains exactly two leaves —
 # `jobs.test.steps[0].with.fetch-depth` and
@@ -693,14 +726,26 @@
 # AND IT IS PINNED NOW, because a line whose absence is silent is a line that
 # comes back off.
 # `tests/test_release_gates.py::test_every_checkout_in_this_file_takes_the_WHOLE_history`
-# derives the checkout steps FROM THIS FILE — matching `actions/checkout@` and
-# not `actions/`, for the reason the count paragraph above gives — and fails
-# if any of them lacks `fetch-depth: 0`. Driven RED five ways, each alone:
-# either line deleted; both deleted, which is this file at `6fa2e7f`;
-# `fetch-depth: 0` rewritten to `fetch-depth: 1`; and a NEW `actions/checkout`
-# step added to `publish` without the key. It types no count, so a checkout
-# added later is covered without a re-derivation — which the header count and
-# the four kinds of ordinal above still are not.
+# derives the checkout steps FROM THIS FILE and fails if any of them lacks
+# `fetch-depth: 0`. Driven RED five ways, each alone: either line deleted;
+# both deleted, which is this file at `6fa2e7f`; `fetch-depth: 0` rewritten to
+# `fetch-depth: 1`; and a NEW `actions/checkout` step added to `publish`
+# without the key. It types no count, so a checkout added later is covered
+# without a re-derivation — which the header count and the four kinds of
+# ordinal above still are not.
+#
+# AND "DERIVES" WAS AN OVERSTATEMENT UNTIL RECENTLY, WHICH IS WORTH LEAVING
+# HERE BECAUSE THIS PARAGRAPH ASSERTED IT FOR SEVERAL COMMITS. The scan
+# matched the LITERAL `- uses: actions/checkout@` at the head of a code line,
+# so a step written in the ordinary alternative order — `- name:` first,
+# `uses:` second — was invisible to it, and because it then asserted only that
+# it had found SOME checkout, a file mixing the two orders was silently
+# half-held. Driven: the `build` checkout rewritten that way with both of its
+# inputs deleted left thirteen modules that read this file at `240 passed, 1
+# skipped`. The steps are located by their position as block-sequence items
+# under `steps:` now, and their keys by indentation, with a count cross-check
+# against the `uses:` assignments naming the action so that a shape the reader
+# cannot parse is a red rather than a shorter list.
 
 name: release
 on:
@@ -718,6 +763,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # THE COMMIT, NOT THE TAG REF — the same input as the `build` job's
+          # checkout and for the same reason, written out there in full. This
+          # job does not read a tag object, so it does not need it TODAY; it
+          # carries it because a checkout property that holds in one of two
+          # steps is the asymmetry this file already spends a paragraph on,
+          # and because the tree is byte-identical either way (measured: HEAD
+          # and `HEAD^{tree}` unchanged, only `refs/tags/<tag>` differs).
+          ref: ${{ github.sha }}
           # FULL HISTORY, AND IT IS THE DIFFERENCE BETWEEN A CHECK AND A SKIP.
           # This job is refusal point 1, and some of what it runs reads git
           # HISTORY rather than the git INDEX. At the default depth of 1 those
@@ -816,6 +869,76 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # ── AND THE TAG REF IS NOT REWRITTEN, BECAUSE THIS CHECKOUT ────
+          # ── ASKS FOR A COMMIT AND NOT FOR THE TAG ──────────────────────
+          #
+          # `actions/checkout@v4` force-writes the release COMMIT over
+          # `refs/tags/<tag>` on a release event, which is what made the step
+          # below refuse a correctly annotated `v0.2.1` on 2026-08-28. THE
+          # WORKFLOW CHOOSES THAT, and it can choose otherwise. Read off the
+          # action's own source at `11d5960` rather than inferred:
+          #
+          #   `input-helper.ts`  an input `ref` matching `^[0-9a-fA-F]{40}$`
+          #                      sets `commit = <sha>` and `ref = ''`
+          #   `ref-helper.ts`    `testRef` is `if (!commit) return true`,
+          #                      `else if (!ref) return shaExists(commit)`,
+          #                      and only then the `REFS/TAGS/` branch
+          #                      `tagExists(t) && commit === revParse(ref)`
+          #   `git-source-provider.ts`  at `fetchDepth <= 0` it fetches all
+          #                      history and re-fetches ONLY IF `testRef` is
+          #                      false
+          #
+          # With no `ref:` the action takes `github.ref` = `refs/tags/<tag>`
+          # and `github.sha` = the COMMIT, so `testRef` compares the tag
+          # OBJECT's sha against the commit's, finds them different, and
+          # re-fetches `+<github.sha>:refs/tags/<tag>`. With `ref:` a bare
+          # 40-hex sha it takes the `!ref` branch instead, `shaExists` is TRUE
+          # after the all-history fetch, and THERE IS NO SECOND FETCH.
+          #
+          # DRIVEN against a mirror of this repository, 2026-08-28, `v0.2.1`:
+          #
+          #   no `ref:`              SECOND FETCH   refs/tags/v0.2.1 commit
+          #                                         a90862ba  taggerdate empty
+          #   `ref: github.sha`      no second      refs/tags/v0.2.1 tag
+          #                          fetch          99418c06  2026-08-28
+          #
+          # HEAD and `HEAD^{tree}` are byte-identical in both, which is the
+          # whole point: this changes NOTHING about which tree is built and
+          # everything about whether the tag can still be read from it. The
+          # step below keeps its own re-fetch anyway, because it cannot verify
+          # what its job's checkout was configured with.
+          #
+          # IT IS SHA-1-SPECIFIC AND THAT IS DECLARED RATHER THAN DISCOVERED
+          # — AND THE MECHANISM WRITTEN HERE FIRST WAS WRONG IN THE PERMISSIVE
+          # DIRECTION, WHICH IS WORSE THAN THE CAVEAT ITSELF. It read: *"in a
+          # SHA-256 repository `github.sha` is 64 hex characters, does not
+          # match, and is treated as an unqualified REF name — at which point
+          # the second fetch is back and the step below is carried by its own
+          # re-fetch … the step refuses on a lightweight-looking ref it cannot
+          # re-fetch."* BOTH CLAUSES ARE FALSE. `input-helper` assigns
+          # `result.commit` only inside the 40-hex branch, so with a 64-hex
+          # `ref` it is left UNDEFINED — and `testRef` returns true at its
+          # very first line, `if (!commit) return true`. So there is no second
+          # fetch and `refs/tags/<tag>` stays INTACT. What happens instead is
+          # that `getCheckoutInfo` reaches its unqualified-ref branch, finds
+          # neither a branch nor a tag by that name, and THROWS: the job dies
+          # at the checkout step and the step below never runs at all.
+          #
+          # Driven at the git level against a mirror of this repository,
+          # 2026-08-28: after the all-history fetch `refs/tags/v0.2.1` reads
+          # `tag` / `2026-08-28`, and `git checkout --force <64 hex>` is rc=1
+          # (*"did not match any file(s) known to git"*) leaving NO HEAD and
+          # the tag ref untouched. The conclusion the old sentence reached is
+          # still right — this fails closed — but a reader reasoning from the
+          # mechanism it gave would expect a refusal from the step below, and
+          # what they would actually see is a red checkout. This repository is
+          # SHA-1 today and nothing here detects the day it is not.
+          #
+          # AND `fetch-depth: 0` IS STILL LOAD-BEARING, for a second reason
+          # now. At depth 1 the refspec is `[commit]` and NO tag ref is
+          # fetched at all — measured, `refs/tags/*` is empty — so the step
+          # below would have nothing to read without the network.
+          ref: ${{ github.sha }}
           # FULL HISTORY HERE TOO, AND NOT BECAUSE THIS JOB NEEDS IT TODAY.
           # That is said plainly rather than implied, because a line justified
           # by a reason that is not its own is a line the next reader deletes.
@@ -823,22 +946,77 @@ jobs:
           # — the INDEX, which a depth-1 checkout has in full"* AND THIS
           # COMMIT MAKES IT FALSE: the step immediately below calls
           # `git for-each-ref refs/tags/<tag>`, which reads a REF and the tag
-          # OBJECT under it, neither of which is the index. THE CONCLUSION
-          # SURVIVES, RE-MEASURED RATHER THAN RE-ASSERTED. Sandbox built the
-          # way `actions/checkout@v4` builds one (`git init`; `git remote
-          # add`; ONE `git fetch` with the depth under test) over a mirror of
-          # this repository, 2026-08-28: with `--depth=1
-          # +refs/tags/v0.2.0:refs/tags/v0.2.0` the clone is shallow
-          # (`git rev-parse --is-shallow-repository` = true) and
-          # `%(objecttype)` / `%(taggerdate:short)` still read `tag` /
-          # `2026-08-25`. The tag OBJECT arrives WITH the tag REF; what a
-          # depth-1 clone lacks is history, and the step below reads none.
-          # The version hatchling stamps into both artefacts is still read
-          # from `[tool.hatch.version]`'s path, never from a tag or a `git
-          # describe`. So nothing in this job is measurably different with
-          # this line or without it, TODAY — but it is true for one reason
-          # fewer than it was, and the sentence that made it true of every
-          # git call in the job is retracted above rather than deleted.
+          # OBJECT under it, neither of which is the index.
+          #
+          # ── AND THE RE-MEASUREMENT THAT FOLLOWED IS ITSELF RETRACTED. ────
+          # ── IT READ: ────────────────────────────────────────────────────
+          #
+          #   *"THE CONCLUSION SURVIVES, RE-MEASURED RATHER THAN RE-ASSERTED.
+          #   Sandbox built the way `actions/checkout@v4` builds one (`git
+          #   init`; `git remote add`; ONE `git fetch` with the depth under
+          #   test) over a mirror of this repository, 2026-08-28: with
+          #   `--depth=1 +refs/tags/v0.2.0:refs/tags/v0.2.0` the clone is
+          #   shallow (`git rev-parse --is-shallow-repository` = true) and
+          #   `%(objecttype)` / `%(taggerdate:short)` still read `tag` /
+          #   `2026-08-25`. The tag OBJECT arrives WITH the tag REF; what a
+          #   depth-1 clone lacks is history, and the step below reads none."*
+          #
+          # THE SANDBOX MODELLED ONE FETCH AND CHOSE ITS OWN REFSPEC; THE
+          # ACTION DOES NEITHER. With `fetch-depth: 0` it fetches every ref,
+          # then re-fetches `+<github.sha>:refs/tags/<tag>` — because its own
+          # `testRef` compares `git rev-parse refs/tags/<tag>` (the TAG
+          # OBJECT's sha, for an annotated tag) against `github.sha` (the
+          # COMMIT's) and finds them different — and that second fetch
+          # force-writes the commit over the tag ref. At `fetch-depth: 1` it
+          # makes that SAME `+<github.sha>:refs/tags/<tag>` fetch as its only
+          # one. Re-derived against a mirror of this repository, 2026-08-28,
+          # `v0.2.1`: after the real depth-0 sequence `%(objecttype)` is
+          # `commit` and `%(taggerdate:short)` is empty, and at depth 1 the
+          # same, with the tag object not in the store at all. So *"the tag
+          # OBJECT arrives WITH the tag REF"* is false at BOTH depths for the
+          # action this job runs, and the sentence is kept above rather than
+          # deleted because a correct measurement of the wrong process is the
+          # exact defect it licensed — this repository's L28, inside the gate
+          # `0.2.1` shipped as its headline release-machinery item. The full
+          # sequence, the cost, and the repair are beside the step below.
+          #
+          # AND THE NEGATIVE CONCLUSION HAS NOW FLIPPED, WHICH IS THE THIRD
+          # TIME THIS PARAGRAPH HAS MOVED AND THE FIRST TIME IT CHANGES SIDES.
+          # It read: *"THE NEGATIVE CONCLUSION STILL HOLDS, FOR A DIFFERENT
+          # REASON. The step below does not need `fetch-depth: 0` — not
+          # because the tag object arrives with the ref, which it does not,
+          # but because the step now re-fetches the ref from `origin` itself
+          # and reads what that brings."* THE STEP BELOW NEEDS THIS LINE NOW.
+          # Its first route resolves the tag from an annotated tag OBJECT that
+          # is already in this workspace's store — un-named by the second
+          # fetch but not deleted — and that object is there only because
+          # `fetch-depth: 0` made the first fetch bring every tag. At
+          # `fetch-depth: 1` the action makes one `+<github.sha>:refs/tags/<tag>`
+          # fetch and the object is absent entirely (measured 2026-08-28:
+          # `git cat-file -t 99418c0` -> "could not get object info"), so the
+          # step falls through to a network re-fetch that is ANONYMOUS here,
+          # because both checkouts say `persist-credentials: false`. On a
+          # private repository that fetch cannot succeed. So this line is what
+          # stands between this job and a step that could not decide anything
+          # without the network.
+          #
+          # THE REASON HAS MOVED ONCE MORE AND THE PREVIOUS ONE IS RETRACTED
+          # HERE. It read: *"Its first route resolves the tag from an
+          # annotated tag OBJECT that is already in this workspace's store --
+          # un-named by the second fetch but not deleted."* There is no such
+          # route any more; it was deleted with the input below, which stops
+          # the second fetch happening at all. What `fetch-depth: 0` buys this
+          # step now is simpler and stronger: the all-history refspec contains
+          # `+refs/tags/*:refs/tags/*`, so `refs/tags/<tag>` ARRIVES, intact,
+          # with no network of the step's own. At depth 1 the refspec is
+          # `[commit]` and there are NO tag refs at all -- measured, empty --
+          # so the step would have nothing to read.
+          #
+          # The version hatchling stamps into both artefacts is
+          # still read from `[tool.hatch.version]`'s path, never from a tag or
+          # a `git describe`; that half is unchanged. And the sentence that
+          # made this line true of every git call in the job is retracted
+          # above rather than deleted.
           #
           # What it buys is that history is a property of THIS FILE rather
           # than of one step in it. The asymmetry this line closes went
@@ -1059,15 +1237,123 @@ jobs:
       # checkout resolved, so the tag object read here is the one the tree in
       # the workspace came from.
       #
-      # THE TAG OBJECT IS READABLE WITHOUT `fetch-depth: 0`, MEASURED, so
-      # this step is NOT a new reason for the line above it and does not get
-      # to claim one. Sandbox built the way `actions/checkout@v4` builds one
-      # (`git init`; `git remote add`; ONE `git fetch` with the depth under
-      # test) against a mirror of this repository, 2026-08-28: with
-      # `--depth=1 +refs/tags/v0.2.0:refs/tags/v0.2.0` the clone is shallow
-      # and `%(objecttype)`/`%(taggerdate:short)` still read `tag` /
-      # `2026-08-25`. The tag OBJECT arrives with the tag REF; what a depth-1
-      # clone lacks is history, which this step does not read.
+      # ── RETRACTED, AND IT COST A RELEASE. THIS PARAGRAPH READ: ──────────
+      #
+      #   *"THE TAG OBJECT IS READABLE WITHOUT `fetch-depth: 0`, MEASURED, so
+      #   this step is NOT a new reason for the line above it and does not get
+      #   to claim one. Sandbox built the way `actions/checkout@v4` builds one
+      #   (`git init`; `git remote add`; ONE `git fetch` with the depth under
+      #   test) against a mirror of this repository, 2026-08-28: with
+      #   `--depth=1 +refs/tags/v0.2.0:refs/tags/v0.2.0` the clone is shallow
+      #   and `%(objecttype)`/`%(taggerdate:short)` still read `tag` /
+      #   `2026-08-25`. The tag OBJECT arrives with the tag REF; what a
+      #   depth-1 clone lacks is history, which this step does not read."*
+      #
+      # EVERY MEASUREMENT IN IT IS TRUE OF ITS SANDBOX AND THE SANDBOX WAS NOT
+      # THIS JOB. It modelled ONE fetch, of the refspec a reader would write
+      # by hand (`+refs/tags/<tag>:refs/tags/<tag>`). `actions/checkout@v4`
+      # writes neither: with `fetch-depth: 0` it fetches all refs, then tests
+      # whether the ref it wants already resolves to `github.sha`, and for an
+      # ANNOTATED tag that test is FALSE — `git rev-parse refs/tags/<tag>`
+      # answers the TAG OBJECT's sha and `github.sha` is the COMMIT's — so it
+      # fetches a second time with `+<github.sha>:refs/tags/<tag>` and
+      # force-writes the commit over the tag ref. RE-DERIVED against a mirror
+      # of this repository, 2026-08-28, `v0.2.1` (tag object 99418c0, peeled
+      # a90862b):
+      #
+      #   after fetch 1 (all heads + all tags)   objecttype=tag     taggerdate=2026-08-28
+      #   rev-parse refs/tags/v0.2.1             99418c0…  != github.sha a90862b…
+      #   after fetch 2 (+a90862b…:refs/tags/v0.2.1)
+      #                                          objecttype=commit  taggerdate=
+      #   after `git checkout --force`           objecttype=commit  taggerdate=
+      #   tag object 99418c0 still in the store: `tag`, named by NO ref
+      #
+      # AND THE CONCLUSION WAS FALSE AT DEPTH 1 TOO, WHICH THE OLD SANDBOX
+      # COULD NOT SEE BECAUSE IT CHOSE THE REFSPEC ITSELF. At `fetch-depth: 1`
+      # the real action makes ONE fetch and it is the SAME `+<github.sha>:
+      # refs/tags/<tag>`, so the ref is a commit there as well and the tag
+      # object is not in the store AT ALL (`git cat-file -t 99418c0` ->
+      # *"could not get object info"*, same run, same mirror). So *"the tag
+      # OBJECT arrives with the tag REF"* is not true at any depth for the
+      # action this job actually runs; what was measured was a hand-written
+      # fetch that resembles it.
+      #
+      # THE PART THAT WAS SAID TO SURVIVE HAS SINCE FLIPPED, AND IT IS
+      # CORRECTED HERE RATHER THAN QUIETLY DROPPED. This paragraph read: *"THE
+      # PART THAT SURVIVES is the negative claim it was written to make: this
+      # step is still NOT a reason for `fetch-depth: 0`, because with the
+      # re-fetch in the body below it reads the ref back from `origin` and
+      # needs nothing that fetch 1 brought."* That was true of a body whose
+      # ONLY route was the network. The body below now resolves the tag first
+      # from an annotated tag object already in this workspace's store, which
+      # is there ONLY because `fetch-depth: 0` made the first fetch bring
+      # every tag; at depth 1 that object is absent and the step falls through
+      # to an ANONYMOUS network fetch that a private repository would refuse.
+      # SO THIS STEP IS NOW A REASON FOR `fetch-depth: 0`, and the paragraph
+      # beside that line says so too.
+      #
+      # WHAT IT COST: `v0.2.1` was tagged ANNOTATED on 2026-08-28 (tagger
+      # 1787921770 +0200), pushed, and the release created on the tag that
+      # already existed — the exact procedure this step's own "TO AVOID IT
+      # NEXT TIME" sentence prescribes. The suite passed on the tagged tree,
+      # this step refused with *"refs/tags/v0.2.1 is a commit object and not
+      # an annotated tag"*, `publish` was skipped, and nothing reached PyPI.
+      # The recovery text told the maintainer to delete a correct tag, re-cut
+      # it, and move `CHANGELOG.md`'s date — which would have failed again
+      # identically, because the cause was the checkout and not the tag. A
+      # gate whose remedy cannot succeed is worse than no gate; that is why
+      # the diagnosis below is conditional now.
+      #
+      # ── HOW THE REF IS RESTORED, AND THE TWO ROUTES NOT TAKEN ───────────
+      #
+      # Chosen: `git fetch --no-tags --force origin refs/tags/<tag>:refs/tags/<tag>`.
+      # Measured in the two-fetch sandbox above, 2026-08-28, against two
+      # mirrors of this repository that differ only in the KIND of `v0.2.1`
+      # they hold:
+      #
+      #   origin holds        after checkout      after the re-fetch
+      #   ──────────────────  ──────────────────  ──────────────────────────
+      #   ANNOTATED v0.2.1    commit / (no date)  tag / 2026-08-28   -> rc=0
+      #   LIGHTWEIGHT v0.2.1  commit / (no date)  commit / (no date) -> rc=1
+      #
+      # The second row is the negative control and it is the one that matters:
+      # a repair that made this gate permissive would be a worse outcome than
+      # the false positive it fixes. Both rows are driven inside the suite —
+      # see `tests/test_release_gates.py::test_the_changelog_gate_reads_the_tag_THROUGH_the_checkout_that_rewrites_its_ref`,
+      # which builds the workspace with the real two-fetch sequence against a
+      # local `origin` and needs no network.
+      #
+      # NOT `git fetch --force --tags origin`. It restores this tag equally
+      # well — measured: the same two rows above, both of them. AND THE
+      # OBVIOUS ARGUMENT AGAINST IT IS NOT THE TRUE ONE, which is why it is
+      # measured here rather than asserted. "It rewrites every tag ref" is
+      # what a reader expects, and on this repository TODAY it does not:
+      # `git for-each-ref refs/` over the sandbox before and after, 304 refs,
+      # and the broad fetch reports ONE line (`t [tag update] v0.2.1 ->
+      # v0.2.1`) with every other ref byte-identical — exactly what the narrow
+      # one does. The two differ in what the command is a VERDICT ABOUT, not
+      # in what moves today: the broad refspec covers all four `refs/tags/*`,
+      # so its exit code answers for every tag on the remote, and one tag the
+      # remote will not serve turns this step's reading of a perfectly good
+      # tag into "could not go and look". It also scales with the tag list
+      # rather than with the release — a repository with a hundred tags takes
+      # a hundred forced ref writes to answer a question about one — and a
+      # step has no business writing refs it was not asked about.
+      #
+      # NOT `gh api repos/{owner}/{repo}/git/ref/tags/<tag>`, which was the
+      # third shape considered and is the only one that does not touch the
+      # workspace at all. Three reasons, and the first is decisive: it would
+      # make this step UNDRIVABLE by the suite that drives it. Every row of
+      # `tests/test_release_gates.py` runs this body with the environment
+      # scrubbed to `PATH`/`HOME`/`LANG`/`TMPDIR`/`SYSTEMROOT` — no token, no
+      # `GITHUB_*` — so an API call would either need the network in a unit
+      # test or be stubbed, and a stub is a model of the thing again, which is
+      # the class of defect this whole paragraph is about. Second, it changes
+      # the SUBJECT: the API answers what the ref is NOW, while this job is
+      # publishing the tree a particular checkout produced. Third, it puts a
+      # date through `gh` and JSON where `%(taggerdate:short)` already renders
+      # it in the TAGGER'S recorded zone, which the paragraph below argues for
+      # at length.
       #
       # WHAT THIS STEP CANNOT SEE, said because an instrument that does not
       # declare its scope reports absence of evidence as evidence of absence:
@@ -1101,6 +1387,51 @@ jobs:
       #     `continue-on-error:` — are held for the whole file by
       #     `tests/test_release_gates.py::test_the_attributes_that_decide_whether_a_refusal_refuses`,
       #     which reads `continue-on-error` and not `if:`.
+      #   * WHETHER `origin` CAN BE REACHED — AND IT NO LONGER HAS TO BE.
+      #     THIS BULLET HAS BEEN WRONG TWICE AND BOTH SPELLINGS ARE KEPT. It
+      #     first said the reachability of `origin` was "a NEW dependency this
+      #     step did not have", which was true while the re-fetch was the only
+      #     way to read the tag. It was then retitled "ON THE FALLBACK ROUTE
+      #     ONLY" and spoke of "the fallback's shape" — and that fallback was
+      #     deleted in the same commit that added `ref: ${{ github.sha }}`
+      #     above, so the heading described a route the body underneath it no
+      #     longer had. What is true now: both checkouts say
+      #     `persist-credentials: false`, so the re-fetch is ANONYMOUS, and it
+      #     is a REFRESH of a ref the checkout already brought intact rather
+      #     than a repair of one it overwrote. Fine while this repository is
+      #     public — checked 2026-08-28,
+      #     `GET /repos/NicholasEhsanRoy/stelling` reads `"private": false`,
+      #     and an https fetch of `refs/tags/v0.2.1` with every credential
+      #     helper disabled came back `tag` / `2026-08-28`.
+      #     On a private repository it can never succeed, and the step is
+      #     then carried entirely by the ref `fetch-depth: 0` already brought
+      #     — which is why that line is load-bearing for this step now.
+      #   * WHETHER ITS OWN JOB'S CHECKOUT WAS CONFIGURED THE WAY THE
+      #     CHECKOUT ABOVE IS. It cannot read its job's `with:` block, so it
+      #     keeps the fetch as a repair for a workspace built without
+      #     `ref: ${{ github.sha }}`. THIS BULLET REPLACED ONE ABOUT AN
+      #     OBJECT-STORE FALLBACK: *"WHETHER THE OBJECT THE FALLBACK PICKS IS
+      #     THE ONE `origin`'s REF NAMES. It cannot know; it INFERS ..."* That
+      #     route is gone; there is nothing left in this step that infers.
+      #   * IT NO LONGER CANNOT SEE WHETHER THE TAG STILL POINTS WHERE THE
+      #     CHECKOUT FOUND IT, and this entry is kept as the record of a
+      #     declared blindness that became a check. It read: *"The re-fetch
+      #     asks origin what the tag is NOW; the tree in the workspace is the
+      #     commit the release event pinned. A tag moved between the two is
+      #     read here as the moved tag, and nothing in this step compares its
+      #     peeled commit against `HEAD`."* Declaring it was not enough: a
+      #     driven run showed a re-run of one release exiting 0 on a tag
+      #     re-cut at a different commit, vouching that tag's date for a tree
+      #     it does not name. `git rev-parse <ref>^{commit}` is compared
+      #     against `HEAD` now, on both routes.
+      #   * HOW FRESH `refs/tags/<tag>` IS. It is origin as of the
+      #     checkout's fetch, refreshed by this step's own fetch when
+      #     `origin` can be reached — so a tag MOVED between the two is read
+      #     as moved when the step can refresh and as the pinned object when
+      #     it cannot. Both readings name a commit this job is not building,
+      #     and the peel-equals-HEAD refusal below turns either into a
+      #     refusal rather than a date, which is why the difference does not
+      #     reach a published artefact.
       #
       # IT USES TWO BASH-4 CONSTRUCTS AND THAT IS DECLARED RATHER THAN
       # DISCOVERED: `mapfile` and `${var,,}`. This job says `runs-on:
@@ -1163,7 +1494,186 @@ jobs:
             problems+=("GITHUB_REF_NAME is empty or unset, so this step has no tag to compare anything to. On a 'release: published' event the runner sets it to the tag's own short name.")
           else
             tag_version="${tag#v}"
+            # A TAG NAMED EXACTLY `v` STRIPS TO NOTHING, and an empty
+            # `tag_version` makes the `[ -n "${tag_version}" ]` guard at the
+            # bottom SKIP the version comparison — so the heading could name
+            # any version at all and only the DATE half would decide. This
+            # predates the tag-reading repairs and was found by neutralising
+            # each refusal in turn: rc=0 against a heading naming 9.9.9. It is
+            # bounded rather than open — the step beside this one compares the
+            # tag against the built artefacts' versions independently, and
+            # `v` matches neither — but a guard whose absence is a silent
+            # skip is the shape this file refuses everywhere else.
+            if [ -z "${tag_version}" ]; then
+              problems+=("the tag is named '${tag}', so stripping the leading 'v' leaves no version at all and there is nothing for the heading's version to agree with. A release tag names a version; this one names the prefix and nothing else.")
+            fi
             ref="refs/tags/${tag}"
+            # ── THE TAG THIS STEP READS MUST BE ORIGIN'S `refs/tags/<tag>`, ─
+            # ── AND IT MUST NAME THE TREE THIS JOB IS BUILDING ──────────────
+            #
+            # `actions/checkout@v4` force-writes the release COMMIT over
+            # `refs/tags/<tag>` on a release event -- the sequence and the
+            # measurement are beside this step -- so a workspace ref reading
+            # `commit` is the NORMAL state of a correctly ANNOTATED tag here
+            # and decides nothing. Two things have to be recovered and not
+            # one: WHICH OBJECT origin's ref names, and THAT THE OBJECT NAMES
+            # THE COMMIT BEING BUILT. Both have been got wrong here once.
+            #
+            # WHAT GOT THE SECOND WRONG: a body that only re-read the ref from
+            # origin read whatever origin holds AT THE MOMENT THIS STEP RUNS
+            # and tied it to nothing. DRIVEN: commit A is the release commit,
+            # `CHANGELOG.md` says `## 0.2.1 -- 2026-08-29`, the tag was cut
+            # 2026-08-28, run 1 refuses on the date arm; the tag is re-cut
+            # ANNOTATED at a different commit B dated 2026-08-29 -- which is
+            # what this step's own "does not know" text invites when it says
+            # to re-run -- and a RE-RUN with `github.sha` unchanged at A exits
+            # 0 reporting `tagged=2026-08-29` while the artefacts are still
+            # built from A. Hence the correspondence refusal below.
+            #
+            # AND WHAT GOT THE FIRST WRONG WAS THE REPAIR FOR THAT. It
+            # resolved the tag from an annotated tag OBJECT in this
+            # workspace's own store, selected on *"names this tag AND points
+            # at HEAD"*, and the comment here claimed it wrote back "exactly
+            # the object it overwrote". IT DID NOT: `tag <name>` inside a tag
+            # object is a header the object CARRIES, not the name of the ref
+            # it arrived under, so any object whose header spells this tag and
+            # whose target is HEAD was selected. CORRESPONDENCE TO HEAD IS NOT
+            # IDENTITY WITH THE TAG. Two shapes, both driven 2026-08-28, both
+            # needing no attacker:
+            #
+            #   `git tag -a -f v0.2.1 v0.2.1` re-annotates in place and git
+            #   NESTS: the new object's target is the OLD tag object, which
+            #   stays reachable from the live ref and so is pushed and
+            #   fetched everywhere. Origin's tag is dated 2026-08-28; the
+            #   superseded object is dated 2026-08-20; the old body read the
+            #   SUPERSEDED date -- rc=0 on a heading carrying it and rc=1 on
+            #   a heading carrying the real one.
+            #
+            #   `git tag v0.2.1-backup v0.2.1` does NOT dereference -- driven:
+            #   both refs end up on the same TAG OBJECT. So backing the tag up
+            #   before following this step's own delete-and-re-cut recipe
+            #   leaves an object named `v0.2.1` behind, and after the tag is
+            #   re-cut LIGHTWEIGHT the old body resolved that decoy and exited
+            #   0 on the shape this whole gate exists to refuse.
+            #
+            # THE ANSWER TO BOTH WAS FIRST TO REORDER THE ROUTES AND THEN TO
+            # DELETE ONE, AND THE FIRST HALF IS RECORDED BECAUSE THE SECOND
+            # ONLY MAKES SENSE AFTER IT. This paragraph read: *"SO THE ORDER
+            # IS REVERSED: ORIGIN FIRST. Origin's ref is the only thing that
+            # establishes identity; the object store can only support an
+            # INFERENCE about it ... The store route is kept as a FALLBACK
+            # because both checkouts here say `persist-credentials: false`, so
+            # the fetch is anonymous and on a private repository it can never
+            # succeed."* The first clause is still the reason this step reads
+            # a REF and not an object: only origin's ref says which object the
+            # tag is. The second stopped being a reason to keep anything, the
+            # moment the checkout stopped un-naming the tag -- a private
+            # repository does not need the fetch, because the ref the first
+            # fetch brought is already correct. So there is no store route at
+            # all now; see below.
+            #
+            # THE BUILD SUBJECT IS `HEAD`, read first because everything under
+            # it is a comparison against it. This job's checkout resolved
+            # `GITHUB_REF_NAME` and checked it out, so HEAD is `github.sha`:
+            # the commit `uv build` will package. `GITHUB_SHA` says the same
+            # thing and is deliberately NOT used -- it would make this step
+            # undecidable outside a runner, which is this file's own argument
+            # against reading the tag through `gh api`: every drive in
+            # `tests/test_release_gates.py` runs this body with the
+            # environment scrubbed to PATH/HOME/LANG/TMPDIR/SYSTEMROOT.
+            head=""
+            head_status=0
+            head="$(git rev-parse --verify --quiet "HEAD^{commit}")" || head_status=$?
+            if [ "${head_status}" -ne 0 ] || [ -z "${head}" ]; then
+              problems+=("git rev-parse --verify HEAD^{commit} exited ${head_status} and gave nothing, so this step cannot tell which commit this job is building and therefore cannot tie any tag to it. A release workspace always has a HEAD; one that has none is not a checkout of the tagged tree.")
+            fi
+
+            # ── ROUTE A: ASK `origin`, WHICH IS THE ONLY ROUTE THAT ─────────
+            # ── ESTABLISHES IDENTITY ────────────────────────────────────────
+            #
+            # One refspec; `--no-tags` so no other tag ref is auto-followed;
+            # `--force` because the ref being replaced is the one checkout
+            # wrote. What comes back IS origin's `refs/tags/<tag>`, by
+            # construction, and the correspondence to HEAD is then checked
+            # below rather than assumed.
+            #
+            # `git check-ref-format` GATES IT, and that is not decoration:
+            # `${tag}` comes from the environment, and a name git reads as a
+            # PATTERN makes this `refs/tags/*:refs/tags/*`, which rewrites
+            # EVERY tag ref in the workspace -- measured against a mirror of
+            # this repository on 2026-08-28, that refspec fetches all four of
+            # its tags. `git check-ref-format` rejects `*`, `v1.0*`, `a b`,
+            # `a:b` and `v0.2.1^{}` and accepts `v0.2.1` and `0.2.1`, which is
+            # the same discrimination the refname comparison below makes AFTER
+            # the fact, made here BEFORE anything is written. DRIVEN, not
+            # pinned by a needle: a text scan over this body cannot see the
+            # guard go away, because the literal survives in this comment.
+            resolve_why=""
+            restore_ok=0
+            restore_said=""
+            restore_status=0
+            if ! git check-ref-format "${ref}" 2>/dev/null; then
+              resolve_why="did NOT ask origin about ${ref}: git check-ref-format refuses that name, so it is not a ref name and fetching it would be fetching a pattern."
+            else
+              # ONE LINE. git's fetch diagnostics are four lines and every
+              # complaint in this step is printed with `printf '  %s\n'`, so a
+              # raw capture would put three unindented lines into the middle
+              # of a numbered list. Folded here rather than at the printf,
+              # because the value is also carried into a `problems+=` entry.
+              # `pipefail` is on, so git's exit code survives the pipe.
+              restore_said="$(git fetch --no-tags --force origin "${ref}:${ref}" 2>&1 >/dev/null | tr '\n' ' ' | tr -s ' ')" || restore_status=$?
+              if [ "${restore_status}" -eq 0 ]; then
+                restore_ok=1
+                resolve_why="re-fetched ${ref} from origin, so what is read below IS the object origin's ${ref} names; whether it names the commit being built is checked separately below."
+              else
+                resolve_why="could NOT re-fetch ${ref} from origin: git fetch exited ${restore_status} saying [${restore_said}]."
+              fi
+            fi
+
+            # ── AND THERE IS NO ROUTE B ANY MORE, WHICH IS A DELETION AND ──
+            # ── NOT AN OMISSION ────────────────────────────────────────────
+            #
+            # This step used to carry a second route: when `origin` could not
+            # be asked, it hunted the workspace's object store for the
+            # annotated tag object the checkout had un-named, filtered on
+            # "peels to HEAD, named by no ref, target of no tag object", and
+            # refused rather than picked when more than one survived. It was
+            # about forty-five lines and it was an INFERENCE about origin's
+            # ref rather than a reading of it. THREE THINGS WERE WRONG WITH
+            # IT AND ALL THREE ARE GONE WITH IT:
+            #
+            #   * it answered a DIFFERENT QUESTION from the route beside it —
+            #     the object origin named when the checkout un-named it,
+            #     rather than the object origin names now. Driven, one world
+            #     state with the tag moved after the checkout: this route
+            #     exited 0 and the fetch route exited 1, so which answer a
+            #     release got depended on whether the repository was public.
+            #   * `named_objects="$(git for-each-ref …)" || named_objects=""`
+            #     swallowed a failure and made its own filter vacuously true;
+            #     with that one call failing, a LIGHTWEIGHT tag came back
+            #     rc=0.
+            #   * a non-zero object-store scan status was written to the log
+            #     and then ignored, and the dispatch ran anyway — a can't-tell
+            #     resolving to the permissive answer, which this file condemns
+            #     by name.
+            #
+            # WHAT REPLACED IT IS AN INPUT AND NOT AN ALGORITHM. The reason
+            # the tag object had to be hunted at all was that this job's own
+            # checkout overwrote the ref that named it; `ref: ${{ github.sha }}`
+            # stops it doing that, so `refs/tags/<tag>` arrives intact and the
+            # fetch above is a refresh rather than a repair. On a private
+            # repository, where the anonymous fetch cannot succeed, the ref
+            # the first fetch brought is still there and still correct. The
+            # forty-five lines were reconstructing information that no longer
+            # gets destroyed.
+            #
+            # WHAT IS LOST, said plainly: if someone removes that input, or
+            # runs this step in a workspace built some other way, the ref can
+            # be a checkout artefact again and the fetch above is the only
+            # thing that repairs it. When the fetch also fails, the step says
+            # it does not know — which is the arm below, and it is now the
+            # whole of what this step does when it cannot read its subject.
+            echo "${resolve_why}"
             # STDOUT ONLY — git's stderr goes to this step's log and never
             # into the value, for the reason the manifest step below gives
             # about tar's warnings — and the EXIT CODE is captured rather
@@ -1179,7 +1689,16 @@ jobs:
                 mapfile -t rows <<<"${ref_rows}"
               fi
               if [ "${#rows[@]}" -eq 0 ]; then
-                problems+=("there is no ${ref} in this checkout, so the tag carries no date this step can read. actions/checkout fetches the tag ref for a release event; a workspace without it is not the tagged tree.")
+                # THE TRAILING CLAUSE HERE USED TO BE A FIXED SENTENCE AND
+                # IT COULD CONTRADICT THE ONE BEFORE IT. It read *"A workspace
+                # with no such ref, after a re-fetch that could not put one
+                # there either, is not the tagged tree"* -- which stood even
+                # when `${resolve_why}` had just said the re-fetch SUCCEEDED.
+                # Nearly unreachable, prose only, and removed rather than
+                # made conditional: `${resolve_why}` already says what was
+                # tried and how it ended, so a second sentence about it is a
+                # second place to be wrong.
+                problems+=("there is no ${ref} in this checkout, so the tag carries no date this step can read, and a workspace with no such ref is not the tagged tree. ${resolve_why}")
               elif [ "${#rows[@]}" -ne 1 ]; then
                 problems+=("${ref} matched ${#rows[@]} refs, so this step cannot tell which tag it is being asked about.")
               else
@@ -1193,10 +1712,56 @@ jobs:
                 # pre-initialised empty, so a `read` that assigned nothing
                 # falls into the refname mismatch below and is refused.
                 read -r got_ref got_type got_date <<<"${rows[0]}" || true
+                # THE PEEL IS `^{commit}` AND NOT `%(*objectname)`, AND THE
+                # SENTENCE HERE USED TO SAY OTHERWISE. It read: *"`%(*objectname)`
+                # ... for a tag ref it is the object the tag PEELS to"*, which
+                # is one level of peeling and not the peel. For
+                # `refs/tags/X -> T_outer -> T_inner -> commit A` it answers
+                # T_inner, so the comparison below was "does this tag's
+                # IMMEDIATE target equal HEAD" and a nested tag that correctly
+                # names the build commit was refused. Fail-closed, so it was a
+                # wrong claim rather than a publishing risk -- and it is the
+                # wrong question either way. `git rev-parse <ref>^{commit}`
+                # peels all the way; measured on a nested tag over commit A:
+                # `%(*objectname)` gives the inner tag object, `^{commit}`
+                # gives A.
+                # `|| true` AND NO STATUS VARIABLE: a `peel_status` stood
+                # here, was assigned and was never read, which is a variable
+                # asserting a check that does not exist. An unpeelable ref
+                # leaves `got_peel` empty and the comparison below refuses on
+                # it by name, so the exit code has nothing to add.
+                got_peel="$(git rev-parse --verify --quiet "${ref}^{commit}")" || true
                 if [ "${got_ref}" != "${ref}" ]; then
                   problems+=("asked git about ${ref} and it answered about ${got_ref}. The name comes from the environment, so a name git would read as a PATTERN is refused here rather than followed.")
                 elif [ "${got_type}" != "tag" ]; then
-                  problems+=("${ref} is a ${got_type} object and not an annotated tag, so it carries no tagger date at all: a lightweight tag has no release date for the heading to agree with. TO RECOVER, and it is TWO edits and not one: delete the tag here and on the remote ('git tag -d ${tag}' and 'git push origin :refs/tags/${tag}'), re-cut it ANNOTATED at the same commit ('git tag -a ${tag} <sha> -m ...'), push it, and put the date the NEW tag object gets onto the newest CHANGELOG.md heading -- re-cutting it today makes TODAY the tag's date, so this step will refuse the old heading date on the next run unless the heading moves with it. TO AVOID IT NEXT TIME: push an annotated tag FIRST and create the release on the tag that already exists -- which is how every release this project had cut as of 2026-08-28, measured rather than assumed, beside this step. This step makes no claim about what any release UI does with a tag name that does not yet exist; see beside it for the evidence there is, what could not be determined, and why this refusal is kept anyway.")
+                  # TWO DIFFERENT FACTS WEAR THIS ONE SYMPTOM AND THEY TAKE
+                  # OPPOSITE INSTRUCTIONS, so the diagnosis is conditional on
+                  # whether the re-fetch above actually ran. A ref that is not
+                  # a tag object means "a lightweight tag was pushed" ONLY if
+                  # it was read from origin; otherwise it means "this
+                  # workspace does not know", and the recovery recipe below
+                  # would send a maintainer to destroy a correct tag. THAT IS
+                  # NOT HYPOTHETICAL -- it is what this step did to v0.2.1 on
+                  # 2026-08-28; see beside this step.
+                  if [ "${restore_ok}" -eq 1 ]; then
+                    problems+=("${ref} is a ${got_type} object and not an annotated tag, AND THIS WAS READ FROM origin: the re-fetch above succeeded, so this is the tag origin holds and not the ref actions/checkout left behind. A lightweight tag carries no tagger date at all, so there is no release date for the heading to agree with. TO RECOVER, and it is TWO edits and not one: delete the tag here and on the remote ('git tag -d ${tag}' and 'git push origin :refs/tags/${tag}'), re-cut it ANNOTATED at the same commit ('git tag -a ${tag} <sha> -m ...'), push it, and put the date the NEW tag object gets onto the newest CHANGELOG.md heading -- re-cutting it today makes TODAY the tag's date, so this step will refuse the old heading date on the next run unless the heading moves with it. TO AVOID IT NEXT TIME: push an annotated tag FIRST and create the release on the tag that already exists -- which is how every release this project had cut as of 2026-08-28, measured rather than assumed, beside this step. This step makes no claim about what any release UI does with a tag name that does not yet exist; see beside it for the evidence there is, what could not be determined, and why this refusal is kept anyway.")
+                  else
+                    problems+=("${ref} IN THIS WORKSPACE is a ${got_type} object and not an annotated tag, and NEITHER ROUTE COULD SETTLE IT: ${resolve_why} SO THIS STEP DOES NOT KNOW WHAT KIND OF TAG WAS PUSHED, and it is not going to guess. DO NOT DELETE OR RE-CUT THE TAG ON THIS EVIDENCE. actions/checkout@v4 REWRITES THIS REF: on a release event it fetches every ref and then fetches '+<the release commit>:${ref}', which force-writes the commit over the tag ref -- so a workspace ref reading '${got_type}' is the ordinary state of a perfectly good ANNOTATED tag here and says nothing about what is on the remote. TO DECIDE IT, from anywhere that can reach the remote, run 'git ls-remote --tags origin' and find ${tag} in the output: an ANNOTATED tag appears TWICE, once as ${ref} and once as ${ref}^{} which peels it to the commit, and a lightweight one appears ONCE. (No pattern argument, deliberately: 'git ls-remote origin ${ref}*' is the shorter spelling and it is a TRAP -- unquoted, a shell that finds a path of that name in the working directory expands the '*' away and the command then prints one line for an ANNOTATED tag, which reads as the wrong answer. Driven 2026-08-28 in a directory holding a file called ${ref}: one line, annotated tag.) If it appears twice the tag is FINE and what needs fixing is this step's re-fetch, whose failure is quoted above -- not the tag. If it appears once, the tag is lightweight: re-run this job once the re-fetch works and this step will print the recovery recipe with the evidence to back it. If it does NOT APPEAR AT ALL, origin holds no ${ref} -- the release was made against a name the remote does not have, or the tag was deleted after it was made -- and the fix is to push the tag before re-running, not to touch anything here.")
+                  fi
+                elif [ -n "${head}" ] && [ "${got_peel:-}" != "${head}" ]; then
+                  # THE CORRESPONDENCE REFUSAL, AND IT IS LOAD-BEARING ON THE
+                  # ROUTE THAT USUALLY DECIDES: origin answers with whatever
+                  # it holds NOW, which is not necessarily the tag the release
+                  # event pinned, and the ref the checkout brought is origin
+                  # as of ITS fetch. Either can name a commit this job is not
+                  # building, and this is the only thing that notices.
+                  # Guarded on `${head}` being readable
+                  # because an unreadable HEAD has already put its own
+                  # complaint in the list, and comparing against an empty
+                  # string would add a second and more confident-sounding one
+                  # about the same absence -- the rule the comparisons at the
+                  # bottom of this step already follow.
+                  problems+=("${ref} is an annotated tag object, but it does not name the tree this job is building: it peels to ${got_peel:-nothing this step could read} and this workspace's HEAD -- the commit the release event pinned, and the commit the artefacts are built from -- is ${head}. A release note's date read off a tag that names a DIFFERENT commit is a claim about a different release, and this step will not make it. This is what a tag MOVED or RE-CUT between the checkout and now looks like. Do not answer it by moving the tag again: either cut the release on the tag that names the commit being published, or start a NEW release run so the event pins the tag's own commit. Nothing is published while this refuses.")
                 elif [ -z "${got_date}" ]; then
                   problems+=("${ref} is a tag object whose tagger date is empty, so there is nothing to compare the heading's date against.")
                 else

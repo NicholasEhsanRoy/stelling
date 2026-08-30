@@ -70,6 +70,37 @@ TAG with a chosen tagger date, which is one more thing a test can plant and a
 runner does not have to supply. Corrected here rather than left to be
 inferred from the count of `_step_body` calls below.
 
+AND THAT DESCRIPTION OF THE PLANT WAS ITSELF TOO SMALL, WHICH COST A RELEASE.
+A checkout carrying a tag is not what the release job has: the job has a
+checkout `actions/checkout@v4` BUILT, and for a release event that action
+fetches every ref and then force-writes `+<github.sha>:refs/tags/<tag>`,
+replacing the annotated tag ref with the release commit. `v0.2.1` was refused
+by the changelog step on 2026-08-28 for being "a commit object and not an
+annotated tag" when the tag on `origin` was a perfectly good annotated one,
+and the recovery text told the maintainer to delete it. Nothing here could see
+that, because every drive planted the tag with `git tag -a` and read it back —
+which is the tag, and not what the checkout leaves. So the plant is bigger by
+one thing: :func:`_checkout_the_way_actions_checkout_does` materialises a
+workspace the way the action does, over a local path remote, with no network,
+in each of the shapes the workflow's own `with:` block selects between. That
+is the third thing a test can plant and a runner does not have to supply: not
+a tag, but the shape a tag arrives in.
+
+AND THIS PARAGRAPH SAID *"every planted tree has an `origin` (`_tagged_tree`)"*
+AS IF THAT WERE HALF THE POINT. It is not: those trees' tag refs are intact,
+so no resolution route decides anything in them, and the remote is there for
+the REMEDY drive, which pushes. What decides the tag-reading rows is the
+checkout fixture and the workflow input it models.
+
+WHAT THAT FIXTURE DOES NOT MODEL, said here because it is the same sentence
+that was too small before: it re-derives the action's refspecs, not the
+action. No submodules, no LFS, no `persist-credentials` handling, no sparse
+checkout, and its `origin` is a directory rather than an authenticated https
+remote. It reproduces exactly one behaviour — which ref name ends up pointing
+at which object — and the drive asserts that behaviour is present before
+relying on it, so a git that stopped force-writing the ref is a red here
+rather than a green for the wrong reason.
+
 THE SENTENCE THAT USED TO STAND HERE WAS FALSE, and how it was false is worth
 writing down, because it is what licensed the gap. It read: this is "NOT a
 check that the gates WORK — nothing in this repository can be, because a
@@ -140,6 +171,18 @@ now a shorter list than the argument that used to stand for it:
 * the sdist drive's plant is keyed on the allowlist's DIRECTORY roots, so a
   member filter keyed on anything else is outside it, as the paragraph above
   says.
+* WHETHER `actions/checkout@v4` STILL DOES WHAT THE CHECKOUT FIXTURE SAYS IT
+  DOES. `_checkout_the_way_actions_checkout_does` is a re-derivation of the
+  action's refspecs from the behaviour they produce, taken 2026-08-28 against
+  a mirror of this repository and against the tag that was refused; nothing
+  here reads the action itself, and `@v4` is a MUTABLE ref — the workflow
+  pins a major series, not a commit. If a future v4 stops force-writing the
+  tag ref, this fixture
+  keeps reproducing the old shape and the drives stay green over a workspace
+  the job no longer gets. That is the safe direction — the step's re-fetch is
+  correct either way, since it re-reads the ref from `origin` regardless of
+  what the checkout left — but the fixture would be modelling history, and
+  this bullet is where a reader finds that out.
 * the `publish` job's two actions, which cannot be driven from here at all
   without cutting a tag and uploading. What IS now pinned is the ref one of
   them carries, and the environment the job runs in — see
@@ -616,6 +659,224 @@ def test_the_attributes_that_decide_whether_a_refusal_refuses():
     )
 
 
+#: A `uses:` line naming the checkout action, with the optional sequence dash
+#: and optional quoting around BOTH the key and the value. This is YAML
+#: STRUCTURE — an action can only enter a workflow through a `uses:` key — and
+#: not a spelling of how a step happens to be written.
+#:
+#: THE KEY'S QUOTES WERE THE LAST RING OUT. This read `(?:-\s+)?uses:` and
+#: :data:`_KEY` read `([A-Za-z0-9_.-]+):`, so `- "uses": actions/checkout@v4`
+#: with `"ref": deadbeef` was missed by BOTH — and because it was missed by
+#: both, the count cross-check that makes every other unparseable shape a loud
+#: red still balanced -- one `uses:` line fewer AND one step fewer -- and the
+#: step went unheld. One backreferenced quote group in each pattern closes it.
+#:
+#: RE-DRIVEN over six respellings of the `build` checkout, 2026-08-28, whole
+#: module each time:
+#:
+#:   `- "uses": …` with `"ref": …`          3 failed   (was 4 passed)
+#:   `- {uses: actions/checkout@v4}`        1 failed   (the count)
+#:   `- <<: *co`, the anchored definition
+#:     kept elsewhere in the file           1 failed   (the count)
+#:   `uses:` inside a `run:` block scalar   1 failed   (the count, a FALSE
+#:                                          red, which is the safe direction)
+#:   `ref:` at step level, outside `with:`  2 failed
+#:   the step commented out entirely        41 passed  (correct: a comment is
+#:                                          not a step, and `_code_lines`
+#:                                          drops it before either scan)
+#:
+#: THE ALIAS ROW NEEDS ITS DEFINITION TO REMAIN, and that is worth writing
+#: down because the first attempt at it here did not: replacing the step with
+#: `- <<: *co` and deleting the anchored mapping too is `41 passed`, correctly
+#: -- that is not an aliased checkout, it is a job with no checkout at all,
+#: and these pins are about the inputs of the checkouts that EXIST. A job that
+#: stops checking anything out fails in CI on the first missing file.
+_USES_CHECKOUT = re.compile(
+    r"""(?:-\s+)?(["']?)uses\1:\s*["']?actions/checkout@"""
+)
+
+#: `key: value` with one optional layer of matching quotes around the key. The
+#: backreference is what makes it one LAYER rather than any stray quote: `"a:`
+#: is not a key and does not match.
+_KEY = re.compile(r"""(["']?)([A-Za-z0-9_.-]+)\1:\s*(.*)$""")
+
+
+def _unquote(value: str) -> str:
+    """`value` without one layer of surrounding quotes."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
+def _checkout_steps() -> list[tuple[dict[str, str], dict[str, str]]]:
+    """Every `actions/checkout@` step in `release.yml`, READ AS STRUCTURE.
+
+    **THIS REPLACED TWO SCANS THAT KEYED ON A SPELLING, AND THE SPELLING WAS
+    THE HOLE.** Both said `line.strip().startswith("- uses: actions/checkout@")`
+    — so a step written in the ordinary alternative order, `- name:` first and
+    `uses:` second, was invisible to them; and because each then asserted only
+    that it had found *some* checkout, a file mixing the two orders was
+    silently half-checked. Driven: the `build` checkout rewritten `- name:`
+    first with BOTH `ref:` and `fetch-depth:` deleted left thirteen modules
+    that read `release.yml` at `240 passed, 1 skipped`. A second shape was
+    invisible the same way — `ref: ${{ github.sha }}` written at STEP level
+    rather than inside `with:`, which satisfies a substring scan while the
+    action never receives the input.
+
+    So steps are located by their POSITION — block-sequence items under a
+    `steps:` key — and their keys by INDENTATION, which is what makes key
+    order irrelevant. Each result is `(step keys, the step's `with:` mapping)`,
+    values unquoted once.
+
+    **WHAT IT CANNOT SEE, and each of these is a LOUD failure rather than a
+    quiet one**, which is the property the two scans it replaces did not have:
+
+    * a step written as a FLOW mapping (`- {uses: actions/checkout@v4}`). The
+      reader would not find it, and
+      :func:`test_the_checkout_reader_sees_every_checkout` asserts that the
+      number of steps found equals the number of `uses:`-assignments naming
+      the action, so the count disagrees and the suite goes red. A `uses:`
+      line inside a `run:` block scalar takes the same count red — a FALSE
+      red, and the safe direction.
+    * QUOTED KEYS ARE SEEN, and that is written here because they were not.
+      `- "uses": actions/checkout@v4` with `"ref": deadbeef` slipped BOTH this
+      reader and the count check — the only shape of the six driven that did,
+      because being invisible to both is what let the count balance — so the
+      quotes are part of the patterns now rather than part of what is
+      declared unreachable.
+    * anchors, aliases and merge keys. `release.yml` carries none — re-derived
+      with PyYAML 2026-08-28 — and one appearing would take the same count
+      check red, because the alias would not carry a literal `uses:` line.
+    * whether `${{ github.sha }}` is what the RUNNER substitutes. Nothing here
+      can see that; what is held is what the file asks for.
+    """
+    lines = _code_lines(_release_text())
+    steps: list[tuple[dict[str, str], dict[str, str]]] = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() != "steps:":
+            i += 1
+            continue
+        seq_indent = len(lines[i]) - len(lines[i].lstrip())
+        i += 1
+        while i < len(lines):
+            line = lines[i]
+            if not line.strip():
+                i += 1
+                continue
+            indent = len(line) - len(line.lstrip())
+            if indent <= seq_indent:
+                break
+            if not line.lstrip().startswith("- "):
+                i += 1
+                continue
+            item_indent, key_indent = indent, indent + 2
+            body = [" " * key_indent + line.lstrip()[2:]]
+            i += 1
+            while i < len(lines):
+                nxt = lines[i]
+                if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= item_indent:
+                    break
+                body.append(nxt)
+                i += 1
+            keys: dict[str, str] = {}
+            with_map: dict[str, str] = {}
+            in_with = False
+            for entry in body:
+                if not entry.strip():
+                    continue
+                depth = len(entry) - len(entry.lstrip())
+                match = _KEY.match(entry.strip())
+                if depth == key_indent and match:
+                    in_with = match.group(2) == "with"
+                    keys[match.group(2)] = _unquote(match.group(3).strip())
+                elif in_with and depth == key_indent + 2 and match:
+                    with_map[match.group(2)] = _unquote(match.group(3).strip())
+            steps.append((keys, with_map))
+    return [(k, w) for k, w in steps
+            if k.get("uses", "").startswith("actions/checkout@")]
+
+
+#: THE INPUTS BOTH CHECKOUTS TAKE, AS A CLOSED SET. Each is here for a reason
+#: written beside it in `release.yml`, and the set is closed on purpose: the
+#: header spends two paragraphs REJECTING `fetch-tags`, and nothing held that
+#: rejection — driven, `fetch-tags: true` added to a checkout left this suite
+#: at `169 passed` while three docstrings went on saying "three inputs … and
+#: no `fetch-tags`". A set cannot be derived from the file it is a claim
+#: about, so this is an enumeration; what makes it safe is that it is compared
+#: for EQUALITY against a parsed mapping, so an addition is as red as a
+#: deletion.
+_CHECKOUT_INPUTS = {
+    #: no token in the git config after the checkout returns
+    "persist-credentials",
+    #: the COMMIT and not the tag ref, so the action makes no second fetch and
+    #: `refs/tags/<tag>` still names the annotated tag object
+    "ref",
+    #: full history: at depth 1 the refspec is `[commit]` and no tag ref is
+    #: fetched at all, and the tagged-tree job's history checks SKIP
+    "fetch-depth",
+}
+
+
+def test_the_checkouts_take_the_inputs_this_file_ARGUES_FOR_AND_NO_OTHERS():
+    """The `with:` mapping of every checkout, compared for EQUALITY.
+
+    The two pins below assert that one input each is PRESENT, which says
+    nothing about an input added beside them — and `release.yml`'s header
+    argues at length that `fetch-tags` in particular must not be here, because
+    at depth 1 it makes `refs/tags/v0.1.0` resolve while the history stays one
+    commit deep and turns a disclosed skip into a hard failure. Driven with
+    `fetch-tags: true` added: `169 passed`, nothing red, while three
+    docstrings in this repository said the checkouts carry three inputs and no
+    `fetch-tags`.
+
+    WHAT THIS DOES NOT REACH: whether each input's VALUE is right. `ref` and
+    `fetch-depth` have pins of their own below; `persist-credentials` has
+    none, and that is said here rather than left to be assumed.
+    """
+    for keys, with_map in _checkout_steps():
+        assert set(with_map) == _CHECKOUT_INPUTS, (
+            f"a checkout step's inputs are {sorted(with_map)}, and this file "
+            f"argues for exactly {sorted(_CHECKOUT_INPUTS)}. An input added "
+            f"here is a decision about how the tagged tree is materialised — "
+            f"`fetch-tags` is the one the header rejects by name and measures "
+            f"— and an input removed is one of the two repairs this workflow "
+            f"carries. Decide it deliberately and move this set.\n{keys}"
+        )
+
+
+def test_the_checkout_reader_sees_every_checkout():
+    """ANTI-VACUITY FOR THE READER THE TWO PINS BELOW REST ON.
+
+    An action enters a workflow through a `uses:` key and no other way, so the
+    number of `uses:`-assignments naming `actions/checkout@` is a count the
+    reader must reproduce. When it does not — a flow-style step, an alias, a
+    respelling nobody anticipated — the pins under it would be scanning a
+    shorter list than the file has, and THAT is the failure mode both of their
+    predecessors had silently.
+    """
+    lines = _code_lines(_release_text())
+    declared = [line for line in lines if _USES_CHECKOUT.search(line.strip())]
+    found = _checkout_steps()
+    assert declared, (
+        "no `uses: actions/checkout@` assignment on any code line of "
+        "`release.yml`. Either the workflow stopped checking anything out, or "
+        "this scan has stopped finding what it is meant to hold."
+    )
+    assert len(found) == len(declared), (
+        f"{len(declared)} `uses:` assignments name `actions/checkout@` and "
+        f"the structural reader found {len(found)} steps. A checkout the "
+        f"reader cannot see is a checkout the two pins below do not hold, "
+        f"which is exactly how a `- name:`-first step slipped past their "
+        f"predecessors.\n{[line.strip() for line in declared]}\n{found}"
+    )
+    for keys, with_map in found:
+        assert with_map, (
+            f"a checkout step has no `with:` mapping this reader could read: "
+            f"{keys}. Its inputs are then unheld, whatever they say."
+        )
+
+
 def test_every_checkout_in_this_file_takes_the_WHOLE_history():
     """The attribute that decides whether refusal point 1 CHECKS anything.
 
@@ -658,29 +919,8 @@ def test_every_checkout_in_this_file_takes_the_WHOLE_history():
     commit-cited paragraphs read as uncovered. It converts a lost check into a
     red release job. See `release.yml`'s header for the table.
     """
-    lines = _code_lines(_release_text())
-    assert lines, "`_code_lines` returned nothing; this pin would be vacuous"
-    steps = [
-        i for i, line in enumerate(lines)
-        if line.strip().startswith("- uses: actions/checkout@")
-    ]
-    assert steps, (
-        "no `actions/checkout` step in `release.yml`. Either the workflow "
-        "stopped checking anything out, or this scan has stopped finding the "
-        "steps it is meant to hold — both are reasons to look."
-    )
-    shallow = []
-    for i in steps:
-        indent = len(lines[i]) - len(lines[i].lstrip())
-        body = []
-        for line in lines[i + 1:]:
-            if not line.strip():
-                continue
-            if len(line) - len(line.lstrip()) <= indent:
-                break
-            body.append(line.strip())
-        if "fetch-depth: 0" not in body:
-            shallow.append((lines[i].strip(), body))
+    steps = _checkout_steps()
+    shallow = [(k, w) for k, w in steps if w.get("fetch-depth") != "0"]
     assert not shallow, (
         f"{len(shallow)} of the {len(steps)} `actions/checkout` steps in "
         f"`release.yml` no longer carry `fetch-depth: 0`: {shallow}. The "
@@ -690,6 +930,62 @@ def test_every_checkout_in_this_file_takes_the_WHOLE_history():
         "headers name. `ci.yml` carries this on all ten of its checkouts, "
         "under a comment giving the same reason. `fetch-tags` is not the "
         "substitute: see this test's docstring and `release.yml`'s header."
+    )
+
+
+def test_every_checkout_in_this_file_PINS_THE_COMMIT_AND_NOT_THE_TAG_REF():
+    """The input that stops `actions/checkout@v4` overwriting the tag ref.
+
+    WITHOUT IT THE ACTION UN-NAMES THE TAG, and that is not a quirk to work
+    around but a branch the workflow selects. Read off the action's source at
+    `11d5960`: `input-helper.ts` turns an input `ref` matching
+    `^[0-9a-fA-F]{40}$` into `commit = <sha>` with `ref = ''`;
+    `ref-helper.ts::testRef` answers `shaExists(commit)` when `ref` is empty
+    and only otherwise reaches its `REFS/TAGS/` branch, which compares
+    `github.sha` against `revParse(refs/tags/<tag>)` — the TAG OBJECT's sha
+    for an annotated tag, so always different; and `git-source-provider.ts`
+    re-fetches `+<github.sha>:refs/tags/<tag>` exactly when `testRef` is
+    false. With `ref: ${{ github.sha }}` there is no second fetch and
+    `refs/tags/<tag>` is still the annotated tag object.
+
+    Driven against a mirror of this repository, 2026-08-28, `v0.2.1`: without
+    the input, `refs/tags/v0.2.1` comes back `commit a90862ba` with an empty
+    tagger date; with it, `tag 99418c06` dated `2026-08-28`. `HEAD` and
+    `HEAD^{tree}` are byte-identical either way, which is why this is a safe
+    input to add to a job whose subject is the tree.
+
+    THIS PIN EXISTS BECAUSE THE REPAIR IT PROTECTS IS ONE LINE PER CHECKOUT
+    AND ITS ABSENCE IS SILENT. Removing it from the `build` checkout left this
+    module GREEN — the drives build their own workspaces and cannot see the
+    workflow's checkout config, and the step's own re-fetch repairs the ref
+    whenever `origin` can be reached, so CI would go on passing until the day
+    it could not. Driven red here by deleting either occurrence.
+
+    WHAT IT DOES NOT REACH. It cannot tell that `${{ github.sha }}` is what
+    the runner will put there, only that the file asks for it; it types no
+    count, so a checkout added later is covered without a re-derivation; and
+    it is blind to the SHA-256 case, where a 64-hex `github.sha` fails the
+    action's own 40-hex test. What follows from that is written beside the
+    checkout and was written WRONG there first: `result.commit` is left
+    undefined, so `testRef` returns true at `if (!commit) return true`, there
+    is no second fetch and the tag ref stays intact — and the job then dies in
+    `getCheckoutInfo`, which finds no branch or tag by that name and throws.
+    Fail-closed, and nothing here can see which hash a future repository
+    uses.
+    """
+    steps = _checkout_steps()
+    unpinned = [(k, w) for k, w in steps
+                if w.get("ref") != "${{ github.sha }}"]
+    assert not unpinned, (
+        f"{len(unpinned)} of the {len(steps)} `actions/checkout` steps in "
+        f"`release.yml` no longer pin the COMMIT: {unpinned}. Without "
+        "`ref: ${{ github.sha }}` the action fetches all refs and then "
+        "re-fetches `+<github.sha>:refs/tags/<tag>`, force-writing the release "
+        "commit over the tag ref — so the changelog gate reads a commit where "
+        "an annotated tag object should be, which is how a correctly tagged "
+        "`v0.2.1` was refused on 2026-08-28 and its maintainer told to delete "
+        "the tag. The tree is identical either way; only which ref names what "
+        "changes."
     )
 
 
@@ -1031,11 +1327,115 @@ def test_this_pin_is_reading_the_real_file():
 # for the reason the header gives: `yaml` is not a dependency and the zero-dep
 # job could not import one.
 
-_NEEDED = ("bash", "git", "tar", "comm", "sort", "sed")
+#: THE COMMANDS THE FOUR EXTRACTED BODIES INVOKE. This tuple said it was
+#: "derived by reading the extracted bodies" and it was not: it named seven
+#: and the bodies invoke thirteen. `basename`, `cat`, `cut`, `grep`, `mktemp`
+#: and `wc` were missing, and all six had been there since before the tag
+#: repair — only `tr` arrived with it. The consequence was benign (a box
+#: without `cut` would have failed a drive instead of skipping it, which is
+#: the safe direction), but a comment claiming a method nobody carried out is
+#: the defect this module exists to find one file over.
+#:
+#: MEASURED 2026-08-28 over the CODE lines of the four bodies, whole-word:
+#: `tar` 22, `git` 18, `sort` 5, `cut` 4, `basename`/`cat`/`sed`/`tr`/`wc` 2
+#: each, `comm`/`grep`/`mktemp` 1 each. `head`, `find` and `date` also match
+#: as words and are NOT commands here — they are a shell variable and two
+#: bits of English inside refusal messages, which is exactly why this is a
+#: reading and not a derivation.
+#:
+#: AND A DERIVATION WAS TRIED AND REJECTED, because deciding which tokens in a
+#: shell script are commands is parsing bash: a scan for words in command
+#: position over these bodies returns 69 candidates, of which 13 are commands
+#: and the rest are variable names and prose inside quoted strings. What IS
+#: held mechanically is the other direction —
+#: :func:`test_every_command_this_module_requires_is_one_the_bodies_USE`
+#: fails if a name here stops appearing — so the list can go stale by omission
+#: but not by fiction, and that asymmetry is stated rather than hidden.
+_NEEDED = ("bash", "git", "tar", "comm", "sort", "sed", "tr",
+           "basename", "cat", "cut", "grep", "mktemp", "wc")
 _needs_a_shell = pytest.mark.skipif(
     any(shutil.which(t) is None for t in _NEEDED),
     reason="needs a POSIX shell and coreutils to drive a gate body",
 )
+
+
+def _table_labels(doc: str | None) -> set[str]:
+    """The row labels of a docstring's drive table, parsed out of the table.
+
+    **A TABLE HELD IN ONE DIRECTION IS HALF A CHECK, AND THE MISSING HALF IS
+    THE ONE THAT ALREADY FAILED HERE.** The drives below assert that every row
+    they run is named in their own table — rows -> table — which catches a row
+    added without a line. Nothing caught a row DELETED with its table line left
+    standing, and that is the direction the failure took: a `no-head` row was
+    lost with the test that carried it, the table went on advertising it, and
+    it came back only because a mutant was driven. Worse, a deleted row can be
+    the only pin on a refusal: removing the `taggerless` block and leaving its
+    table line was `38 passed`, and neutralising the empty-tagger-date refusal
+    it was the sole pin on was then `43 passed` — where that same
+    neutralisation with the row present is `1 failed`.
+
+    So the labels are read back OUT of the table and compared for equality.
+    The table block is delimited structurally — from its `───` rule to the
+    first blank line — and a label is a backticked lowercase token that is the
+    first thing on its row, so continuation lines and mid-row backticks are
+    not labels. Under `python -OO` there is no docstring at all and this
+    returns the empty set, which the callers treat as "nothing to hold".
+    """
+    if not doc:
+        return set()
+    found: list[tuple[int, str]] = []
+    inside = False
+    for line in doc.splitlines():
+        if "\u2500" in line:
+            inside = True
+            continue
+        if not inside:
+            continue
+        if not line.strip():
+            inside = False
+            continue
+        match = re.match(r"(\s+)`([a-z][a-z0-9-]+)`", line)
+        if match:
+            found.append((len(match.group(1)), match.group(2)))
+    if not found:
+        return set()
+    # THE LABEL COLUMN, NOT "THE FIRST BACKTICK ON THE ROW". A cell that wraps
+    # can put a backticked word at the start of a CONTINUATION line — driven:
+    # a row whose third column wrapped onto ``\u0060tag\u0060; rc=0`` was read as a
+    # label called `tag`. Labels live in one column, so the leftmost
+    # indentation any of them has is the column, and anything indented past it
+    # is part of some row's prose.
+    column = min(indent for indent, _ in found)
+    return {label for indent, label in found if indent == column}
+
+
+def test_every_command_this_module_requires_is_one_the_bodies_USE():
+    """:data:`_NEEDED` holds nothing that the extracted bodies do not invoke.
+
+    The skip guard this list feeds decides whether four drives RUN. A name
+    that no body uses makes those drives skip on a box that could have run
+    them — an instrument switching itself off over a command nobody needs —
+    and a skip is what pytest exits 0 on. The other direction, a command the
+    bodies use and this list omits, is not checked here and cannot be by a
+    text reader: see the comment on :data:`_NEEDED` for the attempt and why it
+    was dropped. That direction fails a drive loudly rather than skipping it.
+    """
+    code = "\n".join(
+        "\n".join(line for line in _step_body(step).splitlines()
+                  if not line.lstrip().startswith("#"))
+        for step in (_SDIST_STEP, _TAG_STEP, _MANIFEST_STEP, _CHANGELOG_STEP)
+    )
+    unused = [
+        name for name in _NEEDED
+        if name != "bash" and not re.search(r"(?<![\w-])" + name + r"(?![\w-])", code)
+    ]
+    assert not unused, (
+        f"{unused} are required by `_NEEDED` and appear in none of the four "
+        f"extracted step bodies. Every name here gates whether the drives run "
+        f"at all, so one that nothing needs turns a runnable box into a "
+        f"skipped one. (`bash` is exempt: it is what RUNS the bodies rather "
+        f"than something they name.)"
+    )
 
 
 def _step_lines(step_name: str) -> list[str]:
@@ -2581,15 +2981,29 @@ def _git(tree: pathlib.Path, *args, **kwargs):
 
 
 def _annotate(tree: pathlib.Path, tag: str, tagger_date: str,
-              *, message: str | None = None, at: str | None = None) -> None:
+              *, message: str | None = None, at: str | None = None,
+              force: bool = False) -> None:
     """Cut `tag` as an ANNOTATED tag whose tagger date is `tagger_date`.
 
     `GIT_COMMITTER_DATE` is what `git tag -a` writes into the tagger line —
     the date is planted the way git plants it rather than by writing a tag
-    object by hand. `at` names the commit, so the remedy drive can re-cut at
+    object by hand. `at` names the object, so the remedy drive can re-cut at
     the SAME commit the way the refusal message says to.
+
+    `force=True` adds `-f`, and with `at` naming the TAG ITSELF that is how a
+    NESTED tag is produced — git does not dereference, it warns *"You have
+    created a nested tag"* and points the new object at the old one. That is
+    an ordinary maintainer move (`git tag -a -f v0.2.1 v0.2.1`) and it leaves
+    the superseded object reachable from the live ref, so it arrives in every
+    checkout. THIS SENTENCE ENDED *"which is why the object-store fallback has
+    to exclude objects that are some other tag object's target"*, and there is
+    no such fallback any more — it was deleted when the workflow stopped
+    letting the checkout un-name the tag. The shape still matters, for a
+    simpler reason: it is what the `nested-reannotation` row drives, and a
+    step that read anything other than the ref would take the SUPERSEDED
+    object's date.
     """
-    _git(tree, *_GIT_IDENT, "tag", "-a", tag,
+    _git(tree, *_GIT_IDENT, "tag", "-a", *(("-f",) if force else ()), tag,
          *( (at,) if at else () ),
          "-m", message or f"release {tag}",
          env=dict(os.environ,
@@ -2598,7 +3012,7 @@ def _annotate(tree: pathlib.Path, tag: str, tagger_date: str,
 
 def _tagged_tree(base: pathlib.Path, name: str, *, tag: str = "v0.2.0",
                  tagger_date: str = "2026-08-25", annotated: bool = True,
-                 tagged: bool = True,
+                 tagged: bool = True, origin: bool = True,
                  changelog: str | None = "## 0.2.0 — 2026-08-25\n") -> pathlib.Path:
     """A checkout carrying one tag and one `CHANGELOG.md`, as the tagged tree has.
 
@@ -2610,6 +3024,29 @@ def _tagged_tree(base: pathlib.Path, name: str, *, tag: str = "v0.2.0",
     Nothing else is planted. The step reads a ref, a tag object and one line
     of one file, so a `dist/`, an index or a second commit would be furniture
     the drive could not learn anything from.
+
+    **AND IT HAS AN `origin`, WHICH IS NOT FURNITURE — THOUGH THE REASON
+    GIVEN HERE WAS WRONG AND IS CORRECTED RATHER THAN RESTATED.** It read:
+    *"Without one, every drive below would exercise the 'this step
+    could not go and look' arm and none of them the arm they were written
+    for."* That
+    was never true of these trees and is plainly false now: the tag ref in a
+    tree built here is INTACT — nothing clobbered it — so the step reads it
+    directly and its re-fetch is a refresh rather than a repair. Measured:
+    with `origin=False` the green annotated rows still exit 0. The real reason the remote is here is the REMEDY drive, which
+    carries out the printed recipe including `git push origin
+    :refs/tags/<tag>` and the push of the re-cut tag; with the tag re-fetched
+    from `origin`, a recipe carried out only locally is undone by the step on
+    the next run. The origin is a bare clone taken AFTER the tag is planted,
+    so what it holds is what the row planted.
+
+    `origin=False` is not a workspace shape and no test drives one: every one
+    of its uses builds an UPSTREAM for
+    :func:`_checkout_the_way_actions_checkout_does` to fetch from, which is a
+    different job. The sentence claiming it was *"the third shape … driven in
+    test_the_changelog_gate_reads_…"* is withdrawn; workspaces whose remote
+    cannot be reached are built there by removing the remote after the
+    checkout, not by this flag.
     """
     tree = base / name
     tree.mkdir(parents=True)
@@ -2621,6 +3058,11 @@ def _tagged_tree(base: pathlib.Path, name: str, *, tag: str = "v0.2.0",
             _annotate(tree, tag, tagger_date)
         else:
             _git(tree, "tag", tag)
+    if origin:
+        remote = base / f"{name}.origin.git"
+        subprocess.run(["git", "clone", "-q", "--bare", str(tree), str(remote)],
+                       check=True, capture_output=True)
+        _git(tree, "remote", "add", "origin", str(remote))
     if changelog is not None:
         (tree / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
     return tree
@@ -2661,20 +3103,20 @@ def test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry(tmp_path):
         v0.1.0 / 2026-08-12 / `## 0.1.0 — …`         GREEN
         the same two, tag spelled without the `v`    GREEN
         the same, changelog written CRLF             GREEN
-        wrong-version: `## 0.1.0 …` under v0.2.0     red, names both versions
-        unreleased: `## 0.2.0 — unreleased`          red, on that branch's own
+        `wrong-version`  `## 0.1.0 …` under v0.2.0   red, names both versions
+        `unreleased`  `## 0.2.0 — unreleased`        red, on that branch's own
                                                      sentence and not on the
                                                      word, which the DATE
                                                      complaint also echoes
-        unreleased-cased: `— Unreleased`             red, on the same branch
-        date-off-by-one: a day before the tag        red, names both dates
-        no-changelog: no `CHANGELOG.md` at all       red, names the file
-        no-heading: no `## ` line in it              red, says so
-        unparseable-newest: `## 0.2.0 = …` above a
-          well-formed `## 0.1.0 — …`                 red, and does NOT read
+        `unreleased-cased`  `— Unreleased`           red, on the same branch
+        `date-off-by-one`  a day before the tag      red, names both dates
+        `no-changelog`  no `CHANGELOG.md` at all     red, names the file
+        `no-heading`  no `## ` line in it            red, says so
+        `unparseable-newest`  `## 0.2.0 = …` above
+          a well-formed `## 0.1.0 — …`               red, and does NOT read
                                                      past it to the older one
-        lightweight-tag: no tag object               red, names the shape
-        no-such-tag: no such ref in the checkout     red, names the ref
+        `lightweight-tag`  no tag object             red, names the shape
+        `no-such-tag`  no such ref in the checkout   red, names the ref
 
     THE TABLE IS HELD TO THE ROWS BELOW rather than being prose about them —
     every label in `rows` must appear in this docstring, asserted at the end
@@ -2890,12 +3332,21 @@ def test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry(tmp_path):
     # to a proof-read here. Scoped to `rows`: the three drives above this line
     # are not in it and say so in the docstring.
     doc = test_the_changelog_gate_refuses_a_heading_the_tag_does_not_carry.__doc__
+    described = _table_labels(doc)
     if doc:  # `python -OO` strips docstrings; there is then nothing to hold
-        undescribed = [label for label, *_ in rows if label not in doc]
-        assert not undescribed, (
-            f"{undescribed} are driven below and named nowhere in this test's "
-            f"own table. A row added without a line in the table leaves the "
-            f"docstring describing a drive that is no longer what runs."
+        assert described == {label for label, *_ in rows}, (
+            f"this test's table and its `rows` disagree.\n"
+            f"  in `rows` and not in the table: "
+            f"{sorted({label for label, *_ in rows} - described)}\n"
+            f"  in the table and not in `rows`: "
+            f"{sorted(described - {label for label, *_ in rows})}\n"
+            f"This check used to run in one direction only — rows -> table — "
+            f"so a row DELETED with its table line left standing was silent, "
+            f"and that is the direction the failure actually took in the "
+            f"sibling drive: a row was lost with a test that carried it and "
+            f"the table went on advertising it. The four GREEN rows above the "
+            f"rule carry no label and are described in prose; only the "
+            f"labelled rows are held here."
         )
 
 
@@ -3007,14 +3458,29 @@ def test_the_lightweight_remedy_this_step_prints_is_the_one_that_works(tmp_path)
         "any UI does; the remedy is about `git`, which this suite can run."
     )
 
-    # STEP ONE OF THE RECIPE, exactly as printed: drop the tag and re-cut it
-    # ANNOTATED at the same commit. (`git push origin :refs/tags/...` is the
-    # remote half of the same instruction and has no meaning in a repository
-    # with no remote; the local half is the one that changes what this step
-    # reads, and it is the one driven.)
+    # STEP ONE OF THE RECIPE, EXACTLY AS PRINTED — ALL FOUR INSTRUCTIONS NOW,
+    # INCLUDING THE TWO THAT TOUCH THE REMOTE. This comment read: *"(`git push
+    # origin :refs/tags/...` is the remote half of the same instruction and
+    # has no meaning in a repository with no remote; the local half is the one
+    # that changes what this step reads, and it is the one driven.)"* Both
+    # clauses are now false, and the second was the load-bearing one: since
+    # the step re-fetches the tag from `origin` before reading it, a recipe
+    # carried out LOCALLY is undone by the step itself on the next run — the
+    # re-fetch pulls the old lightweight tag straight back over the re-cut
+    # one. So the remote half is not decoration, it is the half that decides,
+    # and a drive that skipped it was measuring a recipe no maintainer would
+    # be following. `_tagged_tree` gives every tree an `origin` for this.
     at = _git(tree, "rev-parse", "HEAD").stdout.decode().strip()
-    _git(tree, "tag", "-d", tag)
-    _annotate(tree, tag, d1, at=at, message="stelling 0.2.1")
+
+    def _recut(date: str) -> None:
+        """The printed recipe, executed: drop it here AND on the remote,
+        re-cut it ANNOTATED at the same commit, push it."""
+        _git(tree, "tag", "-d", tag)
+        _git(tree, "push", "-q", "origin", f":refs/tags/{tag}")
+        _annotate(tree, tag, date, at=at, message="stelling 0.2.1")
+        _git(tree, "push", "-q", "origin", f"refs/tags/{tag}")
+
+    _recut(d1)
     second = _drive(body, tree, GITHUB_REF_NAME=tag)
     assert second.returncode != 0, (
         "re-cutting the tag annotated was enough on its own, so the message's "
@@ -3035,8 +3501,7 @@ def test_the_lightweight_remedy_this_step_prints_is_the_one_that_works(tmp_path)
     (tree / "CHANGELOG.md").write_text(
         f"## 0.2.1 — {d1}\n\n- a release note\n", encoding="utf-8"
     )
-    _git(tree, "tag", "-d", tag)
-    _annotate(tree, tag, d1, at=at, message="stelling 0.2.1")
+    _recut(d1)
     third = _drive(body, tree, GITHUB_REF_NAME=tag)
     assert third.returncode == 0, (
         "the recipe this step PRINTS does not end in a release this step "
@@ -3044,6 +3509,607 @@ def test_the_lightweight_remedy_this_step_prints_is_the_one_that_works(tmp_path)
         f"maintainer routes around.\n{third.stdout}\n{third.stderr}"
     )
     assert f"tagged={d1}" in third.stdout and f"0.2.1 — {d1}" in third.stdout
+
+#: The refusal text that DESTROYS A TAG, as literals. Asserted PRESENT on the
+#: row where a lightweight tag really was pushed, and asserted ABSENT on every
+#: row where the step could not find out or is refusing for another reason —
+#: which is the whole of what this item repaired, and it is not a spelling pin
+#: dressed up as one: what shipped in `v0.2.1` printed exactly these
+#: instructions about a tag that was correctly annotated, and following them
+#: would have failed again identically.
+_DESTRUCTIVE_INSTRUCTIONS = ("git tag -d", "git push origin :refs/tags/",
+                             "re-cut it ANNOTATED")
+
+#: The three workspace shapes this module builds, named rather than spelled as
+#: booleans because each one is an argument about what the release job IS.
+_SHAPES = ("pinned-sha", "release", "depth-one")
+
+
+def _checkout_the_way_actions_checkout_does(
+    origin: pathlib.Path, dest: pathlib.Path, tag: str, commit: str,
+    *, shape: str = "pinned-sha", unreachable: bool = False,
+) -> pathlib.Path:
+    """A workspace built the way `actions/checkout@v4` builds one, in one of
+    three shapes — with the refspecs the action COMPUTES rather than the one a
+    reader would write by hand.
+
+    THE ACTION'S ALGORITHM, read off its source at `11d5960`. With
+    `fetch-depth: 0` it fetches all history — `+refs/heads/*:refs/remotes/origin/*`
+    and `+refs/tags/*:refs/tags/*` — and then re-fetches only if `testRef` is
+    false. `testRef` is `if (!commit) return true`, `else if (!ref) return
+    shaExists(commit)`, and only then the `REFS/TAGS/` branch
+    `tagExists(t) && commit === revParse(ref)`. And `input-helper` turns an
+    input `ref` matching `^[0-9a-fA-F]{40}$` into `commit = <sha>`,
+    `ref = ''`. So WHICH BRANCH IS TAKEN IS A PROPERTY OF THE WORKFLOW:
+
+        shape         what it models
+        ────────────  ──────────────────────────────────────────────────────
+        pinned-sha    `ref: ${{ github.sha }}` — `testRef` takes the `!ref`
+                      branch, `shaExists` is true after the all-history
+                      fetch, there is NO second fetch, and `refs/tags/<tag>`
+                      is still the annotated tag object. This is what
+                      `release.yml` does now
+        release       no `ref:` — the action takes `github.ref` =
+                      `refs/tags/<tag>`, `testRef` compares the TAG OBJECT's
+                      sha against `github.sha`, finds them different, and
+                      re-fetches `+<github.sha>:refs/tags/<tag>`, force-
+                      writing the commit over the tag ref. This is what the
+                      workflow did when it refused `v0.2.1`, and it is kept
+                      because the step must still cope with a workspace built
+                      that way
+        depth-one     `--depth=1` with a pinned sha: the refspec is
+                      `[commit]` and NO tag ref is fetched at all
+
+    HEAD AND `HEAD^{tree}` ARE IDENTICAL IN `pinned-sha` AND `release`, which
+    is asserted in the drive rather than trusted: the input changes which ref
+    names what, and nothing about which tree is built.
+
+    WHAT THIS DOES NOT MODEL. It is a re-derivation of the action's refspecs,
+    not the action: no submodules, no LFS, no `persist-credentials` handling,
+    no sparse checkout, and `origin` is a path on this disk rather than an
+    authenticated https remote. `unreachable=True` points `origin` at a path
+    that is not a repository, which is what a PRIVATE repository looks like to
+    this step — the fetch is anonymous, because both checkouts say
+    `persist-credentials: false`.
+    """
+    assert shape in _SHAPES, f"unknown workspace shape {shape!r}"
+    dest.mkdir(parents=True)
+    _git(dest, "-c", "init.defaultBranch=main", "init", "-q")
+    _git(dest, "remote", "add", "origin", str(origin))
+    if shape == "depth-one":
+        _git(dest, "fetch", "-q", "--no-tags", "--prune", "--depth=1",
+             "--no-recurse-submodules", "origin", commit)
+        _git(dest, "checkout", "-q", "--force", commit)
+    else:
+        _git(dest, "fetch", "-q", "--prune", "--no-recurse-submodules", "origin",
+             "+refs/heads/*:refs/remotes/origin/*", "+refs/tags/*:refs/tags/*")
+        if shape == "release":
+            _git(dest, "fetch", "-q", "--no-tags", "--prune",
+                 "--no-recurse-submodules", "origin",
+                 f"+{commit}:refs/tags/{tag}")
+            _git(dest, "checkout", "-q", "--force", f"refs/tags/{tag}")
+        else:
+            _git(dest, "checkout", "-q", "--force", commit)
+    if unreachable:
+        _git(dest, "remote", "set-url", "origin", str(dest / "no-such.git"))
+    return dest
+
+
+def _ref_object_type(tree: pathlib.Path, tag: str) -> str:
+    """`%(objecttype)` for `refs/tags/<tag>` in `tree`, or `""` for no ref."""
+    got = _git(tree, "for-each-ref", "--format=%(objecttype)",
+               f"refs/tags/{tag}")
+    return got.stdout.decode().strip()
+
+
+def _tag_refs(tree: pathlib.Path) -> set[str]:
+    """Every `refs/tags/*` name in `tree`. Used to catch a fetch that took
+    more than the one ref it was asked for."""
+    got = _git(tree, "for-each-ref", "--format=%(refname)", "refs/tags/")
+    return {line for line in got.stdout.decode().split() if line}
+
+
+@_needs_a_shell
+def test_the_changelog_gate_reads_the_tag_THROUGH_the_checkout_that_rewrites_its_ref(tmp_path):
+    """THE DEFECT THAT REFUSED `v0.2.1`, REPRODUCED, REPAIRED AT ITS CAUSE.
+
+    `v0.2.1` was tagged ANNOTATED, pushed, and its release created on the tag
+    that already existed — the exact procedure this step's own *"TO AVOID IT
+    NEXT TIME"* sentence prescribes. The suite passed on the tagged tree and
+    this step refused it, saying *"refs/tags/v0.2.1 is a commit object and not
+    an annotated tag"* and instructing the maintainer to delete the tag, re-cut
+    it, and move `CHANGELOG.md`'s date. Every clause was false and the
+    instructions would have failed again identically, because what made the
+    ref a commit was the CHECKOUT and not the tag.
+
+    NOTHING IN THIS REPOSITORY COULD SEE THAT, and the reason is worth stating
+    where the repair is: the two places in `release.yml` that had measured the
+    behaviour — beside the `build` job's `fetch-depth: 0` and beside the step
+    itself — both built a sandbox with ONE `git fetch` of a refspec they chose
+    themselves, and `actions/checkout@v4` made TWO, of refspecs it computed.
+    A correct measurement of the wrong process is this project's L28.
+
+    AND THE FIX IS AN INPUT, NOT AN ALGORITHM, WHICH IS WHY THIS TEST IS
+    SHORTER THAN IT WAS. Two earlier repairs reconstructed the tag object the
+    checkout had un-named — first from `origin`, then from the workspace's own
+    object store with three filters and a refuse-rather-than-pick rule. Both
+    were sound only up to what they could infer, and the second was defeated
+    twice by ordinary git (`git tag -a -f <t> <t>` nests; `git tag <new>
+    <annotated>` does not dereference). `ref: ${{ github.sha }}` makes the
+    action take its `!ref` branch, so there is no second fetch and the ref is
+    never un-named: about forty-five lines of reconstruction deleted, and the
+    two shapes that defeated it now come out right by reading the ref.
+
+    THE ROWS::
+
+        label                    the workspace / the input     this step
+        ───────────────────────  ────────────────────────────  ─────────────
+        `pinned-tag-intact`      `pinned-sha`, ANNOTATED       ref reads
+                                                               `tag`; rc=0
+        `pinned-offline`         the same, `origin`            rc=0 — the
+                                 unreachable                   private-repo
+                                                               case, free
+        `clobbered-refetched`    `release` shape — the input   ref reads
+                                 removed — origin reachable    `commit`; the
+                                                               fetch repairs
+                                                               it; rc=0
+        `clobbered-offline`      the same, unreachable         rc=1, "DOES
+                                                               NOT KNOW", no
+                                                               recipe
+        `lightweight`            LIGHTWEIGHT at origin — THE   rc=1, recipe
+                                 NEGATIVE CONTROL              IS printed
+        `nested-reannotation`    `git tag -a -f <t> <t>`,      rc=0 with the
+                                 offline                       OUTER date
+        `decoy-backup`           LIGHTWEIGHT + a `-backup`     rc=1
+                                 ref on the old object
+        `moved-rerun`            tag re-cut elsewhere before   rc=1, names
+                                 the checkout                  both shas
+        `moved-mid-job`          re-cut after it, origin       rc=1, same arm
+                                 reachable
+        `not-a-repo`             not a git repository at all   rc=1, naming
+                                                               git's own
+                                                               failure
+        `no-head`                a repository with no commit   rc=1, naming
+                                                               HEAD
+        `taggerless`             a tag object with NO tagger   rc=1, and the
+                                 line                          date check is
+                                                               NOT skipped
+        `versionless-tag`        a tag named exactly `v`       rc=1, and the
+                                                               version half
+                                                               does not skip
+        `prefix-match`           `GITHUB_REF_NAME=v0.2` with   rc=1, refname
+                                 `refs/tags/v0.2/1` present    mismatch
+        `pattern-name`           GITHUB_REF_NAME is a PATTERN  rc=1, no other
+                                                               tag ref
+        `no-tags-guard`          `release` shape, so the       rc=0, no other
+                                 fetch runs                    tag ref
+
+    The labels are asserted against this docstring at the end, for the reason
+    the sibling drive gives: a table of drives is prose about code and goes
+    stale the moment a row is added.
+
+    THE NEGATIVE CONTROL IS WHY THIS IS NOT JUST A GREEN. A repair that made
+    the gate permissive would be worse than the false positive it fixes: a
+    lightweight tag has no tagger date, so the date half of this gate cannot
+    fire on one, and accepting it would mean the gate silently means something
+    different for the two kinds of tag.
+
+    `taggerless` AND `prefix-match` ARE REFUSALS THAT THIS FILE ALREADY
+    SHIPPED AND NOTHING HELD. Neutralising each `problems+=` site one at a
+    time, four of seventeen did not redden; these are the two reachable ones.
+    A tag object with no tagger line is written by `git hash-object -t tag
+    --literally`, reads `%(objecttype)=tag` with an empty `%(taggerdate:short)`,
+    and passes a fetch — neither `fetch.fsckObjects` nor `transfer.fsckObjects`
+    is on by default, measured, and it survives a clone. Remove the refusal
+    that names it and `tag_date` stays empty, so the `[ -n "${tag_date}" ]`
+    guard at the bottom SKIPS the date comparison entirely: the gate's headline
+    check evaporates rather than refusing. And `for-each-ref` matches a
+    glob-free pattern as a PATH PREFIX, so `refs/tags/v0.2` answers about
+    `refs/tags/v0.2/1` — a name `git check-ref-format` accepts.
+
+    THE FRESHNESS RESIDUAL, DECLARED. `refs/tags/<tag>` is origin as of the
+    checkout's fetch, refreshed by this step's own fetch when `origin` can be
+    reached. A tag moved between the two is therefore read as moved when the
+    step can refresh and as the pinned object when it cannot, so `moved-mid-job`
+    is driven only with a reachable origin. Both answers are about a tag that
+    names a commit this job is not building, and the peel-equals-HEAD refusal
+    is what makes either of them a refusal rather than a date.
+    """
+    body = _step_body(_CHANGELOG_STEP)
+    tag, date = "v0.2.1", "2026-08-28"
+    changelog = f"## 0.2.1 — {date}\n\n- a release note\n"
+    driven: list[str] = []
+
+    upstream = _tagged_tree(tmp_path, "upstream-annotated", tag=tag,
+                            tagger_date=date, changelog=None, origin=False)
+    commit = _git(upstream, "rev-parse", f"refs/tags/{tag}^{{commit}}"
+                  ).stdout.decode().strip()
+    # A SECOND ANNOTATED TAG OVER THE SAME COMMIT — a release candidate tagged
+    # on the commit that becomes the release, which is an ordinary shape. It
+    # is what makes `pattern-name` reach the "matched N refs" refusal: with
+    # one tag ref in the workspace a pattern-shaped `GITHUB_REF_NAME` resolves
+    # to a single row and is caught one branch earlier, by the refname
+    # comparison, so the multiple-match refusal went unexercised.
+    _annotate(upstream, f"{tag}-rc1", "2026-08-20", at=commit)
+
+    def workspace(name, *, origin=upstream, shape="pinned-sha", at=commit,
+                  unreachable=False, heading=changelog):
+        ws = _checkout_the_way_actions_checkout_does(
+            origin, tmp_path / name, tag, at, shape=shape,
+            unreachable=unreachable)
+        (ws / "CHANGELOG.md").write_text(heading, encoding="utf-8")
+        return ws
+
+    driven.append("pinned-tag-intact")
+    # THE SHAPE THE WORKFLOW NOW BUILDS. The precondition is asserted BEFORE
+    # the drive: a green here with the ref reading `commit` would be a green
+    # for a different reason than the one claimed.
+    pinned = workspace("ws-pinned")
+    assert _ref_object_type(pinned, tag) == "tag", (
+        "with `ref: ${{ github.sha }}` the action takes its `!ref` branch and "
+        "makes no second fetch, so `refs/tags/<tag>` must still be the "
+        "annotated tag object. It is not, so either the action's algorithm "
+        "has been mis-derived here or this git no longer behaves that way."
+    )
+    ok = _drive(body, pinned, GITHUB_REF_NAME=tag)
+    assert ok.returncode == 0, (
+        "THE GATE REFUSES A CORRECTLY ANNOTATED TAG in the workspace shape "
+        f"`release.yml` now builds.\n{ok.stdout}\n{ok.stderr}"
+    )
+    assert f"tagged={date}" in ok.stdout, ok.stdout
+    for banned in _DESTRUCTIVE_INSTRUCTIONS:
+        assert banned not in ok.stdout, (
+            f"the step tells a maintainer to {banned!r} on a release it is "
+            f"ACCEPTING:\n{ok.stdout}"
+        )
+
+    driven.append("pinned-offline")
+    # THE PRIVATE-REPOSITORY CASE, AND IT IS FREE NOW. `persist-credentials:
+    # false` makes this step's fetch anonymous, so on a private repository it
+    # can never succeed — and it does not need to, because the ref the first
+    # fetch brought was never overwritten. Two earlier repairs spent a network
+    # round trip and then forty-five lines of inference on exactly this.
+    offline = workspace("ws-pinned-offline", unreachable=True)
+    free = _drive(body, offline, GITHUB_REF_NAME=tag)
+    assert free.returncode == 0, (
+        "the step refused a workspace whose tag ref is a perfectly good "
+        "annotated tag object, because it could not reach `origin`. Nothing "
+        f"had rewritten that ref; there was nothing to repair.\n{free.stdout}"
+    )
+    assert f"tagged={date}" in free.stdout, free.stdout
+
+    driven.append("clobbered-refetched")
+    # THE INPUT REMOVED — DEFENCE IN DEPTH. This step cannot verify what its
+    # own job's checkout was configured with, so it keeps a fetch that repairs
+    # the ref when something has overwritten it.
+    clob = workspace("ws-clobbered", shape="release")
+    assert _ref_object_type(clob, tag) == "commit", clob
+    assert (_git(clob, "rev-parse", "HEAD").stdout
+            == _git(pinned, "rev-parse", "HEAD").stdout), (
+        "the two checkout shapes do not produce the same HEAD, so the claim "
+        "that `ref: ${{ github.sha }}` changes which ref names what and "
+        "nothing about which tree is built is false."
+    )
+    repaired = _drive(body, clob, GITHUB_REF_NAME=tag)
+    assert repaired.returncode == 0, (
+        "a workspace whose tag ref was overwritten by the checkout was not "
+        f"repaired by this step's own fetch.\n{repaired.stdout}\n{repaired.stderr}"
+    )
+    assert "re-fetched" in repaired.stdout and f"tagged={date}" in repaired.stdout
+
+    driven.append("clobbered-offline")
+    # AND WHEN NEITHER THE INPUT NOR THE FETCH IS THERE, IT SAYS SO.
+    blind = workspace("ws-clobbered-offline", shape="release", unreachable=True)
+    cant = _drive(body, blind, GITHUB_REF_NAME=tag)
+    assert cant.returncode != 0, (
+        "the step passed on a workspace whose tag ref is a commit and which "
+        f"it could not check against origin.\n{cant.stdout}"
+    )
+    assert "DOES NOT KNOW" in cant.stdout, (
+        "the step refused without saying that it cannot tell which of the two "
+        f"causes it is looking at.\n{cant.stdout}"
+    )
+    # THE CHECK IT HANDS OVER IS THE SHELL-SAFE SPELLING. `git ls-remote
+    # origin refs/tags/<tag>*` is shorter and is a TRAP: unquoted, a shell
+    # standing in a directory that holds a path of that name expands the `*`
+    # away, and the command then prints ONE line for an ANNOTATED tag — the
+    # reading that says "lightweight", which is the wrong answer in the exact
+    # direction this whole repair is about.
+    assert "git ls-remote --tags origin" in cant.stdout, cant.stdout
+    for banned in _DESTRUCTIVE_INSTRUCTIONS:
+        assert banned not in cant.stdout, (
+            f"THE STEP IS TELLING A MAINTAINER TO {banned!r} ON EVIDENCE IT "
+            f"DOES NOT HAVE.\n{cant.stdout}"
+        )
+
+    driven.append("lightweight")
+    light = _tagged_tree(tmp_path, "upstream-lightweight", tag=tag,
+                         annotated=False, changelog=None, origin=False)
+    light_at = _git(light, "rev-parse", f"refs/tags/{tag}"
+                    ).stdout.decode().strip()
+    lw = workspace("ws-lightweight", origin=light, at=light_at)
+    red = _drive(body, lw, GITHUB_REF_NAME=tag)
+    assert red.returncode != 0, (
+        "THE GATE ACCEPTED A GENUINELY LIGHTWEIGHT TAG. A lightweight tag has "
+        "no tagger date, so the date half of this gate cannot fire on one, "
+        "and a permissive answer here is a worse outcome than the false "
+        f"positive it replaced.\n{red.stdout}"
+    )
+    assert "not an annotated tag" in red.stdout, red.stdout
+    missing = [w for w in _DESTRUCTIVE_INSTRUCTIONS if w not in red.stdout]
+    assert not missing, (
+        f"the lightweight refusal no longer prints {missing}.\n{red.stdout}"
+    )
+
+    driven.append("nested-reannotation")
+    # `git tag -a -f <t> <t>` NESTS — git says so itself — so the superseded
+    # object stays reachable from the live ref and arrives in every checkout.
+    # A resolver that hunted the object store for "a tag object named this,
+    # over this commit" picked the SUPERSEDED one and read its date; reading
+    # the REF cannot, because the ref names the outer object.
+    inner, outer = "2026-08-20", "2026-08-28"
+    nest_up = _tagged_tree(tmp_path, "up-nested", tag=tag, tagger_date=inner,
+                           changelog=None, origin=False)
+    nest_at = _git(nest_up, "rev-parse", f"refs/tags/{tag}^{{commit}}"
+                   ).stdout.decode().strip()
+    superseded = _git(nest_up, "rev-parse", tag).stdout.decode().strip()
+    _annotate(nest_up, tag, outer, at=tag, force=True)
+    nested = workspace("ws-nested", origin=nest_up, at=nest_at,
+                       unreachable=True,
+                       heading=f"## 0.2.1 — {outer}\n")
+    assert _git(nested, "cat-file", "-t", superseded
+                ).stdout.decode().strip() == "tag", (
+        "the superseded object did not arrive, so this row is not the shape "
+        "it says it is."
+    )
+    deep = _drive(body, nested, GITHUB_REF_NAME=tag)
+    assert deep.returncode == 0, f"{deep.stdout}\n{deep.stderr}"
+    assert f"tagged={outer}" in deep.stdout and f"tagged={inner}" not in deep.stdout, (
+        "the step read the SUPERSEDED tagger date rather than the one the ref "
+        f"actually names.\n{deep.stdout}"
+    )
+
+    driven.append("decoy-backup")
+    # `git tag <new> <annotated>` does NOT dereference, so backing the tag up
+    # before following this step's own delete-and-re-cut recipe leaves an
+    # object carrying the header `tag v0.2.1` behind. It is not what the ref
+    # names, and reading the ref cannot be fooled by it.
+    old = "2019-01-01"
+    decoy_up = _tagged_tree(tmp_path, "up-decoy", tag=tag, tagger_date=old,
+                            changelog=None, origin=False)
+    decoy_at = _git(decoy_up, "rev-parse", f"refs/tags/{tag}^{{commit}}"
+                    ).stdout.decode().strip()
+    _git(decoy_up, "tag", f"{tag}-backup", tag)
+    assert _ref_object_type(decoy_up, f"{tag}-backup") == "tag", (
+        "`git tag <new> <annotated>` dereferenced, so this row is not the "
+        "shape it says it is."
+    )
+    _git(decoy_up, "tag", "-d", tag)
+    _git(decoy_up, "tag", tag, decoy_at)
+    decoy = workspace("ws-decoy", origin=decoy_up, at=decoy_at,
+                      unreachable=True, heading=f"## 0.2.1 — {old}\n")
+    fooled = _drive(body, decoy, GITHUB_REF_NAME=tag)
+    assert fooled.returncode != 0, (
+        "THE STEP READ A DECOY AND ACCEPTED A LIGHTWEIGHT TAG.\n{}".format(
+            fooled.stdout)
+    )
+    assert f"tagged={old}" not in fooled.stdout, fooled.stdout
+
+    driven.append("moved-rerun")
+    driven.append("moved-mid-job")
+    for label, recut_first in (("moved-rerun", True), ("moved-mid-job", False)):
+        up = _tagged_tree(tmp_path, f"up-{label}", tag=tag, tagger_date=date,
+                          changelog=None, origin=False)
+        pinned_at = _git(up, "rev-parse", f"refs/tags/{tag}^{{commit}}"
+                         ).stdout.decode().strip()
+
+        def recut():
+            _git(up, *_GIT_IDENT, "commit", "-q", "--no-verify",
+                 "--allow-empty", "-m", "a commit the release event never saw")
+            other = _git(up, "rev-parse", "HEAD").stdout.decode().strip()
+            _git(up, "tag", "-d", tag)
+            _annotate(up, tag, "2026-08-29", at=other)
+            return other
+
+        if recut_first:
+            elsewhere = recut()
+            moved = workspace(f"ws-{label}", origin=up, at=pinned_at)
+        else:
+            moved = workspace(f"ws-{label}", origin=up, at=pinned_at)
+            elsewhere = recut()
+        drift = _drive(body, moved, GITHUB_REF_NAME=tag)
+        assert drift.returncode != 0, (
+            f"[{label}] THE GATE VOUCHED FOR A TAG THAT DOES NOT NAME THE "
+            f"TREE BEING BUILT. HEAD is {pinned_at} and the tag peels to "
+            f"{elsewhere}.\n{drift.stdout}"
+        )
+        assert pinned_at in drift.stdout and elsewhere in drift.stdout, (
+            f"[{label}] the correspondence refusal does not name BOTH "
+            f"commits.\n{drift.stdout}"
+        )
+        for banned in _DESTRUCTIVE_INSTRUCTIONS:
+            assert banned not in drift.stdout, (
+                f"[{label}] the step tells a maintainer to {banned!r} because "
+                f"a tag MOVED.\n{drift.stdout}"
+            )
+
+    driven.append("taggerless")
+    # A TAG OBJECT WITH NO TAGGER LINE. `git hash-object -t tag --literally`
+    # writes one, `%(objecttype)` reads `tag`, `%(taggerdate:short)` is empty,
+    # and it survives a fetch and a clone because neither `fetch.fsckObjects`
+    # nor `transfer.fsckObjects` is on by default (measured). The refusal that
+    # names it is load-bearing in a way a reader would not guess: without it
+    # `tag_date` stays empty, and the `[ -n "${tag_date}" ]` guard at the
+    # bottom of the step SKIPS the date comparison — so the gate's headline
+    # check would evaporate rather than refuse. The heading here disagrees
+    # with everything, which is what makes that visible.
+    bare_up = _tagged_tree(tmp_path, "up-taggerless", tag=tag, tagged=False,
+                           changelog=None, origin=False)
+    bare_at = _git(bare_up, "rev-parse", "HEAD").stdout.decode().strip()
+    raw = tmp_path / "taggerless.raw"
+    raw.write_text(f"object {bare_at}\ntype commit\ntag {tag}\n\n"
+                   "no tagger line at all\n", encoding="utf-8")
+    obj = _git(bare_up, "hash-object", "-t", "tag", "-w", "--literally",
+               str(raw)).stdout.decode().strip()
+    _git(bare_up, "update-ref", f"refs/tags/{tag}", obj)
+    bare = workspace("ws-taggerless", origin=bare_up, at=bare_at,
+                     heading="## 0.9.9 — 1999-01-01\n")
+    assert _ref_object_type(bare, tag) == "tag", bare
+    none_dated = _drive(body, bare, GITHUB_REF_NAME=tag)
+    assert none_dated.returncode != 0, (
+        "a tag object with an EMPTY tagger date was accepted, and with it a "
+        "heading naming another version on another date. The empty-date "
+        "refusal is what stops `tag_date` staying empty and the date "
+        f"comparison being skipped altogether.\n{none_dated.stdout}"
+    )
+    assert "tagger date is empty" in none_dated.stdout, none_dated.stdout
+
+    driven.append("not-a-repo")
+    # NOT A GIT REPOSITORY AT ALL. `git for-each-ref` returns rc=0 for every
+    # pattern this step can hand it — measured on `refs/tags/[`,
+    # `refs/tags/\\`, `refs/tags/**/*` and `refs/tags/*`, all rc=0 — so the
+    # ONLY way its exit code is non-zero is that there is no repository to
+    # ask, and that is the row. The step's own "WHAT THIS STEP CANNOT SEE"
+    # list already says the path is relative to whatever directory the step
+    # runs in; this is what that assumption failing looks like.
+    outside = tmp_path / "ws-not-a-repo"
+    outside.mkdir()
+    (outside / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    nowhere = _drive(body, outside, GITHUB_REF_NAME=tag)
+    assert nowhere.returncode != 0, nowhere.stdout
+    assert "git for-each-ref exited" in nowhere.stdout, (
+        "a working directory that is not a git repository did not produce the "
+        "refusal that names git's own failure. Without it the step reports "
+        "'there is no refs/tags/<tag> in this checkout', which is a claim "
+        f"about a checkout that is not there at all.\n{nowhere.stdout}"
+    )
+
+    driven.append("no-head")
+    # NO COMMIT AT ALL, so there is no build subject to tie a tag to. This row
+    # came back from a test this commit deleted, and its absence was found by
+    # driving rather than by reading: with the unreadable-HEAD refusal removed
+    # the module stayed GREEN.
+    headless = tmp_path / "ws-headless"
+    headless.mkdir()
+    _git(headless, "-c", "init.defaultBranch=main", "init", "-q")
+    (headless / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    none = _drive(body, headless, GITHUB_REF_NAME=tag)
+    assert none.returncode != 0, none.stdout
+    assert "cannot tell which commit this job is building" in none.stdout, (
+        "a workspace with no HEAD did not produce the refusal that names it. "
+        "Everything this step compares is a comparison against the commit "
+        "being built, so a step that cannot read one must say so rather than "
+        f"compare against an empty string.\n{none.stdout}"
+    )
+
+    driven.append("versionless-tag")
+    # A TAG NAMED EXACTLY `v`. `${tag#v}` strips to the empty string, and an
+    # empty `tag_version` makes the version comparison at the bottom of the
+    # step SKIP — so the heading here names 9.9.9 and carries a date that
+    # MATCHES, leaving the version half as the only thing that could refuse.
+    # Pre-existing; found by neutralising each refusal in turn.
+    v_up = _tagged_tree(tmp_path, "up-versionless", tag="v",
+                        tagger_date=date, changelog=None, origin=False)
+    v_at = _git(v_up, "rev-parse", "refs/tags/v^{commit}").stdout.decode().strip()
+    v_ws = _checkout_the_way_actions_checkout_does(
+        v_up, tmp_path / "ws-versionless", "v", v_at)
+    (v_ws / "CHANGELOG.md").write_text(f"## 9.9.9 — {date}\n", encoding="utf-8")
+    versionless = _drive(body, v_ws, GITHUB_REF_NAME="v")
+    assert versionless.returncode != 0, (
+        "a tag named `v` strips to an empty version, and the version half of "
+        "this gate silently skipped: the heading names 9.9.9 and the step "
+        f"accepted it.\n{versionless.stdout}"
+    )
+    assert "leaves no version at all" in versionless.stdout, versionless.stdout
+
+    driven.append("prefix-match")
+    # `for-each-ref` MATCHES A GLOB-FREE PATTERN AS A PATH PREFIX, so
+    # `refs/tags/v0.2` answers about `refs/tags/v0.2/1` — and `v0.2/1` is a
+    # name `git check-ref-format` accepts, so nothing upstream refuses it.
+    # The step compares the refname it got against the one it asked for.
+    slash_up = _tagged_tree(tmp_path, "up-prefix", tag="v0.2/1",
+                            tagger_date=date, changelog=None, origin=False)
+    slash_at = _git(slash_up, "rev-parse", "refs/tags/v0.2/1^{commit}"
+                    ).stdout.decode().strip()
+    slash = _checkout_the_way_actions_checkout_does(
+        slash_up, tmp_path / "ws-prefix", "v0.2/1", slash_at)
+    (slash / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    prefix = _drive(body, slash, GITHUB_REF_NAME="v0.2")
+    assert prefix.returncode != 0, (
+        "`git for-each-ref refs/tags/v0.2` answered about `refs/tags/v0.2/1` "
+        "and the step took it for the tag it asked about. The name comes from "
+        f"the environment.\n{prefix.stdout}"
+    )
+    assert "and it answered about" in prefix.stdout, prefix.stdout
+
+    driven.append("pattern-name")
+    # BOTH WORKSPACES ARE BUILT BEFORE THE PLANT, which is the whole design of
+    # these two rows: the extra tag must not be reachable through the
+    # checkout's own fetch, or its presence afterwards says nothing about what
+    # the STEP fetched. Driven the wrong way round first — the second
+    # workspace built after the plant came back holding it, from its own
+    # fetch 1, with the step's fetch entirely innocent.
+    pattern_ws = workspace("ws-pattern")
+    narrow_ws = workspace("ws-no-tags", shape="release")
+    _git(upstream, "tag", "v9.9.9-planted", commit)
+    # THE POSITIVE CONTROL FOR AN ABSENCE ASSERTION: with the plant deleted
+    # this row and the next were still green, so their own liveness rested on
+    # a line nothing checked.
+    assert "refs/tags/v9.9.9-planted" in _tag_refs(upstream), (
+        "the extra tag was not planted at origin, so the two absence "
+        "assertions below cannot fail and are measuring nothing."
+    )
+    before = _tag_refs(pattern_ws)
+    wide = _drive(body, pattern_ws, GITHUB_REF_NAME="*")
+    assert wide.returncode != 0, wide.stdout
+    after = _tag_refs(pattern_ws)
+    assert "matched 2 refs" in wide.stdout, (
+        "the step refused a pattern-shaped `GITHUB_REF_NAME` for some other "
+        "reason than the one that matters. `git for-each-ref refs/tags/*` "
+        "answers about EVERY tag, and a step that read the first row would be "
+        "reporting a date for whichever tag `for-each-ref` happened to list "
+        f"first.\n{wide.stdout}"
+    )
+    assert "refs/tags/v9.9.9-planted" not in after, (
+        "a `GITHUB_REF_NAME` that git reads as a PATTERN made this step fetch "
+        "`refs/tags/*:refs/tags/*` and drag in every tag on the remote. "
+        "`git check-ref-format` is what refuses it BEFORE anything is "
+        "written, and a text needle cannot see that guard go away because the "
+        f"literal survives in the step's own comments.\n{sorted(after - before)}"
+    )
+
+    driven.append("no-tags-guard")
+    # `--no-tags`, DRIVEN, on a shape where the fetch actually runs.
+    narrow = _drive(body, narrow_ws, GITHUB_REF_NAME=tag)
+    assert narrow.returncode == 0, f"{narrow.stdout}\n{narrow.stderr}"
+    assert "re-fetched" in narrow.stdout, (
+        "this row is supposed to exercise the fetch — if something else "
+        f"decided it, the assertion below measures a fetch that never ran.\n"
+        f"{narrow.stdout}"
+    )
+    assert "refs/tags/v9.9.9-planted" not in _tag_refs(narrow_ws), (
+        "the fetch lost `--no-tags` and auto-followed the remote's other "
+        "tags, so this step wrote ref names it was never asked about.\n"
+        f"{narrow.stdout}"
+    )
+
+    # THE TABLE, HELD TO THE ROWS IT DESCRIBES. Under `python -OO` there is no
+    # docstring at all, so the check has nothing to hold and says so instead
+    # of reporting every row missing.
+    doc = test_the_changelog_gate_reads_the_tag_THROUGH_the_checkout_that_rewrites_its_ref.__doc__
+    described = _table_labels(doc)
+    if doc:  # `python -OO` strips docstrings; there is then nothing to hold
+        assert described == set(driven), (
+            f"this test's table and its drives disagree.\n"
+            f"  driven and not in the table: {sorted(set(driven) - described)}\n"
+            f"  in the table and not driven: {sorted(described - set(driven))}\n"
+            f"A row added without a table line leaves the docstring behind; a "
+            f"row DELETED with its table line left standing leaves the table "
+            f"advertising a drive that no longer runs — and some of these rows "
+            f"are the only pin on a refusal, so that direction loses coverage "
+            f"silently. Both are held now."
+        )
+
 
 #: SHAPES BOTH READERS MUST AGREE ABOUT, and the reason this table exists is
 #: that they did not. `.github/workflows/release.yml` decides "the newest
@@ -3240,10 +4306,28 @@ def test_the_drives_are_reading_the_real_step_bodies():
     calls that step a non-refusal and gives it no count, so an `exit 1` there
     is a refusal point the header's arithmetic never saw.
     """
-    sdist = _step_body(_SDIST_STEP)
-    tag = _step_body(_TAG_STEP)
-    manifest = _step_body(_MANIFEST_STEP)
-    changelog = _step_body(_CHANGELOG_STEP)
+    # CODE LINES, FOR ALL FOUR BODIES, AND THE REASON IS A DEFECT THIS
+    # FUNCTION HAD IN THREE OF ITS FOUR LOOPS. A needle matched against an
+    # extracted `run:` block INCLUDING ITS COMMENTS is satisfied by prose, and
+    # `release.yml` is a file whose step comments quote the constructs beside
+    # them — usually because a retired one is being recorded, which is exactly
+    # what this module asks that file to do. Measured on the bodies this
+    # commit ships: `tar tzf` is 1 code line and 2 comment lines in the sdist
+    # step, `mktemp -d` the same, and replacing the sole code occurrence of
+    # `mktemp -d` with a behaviour-identical spelling left this module GREEN
+    # with three comment hits standing. The changelog loops were repaired one
+    # commit earlier and the other three were left; they are all one
+    # projection now, so a body cannot be pinned by its own footnotes.
+    def _code_of(step_name: str) -> str:
+        return "\n".join(
+            line for line in _step_body(step_name).splitlines()
+            if not line.lstrip().startswith("#")
+        )
+
+    sdist = _code_of(_SDIST_STEP)
+    tag = _code_of(_TAG_STEP)
+    manifest = _code_of(_MANIFEST_STEP)
+    changelog = _code_of(_CHANGELOG_STEP)
     for needle in ("tar tzf", "git ls-files", "comm -23", "explained.txt",
                    "dist/*.tar.gz", "${#sdists[@]}",
                    "shopt -s nullglob dotglob", "mktemp -d", "trap "):
@@ -3357,6 +4441,60 @@ def test_the_drives_are_reading_the_real_step_bodies():
     # lightweight case a named refusal instead of an empty string compared to
     # a heading. `GITHUB_REF_NAME` rather than an `env:` block is the other
     # half: nothing is interpolated into that shell at all.
+    # THE TAG RESOLUTION, PINNED ON CODE LINES ONLY — AND THIS COMMENT USED
+    # TO CLAIM SOMETHING FALSE ABOUT ITSELF. It read: *"The BEHAVIOUR of all
+    # three is driven in
+    # test_the_changelog_gate_reads_the_tag_THROUGH_the_checkout_that_rewrites_its_ref;
+    # these are here because a pin catches the rewrite a drive is blind to."*
+    # That test drove `restore_ok` and drove NEITHER of the other two: every
+    # row passed a well-formed `v0.2.1` and no row ever looked at a second tag
+    # ref. Worse, the needles were scanned over the WHOLE extracted body,
+    # comments included, and `release.yml` names both constructs in its own
+    # prose beside them — so a mutant that disabled either guard while leaving
+    # the sentence about it standing was green. Driven, full module each time:
+    # `--no-tags` -> `--tags` with the literal kept in a comment, 37 passed;
+    # the `check-ref-format` guard replaced by `if false` with the literal
+    # kept, 37 passed. Both were behaviourally live — with a pattern-shaped
+    # `GITHUB_REF_NAME` the shipped body rewrote no tag ref and the mutant
+    # rewrote every one.
+    #
+    # BOTH HALVES ARE FIXED, because either alone leaves the other hole. The
+    # scan is over CODE LINES now, so prose recording a construct cannot stand
+    # in for the construct — the same decision `_code_lines` exists for one
+    # file over. And the two guards are DRIVEN, in the last two rows of the
+    # test named above: each plants an extra tag at `origin` after the
+    # workspace is built and asserts it does not appear, which is exactly what
+    # a glob refspec or a fetch that lost `--no-tags` drags in.
+    for needle in ("git fetch --no-tags --force origin", "check-ref-format",
+                   "restore_ok", "rev-parse --verify --quiet", "^{commit}",
+                   "HEAD^{commit}"):
+        assert needle in changelog, (
+            f"{needle!r} is gone from the CODE of the changelog step body. "
+            "That step reads `%(objecttype)` and `%(taggerdate:short)` off "
+            "`refs/tags/<tag>`, and `actions/checkout@v4` force-writes the "
+            "release COMMIT over that ref UNLESS the checkout is given "
+            "`ref: ${{ github.sha }}` — so without the re-fetch that repairs "
+            "it anyway, a workspace built without that input is read as a "
+            "lightweight tag; and without the `^{commit}`/`HEAD` comparison "
+            "the step will vouch for a tag that names a different commit than "
+            "the one being built. It did the first to `v0.2.1` on 2026-08-28 "
+            "and refused a correct tag; the second was driven passing a "
+            "re-run whose tag had moved."
+        )
+    # AND THE SECOND LOOP READS CODE LINES TOO, WHICH IT DID NOT, AND THE
+    # COMMIT THAT FIXED THE FIRST ONE IS WHAT BROKE IT. This loop scanned the
+    # whole extracted body; at `a90862b` `%(taggerdate:short)` appeared on one
+    # CODE line and nowhere else, so the needle was live. The commit that
+    # added the tag re-fetch wrote a comment INSIDE the `run:` block spelling
+    # the same literal, and the needle went inert — measured on both blobs:
+    # `a90862b` 0 comment-line hits and 1 code-line hit, `fd03c02` 1 and 1.
+    # Driven at `fd03c02`: `%(taggerdate:short)` -> `%(creatordate:short)` on
+    # the CODE line alone left the module at 42 passed, and the same mutation
+    # with the new comment's copy of the literal deleted was 2 failed. So the
+    # tagger-date-versus-committer-date decision — the argument `release.yml`
+    # spends about forty lines on — was pinned by nothing in this module or in
+    # `tests/test_changelog_names_the_version.py`, which carries the same
+    # needle over the same whole body and is repaired the same way.
     for needle in ("CHANGELOG.md", "git for-each-ref", "%(taggerdate:short)",
                    "%(objecttype)", "GITHUB_REF_NAME", "problems+=",
                    "refs/tags/"):
@@ -3369,12 +4507,16 @@ def test_the_drives_are_reading_the_real_step_bodies():
             "is to write a false date into CHANGELOG.md."
         )
     # AND THIS IS THE PIN CATCHING WHAT THE DRIVE CANNOT SEE, which is the
-    # half of the argument the paragraph above usually gets to skip. MEASURED
-    # on this branch: `%(taggerdate:short)` -> `%(creatordate:short)` leaves
-    # every row of the drive unchanged — `%(creatordate)` IS the tagger date
-    # for an annotated tag, and the lightweight row is refused by the
-    # `%(objecttype)` test before any date is read — so the drive is green on
-    # the mutant and only the needle above reddens. It is not a cosmetic
+    # half of the argument the paragraph above usually gets to skip. THE
+    # SENTENCE HERE SAID THE MUTATION WAS "3 failed" AND THAT WAS WRONG, and
+    # the sentence three lines down is what gives it away: `%(creatordate)` IS
+    # the tagger date for an annotated tag, so no row whose tag is annotated
+    # can see the difference, and every drive row's tag is annotated or is
+    # refused before a date is read. RE-MEASURED, all eight occurrences of the
+    # literal in `release.yml` rewritten at once: 1 failed, which is this
+    # needle and nothing else. The earlier figure came from a COMBINED mutant
+    # that also forced `%(objecttype)` to `tag`, and it was the forcing that
+    # reddened the extra rows. It is not a cosmetic
     # difference: `%(creatordate)` falls back to the COMMITTER date for a
     # lightweight tag (measured: a lightweight tag reads `creator=2026-08-28`
     # and `tagger=` empty), which is precisely the hybrid `release.yml`
