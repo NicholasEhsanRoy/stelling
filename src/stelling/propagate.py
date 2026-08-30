@@ -858,6 +858,29 @@ class Propagation:
     # which arithmetic the obligations were judged about ("real" | "ieee");
     # the verdict assemblers stamp from this field, never from a guess
     semantics: str = "real"
+    # WHICH POSITION THE BOUNDARY DIAL WAS IN (:data:`_BOUNDARY_MODES`),
+    # recorded on every propagation the way `semantics` is, from the run
+    # that happened and never from a guess. The DEFAULT here repeats the
+    # module default deliberately: a `Propagation` a caller hand-builds,
+    # and every one recorded before this field existed, IS a
+    # boundary-opaque propagation, so the default is the true value
+    # rather than a placeholder.
+    #
+    # WHAT READS IT: NOTHING IN ``src/``. **This comment used to say
+    # "`propagate` itself, to decide whether to write the stamped position
+    # line"** (0.3.0 P1 closing audit, F5) — `propagate` reads its own
+    # PARAMETER there, several frames before this record exists. The field
+    # is written once, at the end, and is write-only for the library: it
+    # exists for a programmatic reader of a `Propagation`, which is the
+    # only route to the position that does not go through the stamp
+    # (`Stamp` has no boundary field). No transfer, judgment or counter
+    # reads it either.
+    boundary: str = "opaque"
+    # How many strict-sign certificates actually CROSSED a sub-jaxpr
+    # boundary on this run — see `_Propagator.boundary_crossings` for what
+    # the count is and, more importantly, what it is not. Always 0 under
+    # the `"opaque"` default.
+    boundary_crossings: int = 0
     # an assume was DROPPED in constrain mode: its predicate had no decidable
     # box, so the query ran over a SUPERSET of the intended set. Carried out
     # to the solver layer because the escalation refusal keys on a CONSTRAINED
@@ -4055,10 +4078,18 @@ def _box_strict_sign(box: iv.IntervalArray) -> int:
 def _literal_strict_sign(atom: ir.Literal) -> int:
     """The strict sign of a LITERAL, from its own decoded value.
 
-    REAL MODE ONLY by construction — both call paths
-    (:meth:`_Propagator._strict_sign_out` and the `div` transfer's
-    `in_signs`) are gated on `semantics != "ieee"`, and that gating is what
-    makes reading the RAW decoded box correct here. Under ieee a literal is
+    REAL MODE ONLY by construction — every call path is gated on
+    `semantics != "ieee"`, and that gating is what makes reading the RAW
+    decoded box correct here. **THIS SENTENCE READ "both call paths" AND
+    NAMED TWO**; they were :meth:`_Propagator._strict_sign_out` and the
+    `div` transfer's `in_signs`, and both are still gated exactly as it
+    said. There are now THREE: the boundary carry
+    (:meth:`_Propagator._carries_signs`) also reaches
+    :meth:`_Propagator.read_strict_sign`, and a wrapper operand or a
+    sub-jaxpr outvar can be a Literal, so an ungated third path would
+    have written an ieee table off this raw box. Its gate is
+    `_carries_signs`'s own `semantics != "ieee"` conjunct, which exists
+    for exactly this reason and says so. Under ieee a literal is
     subnormal-hazed by :meth:`_Propagator.read` (DAZ flushes a literal like
     every other value), so a tiny positive literal's runtime value IS zero
     and this box would be lying; in real mode the literal's value simply is
@@ -7850,9 +7881,18 @@ class _Propagator:
         assume_mode: str,
         semantics: str = "real",
         libm_budget=None,
+        boundary: str = "opaque",
     ) -> None:
         self.assume_mode = assume_mode
         self.semantics = semantics
+        # WHETHER A SUB-JAXPR BOUNDARY CARRIES THE STRICT-SIGN CERTIFICATE
+        # (:data:`_BOUNDARY_MODES`). ``"opaque"`` is the default and is
+        # today's behaviour with nothing added to it; ``"transparent"``
+        # carries the certificate across the boundaries this walk already
+        # enters. Resolved and validated by :func:`propagate`; the class
+        # default repeats the module default so a hand-built propagator —
+        # the shape half of `tests/` uses — is a boundary-opaque one.
+        self.boundary = boundary
         # The caller's DECLARED libm accuracy budget (ieee only; None is
         # the default and makes every libm-riding transfer decline). It is
         # already resolved to a `LibmBudget` or None by `propagate` —
@@ -7898,8 +7938,14 @@ class _Propagator:
         # drops the fact, which is sound in the only direction that
         # matters.
         #
-        # TWO WRITERS, both real-mode only, and each writes a fact it can
-        # actually establish:
+        # SCOPE-SWAPPED at every sub-jaxpr descent, like the env it
+        # annotates, because var ids are unique per JAXPR and not per
+        # transcription. Whether anything is CARRIED across such a
+        # descent is the ``boundary`` dial (:data:`_BOUNDARY_MODES`);
+        # under its ``"opaque"`` default nothing is, in either direction.
+        #
+        # TWO WRITERS THAT MINT, both real-mode only, and each writes a
+        # fact it can actually establish:
         #
         #   1. a strict `gt`/`lt` assume in
         #      :meth:`_classify_assumed_pred` — the half-space the closed
@@ -7910,9 +7956,31 @@ class _Propagator:
         # A LITERAL is in neither: it has no var id, and its sign is
         # recomputed from its value on each read
         # (:func:`_literal_strict_sign`). So the CERTIFICATE has three
-        # sources and the TABLE has two, and an ARRAY constant needs
-        # writer 2 specifically — it is traced as a constvar and never
-        # reaches a rule as a Literal.
+        # sources and the TABLE has two MINTING writers, and an ARRAY
+        # constant needs writer 2 specifically — it is traced as a
+        # constvar and never reaches a rule as a Literal.
+        #
+        # **THIS CENSUS READ "TWO WRITERS" FLAT, AND UNDER
+        # ``boundary="transparent"`` THERE IS A THIRD ENTRY POINT TO THE
+        # TABLE.** It is called out as a distinct kind rather than
+        # renumbered into the list, because it is a different kind:
+        #
+        #   3. THE BOUNDARY CARRY — the ``arg_signs`` bind in
+        #      :meth:`run` and the out-carry in the transparent-wrapper
+        #      arm of :meth:`eqn`, gated by :meth:`_carries_signs` and
+        #      therefore INERT under the ``"opaque"`` default. It MINTS
+        #      NOTHING. Every value it writes was already certified in
+        #      another scope's table by writer 1 or writer 2 (or is a
+        #      literal's recomputed sign), and all it does is re-key that
+        #      same fact onto the var id the SAME VALUE has on the other
+        #      side of a sub-jaxpr boundary. Its licence is therefore not
+        #      an algebraic rule but a value identity, and that identity
+        #      is argued in full at the two sites — including why the
+        #      `cond` arm carries IN and never OUT.
+        #
+        # So under the default the table has two writers and three
+        # sources, exactly as it always did; under ``"transparent"`` it
+        # has a third writer and still three sources.
         #
         # REAL MODE ONLY, and that is not tidiness. Under ieee the strict
         # narrowing bumps to the format's smallest subnormal and the DAZ
@@ -7923,6 +7991,22 @@ class _Propagator:
         # case split and never reads this table; nothing writes it under
         # ieee either.
         self.strict_sign: dict[int, int] = {}
+        # HOW MANY CERTIFICATES ACTUALLY CROSSED A SUB-JAXPR BOUNDARY on
+        # this walk — one per WRITE performed by a boundary carry, in
+        # either direction, counted where the write happens
+        # (:meth:`run` for the IN direction, the transparent-wrapper arm
+        # of :meth:`eqn` for the OUT one). Always 0 under
+        # ``boundary="opaque"``, because nothing carries there.
+        #
+        # WHAT IT IS NOT. It is not a count of verdicts that depended on
+        # a carried certificate, and no arithmetic on it can become one:
+        # a certificate can cross and never be read by a `div` gate, and
+        # a single carried certificate can be read many times. It is the
+        # count of the ACT, which is exactly what the run's disclosure
+        # reports (:data:`BOUNDARY_CROSSED_DISCLOSURE`) — a disclosure
+        # that claimed the stronger thing would be claiming a
+        # measurement nobody made.
+        self.boundary_crossings = 0
         # var ids whose value comes from a REFUSED negative/malformed
         # shape (fix re-attack N1): membership, not aval classification,
         # is what gates every env reference — ids are globally unique per
@@ -8147,7 +8231,10 @@ class _Propagator:
         (:func:`_literal_strict_sign`), because it is not only the `div`
         boundary gate that reads this: :meth:`_strict_sign_out` reads
         EVERY operand of every rule, so a literal answering 0 zeroed the
-        whole chain through it. `0.5 * Σx²`, `2.0 * x`, `x / 2.0` and the
+        whole chain through it. The boundary carry
+        (:meth:`_carries_signs`) is the third reader, and it is the one
+        that makes this method's silence about ``semantics`` matter — see
+        :func:`_literal_strict_sign`. `0.5 * Σx²`, `2.0 * x`, `x / 2.0` and the
         `/n` inside `jnp.mean` are all literal-COEFFICIENT shapes whose
         certificate died on the coefficient, not on anything about the
         divisor (B5 follow-up audit).
@@ -8155,6 +8242,73 @@ class _Propagator:
         if isinstance(atom, ir.Literal):
             return _literal_strict_sign(atom)
         return self.strict_sign.get(atom.id, 0)
+
+    def _carry_refusal(self) -> str | None:
+        """Why a walk that ASKED for the carry nonetheless carries nothing,
+        as the sentence a verdict stamps — or ``None`` when it does carry.
+
+        **THE GATE AND THE STAMPED SENTENCE ARE ONE FUNCTION, AND THAT IS
+        THE REPAIR.** They used to be two things: :meth:`_carries_signs`
+        tested ``semantics != "ieee"`` and the stamping site in
+        :func:`propagate` tested only ``boundary != "opaque"``. So an
+        ``ieee`` run at ``boundary="transparent"`` — where this gate is
+        False at every descent and NOTHING crosses — stamped
+        :data:`BOUNDARY_TRANSPARENT_POSITION`, whose words are *"the
+        strict-sign certificate … was allowed to cross"*. The artifact of
+        record told its reader that the analysis had used a rule which
+        under ``ieee`` would be UNSOUND, on a run that had refused it.
+        Measured over 6656 ieee query shapes by the independent audit of
+        `5e525ce`: that line was the ONLY difference between the two dial
+        positions under ieee, and it appeared on every one of them. A
+        disclosure that is not conditioned on the act it reports is the
+        defect class this project keeps re-finding; this one was it,
+        one dial over from the `libm_declared` precedent that was
+        supposed to be its model.
+
+        The dial's own ``"opaque"`` position is NOT a refusal and is not
+        answered here: it is the request itself, and it is tested by
+        :meth:`_carries_signs` below. This function answers only *"the
+        carry was asked for — did anything stop it?"*, so every string it
+        can return is a sentence about a walk whose caller wanted the
+        carry and did not get it.
+
+        ONE REASON TODAY, and it is the certificate's own scope:
+
+        * ``semantics == "ieee"`` — the certificate is REAL-MODE ONLY
+          (see ``self.strict_sign``), and the restriction has to be
+          re-stated *here* rather than left to the writers, because
+          :meth:`read_strict_sign` answers for a LITERAL from its own
+          decoded value with no semantics test in it. A wrapper operand
+          that is a literal would therefore hand a nonzero sign across
+          the boundary under ieee, writing the table in a mode where
+          nothing may write it and minting a certificate that is FALSE
+          on a flush-to-zero target (audit 0.2.0 S10, and the invariant
+          ``tests/test_assume_bump_boundary_div.py::test_the_literal_sign_is_REAL_MODE_ONLY``
+          states).
+
+        A SECOND REASON ADDED HERE LATER IS STAMPED BY BEING ADDED, which
+        is the property that makes this shape worth the extra function:
+        the walk cannot refuse for a reason the verdict does not say.
+        """
+        if self.semantics == "ieee":
+            return BOUNDARY_INERT_UNDER_IEEE
+        return None
+
+    def _carries_signs(self) -> bool:
+        """Does a sub-jaxpr boundary carry the strict-sign certificate?
+
+        THE ONE GATE, read by every descent that could carry one, so the
+        dial and the real-mode restriction cannot end up spelled
+        differently at two sites. Both conjuncts are load-bearing:
+
+        * ``boundary == "transparent"`` — the caller asked for it. Under
+          the ``"opaque"`` default this returns False at every descent
+          and no line of the carry runs at all.
+        * :meth:`_carry_refusal` answering ``None`` — nothing else stopped
+          it. That function carries the argument for each reason it can
+          give, and gives the verdict the sentence for it.
+        """
+        return self.boundary == "transparent" and self._carry_refusal() is None
 
     def _strict_sign_out(self, eqn: ir.JaxprEqn, params, ins) -> int:
         """The strict sign of this equation's output, from its operands'.
@@ -8168,11 +8322,17 @@ class _Propagator:
         An operand's premise comes from :meth:`read_strict_sign`, and
         has exactly two shapes: a VAR reads ``self.strict_sign``, a
         LITERAL reads its own decoded value
-        (:func:`_literal_strict_sign`). The table itself has two writers
-        — a strict assume in :meth:`_classify_assumed_pred`, and a
-        CONSTVAR bound in :meth:`run` — and both are real-mode only. The
-        constant sources, literal and constvar, are why a coefficient no
-        longer zeroes the chain it sits in.
+        (:func:`_literal_strict_sign`). The table itself has two MINTING
+        writers — a strict assume in :meth:`_classify_assumed_pred`, and
+        a CONSTVAR bound in :meth:`run` — and both are real-mode only.
+        (This sentence read *"has two writers"* with no qualifier; under
+        ``boundary="transparent"`` a third entry point re-keys an
+        already-minted certificate across a sub-jaxpr boundary, and the
+        census on ``self.strict_sign`` states all three and what
+        separates them. It is real-mode only too, and inert under the
+        ``"opaque"`` default.) The constant sources, literal and
+        constvar, are why a coefficient no longer zeroes the chain it
+        sits in.
 
         * ``mul``/``div``: ``sign(a·b) = sign(a)·sign(b)`` and a product or
           quotient of nonzeros is nonzero. Broadcasting is irrelevant
@@ -8211,8 +8371,10 @@ class _Propagator:
         which is the one element the certificate excludes.
 
         **THE FLOAT DOUBLE OF THAT FIELD IS NOT CLOSED UNDER
-        MULTIPLICATION, AND THAT IS NOT A GAP HERE — IT IS THE REASON THE
-        IEEE FACE DOES NOT CALL THIS FUNCTION AT ALL.** binary64's nonzero
+        MULTIPLICATION. THIS HEADING WENT ON "AND THAT IS NOT A GAP HERE —
+        IT IS THE REASON THE IEEE FACE DOES NOT CALL THIS FUNCTION AT
+        ALL", AND IT IS A GAP HERE; the measurement that changed the
+        answer is below, under the withdrawal.** binary64's nonzero
         values are NOT closed under ``*``: a product of two nonzeros can
         underflow to zero, and the certificate would then be a false claim
         about the executable. MEASURED, so a lowering change reddens the
@@ -8225,16 +8387,63 @@ class _Propagator:
 
         — in python's binary64 and in ``jnp.float64`` alike, both faces of
         the ``mul`` chain certified nonzero and the third exactly ``-0.0``.
-        The real-mode verdict built on that certificate is not wrong: real
-        mode's whole posture is that obligations are judged *in exact real
-        arithmetic over the declared sets*, and its stamp says so in the
-        sentence a reader meets first. What would be wrong is the same
+        **AND THE NEXT SENTENCE USED TO READ:** *"The real-mode verdict
+        built on that certificate is not wrong: real mode's whole posture
+        is that obligations are judged in exact real arithmetic over the
+        declared sets, and its stamp says so in the sentence a reader meets
+        first."* **THAT DEFENCE IS WITHDRAWN, BY MEASUREMENT.** It survives
+        the ``mul`` chain above — ``-0.0`` divides to ``-inf``, which is on
+        the certified side — and it fails one primitive later. ``reduce_sum``
+        and ``dot_general`` accumulate FROM A ``+0.0`` SEED, so a value this
+        table calls NEGATIVE whose elements have all become ``-0.0`` reduces
+        to ``+0.0``; ``1.0 / (+0.0)`` is ``+inf``, which is in NO arm of the
+        box :func:`stelling.interval.boundary_div` returns from a negative
+        certificate — and that certificate is the only reason the kernel was
+        allowed to run at all. MEASURED at `80c5213` on 2026-08-28 (jax
+        0.11.0, CPU, ``jax_enable_x64=True``), with the boxes read back
+        through :func:`interval_env`:
+
+            x declared [-1, -0.25] shape (2,), assume(x < 0)
+            mul        [-5e-324, -0.0]      the product underflows
+            reduce_sum [-1e-323,  0.0]      zero at ONE boundary
+            div        [-inf, -1.798e308]   `boundary_div`'s negative arm
+            1.0 / Σ(x·1e-200·1e-200) < 0.0  VERIFIED at the DEFAULT
+            the same expression, EXECUTED   +inf
+
+        The certificate is TRUE in ℝ at every point of that box and the
+        verdict is contradicted at every point of it, so "judged in ℝ over
+        the declared sets" does not settle the question: the certificate is
+        not the conclusion, it is a LICENCE handed to a kernel that mints a
+        box about the executable. Nothing here is target-specific —
+        ``(-1.0*1e-200)*1e-200`` is ``-0.0``, and a REDUCTION of two negative
+        zeros is ``+0.0`` under ``numpy.sum``, ``sum()`` and ``math.fsum``
+        as well as under ``jnp.sum`` (the binary ``+`` operator is the one
+        that keeps the sign: ``-0.0 + -0.0`` is ``-0.0``, which is why this
+        sentence says *reduction*). **NOR IS IT ABOUT SMALL DECLARED
+        VALUES**, which the ``1e-200`` chain above invites: a long enough
+        chain of ordinary ones gets there — ``1.0 / Σ(x**1001) < 0.0`` over
+        ``x`` declared ``[-0.4, -0.2]`` is VERIFIED and returns ``+inf``
+        (0.3.0 P1 re-audit, F1). **AND THIS SENTENCE READ "the condition is
+        that this analysis's OWN box underflows", WHICH IS THE CONDITION FOR
+        THE ROUTE THROUGH THIS TABLE AND NOT FOR THE CLASS.** The wider one
+        is the box entering the TARGET'S SUBNORMAL BAND, reachable with no
+        certificate and no reduction at all: ``x`` declared ``[-1, -0.5]``,
+        ``assert_(x * 2**-512 * 2**-511 < 0.0)``, box ``[-1.11e-308,
+        -5.56e-309]`` with zero EXCLUDED, VERIFIED at the default and
+        ``-0.0`` at every declared point of the executed program (second
+        re-audit, F1; ``semantics="ieee"`` returns UNKNOWN on it). This is a pre-existing soundness defect of the
+        DEFAULT position and of no dial; a reader who turns the boundary dial is told
+        (:data:`BOUNDARY_TRANSPARENT_REACH_DISCLOSURE`) and nobody else is
+        told yet. The repair — a taint carrying sign-bit faithfulness for a
+        negative-certified reduction operand — is a separate change.
+
+        What was ALSO wrong, and this paragraph always said so, is the same
         certificate under ieee semantics, where the value IS ``fl(x*y)``,
         and that is exactly what ``0 if ieee else self._strict_sign_out(...)``
         at this function's one call site refuses — the short-circuit is the
         boundary between "a theorem of ℝ" and "a claim about the program's
-        floats", and this paragraph is the argument for why the boundary is
-        where it is.
+        floats". The measurement above is why that boundary is not in the
+        right place under ``real`` either.
         """
         prim = eqn.primitive
         if prim not in _STRICT_SIGN_PRIMITIVES or len(eqn.outvars) != 1:
@@ -9011,6 +9220,14 @@ class _Propagator:
         if self.branch_depth:
             vacuous.append(desc)
             return True
+        if self._carry_refusal() is None and self.boundary != "opaque":
+            # the ONE fact this channel can carry, and the only channel
+            # this path has: see :data:`BOUNDARY_UNSATISFIABLE_SUFFIX`.
+            # Conditioned on the carry being LIVE, not on the dial being
+            # off default, for the reason `_carry_refusal` exists: an ieee
+            # run that asked for the carry and was refused did not get one
+            # and must not be told it might have.
+            message = message + BOUNDARY_UNSATISFIABLE_SUFFIX
         raise UnsatisfiableAssumptionError(message)
 
     def _assume_constrain(self, eqn: ir.JaxprEqn, where: str) -> None:
@@ -9915,8 +10132,13 @@ class _Propagator:
             # bind in :meth:`run`; one certificate, three sources — those
             # two plus :func:`_literal_strict_sign`, which recomputes a
             # literal's sign on every read and stores nothing, so it is a
-            # source of the certificate and not of the table. The closed
-            # meet just written cannot represent `x > k`; this records the
+            # source of the certificate and not of the table. (Under
+            # ``boundary="transparent"`` a THIRD entry point re-keys an
+            # already-minted certificate across a sub-jaxpr boundary; it
+            # mints nothing, so "one certificate, three sources" is
+            # unchanged and the writer census on `self.strict_sign` says
+            # what separates a minting writer from a copying one.) The
+            # closed meet just written cannot represent `x > k`; this records the
             # part of it the box lost, and only the part that is a
             # NONZERO-ness claim: `x > k` with `k >= 0` gives `x > 0`
             # (transitively, and for every element, since `ks` is the
@@ -9991,7 +10213,13 @@ class _Propagator:
         )
 
     def run(
-        self, jaxpr: ir.Jaxpr, consts, args, arg_flags=None, arg_taints=None
+        self,
+        jaxpr: ir.Jaxpr,
+        consts,
+        args,
+        arg_flags=None,
+        arg_taints=None,
+        arg_signs=None,
     ) -> list[iv.IntervalArray]:
         if self._decl_names is _UNSET:
             # the FIRST `run` is the outermost jaxpr on every entry point
@@ -10070,6 +10298,24 @@ class _Propagator:
             # taint crosses scope boundaries with the value it marks
             if ieee and arg_taints is not None and arg_taints[i]:
                 self.taint[var.id] = True
+            # THE IN DIRECTION OF THE BOUNDARY CARRY, and the only place
+            # the strict-sign table is written from outside this scope.
+            # ``arg_signs`` is None unless the descent that called this
+            # asked for the carry, and the ONE place that decision is
+            # made is :meth:`_carries_signs` — so the mode test and the
+            # real-mode restriction are not re-spelled here. The licence
+            # for each caller is written at that caller: the
+            # unconditional-wrapper argument at the transparent arm of
+            # :meth:`eqn`, the restriction-to-a-subset argument at its
+            # `cond` arm.
+            #
+            # 0 means "unknown" and is never written: the table's
+            # absent-is-unknown reading is what makes a missing entry
+            # conservative, and an explicit 0 would be a second spelling
+            # of it.
+            if arg_signs is not None and arg_signs[i]:
+                self.strict_sign[var.id] = arg_signs[i]
+                self.boundary_crossings += 1
         # assume classification looks up the predicate's producing equation
         # at the CURRENT jaxpr level only; sub-jaxpr runs (transparent
         # wrappers, cond branches) get their own map, restored on exit —
@@ -10208,11 +10454,71 @@ class _Propagator:
                 outer_scope = self._scope_path
                 # var ids are unique per JAXPR, not per transcription, so
                 # the strict-sign table is scope-swapped exactly like the
-                # env it annotates. Nothing is carried IN or OUT across the
-                # boundary: an inner value inherits no certificate from its
-                # caller and hands none back, which loses precision on a
-                # `remat`-wrapped division and cannot lose soundness.
+                # env it annotates.
+                #
+                # **THIS COMMENT USED TO END:** *"Nothing is carried IN or
+                # OUT across the boundary: an inner value inherits no
+                # certificate from its caller and hands none back, which
+                # loses precision on a `remat`-wrapped division and cannot
+                # lose soundness."* That was true of every release up to
+                # and including 0.2.1, and it is still true under the
+                # ``boundary="opaque"`` DEFAULT, which is what
+                # :meth:`_carries_signs` returns False for. It is no
+                # longer true of the whole function, so it does not stand
+                # as an unqualified sentence.
+                #
+                # UNDER ``boundary="transparent"`` THE CERTIFICATE CROSSES
+                # THIS BOUNDARY IN BOTH DIRECTIONS, AND HERE IS THE WHOLE
+                # LICENCE FOR IT — it is short, and a reader who cannot
+                # find it cannot audit the change.
+                #
+                # The certificate says: *every element of this value is
+                # certainly > 0 (resp. < 0) at every point of the assumed
+                # region*. It is a claim about a VALUE over a REGION, and
+                # this boundary changes neither.
+                #
+                #   * The wrapper is UNCONDITIONAL. `jit`, `remat2`,
+                #     `custom_jvp_call` and `custom_vjp_call` all run their
+                #     body exactly when the equation runs; there is no
+                #     predicate, no branch, and nothing that can make the
+                #     body execute on a subset of the region the caller is
+                #     being analysed over. Contrast `cond` below, where
+                #     precisely that is what happens and why the OUT
+                #     direction is refused there.
+                #   * The inner invar IS the outer operand, as a real
+                #     value — that is what the positional binding two
+                #     lines down means, and it is the same identity the
+                #     boxes, the maybe-NaN flags and the product-taints
+                #     already cross on. So a fact true of the outer
+                #     operand's value is true of the inner invar's value,
+                #     because they are one value.
+                #   * The inner outvar IS the outer outvar, by the same
+                #     positional identity, so the converse holds and the
+                #     fact may come back.
+                #   * The REGION is unchanged in both directions: the
+                #     assumed region is a property of the top-level
+                #     declarations and the assumes that narrowed them, and
+                #     descending an unconditional wrapper narrows nothing.
+                #
+                # What is NOT carried, deliberately: `self.exact` (the
+                # :class:`stelling.exactness.ExactSet`) is swapped fresh
+                # below and stays that way. It governs WITHHOLDING —
+                # whether a definite violation may become a REFUTED — so
+                # carrying it would widen what can be refuted, which is
+                # the dangerous direction and a different argument from
+                # this one. Out of scope here by decision, not by
+                # oversight.
                 outer_sign = self.strict_sign
+                # ONE read, before the table is swapped, of the OUTER
+                # operands' certificates — positional, exactly like
+                # `in_flags` and `in_taints` above. None (never an empty
+                # list) when nothing is carried, so `run` has one test to
+                # make and not two.
+                in_signs_cert = (
+                    [self.read_strict_sign(a) for a in eqn.invars]
+                    if self._carries_signs()
+                    else None
+                )
                 self.env = {}
                 self.exact = exactness.ExactSet()
                 self.nan = {}
@@ -10225,9 +10531,15 @@ class _Propagator:
                 self.strict_sign = {}
                 out_flags = None
                 out_taints = None
+                out_signs = None
                 try:
                     outs = self.run(
-                        inner.jaxpr, inner.consts, ins, in_flags, in_taints
+                        inner.jaxpr,
+                        inner.consts,
+                        ins,
+                        in_flags,
+                        in_taints,
+                        in_signs_cert,
                     )
                     if ieee:
                         out_flags = [
@@ -10236,6 +10548,17 @@ class _Propagator:
                         out_taints = [
                             self.read_taint(o) for o in inner.jaxpr.outvars
                         ]
+                    if in_signs_cert is not None:
+                        # read INSIDE the try, while the inner table is
+                        # still installed — the `finally` below restores
+                        # the outer one, and a read after it would be a
+                        # read of the caller's table wearing the callee's
+                        # name. Same shape, and the same reason, as
+                        # `out_flags` above.
+                        out_signs = [
+                            self.read_strict_sign(o)
+                            for o in inner.jaxpr.outvars
+                        ]
                 finally:
                     self.env = outer_env
                     self.exact = outer_exact
@@ -10243,8 +10566,8 @@ class _Propagator:
                     self.taint = outer_taint
                     self._scope_path = outer_scope
                     self.strict_sign = outer_sign
-                for out, val, iout in zip(
-                    eqn.outvars, outs, inner.jaxpr.outvars
+                for j, (out, val, iout) in enumerate(
+                    zip(eqn.outvars, outs, inner.jaxpr.outvars)
                 ):
                     # refusal follows the value across the call boundary:
                     # an inner outvar refused for its shape refuses the
@@ -10257,6 +10580,17 @@ class _Propagator:
                         self._bind_refused(out)
                     else:
                         self.env[out.id] = val
+                        # THE OUT CARRY, in the arm that binds a real
+                        # value and not in the one that binds a refused
+                        # stand-in. A refused outvar's box is a ⊤
+                        # stand-in that stands for no value at all, so a
+                        # sign written onto it would be a certificate
+                        # about nothing; bind and certify stay one
+                        # operation here for the same reason bind and
+                        # register do.
+                        if out_signs is not None and out_signs[j]:
+                            self.strict_sign[out.id] = out_signs[j]
+                            self.boundary_crossings += 1
                 if ieee:
                     for out, f in zip(eqn.outvars, out_flags):
                         self.nan[out.id] = f
@@ -10346,7 +10680,80 @@ class _Propagator:
             # constrains that branch's precondition only, so a certificate
             # it mints must not outlive the branch. The join below hands
             # the cond's outputs no certificate at all.
+            #
+            # **A `cond` CARRIES IN AND NEVER OUT, AND THE ASYMMETRY IS THE
+            # POINT.** Under ``boundary="transparent"``
+            # (:meth:`_carries_signs`) the operands' certificates are bound
+            # onto each branch's invars below, and nothing is read back.
+            #
+            # IN is sound by the transparent-wrapper argument
+            # (:meth:`eqn`'s call arm carries it in full), RESTRICTED: a
+            # branch body is analysed over the subset of the assumed region
+            # on which the index selects that branch, and a fact true at
+            # EVERY point of the region is true at every point of a subset.
+            # The value identity is the same positional one — the branch
+            # invar IS the operand — and the operands are read once, above,
+            # in the caller's scope.
+            #
+            # OUT IS NOT SOUND WITHOUT WORK THAT IS NOT DONE HERE, and this
+            # is the false-VERIFIED trap the whole change has to avoid. A
+            # certificate MINTED inside a branch — by an `assume` written in
+            # the branch body — is conditional on that branch being taken.
+            # Handing it to the cond's outputs would let a branch-local
+            # precondition license a conclusion OUTSIDE the branch, which is
+            # exactly what the branch-scoping machinery already in this
+            # function exists to prevent (:data:`_BRANCH_SCOPED_REASON`, and
+            # a ``branch_depth`` that is inherited rather than reset).
+            #
+            # TWO REPAIRS SUGGEST THEMSELVES AND NEITHER IS AVAILABLE. They
+            # fail for DIFFERENT reasons, and this comment used to give only
+            # the first reason — which is not the obstacle for the second,
+            # so a later reader weighing the second would have found the
+            # objection beside it answered (0.3.0 P1 audit).
+            #
+            #   1. "CARRY OUT ONLY WHAT CAME IN." Needs a fact the table
+            #      cannot hold: its value is an ``int``, so ``+1`` from the
+            #      caller and ``+1`` minted by a branch-body assume are the
+            #      same entry. Distinguishing them is a PROVENANCE question
+            #      and provenance is not in this data structure.
+            #
+            #   2. "CARRY OUT ONLY WHAT EVERY POSSIBLE BRANCH AGREES ON."
+            #      Needs no provenance at all, which is why the objection
+            #      above does not touch it — AND IT IS UNSOUND. Branch
+            #      certificates are licensed by BRANCH-LOCAL PREMISES, and
+            #      premises do not conjoin across a branch: two branches can
+            #      agree on the SIGN while their assumes CONTRADICT each
+            #      other, and their agreement then licenses nothing at all.
+            #      MEASURED — build the repair and this query discharges:
+            #
+            #          x ∈ [-1, 1], selector unforced
+            #          branch 0:  assume(v > 0);  return  v   -> +1, [0, 1]
+            #          branch 1:  assume(v < 0);  return -v   -> +1, [0, 1]
+            #          join [0, 1]; both agree +1;  1/cout > 0  DISCHARGED
+            #
+            #      and it is false at x = 1/2 through branch 1, where the
+            #      program computes 1/(-1/2) = -2. x = 1/2 is in the declared
+            #      box and neither assume is a precondition of the QUERY.
+            #      The witness is
+            #      ``tests/test_boundary_dial.py::test_the_AGREE_repair_is_unsound_too_and_here_is_the_point_it_misses``,
+            #      which carries the falsifying point in exact rationals and
+            #      is RED against that repair.
+            #
+            # So the OUT direction is refused here, as a decision with two
+            # reasons rather than as an omission. A sound version would have
+            # to establish that the certificate holds on the WHOLE assumed
+            # region and not merely on each branch's own slice of it; that is
+            # its own scoped change with its own audit.
             outer_sign = self.strict_sign
+            # positional over `operands` — `eqn.invars[1:]`, i.e. the same
+            # slice `op_flags`/`op_taints` take, because the index is
+            # invar 0 and is not a branch operand. Read ONCE here, in the
+            # caller's scope, and re-bound for every possible branch.
+            op_signs = (
+                [self.read_strict_sign(a) for a in eqn.invars[1:]]
+                if self._carries_signs()
+                else None
+            )
             results = []
             branch_flags = []  # ieee: per-branch outvar flags
             branch_taints = []  # ieee: per-branch outvar product-taints
@@ -10404,7 +10811,7 @@ class _Propagator:
                         results.append(
                             self.run(
                                 b.jaxpr, list(b.consts), operands, op_flags,
-                                op_taints,
+                                op_taints, op_signs,
                             )
                         )
                     finally:
@@ -11062,6 +11469,38 @@ class _Propagator:
                 self.exact.mark_declared(out.id)
 
 
+# THE FOURTH CHANNEL, AND THE ONLY ONE THAT CARRIES NO STAMP. A walk whose
+# assume is definitely false RAISES instead of returning, so
+# :class:`UnsatisfiableAssumptionError` reaches a caller with no `Verdict`
+# and therefore with none of the three boundary lines above. The dial can
+# put a caller on that path: a half-infinite quotient box from
+# :func:`stelling.interval.boundary_div` makes a DOWNSTREAM assume
+# definitely false, and the caller is told their harness is defective on a
+# query the executable satisfies at every declared point.
+#
+# MEASURED at `f1c35f4` on 2026-08-28 (0.3.0 P1 closing audit, F3), jax
+# 0.11.0 and 0.10.2: `assume(x < 0)`, `q = jit(1/Σ(x·1e-200·1e-200))(x)`,
+# `assume(q > 0.0)`, `assert_(q > -1e400)` returns VERIFIED at `"opaque"`
+# and RAISES at `"transparent"`, while the compiled `q` is `+inf` at every
+# declared point, so the precondition holds there.
+#
+# This is the ieee-stamp repair's shape one channel over — a fact about the
+# run that only one output could carry — so the fact is appended to the
+# message, on exactly the runs whose carry was live. The DEFAULT message is
+# unchanged byte for byte, which is the same acceptance criterion the
+# stamped lines are held to.
+BOUNDARY_UNSATISFIABLE_SUFFIX = (
+    " \u2014 AND THIS RUN WAS AT boundary='transparent', WHICH CAN BE WHY: "
+    "a strict-sign certificate that crossed a sub-jaxpr boundary licenses "
+    "interval.boundary_div to return a half-infinite quotient box, and such "
+    "a box can make a downstream assume definitely false on a query the "
+    "compiled program satisfies at every declared point. Re-run at "
+    "boundary='opaque' before treating this as a harness defect; this "
+    "channel raises rather than returning a verdict, so none of the "
+    "boundary lines a stamp would carry reach you here"
+)
+
+
 def _check_assume_mode(assume_mode: str) -> None:
     if assume_mode not in _ASSUME_MODES:
         raise ValueError(
@@ -11071,6 +11510,303 @@ def _check_assume_mode(assume_mode: str) -> None:
 
 _SEMANTICS_MODES = ("real", "ieee")
 _DOMAINS = ("interval",)
+
+# THE BOUNDARY DIAL: does a sub-jaxpr boundary the walk crosses CARRY the
+# strict-sign certificate? ``"opaque"`` is the default and is the behaviour
+# of every release up to and including 0.2.1.
+#
+# **THE WORD IS ALREADY IN USE ONE MODULE OVER, AND IT MEANS SOMETHING
+# ADJACENT AND DIFFERENT.** :data:`stelling.coverage.DEFAULT_TRANSPARENT`
+# names the WRAPPERS THE WALK ENTERS — a "transparent" wrapper is one whose
+# body the analysis looks inside instead of dropping to ⊤. This dial names
+# whether the BOUNDARY the walk crosses CARRIES ANYTHING. The two are
+# independent, and today's default is the combination that reads oddest:
+# a wrapper is transparent (the walk goes in) and its boundary is opaque
+# (nothing about the caller's values goes in with it). That is not a
+# contradiction; it is the exact shape of the shipped limitation, which is
+# why the two words sit beside each other here rather than one of them
+# being renamed.
+_BOUNDARY_MODES = ("opaque", "transparent")
+
+# The stamped POSITION line, added to a run's assumptions whenever the dial
+# is off its default. See :func:`propagate` for why the ``"opaque"``
+# position adds no line at all.
+BOUNDARY_TRANSPARENT_POSITION = (
+    "boundary='transparent': the strict-sign certificate (\"every element "
+    "of this value is certainly nonzero of this sign at every point of the "
+    "assumed region\") was allowed to cross the sub-jaxpr boundaries this "
+    "walk enters — IN and OUT for the unconditional wrappers "
+    "(jit/remat2/custom_jvp_call/custom_vjp_call), IN ONLY for a cond "
+    "branch, never out of one. Every verdict recorded before this dial "
+    "existed is a boundary='opaque' verdict"
+)
+
+# The CONDITIONED disclosure: it reports an ACT, so it is written only when
+# the act happened. A position line that also claimed a crossing would be
+# claiming a measurement nobody made on the runs where nothing crossed —
+# the same asymmetry the libm budget's stamp keeps (`p.libm_declared`
+# gates its line, and the profile is never stamped for transfers that did
+# not run).
+# The sentence for a run that ASKED for the carry and got none. It is a
+# stamped line like the two above, and it exists because its absence was a
+# false one: see :meth:`_Propagator._carry_refusal` for what was stamped
+# instead and what the audit measured.
+BOUNDARY_INERT_UNDER_IEEE = (
+    "boundary='transparent' was requested and is INERT under "
+    "semantics='ieee': the strict-sign certificate is a claim about \u211d "
+    "(\"every element of this value is certainly nonzero of this sign\"), and "
+    "it is FALSE on a flush-to-zero target, where a positive subnormal's "
+    "runtime value is 0 (audit 0.2.0 S10). Nothing crossed any sub-jaxpr "
+    "boundary on this run, and this verdict rests on exactly the rules a "
+    "boundary='opaque' run would have used"
+)
+
+BOUNDARY_CROSSED_DISCLOSURE = (
+    "boundary='transparent' CARRIED {n} strict-sign certificate(s) across a "
+    "sub-jaxpr boundary on this run (the count is of the carries performed, "
+    "not of the verdicts that depended on one: a carried certificate that no "
+    "division consulted is counted here, and one consulted many times is "
+    "counted once)"
+)
+
+# WHAT THE CARRY CAN REACH — the disclosure that says what the position a
+# caller opted into is able to produce, stamped wherever that position is
+# live.
+#
+# **THIS IS A SOUNDNESS DISCLOSURE ON AN OPT-IN, AND THE ℝ POSTURE IS NOT
+# OFFERED AS COVER FOR IT.** Every rule in :meth:`_Propagator._strict_sign_out`
+# is a theorem of ℝ and the certificate is true in ℝ; that argument is
+# withdrawn here, because a VERIFIED the COMPILED PROGRAM CONTRADICTS at a
+# point of the DECLARED box is wrong whatever arithmetic licensed it, and
+# the certificate is exactly what licenses `boundary_div` to run at all.
+#
+# THE MECHANISM, MEASURED IN THIS TREE at `80c5213` on 2026-08-28 (jax
+# 0.11.0, CPU, ``jax_enable_x64=True``) over
+# ``x = any_array((2,), float64, (-1.0, -0.25))`` with ``assume(x < 0)`` and
+# the chain ``1.0 / jnp.sum(x * 1e-200 * 1e-200) < 0.0``. Every box below is
+# the propagator's own, read back through :func:`interval_env`:
+#
+#     mul         [-5e-324, -0.0]      the product underflows, and the
+#                                      outward rounding leaves zero at ONE
+#                                      boundary rather than at both
+#     reduce_sum  [-1e-323,  0.0]      still one-sided at zero
+#     div         [-inf, -1.798e308]   :func:`stelling.interval.boundary_div`'s
+#                                      negative arm, which ONLY the strict-sign
+#                                      certificate licenses — without it the
+#                                      transfer declines
+#                                      (:data:`DIV_BOUNDARY_ZERO_DECLINE`)
+#
+# and the compiled program returns ``+inf`` — in no arm of that box — at
+# every point of the declared box, because ``reduce_sum`` accumulates FROM
+# A ``+0.0`` SEED and a value the certificate calls NEGATIVE whose elements
+# have all become ``-0.0`` therefore sums to ``+0.0``.
+#
+# **THAT IS ``reduce_sum``'s MECHANISM AND NOT ``dot_general``'s, AND THIS
+# COMMENT USED TO SAY "those reductions" ACROSS BOTH** (0.3.0 P1 third
+# re-audit, F4). Measured on both lanes, over products that are all
+# ``-0.0``: ``dot`` keeps the sign for n = 1..32 — there is no seed there —
+# and loses it from n = 33, which is a blocking choice in one backend's
+# lowering (``numpy.dot`` loses it from n = 2). The two primitives reach the
+# same wrong verdict by two different routes through the compiler, and the
+# stamped sentence no longer asserts one mechanism for both. Measured beside
+# it, and the two backends DISAGREE ON ONE ROW: jax gives ``-0.0`` at n = 1
+# and ``+0.0`` from n = 2 up, while ``numpy.sum`` (2.5.2) gives ``+0.0`` at
+# EVERY n, n = 1 included. **THIS COMMENT READ "in jax and in numpy alike"
+# ACROSS BOTH ROWS AND THAT IS FALSE AT n = 1** (0.3.0 P1 re-audit, F6);
+# n = 1 is exactly the control the pinning test leans on, and that test
+# measures jax and nothing else. From n = 2 the two agree, and that is the
+# row the defect rides: the ``+0`` there is the sum's identity element, not
+# one backend's lowering choice.
+#
+# **AND THE REACHING CONDITION IS NOT ABOUT MAGNITUDES, WHICH THE
+# ``1e-200`` CHAIN ABOVE INVITES A READER TO CONCLUDE** (0.3.0 P1 re-audit,
+# F1 — the first pass of this item searched a cube-and-scale grammar at
+# ordinary magnitudes, found nothing, and read that null as a bound on the
+# reach; it was a bound on the grammar). ANY LONG ENOUGH CHAIN GETS THERE
+# FROM ORDINARY INPUTS. Measured in this tree on jax 0.11.0 and 0.10.2, at
+# the DEFAULT, with a no-assume control returning UNKNOWN and the program
+# contradicting each one — the largest declared magnitude ``m`` (over ``x``
+# in ``(-m, -m/2)``) from which ``1.0 / Σ(x**k) < 0.0`` still reaches:
+#
+#     k       3          11        51         201       501      1001
+#     m       3.4e-108   8.1e-30   9.2e-07    0.049     0.45     0.95
+#
+# so ``x = any_array((2,), float64, (-0.4, -0.2))`` with ``assume(x < 0)``
+# and ``1.0 / jnp.sum(x ** 1001) < 0.0`` is VERIFIED at the default, with a
+# clean stamp, and returns ``+inf``. Pinned by
+# ``tests/test_boundary_dial_jax.py::test_an_ORDINARY_magnitude_chain_reaches_it_at_the_DEFAULT``.
+#
+# **AND THEN A THIRD SENTENCE, AND A FOURTH, EACH WRITTEN AS THE WIDENING
+# THAT ENDS THE SEQUENCE AND EACH ONE ROUTE SHORT. THE SEQUENCE IS THE
+# FINDING.** What this constant stamped, in order: *"behind a wrapper"* →
+# *"the condition is ONLY that the box underflows onto zero"* → *"the WIDER
+# condition is the box entering the target's SUBNORMAL BAND"*. Three
+# rounds, three characterisations of the CLASS, three counterexamples:
+#
+#   * a `cond` branch is a sub-jaxpr boundary and not a wrapper;
+#   * ``x`` declared ``[-1, -0.5]``, ``assert_(x * 2**-512 * 2**-511 < 0.0)``
+#     — boxes ``[-7.458e-155, -3.729e-155]`` then ``[-1.1125e-308,
+#     -5.563e-309]``, ZERO EXCLUDED, VERIFIED at the DEFAULT with 0
+#     crossings and no boundary line, and the program returns ``-0.0`` at
+#     every declared point. No certificate, no reduction, no division. The
+#     mechanism is FLUSH-TO-ZERO of a subnormal ``mul`` result;
+#   * ``W = np.array([1e17, -1e17] * 16 + [1.0])``, ``assert_(jnp.sum(W) >
+#     0.0)`` — VERIFIED at the DEFAULT, no boundary line, and
+#     ``jnp.sum(W)`` is ``0.0`` eager and jitted while ``numpy.sum`` and
+#     ``math.fsum`` both give ``1.0``. EVERY element is a normal nonzero
+#     number, ``min |W| = 1.0``. The mechanism is RE-ASSOCIATION in a
+#     vectorised reduction, and it is not the one above. Reproduced on jax
+#     0.11.0 and 0.10.2, and with a declared input in place of the
+#     constants.
+#
+# TWO MEMBERS OF THE CLASS WITH TWO UNRELATED MECHANISMS, AND THAT IS THE
+# POINT: THE CLASS HAS NO CLOSED FORM SHORT OF THE ``semantics:`` LINE,
+# because every departure of the target from correctly-rounded IEEE lands
+# in it — flush-to-zero, summation re-association, the libm fidelity
+# ``exp``/``pow`` already stamp, and whatever the next lowering does. A
+# fourth "the condition is X" would be the same defect again.
+#
+# **SO THE SCOPING IS FIXED INSTEAD OF THE WORDING** (0.3.0 P1 third
+# re-audit, adjudicated): a ROUTE disclosure had been given a CLASS
+# characterisation to carry. The ROUTE has a closed form —
+# :func:`stelling.interval.boundary_div` is consulted only on a divisor box
+# that REACHES ZERO, and the certificate crossing a boundary is exactly
+# what this dial widens — so the stamped sentence names the route, says it
+# bounds nothing, and points at the ``semantics:`` line, which has said the
+# true general thing correctly since before this dial existed. The class's
+# two measured members are pinned by
+# ``tests/test_boundary_dial_jax.py::test_the_CLASS_is_wider_than_the_ROUTE_and_has_no_single_mechanism``,
+# which asserts they exist and asserts NOTHING about what characterises
+# them.
+#
+# THREE MORE THINGS THE FIRST PASS OF THIS SENTENCE GOT WRONG, each now in
+# the stamped text and each pinned by a test that runs the program:
+#
+#   * IT SAID "a VERIFIED". The same licence mints a false REFUTED: a
+#     half-infinite quotient box decides a comparison feeding a ``cond``
+#     selector, forcing the branch the program does not take, and a
+#     definite violation inside the forced branch is not withheld
+#     (re-audit F2, ``::test_the_same_licence_mints_a_false_REFUTED``).
+#   * IT SAID "behind a wrapper". A ``cond`` BRANCH is a sub-jaxpr boundary
+#     too and is not a wrapper — :data:`BOUNDARY_TRANSPARENT_POSITION`
+#     itself keeps the two apart — and the carry reaches through one, for a
+#     live selector and a forced one alike (re-audit F3,
+#     ``::test_the_carry_reaches_it_through_a_cond_BRANCH_and_not_only_a_wrapper``).
+#   * IT SAID "the assume's own scope". No assume is needed at all: the
+#     CONSTVAR writer mints the certificate from an array constant, and
+#     such a query is dial-moved with ``relational_assumes == ()`` and
+#     ``coverage.constrained == 0`` (re-audit F4,
+#     ``::test_the_reach_needs_no_assume_the_CONSTVAR_writer_is_enough``).
+#     The condition is that the certificate and the reduction share a
+#     scope, with the certificate from any of its three sources.
+#
+# **FOUR PLACES PLUMB THIS DIAL: the ``_pipeline`` widen re-check
+# (:mod:`stelling.preconditions`), the two witness probes
+# (:func:`_reachability_witnesses` and :func:`_region_witness` below), and
+# the sign POLARITY of the ``cond`` IN-carry. THREE OF THEM ARE
+# LOAD-BEARING ON SHAPES THIS SUITE DOES NOT HAVE, AND THIS COMMENT USED TO
+# CALL ALL FOUR "defence-in-depth … INERT on every query this suite has"**
+# (0.3.0 P1 third re-audit, F3). The measurement behind that word was
+# correct and correctly scoped — each mutated in turn, twelve modules that
+# could plausibly observe one, 349 passed for the baseline and 349 for
+# every mutant — and "no test in those twelve sees it" is not "it does
+# nothing".
+#
+#   * THE POLARITY IS A SOUNDNESS INVARIANT. This comment argued it was
+#     inert *"since ``_t_div`` reads the certificate as a boolean and
+#     ``boundary_div`` picks its arm from the BOX, so a flipped sign
+#     changes no outcome"*. **Both premises are true and the conclusion is
+#     false**: :meth:`_strict_sign_out` COMPOSES signs before anything
+#     reads one as a boolean, and its ``add``/``add_any`` rule is an
+#     AGREEMENT test (``sgn[0] if sgn[0] == sgn[1] else 0``), so a flipped
+#     carry can fabricate a certificate the true signs deny. Driven at
+#     `e16f96d` on 2026-08-28: ``a`` declared ``[-2e-200, -1e-200]`` with
+#     ``assume(a < 0)`` and ``cond(s > 0.5, br, br, a) < 0`` where
+#     ``br(v) = 1.0/(v + 1e-200)`` is UNKNOWN on the shipped code and
+#     **DISCHARGED under the flipped carry — a false VERIFIED**, while the
+#     program at ``a = -1e-200`` returns ``inf``. The three dial modules
+#     pass 127/127 with that mutant in place. Now pinned by
+#     ``tests/test_boundary_dial_jax.py::test_the_cond_IN_carry_POLARITY_is_a_soundness_invariant``.
+#   * THE WIDEN RE-CHECK'S KEYWORD moves a stamped VACUITY line, in its
+#     false direction. Measured here: ``assume(x > 0)`` with
+#     ``cond(s > 0.5, 1/v, 1/v, x) > -1e9`` stamps *"obligation(s) (0,)
+#     discharge with the declared bounds widened … envelope not
+#     load-bearing"* with the keyword and *"no obligation discharges …
+#     not re-derivable without the declared envelope"* without it, losing
+#     the per-obligation note as well. Pinned by
+#     ``tests/test_boundary_dial_jax.py::test_the_widen_recheck_runs_at_the_SAME_dial_position``.
+#   * ``_region_witness``'s argument turns a ``violated-over-set`` with
+#     ``region_inhabited=True`` into ``unknown`` with ``False``. **THIS
+#     ENTRY CARRIED A PROVENANCE DISCLAIMER — "the third re-audit's
+#     measurement, not mine; six shapes tried here never engaged
+#     ``narrowing_uncertified``" — AND THE DISCLAIMER IS RETIRED**: the
+#     shape is reproducible and that search was one ingredient short
+#     (closing audit, F4). It needs THREE things at once, and the sixth
+#     shape had two: a CONSTVAR-sourced certificate, because a pinned probe
+#     DROPS assumes on declared inputs and writer 1 never mints inside one;
+#     a SEPARATE narrowing assume on a DERIVED value, to hold
+#     ``narrowing_uncertified`` True; and an assume DOWNSTREAM of the
+#     crossed division, which is the one the pinned probe cannot satisfy.
+#     Measured at `f1c35f4` on 2026-08-28 and pinned by
+#     ``tests/test_boundary_dial_jax.py::test_the_region_probe_runs_at_the_SAME_dial_position``.
+#   * :func:`_reachability_witnesses` remains unobserved by anything
+#     measured on either side.
+#
+# WHY THE LINE HANGS ON THE POSITION AND NOT ON THE ACT, WHICH IS THE
+# OPPOSITE OF THE CONSTANT DIRECTLY ABOVE. :data:`BOUNDARY_CROSSED_DISCLOSURE`
+# reports an ACT and is conditioned on the act, because a run in which
+# nothing crossed did not cross. This line reports a PROPERTY OF THE RULE
+# the run was judged under, and that property holds at this position whether
+# or not anything crossed on this particular query. Three placements were
+# rejected, and the reasons are the argument for the one taken:
+#
+#   * CONDITIONED ON ``boundary_crossings`` — it would be withheld from
+#     exactly the reader who most needs it, the one whose query carried
+#     nothing this time and who is about to widen it;
+#   * APPENDED TO :data:`BOUNDARY_TRANSPARENT_POSITION` — that sentence is
+#     quoted verbatim, as the sentence an ieee run must NOT stamp, by
+#     ``tests/test_boundary_dial.py::test_the_ieee_STAMP_does_not_claim_a_rule_the_walk_refused``.
+#     Welding a second claim onto it gives one string two truth conditions
+#     and one gate, which is the shape :meth:`_Propagator._carry_refusal`
+#     was built to undo;
+#   * A ``note`` INSTEAD OF, OR AS WELL AS, AN ASSUMPTION —
+#     :attr:`stelling.verdict.Verdict.notes` are where and why something
+#     DEGRADED on this run, and nothing degraded on this run. What is at
+#     stake is what the verdict RESTS ON, which is what the ``assumes:``
+#     lines are. "As well as" would put one sentence in two places with two
+#     truth conditions and let them drift.
+#
+# AND IT IS ABSENT AT ``"opaque"``, WHICH IS NOT A CLAIM THAT ``"opaque"``
+# IS SAFE — the sentence says so in its own words, because it is not. The
+# same chain with no wrapper at all is VERIFIED at the DEFAULT, with zero
+# crossings: measured in this tree and pinned by
+# ``tests/test_boundary_dial_jax.py::test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts``,
+# whose first row is that default. The line is withheld at ``"opaque"``
+# only because that position is asserted byte-for-byte identical to every
+# previous release
+# (``tests/test_boundary_dial.py::test_the_DEFAULT_battery_is_byte_for_byte_the_base_tree``),
+# so a line there is a change to the default; the default's own disclosure
+# belongs with the repair, which is a separate change.
+BOUNDARY_TRANSPARENT_REACH_DISCLOSURE = (
+    "boundary='transparent' EXTENDS THE REACH OF A DEFECT THAT IS NOT "
+    "CONFINED TO IT. The strict-sign certificate is what licenses "
+    "interval.boundary_div to drop a divisor box's zero endpoint, and the "
+    "half-infinite quotient box it returns can exclude the value the "
+    "compiled program computes \u2014 the verdict is then contradicted at a "
+    "point of the declared box, IN EITHER DIRECTION: a false VERIFIED, or a "
+    "false REFUTED (which needs no cond \u2014 the box decides an ordinary "
+    "bound obligation directly). Measured through reduce_sum and, by a "
+    "different mechanism, through dot_general. No assume is required (an "
+    "array constant certifies too), and the DEFAULT reaches this route "
+    "wherever the certificate and the division share a scope; what this "
+    "position adds is that they may sit on opposite sides of a sub-jaxpr "
+    "boundary \u2014 a wrapper body or a cond branch \u2014 that the default "
+    "DECLINED. **THIS NAMES ONE ROUTE AND BOUNDS NOTHING.** The general "
+    "statement is the semantics line above, and READ IT AS COVERING BOTH "
+    "DIRECTIONS: its words are that a predicate can hold in real arithmetic "
+    "and fail in floats, and the false REFUTED is the converse of that "
+    "sentence rather than an instance of it. NOT REPAIRED IN THIS RELEASE"
+)
 
 # The mechanical guard on the domain dial: quoted verbatim when a
 # tightened (non-interval) domain is requested under semantics="real".
@@ -11087,6 +11823,24 @@ def _check_semantics(semantics: str) -> None:
     if semantics not in _SEMANTICS_MODES:
         raise ValueError(
             f"semantics must be one of {_SEMANTICS_MODES}, got {semantics!r}"
+        )
+
+
+def _check_boundary(boundary: str) -> None:
+    """Guard the boundary dial, eagerly and by name.
+
+    The house idiom for a dial (:func:`_check_semantics`,
+    :func:`_check_assume_mode`, :func:`_check_domain`): a module-level
+    tuple of the legal values, a refusal that names what was passed, and
+    a raise at the door rather than a decline three layers down. The
+    dial only DOES anything on a query that both crosses a sub-jaxpr
+    boundary and has a certificate to carry, so a typo'd value would
+    otherwise ride green through every other query until the day one of
+    those arrived.
+    """
+    if boundary not in _BOUNDARY_MODES:
+        raise ValueError(
+            f"boundary must be one of {_BOUNDARY_MODES}, got {boundary!r}"
         )
 
 
@@ -11175,6 +11929,17 @@ def interval_env(
     misdiagnosed as emission infidelity. Un-narrowed intervals are wider,
     so every guard judged on them is conservative — inert is always
     sound. Callers that want the constrained view ask for it explicitly.
+
+    **BOUNDARY-OPAQUE, AND THERE IS NO KEYWORD FOR IT** — the same
+    argument as the ``assume_mode`` default above, one dial over. This
+    accessor exists for the escalation layer's division guard, which must
+    decide *"the divisor definitely excludes 0"* over the DECLARED box;
+    the strict-sign certificate is a fact about the assumed region, so
+    carrying it across a sub-jaxpr boundary here could only narrow a
+    divisor interval the guard is required to judge un-narrowed. Opaque
+    is the wider answer and the wider answer is the conservative one,
+    exactly as ``"inert"`` is. A keyword would be a way to ask for the
+    narrower one, and nothing in this library has a use for it.
     """
     _check_assume_mode(assume_mode)
     p = _Propagator(assume_mode)
@@ -11685,7 +12450,7 @@ def _declared_element_count(jaxpr) -> int:
     return total
 
 
-def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
+def _region_witness(closed, p, *, assume_mode, semantics, boundary="opaque") -> bool:
     """Search for ONE point of the declared set at which EVERY assume of
     the query is definitely true — the non-emptiness certificate.
 
@@ -11849,7 +12614,12 @@ def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
         # the probe judges the SAME query in the SAME arithmetic, so it
         # must carry the same declaration — a probe that declined where
         # the run did not would certify less than the run earned
-        probe = _Propagator(assume_mode, semantics, p.libm_budget)
+        # THE SAME DIAL THE WALK RAN UNDER, for the reason the comment
+        # above gives about the declaration: a probe that declined where
+        # the run did not would certify less than the run earned. The
+        # certificate is real-mode only and the probes are the run's own
+        # arithmetic, so this is the same argument one dial over.
+        probe = _Propagator(assume_mode, semantics, p.libm_budget, boundary)
         probe.pin = k
         try:
             probe.run(closed.jaxpr, list(closed.consts), [])
@@ -11880,7 +12650,7 @@ def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
     return False
 
 
-def _reachability_witnesses(closed, p, *, assume_mode, semantics):
+def _reachability_witnesses(closed, p, *, assume_mode, semantics, boundary="opaque"):
     """Assert outvar ids the program provably reaches somewhere in the box.
 
     Each probe is one propagation of the SAME query with every declaration
@@ -11910,7 +12680,8 @@ def _reachability_witnesses(closed, p, *, assume_mode, semantics):
         return frozenset()
     found: set[int] = set()
     for k in range(_PROBE_COUNT):
-        probe = _Propagator(assume_mode, semantics, p.libm_budget)
+        # the walk's own dial, exactly as in :func:`_region_witness`
+        probe = _Propagator(assume_mode, semantics, p.libm_budget, boundary)
         probe.pin = k
         try:
             probe.run(closed.jaxpr, list(closed.consts), [])
@@ -11920,7 +12691,9 @@ def _reachability_witnesses(closed, p, *, assume_mode, semantics):
     return frozenset(found)
 
 
-def _withhold_uncertified_branch_refutations(closed, p, *, assume_mode, semantics):
+def _withhold_uncertified_branch_refutations(
+    closed, p, *, assume_mode, semantics, boundary="opaque"
+):
     """Withhold REFUTED from violations in branches nothing certifies.
 
     Runs the witness search ONCE, and only when the walk actually recorded
@@ -11944,7 +12717,8 @@ def _withhold_uncertified_branch_refutations(closed, p, *, assume_mode, semantic
     if not candidates:
         return
     certified = _reachability_witnesses(
-        closed, p, assume_mode=assume_mode, semantics=semantics
+        closed, p, assume_mode=assume_mode, semantics=semantics,
+        boundary=boundary,
     )
     for sink, i, key, what, face in candidates:
         if key in certified:
@@ -12145,6 +12919,7 @@ def propagate(
     assume_mode: str = "constrain",
     domain: str = "interval",
     libm_budget=None,
+    boundary: str = "opaque",
 ) -> Propagation:
     """Forward-propagate the declared boxes through a transcribed query and
     judge every ``stelling_assert`` obligation.
@@ -12176,15 +12951,53 @@ def propagate(
     module and the program runs whatever the compiler emitted, and the
     measured gap reaches 5.5 float32 ulps (audit 0.2.0 S9, S11). Passing
     one under ``semantics="real"`` raises: it has no meaning there.
+
+    ``boundary="opaque"`` (the default) is the behaviour of every release
+    up to and including 0.2.1, with nothing added to it: the strict-sign
+    certificate (``_Propagator.strict_sign``) does not cross a sub-jaxpr
+    boundary in either direction, so ``assume(x > 0); 1/jit(f)(x)`` is
+    UNKNOWN and so is the same query with the ``assume`` moved inside.
+    ``boundary="transparent"`` lets that certificate cross the boundaries
+    this walk already enters — **IN and OUT** for the unconditional
+    wrappers of :data:`stelling.coverage.DEFAULT_TRANSPARENT`, **IN only**
+    for a ``cond`` branch. Any other value raises :class:`ValueError`. The
+    returned :class:`Propagation` records the position in
+    :attr:`Propagation.boundary` and, when anything actually crossed, how
+    many times in :attr:`Propagation.boundary_crossings`.
+
+    **THE WORD IS OVERLOADED AND THAT IS DELIBERATE — SEE**
+    :data:`_BOUNDARY_MODES`. ``coverage.DEFAULT_TRANSPARENT`` names the
+    wrappers the walk ENTERS; this dial names whether the boundary it
+    crosses CARRIES ANYTHING. Today's default is a transparent wrapper
+    with an opaque boundary, which is not a contradiction but the exact
+    shape of the limitation.
+
+    **WHAT THIS DIAL DOES NOT REACH.** Only the strict-sign certificate
+    crosses. The other value-annotation tables swapped at a descent are
+    unchanged in both positions: the boxes, the maybe-NaN flags and the
+    product-taints already crossed positionally and still do, and
+    ``exact`` (the :class:`stelling.exactness.ExactSet`) still does not —
+    that one governs WITHHOLDING, so carrying it would widen what may be
+    REFUTED, which is the dangerous direction and a separate argument.
+    ``scan``, ``while``, ``pjit`` and ``closed_call`` are untouched by
+    either position: the walk does not enter them, so there is no
+    boundary for anything to cross.
+
+    **UNDER ``semantics="ieee"`` THE DIAL CHANGES NOTHING IN EITHER
+    POSITION**, and that is enforced rather than left to the reader:
+    :meth:`_Propagator._carries_signs` is the one gate and it tests the
+    semantics as well as the dial, because the certificate is a claim
+    about ℝ that is false on a flush-to-zero target.
     """
     _check_semantics(semantics)
     _check_assume_mode(assume_mode)
     _check_domain(domain, semantics)
+    _check_boundary(boundary)
     # eagerly, so a typo'd profile name raises where it was written
     budget = resolve_libm_budget(libm_budget)
     if budget is not None and semantics != "ieee":
         raise ValueError(LIBM_BUDGET_REAL_MODE_REFUSAL)
-    p = _Propagator(assume_mode, semantics, budget)
+    p = _Propagator(assume_mode, semantics, budget, boundary)
     if closed.jaxpr.invars:
         raise ir.TranscriptionError(
             "propagate expects a self-contained harness query (inputs declared "
@@ -12203,7 +13016,8 @@ def propagate(
     # first; it is one-sided, so computing it can only ever leave the
     # withholding alone or lift it.
     p.region_inhabited = _region_witness(
-        closed, p, assume_mode=assume_mode, semantics=semantics
+        closed, p, assume_mode=assume_mode, semantics=semantics,
+        boundary=boundary,
     )
     # FIRST: the run-scoped assume withholding. It runs before the
     # branch-reachability pass so that an obligation withheld here is not
@@ -12212,7 +13026,8 @@ def propagate(
     # applied inside the walk.
     _withhold_uncertified_refutations(p)
     _withhold_uncertified_branch_refutations(
-        closed, p, assume_mode=assume_mode, semantics=semantics
+        closed, p, assume_mode=assume_mode, semantics=semantics,
+        boundary=boundary,
     )
     assumptions = set(p.assumptions)
     if p.region_inhabited:
@@ -12267,6 +13082,76 @@ def propagate(
                     f"of the assumption it rests on"
                 )
             assumptions.add(budget.render(sorted(p.libm_declared)))
+    if boundary != "opaque":
+        # THREE SENTENCES, AND WHICH ONE IS WRITTEN IS DECIDED BY THE GATE
+        # THE WALK ITSELF USED — not by a second reading of the dial. That
+        # second reading was the defect: this site tested only
+        # `boundary != "opaque"` and wrote the position line unconditioned
+        # on semantics, so an ieee run stamped "the certificate … was
+        # allowed to cross" about a walk in which `_carries_signs` was
+        # False at every descent. See :meth:`_Propagator._carry_refusal`
+        # for what the audit measured.
+        refusal = p._carry_refusal()
+        if refusal is not None:
+            # ASKED FOR AND REFUSED. The verdict says so, and says why in
+            # the refusal's own words: a caller who set the dial and got
+            # a boundary-opaque verdict is told that is what happened,
+            # which is the `vacuity instrument inert (mode=…)` idiom one
+            # layer up in `preconditions._pipeline` — an instrument that
+            # was asked for and could not act discloses the fact rather
+            # than the absence of one.
+            assumptions.add(refusal)
+        else:
+            # THE DIAL'S POSITION, stamped on every run whose walk could
+            # actually carry — NOT conditioned on anything having
+            # crossed. A boundary-transparent run on a query with no
+            # sub-jaxpr is still a run under a different rule, and a
+            # reader comparing it against the archive has to be told
+            # which rule.
+            #
+            # **AND THE `"opaque"` POSITION ADDS NO LINE AT ALL, WHICH IS
+            # A DECISION AND NOT AN OVERSIGHT.** The acceptance criterion
+            # this change was built to is that the default is
+            # byte-for-byte today's behaviour, and a stamped line on
+            # every default run moves the rendered stamp of every verdict
+            # in the archive.
+            #
+            # THE SILENCE IS DECIDABLE AND NOT MERELY CONVENTIONAL, which
+            # is the independent audit's own strengthening of this
+            # decision and is why it stands. Every stamp carries
+            # `stelling {version}` on its first rendered line, so a
+            # reader has two cases and no third: BELOW the release that
+            # ships this dial, no dial existed and the run is
+            # boundary-opaque because nothing else was possible; AT or
+            # ABOVE it with no boundary line, the run is boundary-opaque
+            # because one of the three lines above is written on every
+            # run that is not. The reasoning is written where a verdict's
+            # reader looks — `docs/reading-a-verdict.md`, under the
+            # `assumes:` line inventory — and not only here.
+            #
+            # `propagate` returns the position on
+            # :attr:`Propagation.boundary` for a programmatic reader of a
+            # PROPAGATION. That is not a route out of `check`, which
+            # returns a `Verdict`: `Stamp` has no boundary field and no
+            # `to_dict`, so the lines above are the whole of what a
+            # verdict-reader gets, and this comment used to send that
+            # reader somewhere they cannot go.
+            assumptions.add(BOUNDARY_TRANSPARENT_POSITION)
+            # ...AND WHAT THAT PERMISSION CAN PRODUCE, on the same
+            # condition and for the same reason: it is a fact about the
+            # rule this walk was judged under, not about anything this
+            # walk did. The constant carries the measurement, the three
+            # rejected placements, and why the sentence is absent at
+            # `"opaque"` without claiming `"opaque"` is safe.
+            assumptions.add(BOUNDARY_TRANSPARENT_REACH_DISCLOSURE)
+            if p.boundary_crossings:
+                # THE ACT, reported only where it happened. A disclosure
+                # that rode on the position rather than on the crossing
+                # would say "certificates crossed" about a run in which
+                # none did.
+                assumptions.add(
+                    BOUNDARY_CROSSED_DISCLOSURE.format(n=p.boundary_crossings)
+                )
     return Propagation(
         obligations=tuple(p.obligations),
         nonvacuity_checks=tuple(p.nonvacuity_checks),
@@ -12282,6 +13167,8 @@ def propagate(
         # than pairing with anything.
         query_sha256=query_identity(closed),
         semantics=semantics,
+        boundary=boundary,
+        boundary_crossings=p.boundary_crossings,
         assume_dropped=p.assume_dropped,
         narrowing_uncertified=p.narrowing_uncertified,
         region_inhabited=p.region_inhabited,

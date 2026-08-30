@@ -338,6 +338,156 @@ not, the budget is an extrapolation you are making. See
 and `stelling.propagate.LIBM_MEASURED`, which carries every figure beside
 the population it came from.
 
+### Four `assumes:` lines carry the BOUNDARY RULE — and their absence says one too
+
+`boundary="opaque"` (the default) and `boundary="transparent"` decide
+whether the strict-sign certificate — the fact that lets a division tighten
+a divisor box whose endpoint is exactly zero — crosses a sub-jaxpr
+boundary. The dial can move a verdict, in both directions, so the stamp has
+to say which position ran. Four lines carry it, and which of them are
+written is decided by what the walk actually did:
+
+**THAT SENTENCE READ "It says it in *at most one* of three lines", AND IT
+WAS ALREADY FALSE WHEN IT WAS WRITTEN.** Two of the lines co-occur: a
+`transparent` run whose carry crossed stamps the position line *and* the
+`CARRIED` line, and
+`tests/test_boundary_dial.py::test_the_stamped_lines_reach_the_verdict`
+asserts them together. They are not alternatives. Each line is written on
+exactly the runs its own condition holds for, and the conditions overlap.
+
+| the line begins | it means |
+|---|---|
+| `boundary='transparent': the strict-sign certificate …` | the run was at `transparent` and the carry was LIVE — the certificate was allowed to cross the wrappers the walk enters, and to enter a `cond` branch |
+| `boundary='transparent' CARRIED N strict-sign certificate(s) …` | …and it actually crossed, N times. Present only when N > 0; it reports the ACT, not the position, and a run that carried nothing does not carry this line |
+| `boundary='transparent' was requested and is INERT under semantics='ieee'` | the dial was set and the walk refused it. The certificate is a claim about ℝ and is false where a positive subnormal flushes to zero, so nothing crossed and this verdict rests on exactly the rules an `opaque` run would have used |
+| `boundary='transparent' EXTENDS THE REACH OF A DEFECT …` | the same runs as the first line, and what that permission is able to produce. The certificate is what licenses `interval.boundary_div` to drop a divisor box's zero endpoint, and the half-infinite quotient box it returns can exclude the value the program computes, **in either direction**: a false VERIFIED, or a false REFUTED — which needs no `cond`, the box decides an ordinary bound obligation directly. Measured through `reduce_sum` and, by a different mechanism, through `dot_general`. **It names one route and bounds nothing** — see below. Not repaired in this release |
+
+**NO LINE MEANS `opaque`, AND THAT IS DECIDABLE RATHER THAN CONVENTIONAL.**
+The default adds nothing to the stamp — deliberately, so that a
+`boundary="opaque"` verdict is byte-for-byte the verdict the same query got
+before the dial existed, and so that every verdict recorded in this
+project's history stays comparable against a new one. A reader meeting a
+stamp with no boundary line has exactly two cases and no third, and the
+stamp's own first rendered line — `stelling <version>` — separates them:
+
+* the version is **below** the release that ships the dial: no dial
+  existed, and the run is boundary-opaque because nothing else was
+  possible;
+* the version is **at or above** it: one of the four lines above is
+  written on *every* run that is not boundary-opaque, so their absence is
+  the `opaque` position and not a gap in the record.
+
+**THE SPLIT TURNS ON A RELEASE THIS PAGE NEVER NAMED, AND ON A DEVELOPMENT
+BRANCH IT DOES NOT SEPARATE ANYTHING.** The dial ships in **0.3.0**; the
+version this working tree stamps is `stelling.__version__`, and while the
+dial is being developed that string is still the PREVIOUS release, so a
+stamp produced here reads a version "below the release that ships the dial"
+while the dial is fully available. The split above is sound for released
+artifacts and is *not* a way to read a verdict produced from a source tree
+between releases — for those, read `stelling.propagate.propagate(...)`'s
+`.boundary` field, which is a fact about the run rather than an inference
+from a version.
+
+**AND THE ABSENCE OF THE FOURTH LINE IS NOT A STATEMENT THAT THE DEFECT IT
+NAMES IS ABSENT.** The default reaches that route too, wherever the
+certificate and the reduction sit in the same scope — measured, and pinned by
+`tests/test_boundary_dial_jax.py::test_the_carry_reaches_a_VERIFIED_the_compiled_program_contradicts`,
+whose first row is an `opaque` VERIFIED the program contradicts with no
+boundary crossed at all. The line is withheld from `opaque` runs only
+because that position is asserted byte-for-byte identical to every previous
+release; what `transparent` adds is REACH — the certificate and the
+reduction may now sit on opposite sides of a sub-jaxpr boundary, a wrapper
+body *or* a `cond` branch, that the default declined — and that is what the
+line says.
+
+**Two things this paragraph said in its first form, corrected here rather
+than deleted.** It said *"wherever the certifying `assume` and the reduction
+sit in the same scope"*: **no `assume` is required at all**. The strict-sign
+table has three sources and only one of them is an assume — an array
+constant is certified from its own box, and a query with no `assume`
+anywhere is VERIFIED at the default and contradicted by the program
+(`::test_the_reach_needs_no_assume_the_CONSTVAR_writer_is_enough`). And it
+said *"behind a wrapper"*, which in this codebase names only the
+unconditional four; the `cond` route is measured in
+`::test_the_carry_reaches_it_through_a_cond_BRANCH_and_not_only_a_wrapper`.
+
+**Nor is the route a story about small numbers.** Any long enough chain gets
+there from ordinary declared values: `x` declared `[-0.4, -0.2]` with
+`assume(x < 0)` and `1.0 / jnp.sum(x ** 1001) < 0.0` is VERIFIED at the
+default, with no boundary line in its stamp, and returns `+inf`
+(`::test_an_ORDINARY_magnitude_chain_reaches_it_at_the_DEFAULT`).
+
+**THE FOURTH LINE NAMES A ROUTE. IT IS NOT A CHARACTERISATION OF THE CLASS,
+AND THIS PARAGRAPH TRIED TO WRITE ONE THREE TIMES.** In order it said the
+condition was *"behind a wrapper"*, then *"the analysis's own binary64 box
+underflows onto zero at one boundary"*, then *"the box entering the target's
+subnormal band"*. Each was written as the widening that ends the sequence
+and each was one route short. Two measured members of the class, with two
+unrelated mechanisms:
+
+| | flush-to-zero | re-association |
+|---|---|---|
+| the query | `x = any_array((), f64, (-1.0,-0.5))`; `assert_(x * 2**-512 * 2**-511 < 0.0)` | `W = [1e17,-1e17]×16 + [1.0]`; `assert_(jnp.sum(W) > 0.0)` |
+| the boxes | `[-1.1125e-308, -5.563e-309]` — zero excluded | one `reduce_sum`, nothing near zero |
+| anything small? | the *result* is a binary64 subnormal | **no** — every element is normal, `min |W| = 1.0` |
+| `semantics="real"` | **VERIFIED**, 0 crossings, no boundary line | **VERIFIED**, 0 crossings, no boundary line |
+| the program | `-0.0` at every declared point | `jnp.sum` is `0.0`, eager and jitted |
+| exact ℝ | `-1.1125369292536007e-308` (`python`, `numpy`) | `1.0` (`numpy.sum`, `math.fsum`) |
+| `semantics="ieee"` | **UNKNOWN** | **UNKNOWN** |
+
+The class has **no closed form** short of the `semantics:` line, because
+every departure of the target from correctly-rounded IEEE lands in it:
+flush-to-zero, summation re-association, the libm fidelity `exp`/`pow`
+already stamp, and whatever the next lowering does. The **route** does have
+one — `interval.boundary_div` is consulted only on a divisor box that
+reaches zero, and a certificate crossing a boundary is what this dial
+widens — so the fourth line names the route, says it bounds nothing, and
+hands the class to the `semantics:` line at the top of every real-mode
+stamp. Both members above are pinned by
+`tests/test_boundary_dial_jax.py::test_the_CLASS_is_wider_than_the_ROUTE_and_has_no_single_mechanism`,
+which asserts that they exist and asserts nothing about what they share.
+
+**READ THAT HAND-OFF IN BOTH DIRECTIONS, BECAUSE THE SENTENCE IT HANDS TO
+NAMES ONE.** The `semantics:` line reads *"obligations judged in exact real
+arithmetic over the declared sets; the traced program's IEEE float
+behaviour is NOT modeled — a predicate can hold in ℝ and fail in floats"*.
+That is the false-VERIFIED direction. **The false REFUTED is its converse**
+— the predicate fails in ℝ and holds in floats — and the same licence
+produces it, with no `cond` and already at the default:
+`assume(x < 0)` over `x ∈ [-1, -0.25]` with `assert_(1/Σ(x·1e-200·1e-200) >
+0.0)` is REFUTED while the compiled quotient is `+inf` at every declared
+point. The first clause of the `semantics:` line — *judged in exact real
+arithmetic* — covers both; its closing example does not, and this page said
+"where it has always been correct" without saying which half.
+(`::test_a_false_REFUTED_needs_no_cond_at_all`.)
+
+**AND THERE IS A THIRD DIRECTION THAT NEVER REACHES THIS PAGE AT ALL.** The
+same half-infinite quotient box can make a *downstream* `assume` definitely
+false, and `check()` then RAISES
+`stelling.propagate.UnsatisfiableAssumptionError` instead of returning —
+telling you your harness is defective on a query the executable satisfies
+at every declared point. An exception carries no stamp, so **none of the
+four lines above are delivered on that path**, and the guidance further
+down this page to fix the declaration or the precondition is the wrong
+advice there. The refusal message itself now says the dial was on and why
+that can be the cause; re-run at `boundary="opaque"` before believing it
+(`::test_the_UNSATISFIABLE_channel_carries_the_dial_because_no_stamp_can`).
+
+That is the whole of what a verdict-reader gets, and it is deliberate that
+there is no more: `Stamp` has no `boundary` field. A **programmatic**
+reader of a *propagation* — not of a verdict — can read
+`stelling.propagate.propagate(...).boundary` and `.boundary_crossings`
+directly; `check()` returns a `Verdict` and those fields are not on it.
+
+**The `ieee` line is the one to read twice.** It is the only one of the
+four that reports a request the analysis *declined*, and it exists
+because the alternative was worse: before it, an `ieee` run at
+`boundary="transparent"` stamped the first line in the table — *"the
+certificate … was allowed to cross"* — on a walk that had refused the carry
+at every descent. That told the reader the analysis had used a rule which
+under `ieee` would be unsound. The line now written says the opposite, and
+says it because the stamping site consults the same gate the walk did.
+
 ## `coverage-not-established:` — what the `coverage:` line did not settle
 
 `coverage:` is a **census**. It counts whether each equation's primitive

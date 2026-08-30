@@ -855,7 +855,10 @@ was written against the object at `343ebe6` (2026-08-03), and then four
 parameters landed under it — `solver` (`cbb1d60`, 08-12), `semantics`
 (`d6451cc`, 08-13), `libm_budget` (`c322cec`, 08-15) and `falsify`
 (`123ad75`, 08-19) — while this page went on using one of them,
-`semantics="ieee"`, further down. Nothing pinned the typed copy.
+`semantics="ieee"`, further down. Nothing pinned the typed copy. **A fifth
+landed after that** — `boundary` (0.3.0 development) — and the printed
+signature below picked it up on its own, which is the whole point of
+printing it.
 
 ```python
 import inspect
@@ -887,6 +890,7 @@ check.solver = None
 check.strict = False
 check.libm_budget = None
 check.falsify = None
+check.boundary = 'opaque'
 ```
 
 | argument | |
@@ -898,6 +902,7 @@ check.falsify = None
 | `solver` | `None` (the full portfolio), `"z3"` or `"cvc5"` to restrict it; anything else raises `ValueError` at the call. See [Choosing a solver backend](choosing-a-solver-backend.md) |
 | `strict` | `False` (default) returns `DECLINED` for a query that cannot be transcribed; `True` re-raises instead |
 | `libm_budget` | a declared accuracy profile for `exp`/`pow` under `semantics="ieee"`, which decline without one. Passing it under `"real"` raises — see [Checking preconditions](preconditions.md) |
+| `boundary` | `"opaque"` (default) or `"transparent"`: whether the strict-sign certificate — the fact that lets a division tighten a divisor box touching zero — crosses a sub-jaxpr boundary. The default is the behaviour of every release through 0.2.1: a `jit`/`remat`/`custom_jvp`/`custom_vjp` body and a `cond` branch each run with a fresh table, so `assume(x > 0); 1/jax.jit(f)(x)` is UNKNOWN. `"transparent"` carries it **in and out** of those unconditional wrappers and **in only** to a `cond` branch — never out of one, because a certificate a branch body mints is conditional on that branch being taken. **This dial can move a verdict**, and when it is off the default the stamp discloses the position — or says why the walk refused it, which is what `semantics="ieee"` gets instead |
 | `falsify` | `None` (default, the probe never runs) or `"sample"`: the falsification pass. **Stability: `experimental`** — may change or be withdrawn without notice. With it set, `check` **may raise instead of returning**, and one of the two classes is a `BaseException`. It can only refute. See the paragraph below, [Checking preconditions](preconditions.md) and [Reading a verdict](reading-a-verdict.md) |
 
 **`falsify` is `experimental`, and that is a level and not an adjective.**
