@@ -83,7 +83,9 @@ makes that possible.
 
 from __future__ import annotations
 
+import itertools
 import pathlib
+import re
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
@@ -126,19 +128,160 @@ RELEASE_FILES: tuple[str, ...] = ("CHANGELOG.md", "SOUNDNESS.md")
 #: `tests/test_soundness_log_reach.py` now holds the CHANGELOG
 #: DISCLOSURES that quote these phrases, and still cannot hold their
 #: truth.
-VERSION_FIELDS: tuple[str, ...] = (
-    "Versions: 0.1.0 pre-release builds only.",
-    "Versions: 0.2.0 development builds only.",
-    "Versions: `v0.1.0` and 0.2.0 development builds.",
+#: AND THE THREE ARE NOW GENERATED, WHICH IS THE REPAIR FOR THE LAST
+#: SENTENCE ABOVE. *"A closed set holds the vocabulary and not the truth"*
+#: was written as a limitation and it was also a diagnosis: three literal
+#: sentences, with the reached-release count derived by STRING EQUALITY
+#: against the third of them and every consumer reaching the phrases
+#: POSITIONALLY (`VERSION_FIELDS[0]`, `VERSION_FIELDS[2]`, a three-tuple
+#: unpack). A positional reference into a vocabulary is the same defect as
+#: a positional reference into a numbered list, which is how the 0.2.1
+#: plan's own limitation table came to be shifted by one.
+#:
+#: SO THERE IS A REGISTRY, A GENERATOR AND A PARSER, and the enumeration is
+#: an OUTPUT rather than the definition. :data:`RELEASED` is the one place a
+#: release registers; :data:`OPEN_LINE` is the development line open after
+#: the newest of them; :func:`reach` reads a field back to the set of
+#: releases it names. Today's three phrases are all GENERATED, byte for
+#: byte — asserted in `tests/test_soundness_log_reach.py`, because a
+#: generator that quietly reworded 65 existing fields would be a
+#: documentation migration wearing a refactor's clothes — so no bullet in
+#: `SOUNDNESS.md` moves.
+#:
+#: THE ACCEPTANCE TEST IS MEMBERSHIP AND DELIBERATELY NOT POSITION. An
+#: earlier draft of this paragraph said *"the first three generated phrases
+#: are today's three"*, and it was FALSE the moment `0.2.1` was registered:
+#: the generator emits the release-free forms together, so the third slot
+#: is `0.2.1 development builds only.` A vocabulary whose correctness is
+#: stated as an ORDER has the defect this whole change removes, one
+#: paragraph above the code that removes it.
+#:
+#: WHAT IT ADDS, AND THE SECOND ONE IS THE POINT. It adds the phrases for a
+#: post-0.2.0 event, which is arithmetic. And it adds a form for an event
+#: that is **not over**: every one of the three phrases ends the entry's
+#: event (*"was over before the tag"*, *"was over before the release"*), so
+#: there was no way to record that a defect is present in a published
+#: release and UNREPAIRED. That is not a gap in what can be spelled, it is a
+#: gap in what can be RECORDED, and the FTZ class is exactly the entry that
+#: could not be written: present in `v0.1.0` and `v0.2.0`, both yanked,
+#: unrepaired, release train frozen. A ledger whose grammar can only
+#: describe closed events quietly requires every entry to be a fix.
+
+#: THE RELEASES THIS RECORD CAN NAME, oldest first. The one place a new
+#: release registers; everything below is derived from it.
+RELEASED: tuple[str, ...] = ("0.1.0", "0.2.0")
+
+#: The development line open after the newest member of :data:`RELEASED`.
+OPEN_LINE: str = "0.2.1"
+
+
+def _dev_lines() -> tuple[str, ...]:
+    """The development line that CLOSED each release after the first, plus
+    the one open now — indexed to match :data:`RELEASED`, so
+    ``_dev_lines()[i]`` is the line that follows ``RELEASED[i]``."""
+    return tuple(RELEASED[1:]) + (OPEN_LINE,)
+
+
+def _join(parts: list[str]) -> str:
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def _generate_version_fields() -> dict[str, tuple[frozenset, str | None]]:
+    """``{phrase: (releases reached, the line that closed the event)}``.
+
+    ``closed`` is ``None`` for the unrepaired form. Subsets rather than
+    prefixes: a defect introduced in 0.2.0 development and released reaches
+    `v0.2.0` and not `v0.1.0`, and a prefix-only grammar could not say so.
+    """
+    out: dict[str, tuple[frozenset, str | None]] = {}
+    out[f"Versions: {RELEASED[0]} pre-release builds only."] = (frozenset(), RELEASED[0])
+    for line in _dev_lines():
+        out[f"Versions: {line} development builds only."] = (frozenset(), line)
+    for k in range(1, len(RELEASED) + 1):
+        for subset in itertools.combinations(range(len(RELEASED)), k):
+            tags = [RELEASED[i] for i in subset]
+            closed = _dev_lines()[subset[-1]]
+            ticked = [f"`v{v}`" for v in tags]
+            body = _join(ticked + [f"{closed} development builds"])
+            out[f"Versions: {body}."] = (frozenset(tags), closed)
+            out[f"Versions: {_join(ticked)}, unrepaired."] = (frozenset(tags), None)
+    return out
+
+
+#: ``{phrase: (reach, closed_in)}`` — the generated vocabulary.
+VERSION_FIELD_MAP: dict[str, tuple[frozenset, "str | None"]] = _generate_version_fields()
+
+#: The vocabulary as a tuple, today's three first and byte-identical.
+VERSION_FIELDS: tuple[str, ...] = tuple(VERSION_FIELD_MAP)
+
+_TAG_RE = re.compile(r"`v(\d[0-9A-Za-z._+!-]*)`")
+_FIELD_RE = re.compile(r"Versions: (?P<body>.+?)\.\s*$")
+_NO_RELEASE_RE = re.compile(
+    r"[0-9][0-9A-Za-z._+!-]* (?:pre-release|development) builds only"
 )
 
-#: The subset a `CHANGELOG.md` 0.2.0 one-liner may carry. The first phrase
-#: is excluded on purpose rather than by omission: an entry in the 0.2.0
-#: changelog records a fix that landed in 0.2.0, so the defect was in 0.2.0
-#: development builds by construction and "0.1.0 pre-release only" cannot
-#: be true of it. A permitted phrase that no entry can use is an untested
-#: branch of a rule, and this campaign has withdrawn several.
-CHANGELOG_VERSION_FIELDS: tuple[str, ...] = VERSION_FIELDS[1:]
+
+def reach(text: str) -> "frozenset | None":
+    """The RELEASED versions a `Versions:` field names, or ``None`` if the
+    text is not a well-formed field.
+
+    A PARSE and not a lookup, so that the question *"does this entry reach
+    `v0.1.0`?"* is answered from the sentence rather than from its position
+    in a list. ``frozenset()`` — reaches no release — and ``None`` — not a
+    field at all — are different answers and callers must not conflate them.
+    """
+    m = _FIELD_RE.search(text.strip())
+    if m is None:
+        return None
+    body = m.group("body")
+    tags = frozenset(_TAG_RE.findall(body))
+    if not tags:
+        return frozenset() if _NO_RELEASE_RE.fullmatch(body) else None
+    return tags if tags <= set(RELEASED) else None
+
+
+def changelog_version_fields(line: str) -> tuple[str, ...]:
+    """The subset a `CHANGELOG.md` one-liner for release ``line`` may carry.
+
+    DERIVED from the closing line rather than sliced off the front, which is
+    what `VERSION_FIELDS[1:]` used to be. An entry in a release's changelog
+    records a fix that landed in that release, so the event was over during
+    that release's development line — which excludes the pre-release phrase
+    (a permitted phrase no entry can use is an untested branch of a rule,
+    and this campaign has withdrawn several), every phrase belonging to a
+    later line, and the unrepaired form, whose whole content is that the
+    event is not over.
+    """
+    return tuple(p for p, (_, closed) in VERSION_FIELD_MAP.items() if closed == line)
+
+
+#: The subset a `CHANGELOG.md` 0.2.0 one-liner may carry.
+CHANGELOG_VERSION_FIELDS: tuple[str, ...] = changelog_version_fields("0.2.0")
+
+
+def field_for(reaches: "tuple[str, ...]" = (), closed: "str | None" = None) -> str:
+    """The one generated phrase with this reach and this closing line.
+
+    THE ACCESSOR THAT REPLACES `VERSION_FIELDS[n]`. A consumer that wants
+    *"the phrase for an event that reached `v0.1.0` and was over during
+    0.2.0 development"* now asks for it by what it MEANS. Indexing asked for
+    it by where it happened to sit, which survived exactly as long as the
+    vocabulary had three members.
+
+    Asserts a unique hit rather than returning the first, because two
+    phrases with one meaning would make every count that reads through here
+    a count over whichever the generator emitted first.
+    """
+    want = (frozenset(reaches), closed)
+    hits = [p for p, v in VERSION_FIELD_MAP.items() if v == want]
+    assert len(hits) == 1, (
+        f"the version-field vocabulary has {len(hits)} phrases for "
+        f"reach={sorted(want[0])} closed={closed!r}, and a consumer asking "
+        f"for one by meaning needs exactly one: {hits}"
+    )
+    return hits[0]
 
 
 def release_records() -> tuple[tuple[str, str], ...]:

@@ -13,6 +13,34 @@ on every verdict naming its own assumptions.
 
 *stelling is not affiliated with or endorsed by the JAX project.*
 
+> ### ⚠️ `0.1.0` and `0.2.0` ARE YANKED. DO NOT USE THEM ON FLOATING-POINT PROGRAMS.
+>
+> Both published releases can return **VERIFIED for a property the compiled
+> program contradicts** at a point of the declared box. Real mode — the
+> default — reasons over ℝ with outward-rounded intervals and models
+> neither IEEE flush-to-zero, nor the program's own float format, nor the
+> compiler's freedom to reassociate a reduction. Two of the nine driven
+> witnesses need no reduction, no division and no `assume`:
+>
+> ```python
+> x = any_array((), "float32", (1e-20, 1e-10));  assert_(x * x > 0.0)   # VERIFIED
+> x = any_array((), "float32", (-100.0, -50.0)); assert_(jnp.exp(x) > 0.0)  # VERIFIED
+> ```
+>
+> Both execute `0.0` at an admitted point, where the obligation is False.
+> Nine of the ten driven programs reproduce against `0.1.0` as well.
+>
+> **The yank stops new installs and leaves pinned environments working.**
+> If you have a real-mode VERIFIED over float dtypes, re-run it under
+> `semantics="ieee"`, which refuses every one of these. Integer harnesses
+> are unaffected. The release train is frozen until the class is closed;
+> there is no fixed version to upgrade to yet.
+>
+> Full record, with the witnesses, the reach and the response:
+> [SOUNDNESS.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/SOUNDNESS.md)
+> (2026-08-30) and
+> [design/soundness-response-policy.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/design/soundness-response-policy.md).
+
 ---
 
 ## JAX silently narrows integer constants during tracing

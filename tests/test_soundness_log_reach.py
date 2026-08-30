@@ -139,7 +139,12 @@ import warnings
 import pytest
 
 from _release_record import (  # noqa: E402
+    OPEN_LINE,
+    RELEASED,
     VERSION_FIELDS,
+    VERSION_FIELD_MAP,
+    field_for,
+    reach,
     release_prose,
     release_records,
 )
@@ -149,17 +154,44 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 SOUNDNESS = REPO / "SOUNDNESS.md"
 CHANGELOG = REPO / "CHANGELOG.md"
 
-#: The closed set. A `## Log` bullet answers the reach question with
-#: exactly one of these and with nothing else, and `REACHES_V010` is the
-#: one the count is over.
-#: DERIVED from `_release_record.VERSION_FIELDS` and not retyped: the Log
-#: writes the same sentence in italics, so the two closed sets are ONE set
-#: and cannot drift into disagreeing about the wording.
+#: The vocabulary, in the Log's italic spelling. A `## Log` bullet answers
+#: the reach question with exactly one of these and with nothing else.
+#: DERIVED from `_release_record`'s GENERATOR and not retyped: the Log
+#: writes the same sentence in italics, so the two vocabularies are ONE
+#: vocabulary and cannot drift into disagreeing about the wording.
 REACH_FIELDS = tuple(f"*{phrase}*" for phrase in VERSION_FIELDS)
-PRE_RELEASE_ONLY, DEV_ONLY, REACHES_V010 = REACH_FIELDS
+
+#: THE THREE A CONSUMER NEEDS BY NAME, ASKED FOR BY MEANING. This was
+#: `PRE_RELEASE_ONLY, DEV_ONLY, REACHES_V010 = REACH_FIELDS` — a three-tuple
+#: unpack that was correct for exactly as long as the vocabulary had three
+#: members, and that raised `ValueError: too many values to unpack` the
+#: moment the generator landed. That is the right way for it to stop being
+#: correct, and it is why the accessor takes a MEANING rather than an index.
+PRE_RELEASE_ONLY = f"*{field_for(closed=RELEASED[0])}*"
+DEV_ONLY = f"*{field_for(closed=RELEASED[1])}*"
+REACHES_V010 = f"*{field_for(reaches=(RELEASED[0],), closed=RELEASED[1])}*"
 
 #: The `CHANGELOG.md` one-liner field for the same fact, unitalicised.
-LINER_V010 = VERSION_FIELDS[2]
+LINER_V010 = field_for(reaches=(RELEASED[0],), closed=RELEASED[1])
+
+
+def reaches_first_release(text: str) -> bool:
+    """Does this bullet's `Versions:` field name `RELEASED[0]`?
+
+    THE COUNT IS A PARSE NOW AND NOT A STRING MATCH, and the difference is
+    not cosmetic. `REACHES_V010 in text` asked whether one PARTICULAR
+    sentence appears; the vocabulary now contains four phrases that name
+    `v0.1.0` — the one above, its unrepaired form, and the two that also
+    name `v0.2.0` — so a count by string equality would silently be a count
+    over whichever of them the Log happened to use. That is the defect
+    `_release_record`'s own comment describes as *"a count derived from a
+    vocabulary that cannot express a third of its entries"*, moved one layer
+    out and waiting for the first entry to use a new phrase.
+    """
+    return any(
+        field in text and RELEASED[0] in (reach(field.strip("*")) or frozenset())
+        for field in REACH_FIELDS
+    )
 
 _NUMBER_WORD = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -591,7 +623,7 @@ def test_the_reached_release_count_is_the_number_of_entries_that_declare_it():
     number, it has stopped letting a reader find it.
     """
     entries = [
-        line for line, text in log_bullets() if REACHES_V010 in text
+        line for line, text in log_bullets() if reaches_first_release(text)
     ]
 
     canonical, wrong = [], []
@@ -1042,7 +1074,7 @@ def test_the_release_record_does_not_state_the_old_count_unquoted():
         r"(?<![\"*])is\s+reached\s+by\s+\*\*(?P<n>[A-Za-z]+|\d+)\*\*\s+ENTRIES",
         re.S,
     )
-    entries = [line for line, text in log_bullets() if REACHES_V010 in text]
+    entries = [line for line, text in log_bullets() if reaches_first_release(text)]
     wrong = [
         m.group("n") for m in live.finditer(prose)
         if _numeral(m.group("n")) != len(entries)
@@ -1053,36 +1085,118 @@ def test_the_release_record_does_not_state_the_old_count_unquoted():
     )
 
 
-@pytest.mark.parametrize("field", REACH_FIELDS)
-def test_each_permitted_field_is_actually_used(field):
-    """No permitted-but-unused option.
+def test_every_field_the_log_uses_is_one_the_GENERATOR_produces():
+    """The soundness direction, and it is the one that survived the change.
 
-    A closed set with a member nothing ever uses is an option that has
-    never been exercised, and this campaign has closed that shape often
-    enough to check for it. All three are in use. **The partition is NOT
-    typed here**, for the reason the comment on `_PREAMBLE_MAX_LINES`
-    gives: measured over the same bullets at each commit that touched this
-    file, it has been 39/8/7 (`68b219d`, `1f55eef`, `1242da4`), 33/12/9
-    (`c198a8d`, `6ecb5cd`) and 33/10/11 (`161ead8`) — three moves in two
-    days before this branch made a fourth, and every one of them a
-    correction of a FALSE FIELD rather than a new entry. The live values are in the message below and in `SOUNDNESS.md`'s
-    own reached-release paragraph, which is derived from these bullets and
-    checked above. (Named
-    rather than called "the release": `0.2.0` is a release too now, and no
-    bullet reaches it.)
+    THIS TEST WAS `test_each_permitted_field_is_actually_used`, PARAMETRIZED
+    OVER THE VOCABULARY, and its argument was sound for a HAND-TYPED closed
+    set: *"a closed set with a member nothing ever uses is an option that
+    has never been exercised"*. Someone typed three sentences; a fourth
+    nobody used would be dead vocabulary, and this campaign has closed that
+    shape often enough to check for it.
+
+    **IT IS NOT SOUND FOR A GENERATED ONE, AND THE GENERATOR IS WHY THIS
+    CHANGED.** `_release_record` now DERIVES the vocabulary from
+    :data:`_release_record.RELEASED` and :data:`_release_record.OPEN_LINE`,
+    so its members are the combinations that CAN arise rather than sentences
+    anybody chose. Requiring each to be used would require `SOUNDNESS.md` to
+    contain an entry of every possible shape — six of the nine went unused
+    the moment `0.2.1` was registered, including *"reached `v0.2.0` and was
+    over during 0.2.1 development"*, which nobody wants to have to invent an
+    entry to satisfy.
+
+    **AND THE BRANCH THE OLD RULE PROTECTED IS STILL EXERCISED, JUST NOT BY
+    THE LEDGER.** What *"an untested branch"* meant was a phrase whose
+    handling nothing runs. Every generated phrase now round-trips through
+    :func:`_release_record.reach` in
+    `test_every_generated_phrase_parses_back_to_its_own_reach`, so the
+    handling is exercised for all nine whether or not the log has an entry
+    shaped like it.
+
+    What is left here is the direction that was always load-bearing: **no
+    bullet may carry a field the generator does not produce**, and no bullet
+    may carry two. The partition is REPORTED rather than typed, for the
+    reason the old docstring gave — measured over the same bullets it has
+    been 39/8/7 (`68b219d`, `1f55eef`, `1242da4`), 33/12/9 (`c198a8d`,
+    `6ecb5cd`) and 33/10/11 (`161ead8`), three moves in two days, every one
+    a correction of a FALSE FIELD rather than a new entry.
     """
     bullets = log_bullets()
-    used = [line for line, text in bullets if field in text]
-    assert used, (
-        f"no `## Log` bullet carries {field!r}. A phrase in the closed set "
-        f"that nothing uses is an untested branch of the rule, not a "
-        f"choice the rule offers. The partition over "
-        f"{len(bullets)} bullets is "
-        + "/".join(
-            str(sum(1 for _, text in bullets if f in text))
-            for f in REACH_FIELDS
-        )
-        + "."
+    partition = {f: sum(1 for _, text in bullets if f in text)
+                 for f in REACH_FIELDS}
+    stray = [
+        (line, text.split("\n")[0][:70])
+        for line, text in bullets
+        if not any(f in text for f in REACH_FIELDS)
+    ]
+    assert not stray, (
+        f"{len(stray)} `## Log` bullet(s) carry a `Versions:` field the "
+        f"generator does not produce: {stray[:6]}. The vocabulary is derived "
+        f"from RELEASED={list(RELEASED)} and OPEN_LINE={OPEN_LINE!r}; a "
+        f"bullet outside it is either a typo or a release nobody registered."
+    )
+    assert sum(partition.values()) == len(bullets), (
+        f"the partition {partition} does not add up to {len(bullets)} "
+        f"bullets, so at least one bullet carries two fields and every count "
+        f"derived from them is over a population that overlaps itself"
+    )
+
+
+def test_every_generated_phrase_parses_back_to_its_own_reach():
+    """The round trip, which is what makes the vocabulary a GRAMMAR.
+
+    `_release_record` generates a phrase from a `(reach, closed)` pair and
+    :func:`_release_record.reach` reads a phrase back to its reach. If the
+    two disagreed for any member, the count derived through the parser would
+    be a count over a different population than the one the generator
+    describes — and it would disagree SILENTLY, because each half would
+    still be internally consistent.
+
+    This is also what replaces the old *"every permitted field is actually
+    used"* rule: it exercises the handling of all nine phrases without
+    requiring the log to contain an entry of every shape.
+    """
+    bad = [
+        (phrase, sorted(want), sorted(reach(phrase) or ()))
+        for phrase, (want, _) in VERSION_FIELD_MAP.items()
+        if reach(phrase) != want
+    ]
+    assert not bad, (
+        f"the generator and the parser disagree about what these phrases "
+        f"say: {bad}"
+    )
+    assert reach("Versions: `v9.9.9`, unrepaired.") is None, (
+        "the parser accepted a release that is not in RELEASED, so a typo in "
+        "a version number reads as a reach rather than as a refusal"
+    )
+
+
+def test_the_generators_inputs_are_this_repositorys_releases():
+    """RELEASED and OPEN_LINE are the thing that can actually rot now.
+
+    The vocabulary is derived, so no member of it can go stale on its own.
+    What CAN is the registry it is derived from: a release cut without being
+    registered here makes every phrase about it unspellable, which is
+    exactly the state this change was made to leave. `0.2.0` was a release
+    while the vocabulary had no phrase that could name it, and the docstring
+    of the test deleted above recorded that in a PARENTHESIS — *"`0.2.0` is
+    a release too now, and no bullet reaches it"* — rather than in an
+    assertion.
+
+    Read off `CHANGELOG.md`'s own version headings rather than off git tags,
+    so this holds in an unpacked sdist, where `ci.yml`'s `sdist-suite` job
+    runs this file and there are no tags at all.
+    """
+    headings = re.findall(
+        r"^##\s+([0-9][0-9A-Za-z.]*)\s+—", CHANGELOG.read_text(), re.M
+    )
+    missing = sorted({h for h in headings if h not in RELEASED and h != OPEN_LINE})
+    assert not missing, (
+        f"`CHANGELOG.md` carries a version heading for {missing}, and "
+        f"`_release_record.RELEASED` is {list(RELEASED)} with OPEN_LINE "
+        f"{OPEN_LINE!r}. Every `Versions:` phrase is generated from those "
+        f"two, so a release absent from them cannot be named by any entry in "
+        f"the log at all."
     )
 
 

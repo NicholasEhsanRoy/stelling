@@ -91,7 +91,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from _release_record import VERSION_FIELDS  # noqa: E402
+from _release_record import RELEASED, field_for  # noqa: E402
 from test_soundness_log_reach import log_bullets  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -102,12 +102,19 @@ SOUNDNESS = REPO / "SOUNDNESS.md"
 #: own constant and not this file's choice of one.
 TAG = "v0.1.0"
 
-#: The scoping phrase, in the Log's italic spelling. Derived from
-#: `_release_record.VERSION_FIELDS` for the reason
-#: `test_soundness_log_reach.py` gives: the closed set is ONE set, written
+#: The scoping phrase, in the Log's italic spelling. Asked for BY MEANING
+#: through `_release_record.field_for` for the reason
+#: `test_soundness_log_reach.py` gives: the vocabulary is ONE thing, written
 #: once, and a second copy of the wording here would be a second thing to
-#: keep in step.
-PRE_RELEASE_ONLY = f"*{VERSION_FIELDS[0]}*"
+#: keep in step. `VERSION_FIELDS[0]` is what this was, and an index into a
+#: vocabulary is a claim about the generator's emission order rather than
+#: about what the phrase says.
+PRE_RELEASE_ONLY = f"*{field_for(closed=RELEASED[0])}*"
+
+#: The phrase this file RE-SCOPES a bullet to, in its own drive: the one
+#: that says the event arrived after the tag and was over before the
+#: release. `VERSION_FIELDS[1]` before.
+DEV_ONLY = field_for(closed=RELEASED[1])
 
 #: The skip reason, typed here and typed again in
 #: `tests/test_skip_inventory.py`'s `RULES`. It is a LITERAL on both sides on
@@ -358,12 +365,12 @@ def test_both_directions_of_the_rule_are_driven(documents):
         if identity(body) in at_tag_ids and PRE_RELEASE_ONLY in body
     )
     rescoped = here.replace(
-        body, body.replace(PRE_RELEASE_ONLY, f"*{VERSION_FIELDS[1]}*", 1), 1
+        body, body.replace(PRE_RELEASE_ONLY, f"*{DEV_ONLY}*", 1), 1
     )
     a2, u2 = strays(rescoped, at_the_tag)
     assert [(d, h) for d, h, _ in u2] == [identity(body)], (
         f"re-scoping the bullet at line {line} — which IS in the tagged "
-        f"document — to {VERSION_FIELDS[1]!r} was not reported as a "
+        f"document — to {DEV_ONLY!r} was not reported as a "
         f"present-at-the-tag-but-not-scoped stray; got {u2}"
     )
     assert {(d, h) for d, h, _ in a2} == {(d, h) for d, h, _ in absent}, (

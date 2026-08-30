@@ -1435,6 +1435,14 @@ _PATH_FORM_OVERLAPS = 0
 #: still_absent` requires every name here to resolve NOWHERE, so an entry that
 #: has become a live test fails rather than silently exempting it.
 _NAMES_DECLARED_ABSENT: dict[str, str] = {
+    "test_each_permitted_field_is_actually_used":
+        "deleted on 2026-08-30 when the `Versions:` vocabulary stopped being "
+        "hand-typed and became generated; its successor "
+        "`test_every_field_the_log_uses_is_one_the_GENERATOR_produces` quotes "
+        "the old name because the ARGUMENT for the old rule -- a closed set "
+        "with an unused member is an untested branch -- is what that "
+        "docstring exists to explain the retirement of, and rewriting the "
+        "sentence would delete the reason",
     "test_the_nightly_workflow_still_runs_the_canary":
         "renamed to `test_the_canary_and_the_workflow_agree_about_the_two_"
         "legs`; `.github/scripts/tripwire_canary.py` cites the new name by "

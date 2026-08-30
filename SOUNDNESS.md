@@ -31,11 +31,16 @@ re-establish trust. Nothing below is any of those. No verdict flips, no
 recorded verdict becomes invalid, and there is nothing to re-run — this is a
 standing property of every build this project has ever made, the released
 `0.2.0` included, and it will still hold of the next one. The `Versions:`
-vocabulary the Log is counted with is closed at three phrases
-(`tests/_release_record.py`), and **not one of them is true of a disclosure
-that scopes to every build there has been**: filing this as an entry would
-put a false scope in the field the Log's derived counts are computed from,
-to record something that is not an event. It belongs where this page says
+vocabulary the Log is counted with is GENERATED from the releases this
+repository has cut (`tests/_release_record.py`), and **not one of its
+phrases is true of a disclosure that scopes to every build there has
+been** — each names a set of releases, or a development line, and this
+scopes to neither: filing this as an entry would put a false scope in the
+field the Log's derived counts are computed from, to record something that
+is not an event. That was also true when the vocabulary was three typed
+sentences, and it is not the kind of claim the generator changes: widening
+what CAN be said about releases does not create a phrase for something
+that is not about a release. It belongs where this page says
 what a verdict means, which is here.
 
 ### The chain, and which links a green verdict crosses unaided
@@ -836,7 +841,7 @@ repairing them, and the repairs are in place above and in
   swept — a paragraph naming what a sweep reached must move when the page
   grows a section the sweep never saw, or the reach statement quietly
   widens to cover text nobody drove.
-* **The `## Log` below was not read line by line.** It is **16,223 lines** as
+* **The `## Log` below was not read line by line.** It is **16,349 lines** as
   this is written — the `## Log` heading to the end of the file, and that is
   the population — and it was swept EXHAUSTIVELY BY INSTRUMENT — every
   `path::name` citation, every backticked module-qualified identifier, every
@@ -858,8 +863,8 @@ repairing them, and the repairs are in place above and in
   arithmetic were all stale by 2026-08-25 and are re-derived here rather
   than left**: measured on this tree by the same two rules — physical lines
   from the `## Log` heading to the last line of the file, and
-  `_detail_sections` over the 72 routed bodies — the Log is **16,223**
-  lines, the routed sections **3,470**, and the difference **12,753**,
+  `_detail_sections` over the 72 routed bodies — the Log is **16,349**
+  lines, the routed sections **3,470**, and the difference **12,879**,
   which is not 11,000-odd any more either. The two rules are stated because
   they are what reproduce the historical figures: they give 14,926 at
   `3fe29d3`, 14,924 at `391e50e` and 14,823 at `5ad906f`, so nothing above
@@ -1037,15 +1042,18 @@ hand-copied list — and reddens on a reference to an unshipped path in
 
 ## Log
 
-**EVERY ENTRY BELOW CARRIES A `Versions:` FIELD, FROM A CLOSED SET OF
-THREE, AND IT SCOPES THE ENTRY'S OWN EVENT.** *0.1.0 pre-release builds
-only* means the thing this entry records — a defect fixed, a disclosure
-gap closed, a claim narrowed — was over before the `v0.1.0` tag, so no
-release is reached by it. *0.2.0 development builds only* means it
-arrived after that tag and was over before the 0.2.0 release. *`v0.1.0`
-and 0.2.0 development builds* means `v0.1.0` is reached, and those
-entries also say so in their own words and carry the reproduction at the
-tag.
+**EVERY ENTRY BELOW CARRIES A `Versions:` FIELD FROM A GENERATED
+VOCABULARY, AND IT SCOPES THE ENTRY'S OWN EVENT.** *0.1.0 pre-release
+builds only* means the thing this entry records — a defect fixed, a
+disclosure gap closed, a claim narrowed — was over before the `v0.1.0`
+tag, so no release is reached by it. *0.2.0 development builds only* means
+it arrived after that tag and was over before the 0.2.0 release.
+*`v0.1.0` and 0.2.0 development builds* means `v0.1.0` is reached, and
+those entries also say so in their own words and carry the reproduction at
+the tag. *`v0.1.0` and `v0.2.0`, unrepaired* means both carry it and the
+event is NOT OVER.
+
+The vocabulary is GENERATED and parsed; see `tests/_release_record.py`.
 
 **THE THIRD PHRASE NAMES `v0.1.0` AND NOT "THE RELEASE", BECAUSE THERE IS
 MORE THAN ONE NOW.** All three were written while `0.2.0` was a
@@ -12855,21 +12863,132 @@ in place and marked.*
   development line, and the bump made it restate its reason without ever
   re-testing its conclusion.
 
+- **2026-08-30: A VERIFIED CAN CONTRADICT THE COMPILED PROGRAM AT A POINT OF
+  THE DECLARED BOX, WITH NO CERTIFICATE, NO SOLVER AND NO SUB-JAXPR
+  INVOLVED. `0.1.0` AND `0.2.0` ARE YANKED FROM PyPI AND THE RELEASE TRAIN
+  IS FROZEN.** Real mode judges obligations by interval arithmetic over ℝ
+  with outward rounding, and does not model IEEE flush-to-zero, the
+  program's own float format, or the compiler's freedom to reassociate a
+  reduction. Wherever those diverge enough to put the executed value
+  outside the computed box, the stamp is wrong about the program.
+
+  *Versions: `v0.1.0` and `v0.2.0`, unrepaired.*
+
+  **THE ℝ POSTURE DOES NOT COVER THIS, AND THAT IS A RULING RATHER THAN A
+  READING.** `verdict.SEMANTICS_REAL` says a predicate can hold in ℝ and
+  fail in floats, and every entry in this log until now has treated that as
+  a disclosure that scopes the claim. It does not scope this one. A VERIFIED
+  stamp that contradicts the compiled execution of the program is a
+  soundness defect regardless of whether the mathematics holds in ℝ — and
+  the disclosure is one-directional besides, since the false REFUTED is the
+  converse of the sentence it states.
+
+  **WHAT IS DRIVEN, AND IT IS NOT A CORNER.** Nine programs are pinned in
+  `tests/property/_float_oracle.py`'s `MEMBERS`, each re-run on every
+  property-suite invocation, each with its cause registered and asserted
+  rather than described. Five falsify a VERIFIED; one contradicts a
+  REFUTED. Two need no reduction, no division and no `assume`:
+
+  ```
+  x = any_array((), "float32", (1e-20, 1e-10));  assert_(x * x > 0.0)
+  x = any_array((), "float32", (-100.0, -50.0)); assert_(jnp.exp(x) > 0.0)
+  ```
+
+  Both are VERIFIED; both execute `0.0` at an admitted point and the
+  obligation is False there. `semantics="ieee"` returns UNKNOWN on both.
+
+  **AND IT IS NOT CONFINED TO SMALL NUMBERS, WHICH TWO EARLIER
+  CHARACTERISATIONS OF THIS CLASS SAID AND WHICH WERE MEASURED FALSE.** The
+  first said the route needs the analysis's own box to underflow; the second
+  said it needs the box to enter the target's subnormal band. Neither holds
+  of `reassociation-n33`, whose every declared box is a normal, finite
+  POINT, whose smallest magnitude is `1.0`, and whose exact real sum is
+  inside the computed box — the compiled reduction simply associates
+  differently from the transfer. **This class has no closed form short of
+  the `semantics:` line, and four sentences written to bound it have each
+  been falsified in turn.**
+
+  **HOW FAR BACK.** Nine of the ten driven programs violate box containment
+  against `v0.1.0`'s own `src/` as well, and five falsify a discharge there,
+  re-derived with `git archive v0.1.0 src` on `PYTHONPATH` rather than
+  argued. The one that does not reach `v0.1.0` is `reassociation-n33`, and
+  the reason is worth keeping: at `v0.1.0` `interval.mul` was not exact, so
+  the pinned product boxed to a WIDTH instead of a point and the reduction's
+  box was wide enough to contain the executed value. **A later tightening is
+  what opened that member** — a soundness defect introduced by making an
+  analysis more precise.
+
+  **WHY NOTHING IN THIS TREE SAW IT, and this is the part worth carrying.**
+  Three shipped instruments were each scoped away from floats by the ℝ
+  posture. `tests/property/README.md` said *"integers only … An oracle
+  pointed at floats measures the documentation."* `_t_div`'s standing
+  paragraph argued the certificate cannot be wrong. And
+  `stelling.falsify.probe` — `falsify="sample"` — **sees these violations
+  and declines them**, saying so in its own output: 28 points on
+  `ftz-subnormal-sum`, 12 on `f32-underflow`, 58 on `f32-exp`, reported as
+  `float-rounding-artefact` with the reason
+  `exact-replay-holds-over-the-rationals`. Its witness replay is exact
+  rational arithmetic in pure Python, so it cannot catch this class by
+  construction. **A disclosure that also functions as a reason not to test
+  for the thing disclosed is the shape to watch for.**
+
+  **THE RESPONSE, against `design/soundness-response-policy.md`.** Rung
+  **R3 + R5**: `0.1.0` and `0.2.0` yanked from PyPI on 2026-08-30 with
+  reasons naming this class, the release train frozen until the class is
+  closed rather than the instance. **R4 skipped on evidence** and the skip
+  recorded rather than omitted: 260 PyPI downloads with a release-day spike
+  and a 2–7/day trickle, which is automation-shaped, and GitHub traffic
+  agrees. A yank stops new resolution and leaves pinned environments
+  working, which is the correct asymmetry.
+
+  **WHAT TO RE-RUN.** Any real-mode VERIFIED over float dtypes, under
+  `semantics="ieee"`. That mode already refuses every one of the six
+  two-line members, and it refuses them for the right reason in four cases
+  and for a coarser one in the other two — `interval.ieee_reduce_sum`
+  DECLINES above two contributors rather than bounding the association
+  orders, which is why `ieee` cannot simply become the default. The repair
+  is specified in `stelling-sweeps/SPEC-B-abstraction-validity.md` and is
+  not in this tree.
+
+  **WHAT IS ASSERTED HERE AND WHAT IS NOT.** The nine members and their
+  causes are asserted on every property-suite run, under a `strict` xfail
+  narrowed by `raises=`, so the day a remedy lands that test XPASSes and the
+  suite goes red rather than quiet. The boxes and executed values quoted in
+  that module are a DATED measurement and are not asserted. And the oracle's
+  own reach is disclosed rather than implied: 5491 of 13041 boxes compared,
+  **42 %, with 58 % blind in three separately-counted ways**, and the
+  unbiased leg contributes ZERO falsified discharges — every member came
+  from a pin or an aimed strategy.
+
 **Releases reached by an entry in this log.** `v0.1.0` is reached by
-**twelve** ENTRIES of this log, and `0.2.0` by NONE — this said *"the only
-release"* until the 0.2.0 bump, it read **seven** until later the same
+**thirteen** ENTRIES of this log, and **`0.2.0` by ONE** — this said *"the
+only release"* until the 0.2.0 bump, it read **seven** until later the same
 day, when two entries dated after the tag were found scoped as though
 their event was over before it, it read **nine** until 2026-08-25,
-when two more were found scoped the OTHER way, and it read **eleven** for
+when two more were found scoped the OTHER way, it read **eleven** for
 the rest of that day, until a blinded audit of that correction found a
-THIRD of the same shape one entry further down. The unit is stated
-because the three counts here are 12, 12 and 10, and this sentence has
-twice been corrected by putting one of them where another belongs — and
-the first two being EQUAL today, for reasons that have nothing to do with
-each other, is the strongest argument this page has ever had for stating
-the unit. Every
-top-level bullet above carries exactly one `Versions:` field from a closed
-set of three, and these twelve are the bullets whose field names `v0.1.0`.
+THIRD of the same shape one entry further down, and it read **twelve**
+until 2026-08-30. The unit is stated
+because the three counts here are 13, 12 and 10, and this sentence has
+twice been corrected by putting one of them where another belongs — the
+first two were EQUAL until 2026-08-30, for reasons that had nothing to do
+with each other, which was the strongest argument this page had ever had
+for stating the unit, and they have now come apart exactly as that
+argument said they eventually would.
+
+**AND `0.2.0` READ "BY NONE" FOR SIX DAYS WHILE THE VOCABULARY HAD NO
+PHRASE THAT COULD SAY OTHERWISE.** Every top-level bullet above carries
+exactly one `Versions:` field, and until 2026-08-30 the permitted set was
+three sentences typed by hand, none of which could name `v0.2.0` as
+reached and none of which could describe an event that is NOT OVER. The
+set is now GENERATED from `tests/_release_record.py`'s `RELEASED` and
+`OPEN_LINE`, and read back by a parser rather than by string equality, so
+"reaches `v0.1.0`" is decided from what a field SAYS. A ledger whose
+grammar can only describe closed events quietly requires every entry to be
+a fix; the 2026-08-30 abstraction-validity entry is neither closed nor a
+fix, and it is the one that reaches both releases.
+
+Of the thirteen, the twelve that reach `v0.1.0` alone are described below.
 **ELEVEN OF THE TWELVE ARE AUDIT 0.2.0 FINDINGS, AND THIS SAID ALL OF
 THEM WERE.** The twelfth — the 2026-08-18 query-identity entry — is a B13
 INSTRUMENT fix (`SF-0.2.0-11`) and was never an audit finding at all, so
@@ -12971,15 +13090,27 @@ of this paragraph, and none of them noticed it. That is why the digit is
 no longer written: `tests/test_soundness_log_reach.py` counts the fields
 and holds the numerals above and below to what it counts.
 
-**THE THREE UNITS, AND WHY EACH IS STATED.** Twelve ENTRIES of this log
-reach `v0.1.0` — the list above. **Twelve** audit findings reach it: M12,
+**THE THREE UNITS, AND WHY EACH IS STATED.** Thirteen ENTRIES of this log
+reach `v0.1.0` — the list above, plus the 2026-08-30 abstraction-validity
+entry, which reaches `v0.2.0` as well and is the only entry that reaches
+any release and is not over. **Twelve** audit findings reach it: M12,
 M16, M17, S11, S12, S12&prime;, S12&Prime;, S13, S14, S15, S16, UNSOUND-3
-— the same NUMBER as the
-entries and NOT the same SET, which is a worse trap than the off-by-one it
-replaced and is why the unit is still stated: S14 has a routed detail
-section (`SF-0.2.0-59`) and its own reach declaration but no `## Log`
-bullet of its own, the query-identity entry has a bullet and is no audit
-finding, and the two differences cancel in the digit and nowhere else. And
+— one fewer than the entries, and that difference is new.
+
+**THOSE TWO WERE THE SAME NUMBER AND NOT THE SAME SET UNTIL 2026-08-30,
+which this paragraph called *"a worse trap than the off-by-one it
+replaced"*, and the trap has now sprung open rather than been fixed.** The
+sets still differ in both directions for the reasons they always did — S14
+has a routed detail section (`SF-0.2.0-59`) and its own reach declaration
+but no `## Log` bullet of its own, and the query-identity entry has a
+bullet and is no audit finding — and those two differences cancelled in the
+digit. The thirteenth entry does not cancel against anything: the
+abstraction-validity class was found by an INSTRUMENT this project did not
+have when any audit ran, so it is an entry and not a finding, and the two
+units now differ in the digit as well as in the membership. **The unit was
+stated for exactly this day** and the paragraph is kept rather than
+rewritten, because a reader who saw the numbers agree needs to be told they
+have stopped agreeing and why. And
 **ten**
 one-liners in `CHANGELOG.md` carry the `v0.1.0` version field — two
 fewer than the findings, and the derivation needs FOUR terms where it used

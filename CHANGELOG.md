@@ -5,6 +5,44 @@ SPDX-License-Identifier: Apache-2.0
 
 # Changelog
 
+<!-- THE YANK NOTICE SITS ABOVE EVERY RELEASE HEADING ON PURPOSE: it is
+     about artefacts that are already published, not about a release being
+     described below, and a reader scanning for the newest entry must not
+     scroll past it.
+
+     IT IS A PLAIN PARAGRAPH AND NOT A BLOCK QUOTE, AND THAT IS NOT A STYLE
+     CHOICE. `.github/workflows/release.yml`'s changelog gate and its Python
+     twin in `tests/test_changelog_names_the_version.py` are LINE GRAMMARS,
+     and the shapes they will step over above the newest heading are a
+     whitelist: blank, indented four spaces, another ATX heading, or a
+     paragraph line beginning with an ASCII letter, digit, backtick or
+     tilde. A `>` block quote stops them, so does a line beginning `**`, and
+     so does a markdown LINK at the start of a line.
+
+     ALL THREE WERE FOUND BY BEING REFUSED, NOT BY READING THE WHITELIST,
+     which is worth recording where the next editor of this block will see
+     it. Written as a block quote first: both gates refused the file and
+     named line 13. Rewritten as a plain paragraph with the note "every line
+     below therefore begins with a letter, a digit or a backtick" -- and that
+     sentence was FALSE in the same commit that wrote it, because the closing
+     citation was a `[link](...)` at column 0, which the gates named at line
+     36. The rule for anyone editing the paragraph below: every line must
+     begin with an ASCII letter, digit, backtick or tilde. -->
+
+YANKED: `0.1.0` AND `0.2.0` WERE YANKED FROM PyPI ON 2026-08-30. Both can
+return **VERIFIED for a property the compiled program contradicts** at a
+point of the declared box. Real mode reasons over ℝ and models neither IEEE
+flush-to-zero, nor the program's own float format, nor the compiler's
+freedom to reassociate a reduction; nine driven witnesses are pinned in
+`tests/property/_float_oracle.py`, five of which falsify a discharge, and
+nine of the ten reproduce against `0.1.0`. Integer harnesses are
+unaffected, and `semantics="ieee"` refuses every witness. A yank stops new
+resolution and leaves pinned environments working. The release train is
+frozen until the class is closed, so there is no fixed version yet. The
+full record is the 2026-08-30 entry in [SOUNDNESS.md](SOUNDNESS.md), and
+the rung and the reasoning are in
+`design/soundness-response-policy.md`.
+
 ## 0.2.1 — 2026-08-28
 
 **A maintenance release. No verdict moves, no public name is added or
