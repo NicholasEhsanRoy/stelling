@@ -1687,7 +1687,7 @@ jobs:
   #     outside this appended block, and this file is being edited concurrently.
   #     The command is in `tests/property/README.md`; until a trigger is added,
   #     nobody is running it, and that is the honest state.
-  #   * four of the FOURTEEN positive controls — `cvc5-stateful` (20x
+  #   * four of the FIFTEEN positive controls — `cvc5-stateful` (20x
   #     budget), `cross-series` (two interpreters), and the two whose
   #     properties ARE the xfails, `oracle-wrap` and `float-oracle-box`,
   #     which the step below already asserts fired. `float-oracle-box` was
@@ -1695,6 +1695,14 @@ jobs:
   #     box at load 6, `2/2 controls fired` alongside its sibling); it is
   #     left out for the same reason `oracle-wrap` is, not because it
   #     cannot be demonstrated.
+  #
+  #     THE DENOMINATOR MOVED AT A MERGE AND THE NUMERATOR DID NOT, which is
+  #     the shape a hand-typed count gets wrong. Two branches wrote this
+  #     sentence, one saying "three of the thirteen" and one "four of the
+  #     FOURTEEN", and each was right about its own tree. Derived over the
+  #     merge rather than picked: `positive_controls.CONTROLS` has 15 rows,
+  #     the `--control` flags below name 11, and the 4 left out are the same
+  #     four both branches named plus `float-oracle-box`.
   property:
     name: property suite (hypothesis)
     runs-on: ubuntu-latest
@@ -1754,7 +1762,7 @@ jobs:
 
           What this job DOES buy, and it is worth having: the strategies still
           draw their boundary classes, the registered mutations still apply,
-          every property still has a control, ten controls still fire, and
+          every property still has a control, eleven controls still fire, and
           the suite still runs at all. That is rot, caught on the push that
           causes it. It is not a soundness argument.
 
@@ -1798,12 +1806,17 @@ jobs:
               still admits no array big enough to reach `jnp.sum`'s two-window
               split, so the unbiased leg's zero in that row is a proof about
               the generator rather than an under-sampled cell
+            * no strict-sign certificate is false at a point of the assumed
+              region, over generated programs and generated declared boxes
             * the strategies still draw their boundary classes (generator floor)
             * every property is registered with a positive control, every
               control names a property that exists, every mutation still applies
-            * TEN of the fourteen positive controls FIRE where they are
+            * ELEVEN of the fifteen positive controls FIRE where they are
               supposed to, one of them for each of the cvc5 oracle's three
-              clauses
+              clauses. Both counts are DERIVED at the merge and not typed:
+              two branches each wrote a correct pair for its own tree (ten of
+              thirteen; ten of fourteen) and neither pair is true of the tree
+              they are both in.
 
           NOT RUN HERE AT ALL:
             * THE OPEN WRAP DEFECT IS EXPECTED TO FAIL. The unmasked oracle leg
@@ -1995,7 +2008,8 @@ jobs:
             --control cvc5-flat \
             --control cvc5-exit-tell \
             --control cvc5-phantom-model \
-            --control float-oracle-unexplained
+            --control float-oracle-unexplained \
+            --control strict-sign-sub-same-sign
 
   # ── TWO SHAPES OF WORKING TREE THAT WERE CHECKED BY HAND AND BY NOTHING ELSE ─
   #

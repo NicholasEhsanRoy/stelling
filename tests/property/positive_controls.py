@@ -96,6 +96,7 @@ _META = f"{PROPERTY_DIR}/test_metamorphic.py"
 _CVC5 = f"{PROPERTY_DIR}/test_cvc5_protocol.py"
 _CROSS = f"{PROPERTY_DIR}/test_cross_series.py"
 _FLOAT = f"{PROPERTY_DIR}/test_float_oracle.py"
+_SIGN = f"{PROPERTY_DIR}/test_strict_sign_property.py"
 
 
 # The mutation two controls below share: interval multiplication that keeps
@@ -124,6 +125,18 @@ _FLOAT = f"{PROPERTY_DIR}/test_float_oracle.py"
 # `(0.25, 1.0)` for an image that is `[-0.5, 1.0]` -- the cross term
 # `-1 * 0.5` gone, the box no longer containing it, and the non-monotone
 # behaviour both controls exist to catch back in the tree.
+# 0.3.0's `sub` strict-sign rule, and the SAME-sign version of it. Asked of
+# git before being registered as a mutant: `git log -S "sgn[0] != -sgn[1]"
+# -- src/stelling/propagate.py` names only the commit that ADDS the rule, and
+# `sub` carried no rule at all before it — there is no revision of this tree
+# where the same-sign rule shipped, so this is a mutant and says so.
+_SUB_OPPOSITE_OLD = (
+    "            if len(sgn) != 2 or not sgn[0] or sgn[0] != -sgn[1]:"
+)
+_SUB_OPPOSITE_NEW = (
+    "            if len(sgn) != 2 or not sgn[0] or sgn[0] != sgn[1]:"
+)
+
 _MUL_CORNERS_OLD = """    ex = [_mul_corner(x, y) for x in (alo, ahi) for y in (blo, bhi)]
     return _extreme_down(min(ex)), _extreme_up(max(ex))"""
 
@@ -595,6 +608,32 @@ CONTROLS = (
         # recorded failure is `AssertionError: THE TWO TESTED jax SERIES
         # DISAGREE on 4 of 225 harnesses`, and `disagree` is not in it.
         expect_message="SERIES DISAGREE",
+    ),
+    # ── the strict-sign certificate ─────────────────────────────────────────
+    Control(
+        name="strict-sign-sub-same-sign",
+        nodeid=f"{_SIGN}::test_a_certified_sign_is_TRUE_at_every_assumed_point",
+        kind="mutant",
+        at="HEAD",
+        why=(
+            "0.3.0's `sub` strict-sign rule fires only on OPPOSITE-signed "
+            "operands (`a > 0` and `b < 0` give `a - b > 0`). The SAME-sign "
+            "version of it is the rule 0.2.0 was right to refuse: two "
+            "certified positives can differ by zero, which is the `sum(x*x) "
+            "- c` shape whose missing decline was a false VERIFIED. No "
+            "revision of this tree ever shipped the same-sign rule — `sub` "
+            "had no rule at all before 0.3.0 — so this is a MUTANT, which is "
+            "weaker evidence than a commit, and it is labelled as one. "
+            "Measured against it: the property reports `var 3 (from sub) was "
+            "certified sign=1 and is 0 at the assumed point [1/8, 1/8, 1/8]`, "
+            "the drawn chain being `x - x`."
+        ),
+        mutation=Mutation(
+            path="src/stelling/propagate.py",
+            old=_SUB_OPPOSITE_OLD,
+            new=_SUB_OPPOSITE_NEW,
+        ),
+        expect_message="CERTIFIED SIGN IS FALSE",
     ),
 )
 
