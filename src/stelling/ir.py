@@ -3050,20 +3050,19 @@ def _float_image(x: float, dtype: str) -> float:
 
     This module answers the IEEE one, which is the answer three of the
     four routes give and the only one derivable from the format alone.
-    **A VALUE THAT LANDS IN THAT BAND IS THEREFORE ADMITTED HERE, AND
-    USUALLY WITH NO NOTE AT ALL** — an earlier wording said it "records
-    INEXACT", which is false at every one of the 24 magnitudes the
-    sentence above names, since each is an EXACT float32 subnormal that
-    this function returns unchanged. The note appears only when a value
-    ROUNDS inside the band: ``1.5 * 2**-149`` has no float32 and stores
-    as ``2.802596928649634e-45``. Either way the literal is admitted and
-    the XLA convert would destroy it. Nothing in this pass changes on
-    that account — the underflow REFUSAL in :func:`_lit_float_problem`
-    reads this same IEEE image, and it fires only BELOW the band — but a
-    reader comparing the note against a jax round trip should know which
-    of the two routes they are looking at. Driven, with the admissions,
-    the one rounding note and the route disagreement all re-measured
-    rather than quoted, in
+    **A VALUE THAT LANDS IN THAT BAND IS THEREFORE ADMITTED HERE** — an
+    earlier wording said it "records INEXACT", which is false at every
+    one of the 24 magnitudes the sentence above names, since each is an
+    EXACT float32 that this function returns unchanged. The note
+    appears only when a value ROUNDS inside the band: ``1.5 * 2**-149``
+    has no float32 and stores as ``2.802596928649634e-45``. Either way
+    the literal is admitted and the XLA convert would destroy it.
+    Nothing in this pass changes on that account — the underflow REFUSAL
+    in :func:`_lit_float_problem` reads this same IEEE image, and it
+    fires only BELOW the band — but a reader comparing the note against
+    a jax round trip should know which of the two routes they are
+    looking at. Driven, with the admissions, the one rounding note and
+    the route disagreement all re-measured rather than quoted, in
     `test_the_subnormal_band_is_admitted_and_the_note_is_the_IEEE_route`.
     """
     if dtype == "float64":
@@ -3328,16 +3327,54 @@ def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
         # The rule is the same on both signs: while the platform's cast
         # still WRAPS, numpy's answer is the low ``bits`` of the
         # truncated value, so it lands on the endpoint jax clamps to
-        # exactly when ``int(v) ≡ hi (mod 2**bits)`` — i.e. from
-        # ``hi + 2**bits`` upward. THE SET SIMPLY CONTAINS NO SUCH VALUE,
-        # for a reason worth writing down because it is not a coincidence
-        # of taste: every ``hi`` in :data:`_LIT_INT_BOUNDS` is
-        # ``2**k - 1`` and therefore ODD, and all 15 of the sweep's
-        # positive values are EVEN, so no positive cell can be congruent
-        # to its ``hi`` and numpy's wrap can never land there. The
-        # negative side has no such parity bar — every ``lo`` is even
-        # (``-2**(bits-1)`` or ``0``) and the set's negatives include
-        # even ones — which is the whole of the "asymmetry".
+        # exactly when ``int(v) ≡ hi (mod 2**bits)``. THAT IS A LADDER,
+        # ``hi + k*2**bits``, AND NOT A HALF-LINE: ``384.0`` and ``385.0``
+        # under `int8` are both past ``hi + 2**8`` and both DISAGREE,
+        # while ``639.0`` agrees again. AND THE LADDER RUNS ONLY AS FAR AS
+        # THE WRAP DOES. Where the platform's cast stops wrapping the
+        # agreement stops with it, and for `int32` that is already true at
+        # the first rung: measured on this box, numpy answered INT32_MIN
+        # at every one of 10000 positive `int32` overflow cells asked,
+        # ``6442450943.0 = hi + 2**32`` among them (numpy INT32_MIN, jax
+        # INT32_MAX), so no positive agreement was found there at all. 5
+        # of the 8 dtypes both backends spell have one at ``hi + 2**bits``
+        # — `int32` disagrees, and `int64` and `uint64` cannot spell that
+        # value as an exact float64 to ask.
+        #
+        # THE SET SIMPLY CONTAINS NO SUCH VALUE, for a reason worth
+        # writing down because it is not a coincidence of taste: every
+        # ``hi`` in :data:`_LIT_INT_BOUNDS` is ``2**k - 1`` and therefore
+        # ODD, and all 15 of the sweep's positive values are EVEN, so no
+        # positive cell can be congruent to its ``hi`` and numpy's wrap
+        # can never land there. The negative side has no such parity bar
+        # — every ``lo`` is even (``-2**(bits-1)`` or ``0``) and the
+        # set's negatives include even ones.
+        #
+        # AND PARITY IS ABOUT HALF OF THE ASYMMETRY, NOT ALL OF IT — an
+        # earlier wording of this comment said it was the whole. Parity is
+        # an argument about a WRAP, so it reaches only the cells that
+        # wrap, and over these same 155 numpy's cast wraps at 54 of the 68
+        # positive cells and not at the other 14, while the 32 negative
+        # agreements are 18 where numpy's wrap lands on the clamp plus 14
+        # where numpy did not wrap at all. THE SECOND REASON IS
+        # SATURATION. Where the cast stops wrapping numpy returns a
+        # constant that does not depend on the value: over the 35
+        # non-wrapping cells here it is ``lo`` at 27 and something else at
+        # 8, and it is ``hi`` at NONE of the 155. jax clamps to ``lo``
+        # below the range and to ``hi`` above it, so that constant can
+        # coincide with jax's answer on the negative side and never does
+        # on the positive. Counts from
+        # `stelling-sweeps/lit-r5/verify_r5.py`.
+        #
+        # BOTH HALVES ARE PLATFORM-SCOPED, AND THIS IS AN OPEN QUESTION
+        # RATHER THAN A MEASUREMENT. They rest on what this x86 box's
+        # ``cvttsd2si`` returns when the result does not fit — the
+        # "integer indefinite", which for a signed dtype IS ``lo``. A
+        # SATURATING target such as aarch64's ``fcvtzs`` would answer
+        # ``hi`` for a positive overflow instead, which would put a
+        # positive agreement at an even value and break the parity story
+        # on that side. Nothing in this tree has run one; there is no ARM
+        # box here.
         #
         # One step past the set's own ``300.0`` the positive agreement
         # appears, measured on the same box: ``383.0`` under `int8`
@@ -3349,10 +3386,13 @@ def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
         # is false at 383.0. The three witnesses are DERIVED and driven
         # in the test named below rather than typed here.
         #
-        # `-1e30` under `int64` is one of the 32: BOTH store INT64_MIN,
-        # and that is the cell `e66fef3`'s own commit message cites
-        # BECAUSE they agree there. A reader who checked it against the
-        # old clause found the opposite of what it said and was pushed
+        # `-1e30` under `int64` is one of the 32: BOTH store INT64_MIN.
+        # It is one of the 14 SATURATING ones and not one of the 18 where
+        # numpy's wrap lands on ``lo`` — numpy's wrap at that cell is
+        # ``-5076964154930102272``, which is not what it answers — and
+        # that is the cell `e66fef3`'s own commit message cites BECAUSE
+        # they agree there. A reader who checked it against the old
+        # clause found the opposite of what it said and was pushed
         # toward "so it should have predicted INT64_MIN" — which is
         # exactly the repair the class-level argument rules out. The
         # unspecified-ness is what licenses the refusal; the

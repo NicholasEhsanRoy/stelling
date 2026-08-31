@@ -63,10 +63,11 @@ be the wrong one. See
 CAN ROT, WHICH ONE DID.** `ir._float_image`'s paragraph on the float32
 subnormal band said a value landing there "records INEXACT"; it records
 NOTHING at all 24 of the magnitudes that paragraph itself names, every
-one of them an exact float32 subnormal. Three routes' worth of
-measurement sat above the sentence and the sentence said the opposite,
-because nothing re-ran it. It is re-run now, admissions and note and
-route split alike, in
+one of them an exact float32 — 23 subnormal and ``2**-126`` the smallest
+NORMAL, which an earlier wording of this sentence called a subnormal too.
+Three routes' worth of measurement sat above the sentence and the
+sentence said the opposite, because nothing re-ran it. It is re-run now,
+admissions and note and route split alike, in
 :func:`test_the_subnormal_band_is_admitted_and_the_note_is_the_IEEE_route`.
 """
 from __future__ import annotations
@@ -407,6 +408,15 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     below alongside the negative agreements: a POSITIVE agreeing cell,
     which the old sentence said could not exist.
 
+    **AND PARITY IS HALF OF THAT ASYMMETRY, NOT ALL OF IT** — an earlier
+    wording of the block below, and of the comment at the check, said it
+    was the whole. Parity is an argument about a WRAP, and the
+    platform's cast does not always wrap: where it stops it returns a
+    value-independent constant that is ``lo`` or ``0`` and never ``hi``.
+    So the saturating answer can coincide with jax's clamp BELOW the
+    range and never above it — a second, separate reason for the same
+    one-sided agreement, with its own witness driven below.
+
     Nothing here is typed. The disagreement is COUNTED over the cells the
     default jax configuration can reach, and the test asserts the count
     is nonzero — so if the backends ever converge, this fails and the
@@ -499,14 +509,38 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     # THE PARITY THAT MADE THE OLD SWEEP LOOK ASYMMETRIC, asserted off
     # the table rather than typed: every `hi` is ``2**k - 1`` and so ODD,
     # every `lo` is ``-2**(bits-1)`` or ``0`` and so EVEN. A sweep whose
-    # positive values are all even therefore CANNOT produce a positive
-    # agreement — numpy's wrap has the wrong parity to land on `hi` —
-    # while its negative values can land on `lo`. That is the whole of
-    # the "0 of 68 positive, 32 of 87 negative" the comment at the check
-    # reports, and it is a fact about the sample, not about the backends.
+    # positive values are all even therefore cannot produce a positive
+    # agreement BY WRAPPING — numpy's wrap has the wrong parity to land
+    # on `hi` — while its negative values can land on `lo`.
     for dtype, (lo, hi) in ir._LIT_INT_BOUNDS.items():
         assert hi % 2 == 1, (dtype, hi)
         assert lo % 2 == 0, (dtype, lo)
+
+    # ...AND THAT IS HALF OF THE "0 of 68 positive, 32 of 87 negative"
+    # the comment at the check reports, not the whole of it — which is
+    # what an earlier wording of this block said. Parity is an argument
+    # about a WRAP, so it reaches only the cells that wrap, and numpy's
+    # cast wraps at 54 of those 68 and produces 18 of those 32. THE
+    # SECOND MECHANISM IS SATURATION, and it has a witness a 32-bit
+    # container can be asked about, so it is pinned here rather than
+    # left in prose: at `-1e10` under `uint16` numpy does NOT wrap — the
+    # wrap is derived below and is not what it answers — it returns the
+    # value-independent 0 it returns for any negative too far out to
+    # cast, which is exactly where jax clamps. The two AGREE for a
+    # reason parity says nothing about. jax sees the float32 image of
+    # -1e10 rather than -1e10 itself; both are far below the range, so
+    # the clamp is the same either way and no `jax_enable_x64` is
+    # needed. numpy names its own answer invalid while returning it,
+    # which is why the cast is bracketed.
+    lo, _ = ir._LIT_INT_BOUNDS["uint16"]
+    saturating = -1e10
+    assert "PREDICTS NO STORED VALUE" in refused(saturating, "uint16")
+    wrap = ((int(saturating) - lo) % (1 << ir._LIT_INT_BITS["uint16"])) + lo
+    with pytest.warns(RuntimeWarning, match="invalid value encountered"):
+        npv = int(np.array(saturating).astype(np.uint16).item())
+    jv = int(jnp.array(saturating).astype(jnp.uint16).item())
+    assert npv == jv == lo, (npv, jv, lo)
+    assert npv != wrap, (npv, wrap)
 
 
 # -- row: the float dtypes ----------------------------------------------------
@@ -979,9 +1013,9 @@ def test_the_subnormal_band_is_admitted_and_the_note_is_the_IEEE_route():
     that paragraph said a value landing in the float32 subnormal band
     "therefore records INEXACT", and it records NOTHING at all 24 of the
     magnitudes the same paragraph names, because each of them is an
-    exact float32 subnormal. This test is the paragraph, driven — every
-    figure recomputed here so neither it nor this docstring carries a
-    number that nothing checks.
+    exact float32. This test is the paragraph, driven — every figure
+    recomputed here so neither it nor this docstring carries a number
+    that nothing checks.
 
     Three claims, in the order the paragraph makes them:
 
@@ -1015,7 +1049,9 @@ def test_the_subnormal_band_is_admitted_and_the_note_is_the_IEEE_route():
     assert len(band) == 24
     assert band[-1] == 2.0 ** -126  # the one NORMAL magnitude in the list
 
-    # (1) exact float32 subnormals: the identity, admitted, no note
+    # (1) each of the 24 IS an exact float32 — 23 subnormals and the
+    # smallest NORMAL — so the image is the identity, the literal is
+    # admitted, and there is no note
     for x in band:
         assert ir._float_image(x, "float32") == x
         assert ir.literal_inexact(admitted(x, "float32")) is None
