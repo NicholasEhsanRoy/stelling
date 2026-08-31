@@ -78,8 +78,11 @@ document claims to be a query that came through that face while
 ``ir.JaxprEqn`` is the constructor underneath it);
 :class:`Array` payload lengths equal
 to ``product(shape) x itemsize`` (for dtypes whose itemsize the ``.str``
-code names); and aval-vs-value shape consistency for literals and
-consts. Violations raise :class:`TranscriptionError` at LOAD — the same
+code names); aval-vs-value shape consistency for literals and
+consts; and, for a SCALAR literal, that its value is one the aval's own
+dtype can hold (:func:`_literal_range_problem` — the shape check above
+never asked, so ``ir.Literal(256, Aval(dtype="int8"))`` used to
+construct). Violations raise :class:`TranscriptionError` at LOAD — the same
 loud posture trace-side transcription has, now symmetric at the
 deserialization door. **Explicitly out of scope:** full per-primitive
 shape inference (validating every equation's output aval against its
@@ -296,6 +299,11 @@ class Literal:
         # comparison was made about (audit 0.2.0 B6 audit 6)
         _canonicalise(self, "Literal")
         _validate_value_against_aval(self.val, self.aval, "Literal")
+        # ...and the value is IN the dtype the aval names, which the line
+        # above cross-checks the SHAPE for and never asked. Component LIT;
+        # see :func:`_literal_range_problem` for what it refuses and
+        # :func:`literal_inexact` for the one thing it only records.
+        _validate_literal_range(self)
 
 
 Atom = Var | Literal
@@ -2727,6 +2735,466 @@ def _validate_value_against_aval(val, aval: Aval, where: str) -> None:
             f"shape {aval_dims}",
         )
     # str and None values carry no shape claim to cross-check
+
+
+# --- Component LIT: is the literal's VALUE in its aval's DTYPE? --------------
+#
+# THE HOLE. :func:`_validate_value_against_aval` above cross-checks SHAPE
+# and never asks whether the value is *in* the dtype, so
+# ``ir.Literal(val=256, aval=Aval(kind="ShapedArray", shape=(),
+# dtype="int8"))`` CONSTRUCTED, and every downstream reader that assumes
+# literal-fits-aval was reading a lie. Nothing in-tree noticed, and the
+# reason it did not is the interesting part: jax supplies the invariant
+# for free, because it narrows a python scalar to the dtype BEFORE it
+# writes a literal. A frontend that transcribes a foreign graph cannot —
+# writing ``256`` makes the aval a lie and writing ``0`` makes the source
+# a lie — so the invariant has to stop being a side effect of one
+# producer and become a rule of the type. That is all this pass is.
+#
+# STDLIB ONLY, which is the module docstring's rule and not a preference:
+# no numpy here, and no borrowing `stelling._jax_compat`'s exactness
+# classifier. It costs nothing, because `struct` IS the IEEE interchange
+# codec for binary64/32/16 (``'d'``/``'f'``/``'e'``) and bfloat16 is
+# reachable from binary32 by integer masking (:func:`_bfloat16_image`).
+#
+# WHAT IS REFUSED AND WHAT IS ONLY RECORDED. A value the dtype cannot
+# hold AT ALL is DESTROYED, and destroyed is a :class:`TranscriptionError`
+# through :func:`_load_check` — the same door and the same class as a
+# negative shape extent, and deliberately no new exception type, because
+# `TranscriptionError` subclasses `TypeError` and callers already catch
+# it. A value the dtype holds a DIFFERENT number for is ordinary
+# rounding: it is never refused, never a `warnings` call, and is recorded
+# on the literal itself (:func:`literal_inexact`).
+
+import math as _math  # noqa: E402  (stdlib; kept local to the pass)
+import struct as _struct  # noqa: E402  (stdlib; kept local to the pass)
+
+# THE BINARY FLOAT FORMATS, as ``(significand bits INCLUDING the implicit
+# leading one, minimum normal exponent, maximum exponent)`` — deliberately
+# the same three-tuple shape and the same numbers as
+# `stelling.propagate._FLOAT_FORMATS`, which this module MAY NOT IMPORT
+# (propagate imports ir; never the reverse). Two copies of one table
+# drift, so the agreement is a TEST
+# (`tests/test_literal_range.py::test_the_format_tables_agree_with_propagates`)
+# rather than the sentence you are reading.
+_LIT_FLOAT_FORMATS: dict[str, tuple[int, int, int]] = {
+    "float16": (11, -14, 15),
+    "bfloat16": (8, -126, 127),
+    "float32": (24, -126, 127),
+    "float64": (53, -1022, 1023),
+}
+
+# ...and every float bound below is DERIVED from it. A typed
+# ``3.4028234663852886e+38`` beside a table that already determines it is
+# a second source of truth for one fact, and this project has spent more
+# time correcting typed constants than producing them.
+#
+# ``_LIT_FLOAT_OVERFLOW_AT`` is the ROUND-TO-NEAREST TIE POINT
+# ``(2 - 2**-p) * 2**emax``, NOT the largest finite ``(2 - 2**(1-p)) *
+# 2**emax``, and the difference is load-bearing twice over.
+#
+#   * It is where a magnitude starts rounding to infinity. Ties go to the
+#     EVEN neighbour, and the largest finite always has an all-ones
+#     significand (odd), so the tie itself rounds to infinity: the
+#     predicate is ``>=``. MEASURED against `struct`, which is an
+#     independent implementation of the same rounding:
+#     ``pack('<f', 3.4028235677973362e+38)`` returns float32's largest
+#     finite and ``pack('<f', 3.4028235677973366e+38)`` — the tie —
+#     raises `OverflowError`. So `struct`'s refusal is exactly "rounds to
+#     infinity", which is why :func:`_float_image` may translate it into
+#     one.
+#   * SPEC-LIT's float row says to compare an int value against the
+#     largest FINITE. Its next row says a value that "round-trips to a
+#     different finite number" is ordinary rounding and must NEVER be
+#     refused. Those two rows contradict each other on the band between
+#     the largest finite and the tie: every value in it round-trips to
+#     the largest finite, which is a different finite number. The tie is
+#     the reading that satisfies both, and it is the one implemented. A
+#     driven witness for the band is in
+#     `test_a_value_between_the_largest_finite_and_the_tie_is_INEXACT_not_overflow`.
+#
+# It is an exact `int` for all four formats — ``(2**(p+1) - 1) *
+# 2**(emax - p)`` — and it is written that way ON PURPOSE: the value-first
+# rule compares an unbounded python `int` against it, and an int-to-int
+# comparison reaches a verdict without converting either side.
+_LIT_FLOAT_OVERFLOW_AT: dict[str, int] = {
+    d: (2 ** (p + 1) - 1) * 2 ** (emax - p)
+    for d, (p, _emin, emax) in _LIT_FLOAT_FORMATS.items()
+}
+_LIT_FLOAT_MAX: dict[str, float] = {
+    d: (2 - 2.0 ** (1 - p)) * 2.0**emax
+    for d, (p, _emin, emax) in _LIT_FLOAT_FORMATS.items()
+}
+# the smallest nonzero magnitude the format can hold — a subnormal, and
+# what an underflow refusal quotes as the thing the value fell under
+_LIT_FLOAT_MIN_SUBNORMAL: dict[str, float] = {
+    d: 2.0 ** (emin - p + 1) for d, (p, emin, _emax) in _LIT_FLOAT_FORMATS.items()
+}
+
+# THE INTEGER DTYPES, bounds derived from the width in the name — the same
+# construction as `propagate._INT_DTYPE_BOUNDS`, cross-checked in the same
+# test for the same two-copies reason.
+#
+# 4..64 AND NOT 8..64, WHICH IS A DEPARTURE FROM SPEC-LIT'S ROW AND WAS
+# DECIDED BY THE CENSUS RATHER THAN BY TASTE. That row enumerates
+# int8..int64 and uint8..uint64. `propagate._INT_DTYPE_BOUNDS` carries
+# `int4`/`uint4` rows as well, with a note beside them saying its guard
+# was "a silent no-op for them", harmless "only because no int4
+# conversion is whitelisted — a coincidence, not a guarantee". Leaving
+# the two widths out here would have left exactly the hole this pass
+# closes, in a dtype the tree already knows about.
+#
+# Measured, before choosing: the recorder census over the full suite
+# constructed literals under 19 distinct dtype strings, and one of them
+# IS `int4` — a single literal, and it is out of int4's range [-8, 7].
+# (It is `test_three_rows.py`'s slack bound, repaired in the same commit;
+# `tests/test_three_rows.py::test_int4_and_uint4_are_registered_not_silently_skipped`
+# is the test that builds it.) So the narrow reading and the wide one are
+# NOT indistinguishable on this tree: the narrow one admits a literal
+# that lies. A width absent even from the wide table still falls to the
+# unrecognised-dtype row — NO CLAIM — which is the posture
+# :func:`_load_itemsize` takes when a dtype code does not name a size.
+_LIT_INT_BITS: dict[str, int] = {
+    **{f"int{n}": n for n in (4, 8, 16, 32, 64)},
+    **{f"uint{n}": n for n in (4, 8, 16, 32, 64)},
+}
+_LIT_INT_BOUNDS: dict[str, tuple[int, int]] = {
+    d: ((-(2 ** (n - 1)), 2 ** (n - 1) - 1) if d.startswith("int") else (0, 2**n - 1))
+    for d, n in _LIT_INT_BITS.items()
+}
+
+# a complex dtype is two reals of half its width, and the float rule
+# below judges each part under that half
+_LIT_COMPLEX_PART: dict[str, str] = {"complex64": "float32", "complex128": "float64"}
+
+# EVERY DTYPE NAME THIS PASS RECOGNISES, MAPPED TO ITSELF — so a refusal
+# quotes THIS MODULE's spelling of the dtype it matched and never the
+# document's object. That is the same rule the rest of this file follows
+# for a value it has validated (audit 0.2.0 B6 audit 5, F1: install what
+# the guard read), and it is what keeps a `str` SUBCLASS whose
+# `__repr__`/`__str__`/`__format__` refuse out of a message it would
+# otherwise raise from. The lookup that RECOGNISES the dtype is the one
+# that returns it, so there is no second read to disagree.
+_LIT_DTYPE_NAME: dict[str, str] = {
+    d: d
+    for d in (*_LIT_FLOAT_FORMATS, *_LIT_INT_BOUNDS, *_LIT_COMPLEX_PART, "bool")
+}
+
+# WHERE AN INEXACT RECORDING LIVES. Not a `warnings` call: warnings are
+# process-global, order-dependent, deduplicated by location and OFF by
+# default, which is the wrong channel for something a verdict has to
+# quote. Not a module-level list either: that is process-global MUTABLE
+# state, so two `preconditions.check` calls in one process interleave
+# into it and neither can say which entries are its own. And not a
+# dataclass FIELD: a field enters `_encode`, `__eq__`, `__hash__` and
+# `content_hash`, which would make an observation ABOUT the transcription
+# part of the document's IDENTITY — two literals denoting the same number
+# would stop being equal because one of them was written down in a
+# lossier spelling.
+#
+# So it is an instance attribute on the literal the observation is about,
+# set once inside a frozen dataclass's own `__post_init__` and never
+# again. It is per-object, so concurrency cannot interleave it; it is
+# invisible to `_encode`/`__eq__`/`__hash__`, which read declared FIELDS;
+# and it travels with the literal to whatever reads it, which is what
+# "reaches the stamp" needs. Read it with :func:`literal_inexact`.
+#
+# IT IS DELIBERATELY NOT A :data:`CANONICALIZATIONS` ENTRY. That list
+# records what this module does to a DOCUMENT it is given, and this does
+# nothing to one: the literal's fields are untouched, `to_dict` writes
+# the same document with the note and without it, and `content_hash` is
+# unmoved. Recording it as a canonicalization would claim a change to the
+# document that has not happened, which is the failure mode that list
+# exists to make impossible in the other direction.
+_LITERAL_INEXACT_ATTR = "_stelling_inexact"
+
+
+def literal_inexact(lit: "Literal") -> str | None:
+    """What ``lit``'s dtype stores INSTEAD of the value it was written
+    with, as a sentence — or ``None`` when the two are the same number.
+
+    ``ir.Literal(0.1, Aval(kind="ShapedArray", shape=(), dtype="float32"))``
+    is not malformed IR and is not refused: 0.1 has no float32, and
+    0.10000000149011612 is what a float32 holds. That is ordinary
+    rounding, it is what every float32 program does, and refusing it would
+    have failed tests that are correct. It is still a fact a verdict about
+    that literal may need to quote, which is why it is recorded rather
+    than dropped. See :data:`_LITERAL_INEXACT_ATTR` for why the recording
+    is here and not in a registry.
+    """
+    return getattr(lit, _LITERAL_INEXACT_ATTR, None)
+
+
+def _bfloat16_image(x: float) -> float:
+    """``x`` as the nearest bfloat16, returned as a python float.
+
+    bfloat16 has no `struct` code and no numpy is allowed in this module,
+    so this is the implementation rather than a call. It is binary32's
+    image with the low 16 significand bits dropped round-to-nearest-even:
+    add ``0x7FFF`` plus the low bit of the half that is KEPT (that is the
+    ties-to-even rule written as arithmetic), then mask. A carry out of
+    the significand lands on ``0x7F800000`` — infinity — which is correct:
+    the binary32 values above bfloat16's largest finite really do round
+    there.
+
+    **THE ROUTE THROUGH BINARY32 IS THE SPECIFICATION, NOT A SHORTCUT, AND
+    I FALSIFIED THE OTHER READING BEFORE BELIEVING IT.** Rounding binary64
+    to bfloat16 THROUGH binary32 rounds twice, and double rounding is not
+    the identity: measured, ``1 + 2**-8 + 2**-30`` is above bfloat16's
+    midpoint and rounds DIRECTLY to 1.0078125, while binary32 first
+    rounds it down onto the midpoint exactly and ties-to-even then answers
+    1.0. I wrote a direct binary64->format rounder to fix that and checked
+    it against `struct` on a random sweep of finite doubles per format —
+    float32, float16 and float64, no disagreements, so the machinery was
+    right — and then checked BOTH against `jax.numpy.bfloat16`, which is
+    the bfloat16 this tree's dtype NAMES come from, since the name is
+    ``str(np.dtype(...))`` of exactly that type. On the same sweep the
+    masking route agreed with the authority everywhere and the direct
+    rounder disagreed on exactly the crafted subject above. So the
+    AUTHORITY converts through binary32; the "more correct" rounder was
+    the one that disagreed with every bfloat16 that exists, and it was
+    deleted.
+    `test_bfloat16_agrees_with_jaxs_own_bfloat16_and_direct_rounding_would_not`
+    re-runs that sweep and computes its own counts, so this paragraph
+    states no figure of its own to go stale.
+    """
+    try:
+        bits = _struct.unpack("<I", _struct.pack("<f", x))[0]
+    except OverflowError:
+        # past binary32 entirely, so past bfloat16 — see _float_image
+        return _math.inf if x > 0 else -_math.inf
+    if bits & 0x7F800000 == 0x7F800000:  # already inf or NaN in binary32
+        return _struct.unpack("<f", _struct.pack("<I", bits))[0]
+    bits = (bits + 0x7FFF + ((bits >> 16) & 1)) & 0xFFFF0000
+    return _struct.unpack("<f", _struct.pack("<I", bits))[0]
+
+
+def _float_image(x: float, dtype: str) -> float:
+    """``x`` as the nearest ``dtype`` value: what storing it would store.
+
+    ``float64`` is the IDENTITY because a python `float` IS a binary64 —
+    there is nothing to round it to. The other two `struct` formats round
+    correctly and raise `OverflowError` exactly at the tie point (see
+    :data:`_LIT_FLOAT_OVERFLOW_AT`), so that refusal is translated into
+    the infinity it stands for and the caller reads overflow off the
+    returned value like any other.
+    """
+    if dtype == "float64":
+        return x
+    if dtype == "bfloat16":
+        return _bfloat16_image(x)
+    code = "<f" if dtype == "float32" else "<e"
+    try:
+        return _struct.unpack(code, _struct.pack(code, x))[0]
+    except OverflowError:
+        return _math.inf if x > 0 else -_math.inf
+
+
+def _lit_float_problem(val, dtype: str) -> tuple[str | None, str | None]:
+    """``(refusal, inexact)`` for one REAL scalar under a binary float dtype.
+
+    ``dtype`` is always one of THIS MODULE's own strings — the caller
+    resolves the document's spelling through :data:`_LIT_DTYPE_NAME`
+    first — so the messages below interpolate it bare. That is the same
+    rule the rest of this pass follows for a value it has validated: the
+    message quotes what the module matched, never the object the document
+    handed it. It is also the per-part rule for the complex dtypes, which
+    is why the dtype is an argument rather than a read.
+    """
+    if issubclass(type(val), float) and not _math.isfinite(val):
+        # NaN and +-inf ARE values of every binary float format; a literal
+        # carrying one is not lying about its dtype, and this tree builds
+        # them deliberately (test_literal_strict_sign_drops_zero_and_nonfinite)
+        return None, None
+    # VALUE-FIRST, AND IT IS NOT DEFENSIVE STYLING. `float(10**400)` raises
+    # `OverflowError: int too large to convert to float`, so a check that
+    # CONVERTS before it COMPARES crashes on the very value it exists to
+    # refuse — the plan's prototype did exactly that, and the tree already
+    # knew the failure one layer up ("the phase1 escape, closed
+    # value-first: float(10**400) used to raise", tests/test_exact_
+    # recording.py, whose fixtures this pass adopts rather than
+    # re-invents). The comparison is int-against-int for an int val, so it
+    # reaches its verdict with no conversion at all, and everything that
+    # survives it converts without raising.
+    if issubclass(type(val), int) and abs(val) >= _LIT_FLOAT_OVERFLOW_AT[dtype]:
+        return (
+            f"literal {_safe_repr(val)} overflows {dtype}: it is at or past "
+            f"{dtype}'s round-to-nearest tie point, so its nearest {dtype} is "
+            f"{'-inf' if val < 0 else 'inf'} — storing it would replace a "
+            f"finite value with an infinity (largest finite {dtype}: "
+            f"{_LIT_FLOAT_MAX[dtype]!r})"
+        ), None
+    x = float(val)
+    image = _float_image(x, dtype)
+    if _math.isinf(image):
+        return (
+            f"literal {_safe_repr(val)} overflows {dtype}: its nearest "
+            f"{dtype} is {image!r} — storing it would replace a finite value "
+            f"with an infinity (largest finite {dtype}: "
+            f"{_LIT_FLOAT_MAX[dtype]!r})"
+        ), None
+    if image == 0.0 and x != 0.0:
+        return (
+            f"literal {_safe_repr(val)} underflows {dtype} to 0.0 — the "
+            f"smallest nonzero magnitude a {dtype} holds is "
+            f"{_LIT_FLOAT_MIN_SUBNORMAL[dtype]!r}, and storing a nonzero "
+            f"value as zero destroys its sign as well as its size"
+        ), None
+    if image != val:
+        # ORDINARY ROUNDING, recorded and never refused — SPEC-LIT §5. The
+        # empirical case is in the recorder census: every INEXACT the
+        # suite constructs is benign float32 rounding, and a refusal here
+        # would have failed correct tests for nothing.
+        return None, f"{_safe_repr(val)} has no {dtype}; it stores as {image!r}"
+    return None, None
+
+
+def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
+    """``(refusal, inexact)`` for a literal's value against its own dtype.
+
+    A PURE FUNCTION of ``(val, aval.dtype)``, deliberately: the recorder
+    census that attributed every violation in the suite before this was
+    armed ran it off the construction path, and a function that recorded
+    anywhere but in its return value could not have been run that way.
+
+    Called from :meth:`Literal.__post_init__` and from nowhere else, AFTER
+    :func:`_canonicalise`, so ``val`` is an exact built-in or an `ir`
+    frozen dataclass and ``aval`` is an :class:`Aval` that canonicalized
+    its own ``dtype``. The quotes still go through :func:`_safe_repr`,
+    because `tests/test_ir_message_totality.py` measures this pass with
+    that door removed and a message may not raise in either
+    configuration.
+    """
+    dtype = aval.dtype
+    if not dtype:
+        # a dtype-less aval (tokens) claims nothing about values, and `""`
+        # is what a document can spell that with
+        return None, None
+    # ARRAY PAYLOADS ARE OUT, AND STRUCTURALLY SO — a boundary, not a gap.
+    # An `Array`'s bytes ARE its dtype: :func:`_validate_array_value`
+    # already holds ``len(data) == product(shape) x itemsize``, and a
+    # fixed-width buffer cannot encode a value outside the width it is
+    # measured against. ONLY A SCALAR CAN LIE. Decoding the payload would
+    # also need numpy, which the module docstring forbids.
+    #
+    # This exit is also where all the data volume leaves. Measured in the
+    # recorder census over the full suite: 43,047 literals constructed,
+    # of which 38,133 carry an `Array` value and 7 a `str`. Not one of
+    # those 38,140 is decoded, here or anywhere in this pass — the
+    # dispatch is a `type` test and reads no byte of a payload. The
+    # plan's prototype had no such boundary and crashed on the `Array`
+    # ones, which is how the boundary was found; it is written HERE, at
+    # the check, because a commit message is not where the next reader
+    # looks.
+    if not issubclass(type(val), (bool, int, float, complex)):
+        return None, None
+    # A COMPLEX VALUE UNDER A NON-COMPLEX DTYPE is a category error and is
+    # refused as one, ahead of the numeric rows, so the message names the
+    # category rather than an endpoint: 1+2j is not near float64's range,
+    # it is not on its line. (`issubclass(int, complex)` is False — the
+    # built-in numeric types are not a class hierarchy — so an `int` val
+    # never reaches this arm.)
+    if issubclass(type(val), complex) and dtype not in _LIT_COMPLEX_PART:
+        return (
+            f"complex literal {_safe_repr(val)} under the non-complex dtype "
+            f"{_safe_repr(dtype)} — no value of that dtype is complex"
+        ), None
+    # From here on the dtype has been RECOGNISED, and every message quotes
+    # THIS MODULE's spelling of it rather than the document's object — the
+    # same rule as quoting a validated value. `_LIT_DTYPE_NAME` maps each
+    # name to itself, so the lookup that recognises it also returns it.
+    if dtype == "bool":
+        if issubclass(type(val), bool):
+            return None, None
+        if issubclass(type(val), int) and (val == 0 or val == 1):
+            # the two ints a bool round-trips through, and nothing else:
+            # `2` is not True, it is a value bool cannot hold
+            return None, None
+        return (
+            f"literal {_safe_repr(val)} is not a bool value — dtype 'bool' "
+            f"holds True and False (int 0 and 1) and nothing else"
+        ), None
+    if dtype in _LIT_INT_BOUNDS:
+        name = _LIT_DTYPE_NAME[dtype]
+        lo, hi = _LIT_INT_BOUNDS[dtype]
+        if issubclass(type(val), float) and not val.is_integer():
+            # `is_integer()` is False for NaN and for both infinities too,
+            # and that is the right answer: an integer dtype holds none of
+            # them, and `int()` would raise on all three
+            return (
+                f"literal {_safe_repr(val)} is not an integral value, and "
+                f"a {name} holds only integers"
+            ), None
+        v = int(val)
+        if lo <= v <= hi:
+            return None, None
+        # ...and the refusal quotes THE WRAP — what the value would
+        # actually store as under two's complement — because "out of
+        # range" alone does not tell a frontend author which of the two
+        # lies they are about to write.
+        return (
+            f"literal {_safe_repr(val)} is outside {name}'s range "
+            f"[{lo}, {hi}] — it would store as "
+            f"{((v - lo) % (1 << _LIT_INT_BITS[dtype])) + lo}"
+        ), None
+    if dtype in _LIT_FLOAT_FORMATS:
+        return _lit_float_problem(val, _LIT_DTYPE_NAME[dtype])
+    if dtype in _LIT_COMPLEX_PART:
+        name, part = _LIT_DTYPE_NAME[dtype], _LIT_COMPLEX_PART[dtype]
+        # A REAL val under a complex dtype IS its own real part, with an
+        # imaginary part of exactly zero. Taking `.real`/`.imag` off it
+        # would mean calling `complex()`, which raises the same
+        # `OverflowError` `float()` does on the huge ints the value-first
+        # rule exists to refuse.
+        parts = (
+            (("real", val.real), ("imag", val.imag))
+            if issubclass(type(val), complex)
+            else (("real", val),)
+        )
+        inexact = None
+        for pname, p in parts:
+            problem, note = _lit_float_problem(p, part)
+            if problem is not None:
+                return f"{problem} — the {pname} part of a {name} literal", None
+            if note is not None:
+                inexact = f"{note} — the {pname} part of a {name} literal"
+        return None, inexact
+    # AN UNRECOGNISED DTYPE STRING GETS NO CLAIM, matching
+    # :func:`_load_itemsize`, which returns None rather than guess a size
+    # for a code it does not know. A guessed range is worse than no range:
+    # it refuses documents this module has no standing to judge. It is
+    # also what keeps `propagate`'s saturating-int path reachable, which
+    # `tests/test_assume_bump_boundary_div.py` establishes by measurement
+    # rather than by argument.
+    return None, None
+
+
+def _validate_literal_range(lit: "Literal") -> None:
+    """Refuse a literal whose value its aval's dtype cannot hold, and
+    RECORD one the dtype can only hold a different number for.
+
+    Called from :meth:`Literal.__post_init__`, which is what puts it on
+    every path that builds IR — trace, ``from_dict``, or direct
+    construction — the reach :func:`_load_check`'s own sentence already
+    claims for this module's refusals. There is deliberately no softer
+    door: a frontend meeting a scalar its dtype cannot hold must decline
+    the node rather than write a lie into the IR.
+
+    **A CONSTVAR'S CONST IS NOT CHECKED, AND THAT IS A SCOPE BOUNDARY
+    RATHER THAN AN OVERSIGHT.** A `ClosedJaxpr` const is the same shape of
+    claim — a value beside an aval — and :func:`_validate_value_against_aval`
+    already cross-checks its SHAPE at the two const sites. SPEC-LIT scopes
+    this pass to `Literal`, and the recorder census measured what that
+    costs: of 3,622 consts the suite constructs, 556 are scalars and NONE
+    of them violates, so extending the rule there today would refuse
+    nothing and would widen a pass whose blast radius was measured for
+    literals only. `tests/test_literal_range.py` drives the boundary so it
+    is visible rather than assumed.
+    """
+    problem, inexact = _literal_range_problem(lit.val, lit.aval)
+    _load_check(problem is None, "Literal", problem)
+    if inexact is not None:
+        object.__setattr__(lit, _LITERAL_INEXACT_ATTR, inexact)
 
 
 def _validate_aval(aval: Aval, where: str) -> tuple[int, ...]:

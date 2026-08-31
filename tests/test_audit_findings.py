@@ -259,14 +259,46 @@ def test_select_n_top_selector_joins_all():
     assert (j.los[0], j.his[0]) == (10.0, 20.0)
 
 
+# A dtype `ir`'s literal range check makes NO CLAIM on, which is the only
+# way a saturating int literal can exist at all now — see the test below.
+# `key<fry>` is not invented for this: it is a real jax EXTENDED dtype and
+# `stelling._tripwire.prop_guard` already names it as one whose `.kind`
+# cannot even be read.
+NO_CLAIM = ir.Aval(kind="ShapedArray", shape=(), dtype="key<fry>")
+
+
 def test_huge_python_int_literal_saturates_instead_of_crashing():
+    """The finding is unchanged — `propagate` must SATURATE an int past
+    the double range rather than raise `OverflowError` out of the walk —
+    and the aval this literal is written under is not.
+
+    **THE LITERAL USED TO CARRY `F64`, AND `ir` NOW REFUSES THAT**, which
+    is correct and is asserted below: 2**2000 has no float64, so a
+    literal claiming to be one is a lie, and Component LIT closed exactly
+    that hole. It did NOT make this finding hypothetical. The range check
+    makes no claim on an unrecognised dtype string — matching
+    `ir._load_itemsize`, which returns None rather than guess a size — so
+    a literal under one still constructs, still reaches
+    `propagate._int_bracket`, and still has to saturate instead of
+    crashing. That is the route the finding is now driven through, and it
+    is the same route
+    `tests/test_assume_bump_boundary_div.py::test_the_strict_sign_DROP_on_a_saturating_int_is_STILL_REACHABLE`
+    establishes is live.
+    """
+    huge = 2**2000
+    # what changed: the float64 spelling is refused at construction now
+    with pytest.raises(ir.TranscriptionError, match="overflows float64"):
+        ir.Literal(val=huge, aval=F64)
+    # what did not: the walk still saturates rather than crashing
+    with pytest.raises(OverflowError):
+        float(huge)
     x, pred, out = var(0), var(1, BOOL), var(2, BOOL)
     q = close(
         [
             any_eqn(x, 0.0, 1.0),
             ir.JaxprEqn(
                 primitive="add",
-                invars=(x, ir.Literal(val=2**2000, aval=F64)),
+                invars=(x, ir.Literal(val=huge, aval=NO_CLAIM)),
                 outvars=(var(3),),
             ),
             ir.JaxprEqn(
