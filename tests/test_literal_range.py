@@ -426,8 +426,7 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     earlier *"``lo`` or ``0``"* was an enumeration of one sample, and
     `uint64` answers neither of those at cells of that very sample. How
     many is asserted over there rather than typed here; an earlier
-    wording of this paragraph typed it, three lines above the sentence
-    that says nothing here is. So the saturating answer can
+    wording of this paragraph typed it. So the saturating answer can
     coincide with jax's clamp BELOW the range and never above it — a
     second, separate reason for the same one-sided agreement, with its
     own witness driven below and the whole split counted in
