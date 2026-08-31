@@ -3056,7 +3056,14 @@ def _float_image(x: float, dtype: str) -> float:
     EXACT float32 that this function returns unchanged. The note
     appears only when a value ROUNDS inside the band: ``1.5 * 2**-149``
     has no float32 and stores as ``2.802596928649634e-45``. Either way
-    the literal is admitted and the XLA convert would destroy it.
+    the literal is admitted. **WHAT THE XLA CONVERT WOULD THEN DO TO IT
+    IS NOT UNIFORM, AND AN EARLIER WORDING SAID IT WAS** — "the XLA
+    convert would destroy it" is false in BOTH branches at the top of
+    the band. It destroys the SUBNORMALS; ``2**-126`` is the one NORMAL
+    magnitude in the list above and the convert preserves it, and a
+    value that ROUNDS UP onto ``2**-126`` gets a note here and survives
+    the convert as well. That is the same normal-versus-subnormal slip
+    the sentence before this one had just been corrected for.
     Nothing in this pass changes on that account — the underflow REFUSAL
     in :func:`_lit_float_problem` reads this same IEEE image, and it
     fires only BELOW the band — but a reader comparing the note against
@@ -3295,109 +3302,116 @@ def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
         # THE CLAUSE IS ABOUT THE CLASS, NOT ABOUT THIS CELL, AND THE
         # DIFFERENCE IS MEASURED. It used to end "and the backends
         # disagree about it" — a claim about the very conversion in front
-        # of the reader, and false at about a fifth of the cells that
-        # emit it. Driven over a sweep of out-of-range INTEGRAL floats,
-        # SPELLED OUT HERE BECAUSE "a spread of larger magnitudes" was
-        # not enough to rebuild it and an independent reconstruction of
-        # the described shape landed on different totals: take
-        # ``float(hi) + 1`` and ``float(lo) - 1`` for each of the ten
-        # dtypes in :data:`_LIT_INT_BOUNDS`, add the fixed list ``±16,
-        # ±300, ±65536, ±1e10, ±1e30, ±3e38, ±1e300, 2**31,
-        # -(2**31) - 1, 2**63, -(2**63) * 2, 2**64``, drop the
-        # non-integral and the duplicates — 29 values remain — and cross
-        # them with the same ten dtypes. 211 of those 290 cells emit
-        # this refusal; 155 of the 211 have both a ``numpy.<dtype>`` and
-        # a ``jnp.<dtype>`` to ask, the missing 56 being every emitting
-        # cell of ``int4``/``uint4``, which neither backend spells. On
-        # those 155 (numpy 2.5.2, jax 0.11.0 under `JAX_ENABLE_X64=1`;
-        # the script is `stelling-sweeps/lit-r3/backend_agreement.py`):
+        # of the reader, and false at every cell where the two happen to
+        # agree, which is a NONEMPTY set.
         #
-        #     backends DISAGREE  123   (79.4 %)
-        #     backends AGREE      32   (20.6 %)
+        # THIS PARAGRAPH TYPES NO COUNT AND NO PROPORTION, AND THAT IS
+        # THE REPAIR FOR A DEFECT IT KEPT HAVING. Three consecutive
+        # audits found `ir.py`'s executable half untouched and a
+        # hand-maintained figure in this comment wrong: "false at about a
+        # fifth of the cells", "parity is about half of the asymmetry",
+        # "it is ``hi`` at NONE of the 155", "a constant that is ``lo``
+        # or ``0``". Two of those were repairs FOR an earlier miscount.
+        # They are counts over the answers of two foreign libraries
+        # pinned at one version each, typed beside the thing they count,
+        # so nothing was ever going to look again. The census is
+        # therefore BUILT AND COUNTED in
+        # `test_the_census_behind_that_comment_is_BUILT_AND_COUNTED_HERE`
+        # — the value set constructed there from :data:`_LIT_INT_BOUNDS`
+        # rather than described here, because a described set was twice
+        # rebuilt wrong from the description. Every figure this paragraph
+        # used to carry is an assertion in that test, so a version bump
+        # REDDENS instead of rotting. What stays here is the MECHANISM,
+        # which is what a reader of the refusal actually needs.
         #
-        # and the agreement is not scattered: jax CLAMPS, answering an
-        # endpoint at all 155 cells, while numpy answers whatever the
-        # platform's cast produces, so the two coincide only where that
-        # cast happens to land on the endpoint. IN THIS CELL SET that is
-        # 0 of the 68 positive cells and 32 of the 87 negative ones.
+        # jax CLAMPS: its answer is an endpoint at every cell of that
+        # census. numpy answers whatever the platform's cast produces, so
+        # the two coincide only where that cast happens to land on the
+        # same endpoint, and THERE ARE TWO SEPARATE WAYS IT CAN.
         #
-        # THE POSITIVE ZERO IS A PROPERTY OF THIS SAMPLE AND NOT OF THE
-        # MECHANISM, and an earlier wording of this comment — "never once
-        # on a positive overflow" — read as though it were the mechanism.
-        # The rule is the same on both signs: while the platform's cast
-        # still WRAPS, numpy's answer is the low ``bits`` of the
-        # truncated value, so it lands on the endpoint jax clamps to
-        # exactly when ``int(v) ≡ hi (mod 2**bits)``. THAT IS A LADDER,
+        # ONE, WHILE THE CAST STILL WRAPS. numpy's answer is then the low
+        # ``bits`` of the truncated value, which is jax's clamp exactly
+        # when ``int(v) ≡ hi (mod 2**bits)``. THAT IS A LADDER,
         # ``hi + k*2**bits``, AND NOT A HALF-LINE: ``384.0`` and ``385.0``
-        # under `int8` are both past ``hi + 2**8`` and both DISAGREE,
-        # while ``639.0`` agrees again. AND THE LADDER RUNS ONLY AS FAR AS
-        # THE WRAP DOES. Where the platform's cast stops wrapping the
-        # agreement stops with it, and for `int32` that is already true at
-        # the first rung: measured on this box, numpy answered INT32_MIN
-        # at every one of 10000 positive `int32` overflow cells asked,
-        # ``6442450943.0 = hi + 2**32`` among them (numpy INT32_MIN, jax
-        # INT32_MAX), so no positive agreement was found there at all. 5
-        # of the 8 dtypes both backends spell have one at ``hi + 2**bits``
-        # — `int32` disagrees, and `int64` and `uint64` cannot spell that
-        # value as an exact float64 to ask.
+        # under `int8` are both past the first rung and both DISAGREE,
+        # while ``639.0`` — the second rung — agrees again. AND THE
+        # LADDER RUNS ONLY AS FAR AS THE WRAP DOES. `int32`'s wrap regime
+        # is already over below its own first rung, so `int32` disagrees
+        # there while the narrower dtypes agree; `int64` and `uint64`
+        # cannot spell ``hi + 2**bits`` as an exact float64 to ask at
+        # all. Both rungs are computed from :data:`_LIT_INT_BITS` and all
+        # four `int8` cells are asked, in the census test named above.
         #
-        # THE SET SIMPLY CONTAINS NO SUCH VALUE, for a reason worth
-        # writing down because it is not a coincidence of taste: every
-        # ``hi`` in :data:`_LIT_INT_BOUNDS` is ``2**k - 1`` and therefore
-        # ODD, and all 15 of the sweep's positive values are EVEN, so no
-        # positive cell can be congruent to its ``hi`` and numpy's wrap
-        # can never land there. The negative side has no such parity bar
-        # — every ``lo`` is even (``-2**(bits-1)`` or ``0``) and the
-        # set's negatives include even ones.
+        # TWO, WHERE THE CAST STOPS WRAPPING. numpy then returns a
+        # constant that does not depend on the value, and jax clamps to
+        # ``lo`` below the range and to ``hi`` above it, so that constant
+        # can coincide with jax's answer on the negative side. IT NEVER
+        # DOES ON THE POSITIVE SIDE, and the reason is arithmetic rather
+        # than accidental: every ``hi`` in :data:`_LIT_INT_BOUNDS` is
+        # ``2**k - 1`` and therefore ODD, while every constant this box
+        # returns is EVEN. Both halves are asserted in that test.
         #
-        # AND PARITY IS ABOUT HALF OF THE ASYMMETRY, NOT ALL OF IT — an
-        # earlier wording of this comment said it was the whole. Parity is
-        # an argument about a WRAP, so it reaches only the cells that
-        # wrap, and over these same 155 numpy's cast wraps at 54 of the 68
-        # positive cells and not at the other 14, while the 32 negative
-        # agreements are 18 where numpy's wrap lands on the clamp plus 14
-        # where numpy did not wrap at all. THE SECOND REASON IS
-        # SATURATION. Where the cast stops wrapping numpy returns a
-        # constant that does not depend on the value: over the 35
-        # non-wrapping cells here it is ``lo`` at 27 and something else at
-        # 8, and it is ``hi`` at NONE of the 155. jax clamps to ``lo``
-        # below the range and to ``hi`` above it, so that constant can
-        # coincide with jax's answer on the negative side and never does
-        # on the positive. Counts from
-        # `stelling-sweeps/lit-r5/verify_r5.py`.
+        # SO PARITY IS ONE OF THE TWO MECHANISMS AND NOT A FRACTION OF
+        # THE ASYMMETRY. An earlier wording said "about half" — a
+        # fraction of a denominator it never named, written in the round
+        # whose whole subject was a frequency word taken from a sample.
+        # Parity is an argument about a WRAP and bars the first route
+        # only: every ``hi`` is odd, so a value set whose positives are
+        # all EVEN can hold no positive congruence. The evenness of the
+        # saturating constant bars the second route. Two arguments, two
+        # sets of cells, one conclusion.
         #
-        # BOTH HALVES ARE PLATFORM-SCOPED, AND THIS IS AN OPEN QUESTION
-        # RATHER THAN A MEASUREMENT. They rest on what this x86 box's
-        # ``cvttsd2si`` returns when the result does not fit — the
-        # "integer indefinite", which for a signed dtype IS ``lo``. A
-        # SATURATING target such as aarch64's ``fcvtzs`` would answer
-        # ``hi`` for a positive overflow instead, which would put a
-        # positive agreement at an even value and break the parity story
-        # on that side. Nothing in this tree has run one; there is no ARM
-        # box here.
+        # THE POSITIVE ZERO IS STILL A PROPERTY OF THAT SAMPLE AND NOT OF
+        # THE MECHANISM, and an earlier wording — "never once on a
+        # positive overflow" — read as though it were the mechanism. The
+        # rule is the same on both signs; what differs is that ``hi`` is
+        # ODD while ``lo`` is EVEN, and every positive value in that
+        # sample is EVEN — so no positive cell of it can be congruent to
+        # its ``hi``, while a negative one can be congruent to its
+        # ``lo``.
+        #
+        # "``hi`` AT NONE OF THEM" IS A CLAIM ABOUT THE SATURATING CELLS
+        # ALONE, AND AN EARLIER WORDING FUSED THE TWO DENOMINATORS ONTO
+        # THE WHOLE CENSUS. numpy's answer IS ``hi`` at cells of it — all
+        # of them negative, all reached by WRAPPING, and every one of
+        # them a DISAGREEMENT, since jax clamps a negative overflow to
+        # ``lo``. A wrap from below can land on ``hi``; the saturating
+        # constant cannot.
+        #
+        # BOTH ARGUMENTS ARE PLATFORM-SCOPED, AND THIS IS AN OPEN
+        # QUESTION RATHER THAN A MEASUREMENT. They rest on what this x86
+        # box's ``cvttsd2si`` returns when the result does not fit — the
+        # "integer indefinite" — AND ON HOW WIDE THAT TEMPORARY IS, which
+        # an earlier wording left out by saying the indefinite "for a
+        # signed dtype IS ``lo``". It is `int32`'s ``lo`` and `int64`'s
+        # ``lo``; `int8` and `int16` answer that same constant NARROWED
+        # to their own width by the same truncation the wrap uses, which
+        # is ``0`` and is not their ``lo``. A SATURATING target such as
+        # aarch64's ``fcvtzs`` would answer ``hi`` for a positive
+        # overflow instead, which would put a positive agreement at an
+        # even value and break the parity story on that side. Nothing in
+        # this tree has run one; there is no ARM box here.
         #
         # One step past the set's own ``300.0`` the positive agreement
-        # appears, measured on the same box: ``383.0`` under `int8`
-        # (numpy 127, jax 127), ``511.0`` under `uint8` (255, 255),
-        # ``98303.0`` under `int16` (32767, 32767) — each of them
-        # ``hi + 2**bits``, and each odd. So "the backends do not agree
+        # appears, measured on the same box: ``383.0`` under `int8`, and
+        # the same rung under `uint8` and `int16`, each of them
+        # ``hi + 2**bits`` and each odd. So "the backends do not agree
         # IN GENERAL" is what the message claims and what the evidence
         # supports; "they never agree on a positive overflow" is not, and
         # is false at 383.0. The three witnesses are DERIVED and driven
         # in the test named below rather than typed here.
         #
-        # `-1e30` under `int64` is one of the 32: BOTH store INT64_MIN.
-        # It is one of the 14 SATURATING ones and not one of the 18 where
-        # numpy's wrap lands on ``lo`` — numpy's wrap at that cell is
-        # ``-5076964154930102272``, which is not what it answers — and
-        # that is the cell `e66fef3`'s own commit message cites BECAUSE
-        # they agree there. A reader who checked it against the old
-        # clause found the opposite of what it said and was pushed
-        # toward "so it should have predicted INT64_MIN" — which is
-        # exactly the repair the class-level argument rules out. The
-        # unspecified-ness is what licenses the refusal; the
-        # disagreement is evidence for it, not a property of the
-        # conversion being refused.
+        # `-1e30` under `int64` AGREES: BOTH store INT64_MIN, and by the
+        # SATURATING route rather than by a wrap that landed — numpy's
+        # wrap at that cell is a different value, which the census test
+        # derives and asserts is not what numpy answers. That is the cell
+        # `e66fef3`'s own commit message cites BECAUSE they agree there.
+        # A reader who checked it against the old clause found the
+        # opposite of what it said and was pushed toward "so it should
+        # have predicted INT64_MIN" — which is exactly the repair the
+        # class-level argument rules out. The unspecified-ness is what
+        # licenses the refusal; the disagreement is evidence for it, not
+        # a property of the conversion being refused.
         #
         # So the refusal says the range and stops. Driven — with the
         # disagreement, a negative AGREEING cell and the positive

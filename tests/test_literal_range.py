@@ -77,6 +77,7 @@ import math
 import random
 import struct
 import sys
+import warnings
 
 import pytest
 
@@ -379,8 +380,12 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     **AND THE CELLS WHERE THEY AGREE ARE PINNED HERE TOO, BECAUSE THE
     REFUSAL'S CLAUSE IS ABOUT THE CLASS AND NOT ABOUT THE CONVERSION IN
     FRONT OF THE READER.** It used to end *"and the backends disagree
-    about it"*, which is false at about a fifth of the cells that emit
-    it: jax clamps, so it always answers an endpoint, and numpy
+    about it"*, which is false at every cell where the two happen to
+    agree — a set this test requires to be nonempty and
+    :func:`test_the_census_behind_that_comment_is_BUILT_AND_COUNTED_HERE`
+    sizes, so no fraction is typed in this docstring either: an earlier
+    wording said *"about a fifth"* and nothing recomputed it. jax
+    clamps, so it always answers an endpoint, and numpy
     coincides with that wherever the platform's cast happens to land on
     the same one — ``-1e30`` under `int64` is such a cell and BOTH store
     INT64_MIN there, which is the cell the previous commit message cites
@@ -408,14 +413,22 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     below alongside the negative agreements: a POSITIVE agreeing cell,
     which the old sentence said could not exist.
 
-    **AND PARITY IS HALF OF THAT ASYMMETRY, NOT ALL OF IT** — an earlier
-    wording of the block below, and of the comment at the check, said it
-    was the whole. Parity is an argument about a WRAP, and the
-    platform's cast does not always wrap: where it stops it returns a
-    value-independent constant that is ``lo`` or ``0`` and never ``hi``.
-    So the saturating answer can coincide with jax's clamp BELOW the
-    range and never above it — a second, separate reason for the same
-    one-sided agreement, with its own witness driven below.
+    **AND PARITY IS ONE OF TWO MECHANISMS, NOT A FRACTION OF THAT
+    ASYMMETRY** — an earlier wording of the block below, and of the
+    comment at the check, first said it was the whole and then said it
+    was *"half"*, a fraction of a denominator neither of them named.
+    Parity is an argument about a WRAP, and the platform's cast does not
+    always wrap: where it stops it returns a value-independent constant,
+    and that constant is never ``hi``. THE SECOND HALF OF THAT SENTENCE
+    IS THE HALF THAT SURVIVES, and it is derivable rather than
+    enumerated — every ``hi`` is ``2**k - 1`` and so ODD and every such
+    constant is EVEN — where the earlier *"``lo`` or ``0``"* was an
+    enumeration of one sample, and `uint64` answers neither of those at
+    four of that sample's own cells. So the saturating answer can
+    coincide with jax's clamp BELOW the range and never above it — a
+    second, separate reason for the same one-sided agreement, with its
+    own witness driven below and the whole split counted in
+    :func:`test_the_census_behind_that_comment_is_BUILT_AND_COUNTED_HERE`.
 
     Nothing here is typed. The disagreement is COUNTED over the cells the
     default jax configuration can reach, and the test asserts the count
@@ -516,11 +529,14 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
         assert hi % 2 == 1, (dtype, hi)
         assert lo % 2 == 0, (dtype, lo)
 
-    # ...AND THAT IS HALF OF THE "0 of 68 positive, 32 of 87 negative"
-    # the comment at the check reports, not the whole of it — which is
-    # what an earlier wording of this block said. Parity is an argument
-    # about a WRAP, so it reaches only the cells that wrap, and numpy's
-    # cast wraps at 54 of those 68 and produces 18 of those 32. THE
+    # ...AND PARITY IS ONE OF TWO MECHANISMS AND NOT A FRACTION OF THE
+    # ASYMMETRY — an earlier wording of this block typed the fraction,
+    # and typed it wrong twice running. It is an argument about a WRAP,
+    # so it reaches the wrapping cells and no others; the split by
+    # mechanism is COUNTED, over the census the comment at the check
+    # argues from, in
+    # `test_the_census_behind_that_comment_is_BUILT_AND_COUNTED_HERE`,
+    # and no number for it is typed here. THE
     # SECOND MECHANISM IS SATURATION, and it has a witness a 32-bit
     # container can be asked about, so it is pinned here rather than
     # left in prose: at `-1e10` under `uint16` numpy does NOT wrap — the
@@ -541,6 +557,269 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     jv = int(jnp.array(saturating).astype(jnp.uint16).item())
     assert npv == jv == lo, (npv, jv, lo)
     assert npv != wrap, (npv, wrap)
+
+
+def test_the_census_behind_that_comment_is_BUILT_AND_COUNTED_HERE():
+    """**THE CENSUS THE COMMENT AT THE CHECK RESTS ON, MOVED OUT OF ITS
+    PROSE AND INTO CODE. THE COMMENT NOW TYPES NO FIGURE AT ALL.**
+
+    Three consecutive audits of that block found `ir.py`'s executable
+    half untouched and something wrong with the same paragraph of prose,
+    and every time it was a hand-maintained count or proportion: *"false
+    at about a fifth of the cells"*, *"parity is about half of the
+    asymmetry"*, *"it is ``hi`` at NONE of the 155"*, *"a constant that
+    is ``lo`` or ``0``"*. Two of those were repairs FOR an earlier
+    miscount. A number typed beside the thing it counts cannot redden
+    when the thing moves, and these count the answers of TWO FOREIGN
+    LIBRARIES pinned at one version each — so the failure mode is not
+    carelessness, it is that nothing was ever going to look again.
+
+    So the census lives here. This test BUILDS the value set from
+    :data:`ir._LIT_INT_BOUNDS` rather than listing it — a described set
+    was twice rebuilt wrong from the description — crosses it with the
+    dtype table, asks both backends, and asserts every figure the
+    comment used to carry. If numpy or jax moves an answer, THIS fails
+    and names the cell.
+
+    **THIS DOCSTRING TYPES NO FIGURE EITHER.** Every count lives in an
+    ``assert`` below, where a wrong one is a red test rather than a
+    sentence nobody re-reads. What it pins, in the order the comment
+    argues it:
+
+    1. **The set and the cells.** The integral values, crossed with the
+       whole dtype table; how many cells emit this refusal, and how many
+       of those can be asked — the remainder is every emitting
+       ``int4``/``uint4`` cell, which neither backend spells.
+    2. **jax CLAMPS.** Its answer is an endpoint at every cell, and it
+       is ``hi`` above the range and ``lo`` below it. numpy's is not,
+       which is the whole disagreement.
+    3. **The two mechanisms.** numpy's cast WRAPS at most of the cells
+       and returns a value-independent constant at the rest. Parity is
+       an argument about the first only, which is why it is ONE OF TWO
+       mechanisms and not a fraction of the asymmetry — the earlier
+       *"about half"* was the fraction of a denominator nothing named.
+    4. **The constant is never ``hi``, and the reason is arithmetic.**
+       Every ``hi`` in the table is ``2**k - 1`` and so ODD; every constant
+       this box returns is EVEN. The old sentence enumerated the
+       constants instead — *"``lo`` or ``0``"* — and ``uint64`` answers
+       neither of those at cells of this very census.
+    5. **``hi`` at none of the SATURATING cells is not ``hi`` at none of
+       the census.** numpy's answer IS ``hi`` at cells of it, all of
+       them negative, all reached by WRAPPING, and every one a
+       DISAGREEMENT because jax clamps a negative overflow to ``lo``.
+       Fusing the two denominators is what made the old sentence false.
+    6. **The indefinite is ``lo`` only where the dtype is as wide as the
+       temporary.** ``int32`` and ``int64`` answer their own ``lo``;
+       ``int8`` and ``int16`` answer ``0``, which is that same constant
+       NARROWED to their width by the same truncation the wrap uses.
+    7. **The ladder, and that it is not a half-line.** ``hi + 2**bits``
+       agrees for the dtypes whose wrap regime reaches it, not for
+       ``int32`` — whose regime is over below its own first rung — and
+       not for ``int64``/``uint64``, which have no exact float64 for it
+       to ask. The two ``int8`` values BETWEEN the first and second
+       rungs disagree while the second rung agrees again; both rungs are
+       computed from the table here rather than copied from the comment.
+
+    x64 is needed and is set and PUT BACK in a ``finally``: without it
+    `jnp.asarray(v, dtype=jnp.float64)` hands back an f32, ``1e300``
+    becomes ``inf``, and the census measures a different question. That
+    is the same set-and-restore
+    :func:`test_the_subnormal_band_is_admitted_and_the_note_is_the_IEEE_route`
+    does further down this file, for the same reason:
+    `tests/_state_guard.py` brackets each test, so a restored set is
+    silent to it and a leak is named.
+    """
+    np = pytest.importorskip("numpy")
+    # `jax`, not `jax.numpy`: `tests/test_skip_inventory.py` declares the
+    # optional dependencies this suite may gate on by their TOP-LEVEL
+    # name, and an undeclared gate fails that file
+    jax = pytest.importorskip("jax")
+    jnp = jax.numpy
+
+    def emits(v, dtype):
+        """Does this cell emit the no-prediction refusal? Never raises."""
+        try:
+            ir.Literal(val=v, aval=aval(dtype))
+        except ir.TranscriptionError as exc:
+            return "PREDICTS NO STORED VALUE" in str(exc)
+        return False
+
+    # (1) THE VALUE SET, BUILT AND NOT LISTED. `float(hi) + 1` and
+    # `float(lo) - 1` per dtype, plus a fixed spread of larger
+    # magnitudes, minus the non-integral and the duplicates.
+    values = set()
+    for lo, hi in ir._LIT_INT_BOUNDS.values():
+        values.add(float(hi) + 1.0)
+        values.add(float(lo) - 1.0)
+    for magnitude in (16.0, 300.0, 65536.0, 1e10, 1e30, 3e38, 1e300):
+        values.add(magnitude)
+        values.add(-magnitude)
+    values.update(
+        {2.0 ** 31, -(2.0 ** 31) - 1.0, 2.0 ** 63, -(2.0 ** 63) * 2.0, 2.0 ** 64}
+    )
+    values = sorted(v for v in values if float(v).is_integer())
+    assert len(values) == 29, len(values)
+    # every positive one is EVEN, which is the parity bar itself and not
+    # an observation about it — see (4) below
+    assert [v for v in values if v > 0 and v % 2] == []
+
+    emitting = [
+        (d, v) for d in ir._LIT_INT_BOUNDS for v in values if emits(v, d)
+    ]
+    assert len(ir._LIT_INT_BOUNDS) * len(values) == 290
+    assert len(emitting) == 211, len(emitting)
+
+    askable = [
+        d
+        for d in ir._LIT_INT_BOUNDS
+        if getattr(np, d, None) is not None and getattr(jnp, d, None) is not None
+    ]
+    assert set(ir._LIT_INT_BOUNDS) - set(askable) == {"int4", "uint4"}
+    asked = [(d, v) for d, v in emitting if d in askable]
+    assert len(askable) == 8 and len(asked) == 155, (len(askable), len(asked))
+    assert len(emitting) - len(asked) == 56
+
+    # (2) ASK BOTH BACKENDS. x64 is not optional: `1e300` and `2**64`
+    # have no float32, so without it the wide array is an f32 `inf` and
+    # every cell of this census answers a different question.
+    old_x64 = jax.config.jax_enable_x64
+    rows = []
+    try:
+        jax.config.update("jax_enable_x64", True)
+        for d, v in asked:
+            lo, hi = ir._LIT_INT_BOUNDS[d]
+            wide = jnp.asarray(v, dtype=jnp.float64)
+            assert wide.dtype == jnp.float64  # the flag really took
+            with warnings.catch_warnings():
+                # numpy names its own answer invalid while returning it;
+                # `test_the_backends_DISAGREE_...` above brackets one
+                # such cast with `pytest.warns` to pin that it does
+                warnings.simplefilter("ignore", RuntimeWarning)
+                npv = int(np.asarray(v).astype(getattr(np, d)).item())
+            rows.append(
+                dict(
+                    d=d,
+                    v=v,
+                    np=npv,
+                    jax=int(wide.astype(getattr(jnp, d)).item()),
+                    lo=lo,
+                    hi=hi,
+                    wrap=((int(v) - lo) % (1 << ir._LIT_INT_BITS[d])) + lo,
+                )
+            )
+        # the ladder's first rung, per dtype, asked in the same window:
+        # `hi + 2**bits` is where numpy's wrap lands back on `hi`
+        rung = {}
+        for d in askable:
+            hi = ir._LIT_INT_BOUNDS[d][1]
+            want = hi + (1 << ir._LIT_INT_BITS[d])
+            if int(float(want)) != want:
+                # no float64 spells it exactly, so it cannot be asked
+                rung[d] = None
+                continue
+            wide = jnp.asarray(float(want), dtype=jnp.float64)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                rung[d] = int(
+                    np.asarray(float(want)).astype(getattr(np, d)).item()
+                ) == int(wide.astype(getattr(jnp, d)).item())
+    finally:
+        jax.config.update("jax_enable_x64", old_x64)
+
+    pos = [r for r in rows if r["v"] > 0]
+    neg = [r for r in rows if r["v"] < 0]
+    flat = [r for r in rows if r["np"] != r["wrap"]]
+    assert len(pos) == 68 and len(neg) == 87
+
+    # (3) jax CLAMPS — an endpoint at every cell — and numpy does not
+    assert all(r["jax"] in (r["lo"], r["hi"]) for r in rows)
+    assert not all(r["np"] in (r["lo"], r["hi"]) for r in rows)
+    assert all(r["jax"] == (r["hi"] if r["v"] > 0 else r["lo"]) for r in rows)
+
+    agreed = sum(r["np"] == r["jax"] for r in rows)
+    assert agreed == 32 and len(rows) - agreed == 123
+    assert sum(r["np"] == r["jax"] for r in pos) == 0
+    assert sum(r["np"] == r["jax"] for r in neg) == 32
+
+    # (4) THE TWO MECHANISMS, and parity reaches only the first
+    assert len(rows) - len(flat) == 120 and len(flat) == 35
+    assert sum(r["np"] == r["wrap"] for r in pos) == 54
+    assert sum(r["np"] != r["wrap"] for r in pos) == 14
+    neg_agree = [r for r in neg if r["np"] == r["jax"]]
+    assert sum(r["np"] == r["wrap"] for r in neg_agree) == 18
+    assert sum(r["np"] != r["wrap"] for r in neg_agree) == 14
+    # the parity bar, off the table rather than off the sample: numpy's
+    # wrap lands on jax's clamp only at `int(v) ≡ hi (mod 2**bits)`, and
+    # every `hi` is `2**k - 1` and so ODD while every value above is EVEN
+    assert all(hi % 2 == 1 for _, hi in ir._LIT_INT_BOUNDS.values())
+    assert all(lo % 2 == 0 for lo, _ in ir._LIT_INT_BOUNDS.values())
+    # ...and the SECOND mechanism is why that bar is not the whole story:
+    # where the cast does not wrap, numpy returns a constant, and the
+    # constant is EVEN too, so it cannot be `hi` either
+    for d in askable:
+        for positive in (True, False):
+            group = {
+                r["np"] for r in flat if r["d"] == d and (r["v"] > 0) is positive
+            }
+            assert len(group) <= 1, (d, positive, group)
+    assert sum(r["np"] == r["lo"] for r in flat) == 27
+    assert sum(r["np"] == r["hi"] for r in flat) == 0
+    assert all(r["np"] % 2 == 0 for r in flat), sorted({r["np"] for r in flat})
+
+    # (5) AND `hi` AT NONE OF THE SATURATING CELLS IS NOT `hi` AT NONE
+    # OF THE CENSUS. A wrap FROM BELOW can land on `hi`; the saturating
+    # constant cannot, and fusing the two denominators is the whole of
+    # what made the comment's old sentence false.
+    at_hi = [r for r in rows if r["np"] == r["hi"]]
+    assert len(at_hi) == 7
+    assert all(r["v"] < 0 for r in at_hi)
+    assert all(r["np"] == r["wrap"] for r in at_hi)
+    assert all(r["jax"] == r["lo"] != r["np"] for r in at_hi)
+
+    # (6) THE INDEFINITE IS `lo` ONLY WHERE THE DTYPE IS AS WIDE AS THE
+    # TEMPORARY. `int8` and `int16` answer `0`, which is `int32`'s own
+    # constant narrowed by the same truncation the wrap uses, and those
+    # are cells the comment used to lump under "something else".
+    def constant(d):
+        return sorted({r["np"] for r in flat if r["d"] == d})
+
+    assert constant("int32") == [ir._LIT_INT_BOUNDS["int32"][0]]
+    assert constant("int64") == [ir._LIT_INT_BOUNDS["int64"][0]]
+    for d in ("int8", "int16"):
+        lo = ir._LIT_INT_BOUNDS[d][0]
+        narrowed = ((constant("int32")[0] - lo) % (1 << ir._LIT_INT_BITS[d])) + lo
+        assert constant(d) == [narrowed] == [0], (d, constant(d), narrowed)
+    # and `uint64` is why the constant is per-SIGN and not per-dtype
+    assert len(constant("uint64")) == 2, constant("uint64")
+    assert ir._LIT_INT_BOUNDS["uint64"][0] not in constant("uint64")[1:]
+
+    # (7) THE LADDER'S FIRST RUNG. `int32`'s wrap regime is over below
+    # it, so it disagrees there; `int64` and `uint64` cannot spell
+    # `hi + 2**bits` as an exact float64 to ask at all.
+    assert sum(v is True for v in rung.values()) == 5, rung
+    assert rung["int32"] is False, rung
+    assert rung["int64"] is None and rung["uint64"] is None, rung
+
+    # ...AND IT IS A LADDER AND NOT A HALF-LINE. The comment names four
+    # `int8` values for that; all four are exact float32s, so this needs
+    # no x64, and the two rungs are DERIVED off the table rather than
+    # read off the comment.
+    lo8, hi8 = ir._LIT_INT_BOUNDS["int8"]
+    step = 1 << ir._LIT_INT_BITS["int8"]
+    assert (float(hi8 + step), float(hi8 + 2 * step)) == (383.0, 639.0)
+    rungs = ((383.0, True), (384.0, False), (385.0, False), (639.0, True))
+    for v, agrees in rungs:
+        assert "PREDICTS NO STORED VALUE" in refused(v, "int8")
+        npv = int(np.asarray(v).astype(np.int8).item())
+        assert npv == ((int(v) - lo8) % step) + lo8  # still inside the wrap regime
+        assert (npv == int(jnp.asarray(v).astype(jnp.int8).item())) is agrees, v
+
+    # (8) THE CELL THE COMMENT NAMES BY VALUE: `-1e30` under `int64`
+    # AGREES, and by the saturating mechanism rather than by a wrap that
+    # landed — which is the half `e66fef3`'s reader got backwards.
+    (cell,) = [r for r in rows if r["d"] == "int64" and r["v"] == -1e30]
+    assert cell["np"] == cell["jax"] == cell["lo"]
+    assert cell["np"] != cell["wrap"]
 
 
 # -- row: the float dtypes ----------------------------------------------------
@@ -1026,9 +1305,14 @@ def test_the_subnormal_band_is_admitted_and_the_note_is_the_IEEE_route():
        of these cells.
     2. **When a note does appear.** A value that ROUNDS inside the band
        gets one — ``1.5 * 2**-149`` has no float32 and stores as the
-       next subnormal up. The band is admitted either way: the underflow
-       REFUSAL lives strictly BELOW it, which is checked here too, since
-       "admitted" is the half of the claim a reader relies on.
+       next subnormal up. A value can also round UP out of the band
+       entirely, onto ``2**-126``; it gets a note and it is the one
+       image here the XLA convert does NOT destroy, which is why
+       `ir._float_image`'s docstring no longer says the convert would
+       destroy the band's literals *either way*. The band is admitted
+       either way: the underflow REFUSAL lives strictly BELOW it, which
+       is checked here too, since "admitted" is the half of the claim a
+       reader relies on.
     3. **That the answer is a ROUTE.** `numpy.float32` and
        `jnp.asarray` agree with `struct` on all 24; an XLA
        ``convert_element_type`` on an f64 array flushes every subnormal
@@ -1063,6 +1347,17 @@ def test_the_subnormal_band_is_admitted_and_the_note_is_the_IEEE_route():
     image = ir._float_image(rounder, "float32")
     assert image == 2.0 ** -148 and repr(image) in note, (image, note)
     assert 0.0 < abs(image) < 2.0 ** -126  # and the note's value IS subnormal
+    # ...AND A VALUE CAN ROUND UP OUT OF THE BAND ENTIRELY, which is the
+    # cell that makes "the literal is admitted and the XLA convert would
+    # destroy it" false in the branch it was written for. Just under the
+    # midpoint below `2**-126` there is no float32, so this stores as
+    # `2**-126` — a note, and the one image in this band the convert
+    # PRESERVES; the assertion that it does is in the x64 block below.
+    up = (2 ** 23 - 0.25) * 2.0 ** -149
+    assert 0.0 < up < 2.0 ** -126
+    assert ir._float_image(up, "float32") == 2.0 ** -126 != up
+    up_note = ir.literal_inexact(admitted(up, "float32"))
+    assert up_note is not None and repr(2.0 ** -126) in up_note, up_note
     # ...and the whole band is ADMITTED: the underflow refusal is below it
     assert "underflows float32" in refused(2.0 ** -151, "float32")
     assert "underflows float32" in refused(2.0 ** -150, "float32")  # exact tie
@@ -1114,6 +1409,10 @@ def test_the_subnormal_band_is_admitted_and_the_note_is_the_IEEE_route():
         # arbitrary cell
         normal = jnp.asarray(band[-1], dtype=jnp.float64)
         assert float(convert(normal)) == band[-1] == 2.0 ** -126
+        # ...and so is the value that ROUNDS onto it, which therefore
+        # gets a note AND survives the convert — both halves of the
+        # sentence that used to say the convert destroys it "either way"
+        assert float(convert(jnp.asarray(up, dtype=jnp.float64))) == 2.0 ** -126
     finally:
         jax.config.update("jax_enable_x64", old_x64)
     assert flushed == 23, flushed
