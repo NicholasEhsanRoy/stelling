@@ -234,7 +234,17 @@ def test_reduce_sum_integer_overflow_reachability_guard_both_faces():
 
     # three addends near int32 max: the sum escapes the dtype
     big = 2.0**31 - 1
-    overflow = sum_query([(big, big)] * 3, dtype="int32", bound=1e12)
+    # THE BOUND WAS `1e12`, WHICH IS NOT AN INT32 — the second kind of
+    # out-of-range integer literal this file was writing (see
+    # `_slack_bound` for the first, and `ir._literal_range_problem` for
+    # the check that now refuses both). There is no slack bound here at
+    # all: the true sum 3*(2**31 - 1) is 6442450941 and exceeds EVERY
+    # int32, which is the very fact the guard exists for. The largest
+    # int32 serves, and the test still discriminates — if the guard
+    # vanished this would be REFUTED rather than the `unknown` asserted
+    # below, exactly as it would have been a false `discharged` under
+    # 1e12.
+    overflow = sum_query([(big, big)] * 3, dtype="int32", bound=_INT_MAX32)
     p = sole(overflow)
     assert p.obligations[0].status == "unknown"
     assert any("wraparound is not excluded" in n for n in p.notes)
@@ -504,7 +514,11 @@ def test_integer_pow_integer_overflow_reachability_guard_both_faces():
     assert p.obligations[0].status == "discharged"  # 0..64, no wraparound
     assert not any("wraparound" in n for n in p.notes)
 
-    overflow = pow_query(0.0, 100_000.0, 3, bound=1e20, dtype="int32")
+    # `1e20` was not an int32 either; the same repair and the same
+    # reasoning as the `reduce_sum` row above — 100000**3 is 1e15 and
+    # exceeds every int32, so no slack bound exists and the largest int32
+    # is the honest spelling
+    overflow = pow_query(0.0, 100_000.0, 3, bound=_INT_MAX32, dtype="int32")
     p = sole(overflow)
     assert p.obligations[0].status == "unknown"
     assert any("wraparound is not excluded" in n for n in p.notes)
@@ -1098,6 +1112,41 @@ def test_existing_emission_and_new_transfer_never_disagree_under_a_solver():
 from stelling.propagate import _INT_DTYPE_BOUNDS  # noqa: E402
 
 
+def _slack_bound(dtype):
+    """A bound so far below any result that only the overflow guard can
+    decide the assertion — AND A VALUE OF THE DTYPE IT IS WRITTEN UNDER.
+
+    This was ``-1e30``, written under an INTEGER aval, and it is why this
+    file is repaired in the same commit as `ir`'s literal range check:
+    **the file whose subject is integer-overflow discipline was itself
+    constructing out-of-range integer literals**, FORTY-ONE of them from
+    this one expression, a latent instance of exactly the class that
+    check closes. (Forty-one and not forty: the census that produced the
+    smaller figure was tallied against SPEC-LIT's int8..int64 row, and
+    the check as shipped registers `int4`/`uint4` too — see
+    `test_the_slack_bound_is_a_value_of_the_aval_it_is_written_under`,
+    which also says what part of that census is and is not
+    reproducible.) The INTENT is legitimate and is unchanged; only the
+    spelling was impossible, since no `int32` value is -1e30.
+
+    SPEC-LIT says to repair these to `_INT_MIN32`, and that is right for
+    `int32` and for nothing else. Measured from the recorder census that
+    preceded the check: `wrapping_int_query` is called under `int4`,
+    `int8`, `int16`, `int64`, `uint8` and `uint32` as well, and
+    ``-(2.0**31)`` is outside five of those six — every one but `int64`.
+    So the bound is the DTYPE'S OWN minimum, read from the table
+    `propagate` already keeps — which IS `_INT_MIN32` at `int32`, and
+    that identity is asserted in
+    `test_the_slack_bound_is_a_value_of_the_aval_it_is_written_under` so
+    that the two spellings cannot drift apart. A dtype the table has
+    never heard of (`int128`, here) keeps the original bound: nothing
+    claims a range for it, `ir` makes no claim either, and the query's
+    whole subject there is that unregistered case.
+    """
+    bounds = _INT_DTYPE_BOUNDS.get(dtype)
+    return -1e30 if bounds is None else float(bounds[0])
+
+
 def wrapping_int_query(
     bound_lo, bound_hi, prim, params=(), dtype="int32", second=None
 ):
@@ -1131,7 +1180,10 @@ def wrapping_int_query(
         ins = [v]
     eqns += [
         eqn(prim, ins, s, params),
-        eqn("gt", [s, lit(-1e30, a)], pred),  # slack: only the guard decides
+        # slack: only the guard decides — and see `_slack_bound` for why
+        # the slack is the dtype's own floor and not -1e30, which no
+        # integer dtype in this file can hold
+        eqn("gt", [s, lit(_slack_bound(dtype), a)], pred),
         eqn("stelling_assert", [pred], out),
     ]
     return close(eqns, [out])
@@ -1151,6 +1203,66 @@ _OVERFLOW_SHAPES = [
     ("abs", (), (_INT_MIN32, _INT_MIN32), None),
     ("integer_pow", (("y", 2),), (_INT_MAX32 - 1, _INT_MAX32), None),
 ]
+
+
+def test_the_slack_bound_is_a_value_of_the_aval_it_is_written_under():
+    """THE FILE THAT TESTS INTEGER-OVERFLOW DISCIPLINE WAS ITSELF WRITING
+    OUT-OF-RANGE INTEGER LITERALS, and this is the control for the repair.
+
+    `wrapping_int_query` asserted against ``lit(-1e30, a)`` under an
+    INTEGER aval — thirty-five of the forty-six violations
+    `ir._literal_range_problem`'s recorder census found across the whole
+    suite came from that one expression, and SIX more from the same
+    expression under the other integer dtypes this file uses. It was a
+    latent instance of the class the check closes.
+
+    **FORTY-SIX, AND THE AGGREGATE IS NOT A MEASUREMENT ANYWAY.** Two
+    corrections to what the first commit recorded. The total it quoted,
+    forty-five, was tallied against SPEC-LIT's int8..int64 row while the
+    check as shipped registers `int4`/`uint4` as well, and that
+    forty-sixth violation is this same expression under `int4` — the one
+    `test_int4_and_uint4_are_registered_not_silently_skipped` builds.
+    More importantly, no aggregate of that census is reproducible: the
+    recorder counted OCCURRENCES over 156 processes, and a full run
+    re-imports and re-runs modules inside the child pytest sessions
+    `test_skip_inventory` and the doc-example tests spawn, so the same
+    test contributes a different number of occurrences depending on what
+    else ran. The census on disk records twelve occurrences for
+    `test_every_computing_transfer_actually_carries_the_guard`; the
+    independent audit run measured twenty-four for it. **What IS stable,
+    and what reproduced exactly between the two runs, is the
+    ATTRIBUTION** — which tests, which expression, which dtypes — and
+    that is the part any claim should rest on. Whichever total is
+    quoted, this file's share of it is every violation but three.
+
+    Both directions are driven: the repaired bound is a value of every
+    dtype it is written under, and the spelling it replaced is refused
+    under every one the check claims a range for."""
+    assert _slack_bound("int32") == _INT_MIN32  # SPEC-LIT's repair, at int32
+    assert _slack_bound("float64") == -1e30     # ...and untouched elsewhere
+    assert _slack_bound("int128") == -1e30      # an unregistered dtype
+    for dtype in ("int4", "int8", "int16", "int32", "int64", "uint8", "uint32"):
+        a = aval((), dtype)
+        assert ir._literal_range_problem(_slack_bound(dtype), a) == (None, None)
+        assert lit(_slack_bound(dtype), a).val == _INT_DTYPE_BOUNDS[dtype][0]
+        # THE REFUSAL IS ASSERTED BY ITS RANGE AND NOT BY A WRAP. This
+        # matched "would store as" until the round-2 audit: -1e30 is a
+        # FLOAT, and `ir` no longer predicts what an out-of-range float
+        # stores as, because numpy and jax do not agree on the answer.
+        # See `tests/test_literal_range.py::
+        # test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing`.
+        lo, hi = _INT_DTYPE_BOUNDS[dtype]
+        with pytest.raises(ir.TranscriptionError,
+                           match=r"PREDICTS NO STORED VALUE"):
+            lit(-1e30, a)
+        assert f"[{lo}, {hi}]" in ir._literal_range_problem(-1e30, a)[0]
+    # and the two BOUND literals repaired beside it, for the same reason
+    for dtype, bound in (("int32", _INT_MAX32),):
+        assert ir._literal_range_problem(bound, aval((), dtype)) == (None, None)
+        with pytest.raises(ir.TranscriptionError):
+            lit(1e12, aval((), dtype))
+        with pytest.raises(ir.TranscriptionError):
+            lit(1e20, aval((), dtype))
 
 
 # -- UNSOUND 1: integer arithmetic modelled as real ---------------------------
@@ -1706,7 +1818,10 @@ def test_the_overflow_decline_attributes_an_unbounded_operand_correctly():
         [
             any_eqn(x, -INF, INF, dtype="int32"),
             eqn("add", [x, x], s),
-            eqn("gt", [s, lit(-1e30, a)], pred),
+            # the same slack bound, and here `_INT_MIN32` IS the dtype's
+            # own floor because the aval is int32 — SPEC-LIT's repair,
+            # literally, at the one site where it is the whole answer
+            eqn("gt", [s, lit(_INT_MIN32, a)], pred),
             eqn("stelling_assert", [pred], out),
         ],
         [out],

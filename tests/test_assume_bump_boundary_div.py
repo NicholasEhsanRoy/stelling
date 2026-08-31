@@ -515,7 +515,7 @@ def test_boundary_div_valid_negative_boundary():
 from fractions import Fraction  # noqa: E402
 from itertools import product  # noqa: E402
 
-from stelling.propagate import _literal_strict_sign  # noqa: E402
+from stelling.propagate import _int_bracket, _literal_strict_sign  # noqa: E402
 
 
 def any_eqn_shaped(out, lo, hi, shape, dtype="float64"):
@@ -555,18 +555,104 @@ def test_literal_strict_sign_drops_zero_and_nonfinite():
     assert _sign_of(math.nan) == 0
 
 
-def test_literal_strict_sign_saturating_int_is_not_finite_and_drops():
-    """`_int_bracket` saturates an int past the double range to (maxf, inf).
+def _saturating_int_document(dtype: str) -> dict:
+    """A DOCUMENT whose one literal is ``10**400`` under ``dtype``.
 
-    That is a real literal reaching a real endpoint of ``inf``, which is
-    exactly what the finiteness guard is for — not a hypothetical.
+    Built by taking a WELL-FORMED query through `to_dict` and editing the
+    single value, so every other key is whatever the encoder actually
+    writes rather than what this test guessed it writes — the literal
+    cannot be constructed under an integer dtype any more, which is the
+    whole subject below.
+    """
+    a = ir.Aval(kind="ShapedArray", shape=(), dtype=dtype)
+    pred, out = var(1, BOOL), var(2, BOOL)
+    doc = close(
+        [
+            eqn("gt", [lit(3, a), lit(1, a)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    ).to_dict()
+    written = doc["jaxpr"]["eqns"][0]["invars"][0]
+    assert written["k"] == "lit" and written["val"] == 3, written
+    written["val"] = 10 ** 400
+    return doc
+
+
+def test_a_saturating_int_literal_is_REFUSED_at_the_from_dict_door():
+    """THE RELOCATION, and the honest reading of what it can assert.
+
+    This test used to be
+    `test_literal_strict_sign_saturating_int_is_not_finite_and_drops`,
+    superseded by
+    ::test_a_saturating_int_literal_is_REFUSED_at_the_from_dict_door
+    and ::test_the_strict_sign_DROP_on_a_saturating_int_is_STILL_REACHABLE
+    between them. It built ``ir.Literal(10**400, Aval(dtype="int64"))``
+    DIRECTLY,
+    because its subject is that the strict-sign machinery drops a literal
+    whose `_int_bracket` saturates to ``(maxf, inf)``. Component LIT
+    (`ir._literal_range_problem`) makes that input unconstructible under
+    `int64`: 10**400 is not an int64, and the door now says so. The
+    principal ruled the test moves to the `from_dict` door with a crafted
+    document, because adversarial IR belongs there anyway.
+
+    **`from_dict` IS NOT A SOFTER DOOR, AND THAT IS WHAT THIS ASSERTS.**
+    It builds `ir.Literal` objects, so it runs the same `__post_init__`;
+    a document carrying an out-of-range int64 literal is REFUSED rather
+    than admitted, and the relocated test therefore names THE DOOR'S
+    REFUSAL. That is a different claim from the one it used to make, and
+    where the original claim went is the next test, which drives the drop
+    through the route the rules leave open.
+    """
+    doc = _saturating_int_document("int64")
+    with pytest.raises(ir.TranscriptionError) as exc:
+        ir.ClosedJaxpr.from_dict(doc)
+    msg = str(exc.value)
+    assert "int64's range [-9223372036854775808, 9223372036854775807]" in msg
+    assert "would store as" in msg, msg
+    # the door's own sentence, which claims exactly this reach
+    assert "refused at construction" in msg
+    assert "trace, from_dict, or direct construction" in msg
+    # ...and the same document under a dtype nothing claims a range for
+    # loads, which is what makes the next test's route a real one
+    ir.ClosedJaxpr.from_dict(_saturating_int_document("key<fry>"))
+
+
+def test_the_strict_sign_DROP_on_a_saturating_int_is_STILL_REACHABLE():
+    """WHERE THE ORIGINAL CLAIM WENT — established by measurement, not by
+    argument, which is what SPEC-LIT asked for.
+
+    The range check makes NO CLAIM on an unrecognised dtype string, the
+    same posture `ir._load_itemsize` takes when a dtype code does not name
+    a size. jax's extended dtypes really do spell themselves that way —
+    ``key<fry>``, which `stelling._tripwire.prop_guard` already names — so
+    a literal under one still constructs, still reaches
+    :func:`stelling.propagate._int_bracket`, and still saturates. **The
+    drop path is LIVE, not dead**, so it keeps a driven test rather than
+    a note saying where its coverage went.
+
+    Every link is asserted in order, so the test fails at the link that
+    breaks rather than at the end: the door admits the literal;
+    `_int_bracket` saturates it to an endpoint of ``inf``;
+    `_literal_strict_sign` drops it; and the finite counterparts under
+    the SAME aval still answer their sign, which is what makes the drop
+    the finiteness guard firing rather than the dtype being unreadable.
     """
     huge = 10 ** 400
-    assert _sign_of(huge, ir.Aval(kind="ShapedArray", shape=(), dtype="int64")) == 0
-    assert _sign_of(-huge, ir.Aval(kind="ShapedArray", shape=(), dtype="int64")) == 0
-    # ...while an int that brackets finitely still answers
-    assert _sign_of(3, ir.Aval(kind="ShapedArray", shape=(), dtype="int64")) == 1
-    assert _sign_of(-3, ir.Aval(kind="ShapedArray", shape=(), dtype="int64")) == -1
+    odd = ir.Aval(kind="ShapedArray", shape=(), dtype="key<fry>")
+    maxf = math.nextafter(math.inf, 0.0)
+    assert ir._literal_range_problem(huge, odd) == (None, None)
+    assert _int_bracket(huge) == (maxf, INF)
+    assert _int_bracket(-huge) == (-INF, -maxf)
+    assert _sign_of(huge, odd) == 0
+    assert _sign_of(-huge, odd) == 0
+    assert _sign_of(3, odd) == 1
+    assert _sign_of(-3, odd) == -1
+    # ...and the int64 half of the original test, which is still
+    # constructible because 3 and -3 are int64 values
+    i64 = ir.Aval(kind="ShapedArray", shape=(), dtype="int64")
+    assert _sign_of(3, i64) == 1
+    assert _sign_of(-3, i64) == -1
 
 
 def _f64_array(values):
