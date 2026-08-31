@@ -80,9 +80,12 @@ document claims to be a query that came through that face while
 to ``product(shape) x itemsize`` (for dtypes whose itemsize the ``.str``
 code names); aval-vs-value shape consistency for literals and
 consts; and, for a SCALAR literal, that its value is one the aval's own
-dtype can hold (:func:`_literal_range_problem` — the shape check above
-never asked, so ``ir.Literal(256, Aval(dtype="int8"))`` used to
-construct). Violations raise :class:`TranscriptionError` at LOAD — the same
+dtype can hold (:func:`_literal_range_problem`, for the dtype names this
+module's own tables carry — an unrecognised one gets NO claim, the same
+posture :func:`_load_itemsize` takes for an itemsize it does not know,
+so ``ir.Literal(2**200, Aval(dtype="int128"))`` constructs; the shape
+check above never asked either, so ``ir.Literal(256, Aval(dtype="int8"))``
+used to construct). Violations raise :class:`TranscriptionError` at LOAD — the same
 loud posture trace-side transcription has, now symmetric at the
 deserialization door. **Explicitly out of scope:** full per-primitive
 shape inference (validating every equation's output aval against its
@@ -303,6 +306,16 @@ class Literal:
         # above cross-checks the SHAPE for and never asked. Component LIT;
         # see :func:`_literal_range_problem` for what it refuses and
         # :func:`literal_inexact` for the one thing it only records.
+        #
+        # TWO QUALIFICATIONS, BOTH OF THEM BOUNDARIES OF THE PASS RATHER
+        # THAN DETAILS OF IT, and both stated at the check as well: the
+        # value must be a SCALAR (an `Array` payload carries its own
+        # width and is never decoded), and the dtype must be one THIS
+        # MODULE'S TABLES NAME. An unrecognised dtype string gets no
+        # claim at all — `Literal(2**200, Aval(dtype="int128"))` and
+        # `Literal(1e300, Aval(dtype="complex32"))` both construct — so a
+        # frontend that spells a dtype this module has never heard of
+        # gets this invariant from nowhere.
         _validate_literal_range(self)
 
 
@@ -2751,6 +2764,30 @@ def _validate_value_against_aval(val, aval: Aval, where: str) -> None:
 # a lie — so the invariant has to stop being a side effect of one
 # producer and become a rule of the type. That is all this pass is.
 #
+# ...AND THE PASS REACHES THAT FRONTEND ONLY AS FAR AS ITS OWN DTYPE
+# TABLES DO, which is the second half of "what does this door cover" and
+# belongs beside the first. A dtype string these tables do not name gets
+# NO CLAIM — the rule is stated once more, with its reason, at the
+# bottom of :func:`_literal_range_problem`, and the honest summary of it
+# is that the invariant is only as wide as `_LIT_DTYPE_NAME`. All four
+# of these CONSTRUCT, and none of the values is one its dtype could
+# hold:
+#
+#     Literal(10**400, Aval(dtype="float8_e4m3fn"))  # largest finite 448
+#     Literal(1e300,   Aval(dtype="complex32"))      # float16 parts: 65504
+#     Literal(2**200,  Aval(dtype="int128"))         # max 2**127 - 1
+#     Literal(5,       Aval(dtype="key<fry>"))       # not a numeric dtype
+#
+# That is deliberate and is the same posture :func:`_load_itemsize`
+# takes — a guessed range would refuse documents this module has no
+# standing to judge, and it is what keeps `propagate`'s saturating-int
+# path reachable — but it means the frontend named above gets this
+# invariant for exactly the dtypes jax's own naming already covers.
+# `torch.complex32` and `float8_e4m3fn` are real spellings of real
+# dtypes, and under them this door is open. Every dtype above, crossed
+# with one value of each python type the rule table names, is driven in
+# `tests/test_literal_range.py::test_an_unrecognised_dtype_string_gets_no_claim`.
+#
 # STDLIB ONLY, which is the module docstring's rule and not a preference:
 # no numpy here, and no borrowing `stelling._jax_compat`'s exactness
 # classifier. It costs nothing, because `struct` IS the IEEE interchange
@@ -2978,6 +3015,22 @@ def _float_image(x: float, dtype: str) -> float:
     :data:`_LIT_FLOAT_OVERFLOW_AT`), so that refusal is translated into
     the infinity it stands for and the caller reads overflow off the
     returned value like any other.
+
+    **"WHAT STORING IT WOULD STORE" IS IEEE ROUND-TO-NEAREST, AND IN THE
+    SUBNORMAL BAND THAT IS ROUTE-DEPENDENT** — worth one sentence because
+    the INEXACT note this feeds says "it stores as X" without naming a
+    route. Measured over the 24 magnitudes ``2**-149 … 2**-126`` (numpy
+    2.5.2, jax 0.11.0): `struct`, `numpy.float32` and `jnp.asarray` agree
+    with each other on all 24, and a jitted jax ``f64 -> f32`` convert
+    agrees on only the one that is NORMAL — it FLUSHES all 23 subnormals
+    to ``0.0``. This module answers the IEEE one, which is the answer
+    three of the four routes give and the only one derivable from the
+    format alone; a value that lands in that band therefore records
+    INEXACT here while the XLA convert would destroy it. Nothing in this
+    pass changes on that account — the underflow REFUSAL in
+    :func:`_lit_float_problem` reads this same IEEE image — but a reader
+    comparing the note against a jax round trip should know which of the
+    two routes they are looking at.
     """
     if dtype == "float64":
         return x
@@ -3206,14 +3259,44 @@ def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
         # result is outside the integer format unspecified, and the
         # hardware and the library each answer it their own way.
         #
-        # So the refusal says the range and stops. Driven, with the
-        # disagreement re-measured rather than quoted, in
+        # THE CLAUSE IS ABOUT THE CLASS, NOT ABOUT THIS CELL, AND THE
+        # DIFFERENCE IS MEASURED. It used to end "and the backends
+        # disagree about it" — a claim about the very conversion in front
+        # of the reader, and false at about a fifth of the cells that
+        # emit it. Driven over a sweep of out-of-range INTEGRAL floats —
+        # every integer dtype's two nearest out-of-range neighbours plus
+        # a spread of larger magnitudes of both signs — crossed with
+        # every integer dtype, keeping the cells this refusal actually
+        # emits at and both backends can be asked about (numpy 2.5.2,
+        # jax 0.11.0 under `JAX_ENABLE_X64=1`; 155 cells):
+        #
+        #     backends DISAGREE  123   (79.4 %)
+        #     backends AGREE      32   (20.6 %)
+        #
+        # and the agreement is not scattered: jax CLAMPS, answering an
+        # endpoint at all 155 cells, while numpy answers whatever the
+        # platform's cast produces, so the two coincide only where that
+        # cast happens to land on the endpoint — never once on a positive
+        # overflow (0 of 68) and at 32 of 87 negative ones. `-1e30` under
+        # `int64` is one of them: BOTH store INT64_MIN, and that is the
+        # cell `e66fef3`'s own commit message cites BECAUSE they agree
+        # there. A reader who checked that cell against the old clause
+        # found the opposite of what it said and was pushed toward "so it
+        # should have predicted INT64_MIN" — which is exactly the repair
+        # the class-level argument rules out. The unspecified-ness is
+        # what licenses the refusal; the disagreement is evidence for it,
+        # not a property of the conversion being refused.
+        #
+        # So the refusal says the range and stops. Driven, with both the
+        # disagreement and an AGREEING cell re-measured rather than
+        # quoted, in
         # `test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing`.
         return (
             f"literal {_safe_repr(val)} is outside {name}'s range "
             f"[{lo}, {hi}] — and this refusal PREDICTS NO STORED VALUE, "
             f"because IEEE 754 leaves an out-of-range float-to-integer "
-            f"conversion unspecified and the backends disagree about it"
+            f"conversion unspecified and the backends this tree can reach "
+            f"do not agree on the answer in general"
         ), None
     if dtype in _LIT_FLOAT_FORMATS:
         return _lit_float_problem(val, _LIT_DTYPE_NAME[dtype])
@@ -3265,7 +3348,11 @@ def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
 
 def _validate_literal_range(lit: "Literal") -> None:
     """Refuse a literal whose value its aval's dtype cannot hold, and
-    RECORD one the dtype can only hold a different number for.
+    RECORD one the dtype can only hold a different number for — for a
+    SCALAR value under a dtype name this module's tables carry, which is
+    the reach and is stated in that shape everywhere it is summarised
+    (an `Array` payload and an unrecognised dtype string each get no
+    claim; both boundaries, and why, are in :func:`_literal_range_problem`).
 
     Called from :meth:`Literal.__post_init__`, which is what puts it on
     every path that builds IR — trace, ``from_dict``, or direct

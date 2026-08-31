@@ -1,7 +1,21 @@
 # SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 # SPDX-License-Identifier: Apache-2.0
 
-"""A LITERAL'S VALUE IS A VALUE OF ITS AVAL'S DTYPE, OR IT IS REFUSED.
+"""A LITERAL'S SCALAR VALUE IS A VALUE OF ITS AVAL'S DTYPE — WHERE THIS
+MODULE NAMES THE DTYPE — OR IT IS REFUSED.
+
+**BOTH QUALIFICATIONS IN THAT HEADLINE ARE LOAD-BEARING, AND THE
+UNQUALIFIED SENTENCE WAS WHAT STOOD HERE.** An `Array` value is never
+decoded (:func:`test_an_Array_literal_is_never_decoded`), and on the
+real trace path `_jax_compat` writes even a shape-``()`` scalar as an
+`ir.Array`, so most of the literals this suite constructs are outside
+this check by design — the recorder census that measured the ratio, and
+its derivation, are written at the check in `ir.py` rather than re-typed
+here. A dtype string `ir`'s own tables do not name gets NO CLAIM at all,
+so ``Literal(2**200, Aval(dtype="int128"))`` and ``Literal(1e300,
+Aval(dtype="complex32"))`` construct
+(:func:`test_an_unrecognised_dtype_string_gets_no_claim`). Both are
+deliberate; neither is visible from the headline it used to have.
 
 `ir._validate_value_against_aval` cross-checks SHAPE and never asked
 whether the value was *in* the dtype, so::
@@ -351,6 +365,22 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     quoted, and jax answers the maximum instead. Neither is wrong; a
     message claiming either as "what it would store as" is.
 
+    **AND THE CELLS WHERE THEY AGREE ARE PINNED HERE TOO, BECAUSE THE
+    REFUSAL'S CLAUSE IS ABOUT THE CLASS AND NOT ABOUT THE CONVERSION IN
+    FRONT OF THE READER.** It used to end *"and the backends disagree
+    about it"*, which is false at about a fifth of the cells that emit
+    it: jax clamps, so it always answers an endpoint, and numpy
+    coincides with that wherever the platform's cast happens to land on
+    the same one — ``-1e30`` under `int64` is such a cell and BOTH store
+    INT64_MIN there, which is the cell the previous commit message cites
+    precisely BECAUSE they agree. A reader who checked it against the
+    old clause was pushed toward "so it should have predicted
+    INT64_MIN", the repair the class-level argument rules out. So this
+    test counts BOTH outcomes and requires both to be nonempty: if the
+    backends ever stopped agreeing anywhere, the "in general" the
+    message now says would be understating, and if they stopped
+    disagreeing the refusal should be revisited.
+
     Nothing here is typed. The disagreement is COUNTED over the cells the
     default jax configuration can reach, and the test asserts the count
     is nonzero — so if the backends ever converge, this fails and the
@@ -361,15 +391,40 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     # optional dependencies this suite may gate on by their TOP-LEVEL
     # name, and an undeclared gate fails that file
     jnp = pytest.importorskip("jax").numpy
-    disagreed = cells = 0
+    disagreed = agreed = cells = 0
+    # -65536.0 is in the list so the AGREEING outcome is reachable
+    # without `jax_enable_x64` — it is out of range for all four dtypes,
+    # and under the two unsigned ones both backends answer the lower
+    # endpoint. `tests/_state_guard.py` exists to catch a test flipping
+    # x64, so the agreeing witness has to be one a 32-bit container can
+    # be asked about.
     for dtype in ("int8", "int16", "uint8", "uint16"):
         lo, hi = ir._LIT_INT_BOUNDS[dtype]
-        for v in (float(hi + 1), float(lo - 1), 300.0, -300.0):
+        for v in (float(hi + 1), float(lo - 1), 300.0, -300.0, -65536.0):
+            if lo <= v <= hi:
+                # in range, so nothing is refused and there is no message
+                # whose clause could be right or wrong about it — the
+                # counts below are about the CELLS THAT EMIT IT, which is
+                # what the clause is a claim over
+                continue
+            assert "PREDICTS NO STORED VALUE" in refused(v, dtype)
             cells += 1
             npv = np.array(v).astype(getattr(np, dtype)).item()
             jv = jnp.array(v).astype(getattr(jnp, dtype)).item()
             disagreed += int(npv) != int(jv)
+            agreed += int(npv) == int(jv)
     assert disagreed, f"the two backends agreed on all {cells} cells"
+    # ...and the other half of the same fact: the clause the message
+    # carries has to survive the cells where they AGREE, which is why it
+    # says "in general" rather than claiming this conversion
+    assert agreed, f"the two backends disagreed on all {cells} cells"
+    lo, _ = ir._LIT_INT_BOUNDS["uint16"]
+    assert int(np.array(-65536.0).astype(np.uint16).item()) == lo
+    assert int(jnp.array(-65536.0).astype(jnp.uint16).item()) == lo
+    agree_msg = refused(-65536.0, "uint16")
+    assert "PREDICTS NO STORED VALUE" in agree_msg, agree_msg
+    assert "do not agree on the answer in general" in agree_msg, agree_msg
+    assert "the backends disagree about it" not in agree_msg, agree_msg
     # the witness, both halves of it derived rather than typed
     lo, hi = ir._LIT_INT_BOUNDS["int8"]
     wrap = ((300 - lo) % (1 << ir._LIT_INT_BITS["int8"])) + lo
