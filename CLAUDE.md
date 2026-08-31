@@ -47,6 +47,14 @@ Not style preferences — each one is here because its absence shipped a defect.
 * **Bound what the system produces against what it consumes.** If a component
   writes several witnesses to one fact and the decision reads some of them,
   the next defect lives in the ones nothing reads.
+* **Everything upstream of your assertion is an input, and an input you did
+  not check is an input you assumed.** Before reasoning *from* a value, ask
+  whether the thing that writes it could have written it — and derive that
+  invariant from the writer, not from the reader's expectations. Guards here
+  have repeatedly been correct about a class and still wrong about which
+  *rung* the class sits on: source, then the object the source builds, then a
+  tally of what ran, then the outcome actually measured. Each rung reads like
+  a fix until the next attack arrives.
 * **Say what the search found, not what exists.** *"The sweep finds no input
   that tells it apart"* is a measurement. *"No input tells it apart"* is a
   claim nobody built a control for.
