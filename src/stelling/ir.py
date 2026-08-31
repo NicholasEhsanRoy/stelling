@@ -3335,15 +3335,21 @@ def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
         # ``hi + k*2**bits``, AND NOT A HALF-LINE: ``384.0`` and ``385.0``
         # under `int8` are both past the first rung and both DISAGREE,
         # while ``639.0`` — the second rung — agrees again. AND THE
-        # LADDER RUNS ONLY AS FAR AS THE WRAP DOES. `int32`'s wrap regime
-        # is already over below its own first rung, so `int32` disagrees
-        # there while the narrower dtypes agree; `int64` and `uint64`
-        # cannot spell ``hi + 2**bits`` as an exact float64 to ask at
-        # all. Both rungs are computed from :data:`_LIT_INT_BITS` and all
-        # four `int8` cells are asked, in the census test named above.
+        # LADDER RUNS ONLY AS FAR AS THE WRAP DOES: ``hi + 2**bits``
+        # agrees for the dtypes whose wrap regime REACHES it, `int32`'s
+        # is already over below its own first rung so `int32` disagrees
+        # there, and `int64` and `uint64` cannot spell ``hi + 2**bits``
+        # as an exact float64 to ask at all. IT IS NOT THE NARROW ONES
+        # THAT AGREE — that was an earlier wording of this sentence, and
+        # `uint32` is `int32`'s width and agrees. Which dtypes those are
+        # and how many is COUNTED, with both rungs computed from
+        # :data:`_LIT_INT_BITS` and all four `int8` cells asked, in the
+        # census test named above.
         #
         # TWO, WHERE THE CAST STOPS WRAPPING. numpy then returns a
-        # constant that does not depend on the value, and jax clamps to
+        # constant that depends on the dtype and the SIGN but not on the
+        # value — `uint64` returns a different one on each side, which is
+        # why "per dtype" alone would be wrong — and jax clamps to
         # ``lo`` below the range and to ``hi`` above it, so that constant
         # can coincide with jax's answer on the negative side. IT NEVER
         # DOES ON THE POSITIVE SIDE, and the reason is arithmetic rather

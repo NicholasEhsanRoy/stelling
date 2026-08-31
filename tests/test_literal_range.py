@@ -418,13 +418,16 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     comment at the check, first said it was the whole and then said it
     was *"half"*, a fraction of a denominator neither of them named.
     Parity is an argument about a WRAP, and the platform's cast does not
-    always wrap: where it stops it returns a value-independent constant,
-    and that constant is never ``hi``. THE SECOND HALF OF THAT SENTENCE
-    IS THE HALF THAT SURVIVES, and it is derivable rather than
-    enumerated — every ``hi`` is ``2**k - 1`` and so ODD and every such
-    constant is EVEN — where the earlier *"``lo`` or ``0``"* was an
-    enumeration of one sample, and `uint64` answers neither of those at
-    four of that sample's own cells. So the saturating answer can
+    always wrap: where it stops it returns a constant that depends on the
+    dtype and the SIGN but not on the value, and that constant is never
+    ``hi``. THE SECOND HALF OF THAT SENTENCE IS THE HALF THAT SURVIVES,
+    and it is derivable rather than enumerated — every ``hi`` is
+    ``2**k - 1`` and so ODD and every such constant is EVEN — where the
+    earlier *"``lo`` or ``0``"* was an enumeration of one sample, and
+    `uint64` answers neither of those at cells of that very sample. How
+    many is asserted over there rather than typed here; an earlier
+    wording of this paragraph typed it, three lines above the sentence
+    that says nothing here is. So the saturating answer can
     coincide with jax's clamp BELOW the range and never above it — a
     second, separate reason for the same one-sided agreement, with its
     own witness driven below and the whole split counted in
@@ -594,10 +597,15 @@ def test_the_census_behind_that_comment_is_BUILT_AND_COUNTED_HERE():
        is ``hi`` above the range and ``lo`` below it. numpy's is not,
        which is the whole disagreement.
     3. **The two mechanisms.** numpy's cast WRAPS at most of the cells
-       and returns a value-independent constant at the rest. Parity is
+       and returns a constant per dtype and SIGN at the rest — `uint64`
+       returns a different one on each side, which is why it is not a
+       constant per dtype and not one independent of the value. Parity is
        an argument about the first only, which is why it is ONE OF TWO
        mechanisms and not a fraction of the asymmetry — the earlier
        *"about half"* was the fraction of a denominator nothing named.
+       The ``(dtype, sign)`` groups this sample leaves EMPTY are named,
+       so the one-constant-per-group check is a control that can fire
+       rather than a row of vacuous truths.
     4. **The constant is never ``hi``, and the reason is arithmetic.**
        Every ``hi`` in the table is ``2**k - 1`` and so ODD; every constant
        this box returns is EVEN. The old sentence enumerated the
@@ -611,14 +619,30 @@ def test_the_census_behind_that_comment_is_BUILT_AND_COUNTED_HERE():
     6. **The indefinite is ``lo`` only where the dtype is as wide as the
        temporary.** ``int32`` and ``int64`` answer their own ``lo``;
        ``int8`` and ``int16`` answer ``0``, which is that same constant
-       NARROWED to their width by the same truncation the wrap uses.
+       NARROWED to their width by the same truncation the wrap uses, and
+       ``uint64`` answers it REINTERPRETED unsigned below the range while
+       answering ``0`` above it — the sign in item 3.
     7. **The ladder, and that it is not a half-line.** ``hi + 2**bits``
        agrees for the dtypes whose wrap regime reaches it, not for
        ``int32`` — whose regime is over below its own first rung — and
        not for ``int64``/``uint64``, which have no exact float64 for it
-       to ask. The two ``int8`` values BETWEEN the first and second
+       to ask. It is NOT the narrow dtypes that agree, which is what one
+       round's wording of the comment said: ``uint32`` is ``int32``'s
+       width and is one of them, and the width comes off the table here.
+       The two ``int8`` values BETWEEN the first and second
        rungs disagree while the second rung agrees again; both rungs are
        computed from the table here rather than copied from the comment.
+
+    **EVERY NUMPY FIGURE BELOW IS PLATFORM-SCOPED, AND THAT IS AN OPEN
+    QUESTION RATHER THAN A MEASUREMENT** — the same one the comment at
+    the check discloses, in the same terms, and it belongs here too now
+    that the figures do. They are what THIS x86-64 box's ``cvttsd2si``
+    returns when the result does not fit; a SATURATING target such as
+    aarch64's ``fcvtzs`` answers ``hi`` for a positive overflow instead,
+    which would put a positive agreement at an even value and redden the
+    positive counts and the saturating-constant asserts below. That is
+    the tree PREDICTING a red run on ARM, not disclaiming one: nothing
+    here has been run on such a box, because there is no ARM box here.
 
     x64 is needed and is set and PUT BACK in a ``finally``: without it
     `jnp.asarray(v, dtype=jnp.float64)` hands back an f32, ``1e300``
@@ -755,13 +779,38 @@ def test_the_census_behind_that_comment_is_BUILT_AND_COUNTED_HERE():
     assert all(lo % 2 == 0 for lo, _ in ir._LIT_INT_BOUNDS.values())
     # ...and the SECOND mechanism is why that bar is not the whole story:
     # where the cast does not wrap, numpy returns a constant, and the
-    # constant is EVEN too, so it cannot be `hi` either
+    # constant is EVEN too, so it cannot be `hi` either. The constant is
+    # per dtype AND SIGN — `uint64` is why the sign is in there, see (6).
+    #
+    # THE (dtype, sign) GROUPS THAT ARE EMPTY IN THIS SAMPLE ARE NAMED,
+    # so the per-group check below asks for EXACTLY ONE constant at every
+    # group this sample reaches, rather than the `<= 1` an empty group
+    # satisfies without being looked at. A control that cannot fire is
+    # the defect this census exists to replace, and that applies to the
+    # census itself: `uint32` reaches NEITHER side of this sample's
+    # non-wrapping regime, and `int8`/`uint8` reach only the negative.
+    empty = {
+        (d, positive)
+        for d in askable
+        for positive in (True, False)
+        if not [r for r in flat if r["d"] == d and (r["v"] > 0) is positive]
+    }
+    assert empty == {
+        ("int8", True),
+        ("uint8", True),
+        ("uint32", True),
+        ("uint32", False),
+    }, sorted(empty)
     for d in askable:
         for positive in (True, False):
             group = {
                 r["np"] for r in flat if r["d"] == d and (r["v"] > 0) is positive
             }
-            assert len(group) <= 1, (d, positive, group)
+            assert len(group) == (0 if (d, positive) in empty else 1), (
+                d,
+                positive,
+                group,
+            )
     assert sum(r["np"] == r["lo"] for r in flat) == 27
     assert sum(r["np"] == r["hi"] for r in flat) == 0
     assert all(r["np"] % 2 == 0 for r in flat), sorted({r["np"] for r in flat})
@@ -789,9 +838,25 @@ def test_the_census_behind_that_comment_is_BUILT_AND_COUNTED_HERE():
         lo = ir._LIT_INT_BOUNDS[d][0]
         narrowed = ((constant("int32")[0] - lo) % (1 << ir._LIT_INT_BITS[d])) + lo
         assert constant(d) == [narrowed] == [0], (d, constant(d), narrowed)
-    # and `uint64` is why the constant is per-SIGN and not per-dtype
+    # and `uint64` is why the constant is per-SIGN and not per-dtype, and
+    # why the old *"``lo`` or ``0``"* enumeration could not name it: its
+    # two constants are ``0`` above the range and, below it, `int64`'s
+    # own indefinite REINTERPRETED UNSIGNED — the same temporary as in
+    # the narrowing above, read through a different dtype instead of
+    # truncated to a shorter one. For `uint64` ``lo`` IS ``0``, so a
+    # constant that is neither is the whole of what the enumeration
+    # missed. The assert this replaces asked whether ``lo`` was outside
+    # ``constant("uint64")[1:]``: the answers are unsigned and ``lo`` is
+    # ``0``, so it is element 0 of that sorted set whenever it is present
+    # at all and the check could not fail for any data.
+    u_lo = ir._LIT_INT_BOUNDS["uint64"][0]
+    u_pos = [r["np"] for r in flat if r["d"] == "uint64" and r["v"] > 0]
+    u_neg = [r["np"] for r in flat if r["d"] == "uint64" and r["v"] < 0]
+    indefinite = ir._LIT_INT_BOUNDS["int64"][0] % (1 << ir._LIT_INT_BITS["uint64"])
     assert len(constant("uint64")) == 2, constant("uint64")
-    assert ir._LIT_INT_BOUNDS["uint64"][0] not in constant("uint64")[1:]
+    assert u_lo == 0 and set(u_pos) == {u_lo} and len(u_pos) == 1
+    assert set(u_neg) == {indefinite} and len(u_neg) == 4, u_neg
+    assert u_lo not in u_neg and 0 not in u_neg
 
     # (7) THE LADDER'S FIRST RUNG. `int32`'s wrap regime is over below
     # it, so it disagrees there; `int64` and `uint64` cannot spell
@@ -799,6 +864,22 @@ def test_the_census_behind_that_comment_is_BUILT_AND_COUNTED_HERE():
     assert sum(v is True for v in rung.values()) == 5, rung
     assert rung["int32"] is False, rung
     assert rung["int64"] is None and rung["uint64"] is None, rung
+    # ...AND IT IS NOT THE NARROW DTYPES THAT AGREE. One round's wording
+    # of the comment at the check said "`int32` disagrees there while the
+    # NARROWER dtypes agree", which sorts eight dtypes into three buckets
+    # and leaves `uint32` in none of them: it is `int32`'s WIDTH and it
+    # is one of the five. Width is read off :data:`ir._LIT_INT_BITS`, so
+    # this CONTRADICTS that sentence rather than restating it, and it is
+    # the assert the comment's "which dtypes those are" now points at.
+    assert ir._LIT_INT_BITS["uint32"] == ir._LIT_INT_BITS["int32"] == 32
+    assert rung["uint32"] is True, rung
+    assert {d for d, v in rung.items() if v is True} == {
+        "int8",
+        "int16",
+        "uint8",
+        "uint16",
+        "uint32",
+    }, rung
 
     # ...AND IT IS A LADDER AND NOT A HALF-LINE. The comment names four
     # `int8` values for that; all four are exact float32s, so this needs
