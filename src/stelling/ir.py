@@ -2958,6 +2958,21 @@ def literal_inexact(lit: "Literal") -> str | None:
     that literal may need to quote, which is why it is recorded rather
     than dropped. See :data:`_LITERAL_INEXACT_ATTR` for why the recording
     is here and not in a registry.
+
+    **"STORES" HERE MEANS IEEE ROUND-TO-NEAREST, AND THAT IS A ROUTE,
+    NOT THE ONLY ONE — AND THIS IS THE DOCSTRING A READER MEETS.** The
+    sentence above says "what the dtype stores" unqualified; the reach
+    is stated where it is derived, at :func:`_float_image`, which is
+    internal and which nobody reading a verdict opens. In the float32
+    SUBNORMAL band the routes measurably part: `struct`, `numpy.float32`
+    and `jnp.asarray` all give the IEEE image this function reports,
+    while an XLA ``convert_element_type`` flushes the whole band to
+    ``0.0``, so a reader who checks this note against a jax device round
+    trip can find ``0.0`` where the note names a nonzero. The note is
+    still the dtype's own answer and the convert is the deviation —
+    that is why nothing here changes — but read
+    :func:`_float_image`'s second paragraph before treating the note as
+    route-free.
     """
     return getattr(lit, _LITERAL_INEXACT_ATTR, None)
 
@@ -3021,16 +3036,35 @@ def _float_image(x: float, dtype: str) -> float:
     the INEXACT note this feeds says "it stores as X" without naming a
     route. Measured over the 24 magnitudes ``2**-149 … 2**-126`` (numpy
     2.5.2, jax 0.11.0): `struct`, `numpy.float32` and `jnp.asarray` agree
-    with each other on all 24, and a jitted jax ``f64 -> f32`` convert
-    agrees on only the one that is NORMAL — it FLUSHES all 23 subnormals
-    to ``0.0``. This module answers the IEEE one, which is the answer
-    three of the four routes give and the only one derivable from the
-    format alone; a value that lands in that band therefore records
-    INEXACT here while the XLA convert would destroy it. Nothing in this
-    pass changes on that account — the underflow REFUSAL in
-    :func:`_lit_float_problem` reads this same IEEE image — but a reader
-    comparing the note against a jax round trip should know which of the
-    two routes they are looking at.
+    with each other on all 24, and a jax ``f64 -> f32`` convert agrees on
+    only the one that is NORMAL — it FLUSHES all 23 subnormals to
+    ``0.0``. **JIT IS NOT THE DISCRIMINATOR**, which an earlier wording
+    of this paragraph implied by saying "jitted": measured, an eager
+    ``.astype(float32)`` on an f64 jax array flushes the same 23 of 24 —
+    and its jaxpr is one ``convert_element_type``, the same primitive the
+    jitted version lowers to. What separates the two answers is the
+    CONVERSION, not the trace: the three that agree read a host value
+    (`struct` and `numpy.float32` on a python float, `jnp.asarray` of
+    one), and the one that flushes is an XLA ``convert_element_type`` on
+    an f64 array.
+
+    This module answers the IEEE one, which is the answer three of the
+    four routes give and the only one derivable from the format alone.
+    **A VALUE THAT LANDS IN THAT BAND IS THEREFORE ADMITTED HERE, AND
+    USUALLY WITH NO NOTE AT ALL** — an earlier wording said it "records
+    INEXACT", which is false at every one of the 24 magnitudes the
+    sentence above names, since each is an EXACT float32 subnormal that
+    this function returns unchanged. The note appears only when a value
+    ROUNDS inside the band: ``1.5 * 2**-149`` has no float32 and stores
+    as ``2.802596928649634e-45``. Either way the literal is admitted and
+    the XLA convert would destroy it. Nothing in this pass changes on
+    that account — the underflow REFUSAL in :func:`_lit_float_problem`
+    reads this same IEEE image, and it fires only BELOW the band — but a
+    reader comparing the note against a jax round trip should know which
+    of the two routes they are looking at. Driven, with the admissions,
+    the one rounding note and the route disagreement all re-measured
+    rather than quoted, in
+    `test_the_subnormal_band_is_admitted_and_the_note_is_the_IEEE_route`.
     """
     if dtype == "float64":
         return x
@@ -3263,12 +3297,21 @@ def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
         # DIFFERENCE IS MEASURED. It used to end "and the backends
         # disagree about it" — a claim about the very conversion in front
         # of the reader, and false at about a fifth of the cells that
-        # emit it. Driven over a sweep of out-of-range INTEGRAL floats —
-        # every integer dtype's two nearest out-of-range neighbours plus
-        # a spread of larger magnitudes of both signs — crossed with
-        # every integer dtype, keeping the cells this refusal actually
-        # emits at and both backends can be asked about (numpy 2.5.2,
-        # jax 0.11.0 under `JAX_ENABLE_X64=1`; 155 cells):
+        # emit it. Driven over a sweep of out-of-range INTEGRAL floats,
+        # SPELLED OUT HERE BECAUSE "a spread of larger magnitudes" was
+        # not enough to rebuild it and an independent reconstruction of
+        # the described shape landed on different totals: take
+        # ``float(hi) + 1`` and ``float(lo) - 1`` for each of the ten
+        # dtypes in :data:`_LIT_INT_BOUNDS`, add the fixed list ``±16,
+        # ±300, ±65536, ±1e10, ±1e30, ±3e38, ±1e300, 2**31,
+        # -(2**31) - 1, 2**63, -(2**63) * 2, 2**64``, drop the
+        # non-integral and the duplicates — 29 values remain — and cross
+        # them with the same ten dtypes. 211 of those 290 cells emit
+        # this refusal; 155 of the 211 have both a ``numpy.<dtype>`` and
+        # a ``jnp.<dtype>`` to ask, the missing 56 being every emitting
+        # cell of ``int4``/``uint4``, which neither backend spells. On
+        # those 155 (numpy 2.5.2, jax 0.11.0 under `JAX_ENABLE_X64=1`;
+        # the script is `stelling-sweeps/lit-r3/backend_agreement.py`):
         #
         #     backends DISAGREE  123   (79.4 %)
         #     backends AGREE      32   (20.6 %)
@@ -3276,20 +3319,50 @@ def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
         # and the agreement is not scattered: jax CLAMPS, answering an
         # endpoint at all 155 cells, while numpy answers whatever the
         # platform's cast produces, so the two coincide only where that
-        # cast happens to land on the endpoint — never once on a positive
-        # overflow (0 of 68) and at 32 of 87 negative ones. `-1e30` under
-        # `int64` is one of them: BOTH store INT64_MIN, and that is the
-        # cell `e66fef3`'s own commit message cites BECAUSE they agree
-        # there. A reader who checked that cell against the old clause
-        # found the opposite of what it said and was pushed toward "so it
-        # should have predicted INT64_MIN" — which is exactly the repair
-        # the class-level argument rules out. The unspecified-ness is
-        # what licenses the refusal; the disagreement is evidence for it,
-        # not a property of the conversion being refused.
+        # cast happens to land on the endpoint. IN THIS CELL SET that is
+        # 0 of the 68 positive cells and 32 of the 87 negative ones.
         #
-        # So the refusal says the range and stops. Driven, with both the
-        # disagreement and an AGREEING cell re-measured rather than
-        # quoted, in
+        # THE POSITIVE ZERO IS A PROPERTY OF THIS SAMPLE AND NOT OF THE
+        # MECHANISM, and an earlier wording of this comment — "never once
+        # on a positive overflow" — read as though it were the mechanism.
+        # The rule is the same on both signs: while the platform's cast
+        # still WRAPS, numpy's answer is the low ``bits`` of the
+        # truncated value, so it lands on the endpoint jax clamps to
+        # exactly when ``int(v) ≡ hi (mod 2**bits)`` — i.e. from
+        # ``hi + 2**bits`` upward. THE SET SIMPLY CONTAINS NO SUCH VALUE,
+        # for a reason worth writing down because it is not a coincidence
+        # of taste: every ``hi`` in :data:`_LIT_INT_BOUNDS` is
+        # ``2**k - 1`` and therefore ODD, and all 15 of the sweep's
+        # positive values are EVEN, so no positive cell can be congruent
+        # to its ``hi`` and numpy's wrap can never land there. The
+        # negative side has no such parity bar — every ``lo`` is even
+        # (``-2**(bits-1)`` or ``0``) and the set's negatives include
+        # even ones — which is the whole of the "asymmetry".
+        #
+        # One step past the set's own ``300.0`` the positive agreement
+        # appears, measured on the same box: ``383.0`` under `int8`
+        # (numpy 127, jax 127), ``511.0`` under `uint8` (255, 255),
+        # ``98303.0`` under `int16` (32767, 32767) — each of them
+        # ``hi + 2**bits``, and each odd. So "the backends do not agree
+        # IN GENERAL" is what the message claims and what the evidence
+        # supports; "they never agree on a positive overflow" is not, and
+        # is false at 383.0. The three witnesses are DERIVED and driven
+        # in the test named below rather than typed here.
+        #
+        # `-1e30` under `int64` is one of the 32: BOTH store INT64_MIN,
+        # and that is the cell `e66fef3`'s own commit message cites
+        # BECAUSE they agree there. A reader who checked it against the
+        # old clause found the opposite of what it said and was pushed
+        # toward "so it should have predicted INT64_MIN" — which is
+        # exactly the repair the class-level argument rules out. The
+        # unspecified-ness is what licenses the refusal; the
+        # disagreement is evidence for it, not a property of the
+        # conversion being refused.
+        #
+        # So the refusal says the range and stops. Driven — with the
+        # disagreement, a negative AGREEING cell and the positive
+        # agreeing cells the "asymmetry" said could not exist all
+        # re-measured rather than quoted — in
         # `test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing`.
         return (
             f"literal {_safe_repr(val)} is outside {name}'s range "

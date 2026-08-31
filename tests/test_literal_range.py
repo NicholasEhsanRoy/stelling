@@ -58,6 +58,16 @@ compared here rather than trusted. The bfloat16 image, which has no
 and the comparison found the "obviously more correct" direct rounder to
 be the wrong one. See
 :func:`test_bfloat16_agrees_with_jaxs_own_bfloat16_and_direct_rounding_would_not`.
+
+**AND A MEASURED CLAIM THAT LIVES ONLY IN A DOCSTRING IS A CLAIM THAT
+CAN ROT, WHICH ONE DID.** `ir._float_image`'s paragraph on the float32
+subnormal band said a value landing there "records INEXACT"; it records
+NOTHING at all 24 of the magnitudes that paragraph itself names, every
+one of them an exact float32 subnormal. Three routes' worth of
+measurement sat above the sentence and the sentence said the opposite,
+because nothing re-ran it. It is re-run now, admissions and note and
+route split alike, in
+:func:`test_the_subnormal_band_is_admitted_and_the_note_is_the_IEEE_route`.
 """
 from __future__ import annotations
 
@@ -381,6 +391,22 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     message now says would be understating, and if they stopped
     disagreeing the refusal should be revisited.
 
+    **AND THE AGREEMENT IS NOT A SIGN ASYMMETRY.** The comment at the
+    check used to add that the two coincide *"never once on a positive
+    overflow"*, which is true of the sweep it was measured on and NOT of
+    the mechanism: while the platform's cast still wraps, numpy answers
+    the low ``bits`` of the truncated value, so it lands on ``hi`` — where
+    jax's clamp already is — for every ``v`` with
+    ``int(v) ≡ hi (mod 2**bits)``. That sweep held no such value for a
+    reason that is arithmetic and not judgement, and the reason is
+    asserted below: every ``hi`` is ``2**k - 1`` and so ODD, every ``lo``
+    is even, and the sweep's positive values were all even — so its
+    positive cells could not land on ``hi`` and its negative ones could
+    land on ``lo``. ``383.0`` under `int8` is one step past the sweep's
+    own ``300.0``, is odd, and both backends answer 127. It is driven
+    below alongside the negative agreements: a POSITIVE agreeing cell,
+    which the old sentence said could not exist.
+
     Nothing here is typed. The disagreement is COUNTED over the cells the
     default jax configuration can reach, and the test asserts the count
     is nonzero — so if the backends ever converge, this fails and the
@@ -418,6 +444,7 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     # carries has to survive the cells where they AGREE, which is why it
     # says "in general" rather than claiming this conversion
     assert agreed, f"the two backends disagreed on all {cells} cells"
+
     lo, _ = ir._LIT_INT_BOUNDS["uint16"]
     assert int(np.array(-65536.0).astype(np.uint16).item()) == lo
     assert int(jnp.array(-65536.0).astype(jnp.uint16).item()) == lo
@@ -447,6 +474,39 @@ def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
     # while the INT spelling of the same magnitude still predicts, and
     # numpy still agrees with it
     assert f"would store as {wrap}" in refused(300, "int8")
+
+    # THE POSITIVE AGREEING CELLS, which the comment at the check used to
+    # say did not exist. The witnesses are DERIVED, not typed: the first
+    # positive value past `hi` whose truncation is congruent to `hi` is
+    # `hi + 2**bits`, and that is where numpy's wrap lands back on the
+    # endpoint jax clamps to. All three fit a float32 exactly, so no
+    # `jax_enable_x64` is needed and `tests/_state_guard.py` stays happy.
+    positives = 0
+    for dtype in ("int8", "uint8", "int16"):
+        lo, hi = ir._LIT_INT_BOUNDS[dtype]
+        v = float(hi + (1 << ir._LIT_INT_BITS[dtype]))
+        assert v > 0 and float(v).is_integer() and v == int(v)
+        assert "PREDICTS NO STORED VALUE" in refused(v, dtype)
+        npv = int(np.array(v).astype(getattr(np, dtype)).item())
+        jv = int(jnp.array(v).astype(getattr(jnp, dtype)).item())
+        assert npv == jv == hi, (dtype, v, npv, jv, hi)
+        positives += 1
+    assert positives == 3
+    # and the one the comment names by value, so a reader who pastes it
+    # into an interpreter meets the same number
+    assert float(ir._LIT_INT_BOUNDS["int8"][1] + 256) == 383.0
+
+    # THE PARITY THAT MADE THE OLD SWEEP LOOK ASYMMETRIC, asserted off
+    # the table rather than typed: every `hi` is ``2**k - 1`` and so ODD,
+    # every `lo` is ``-2**(bits-1)`` or ``0`` and so EVEN. A sweep whose
+    # positive values are all even therefore CANNOT produce a positive
+    # agreement — numpy's wrap has the wrong parity to land on `hi` —
+    # while its negative values can land on `lo`. That is the whole of
+    # the "0 of 68 positive, 32 of 87 negative" the comment at the check
+    # reports, and it is a fact about the sample, not about the backends.
+    for dtype, (lo, hi) in ir._LIT_INT_BOUNDS.items():
+        assert hi % 2 == 1, (dtype, hi)
+        assert lo % 2 == 0, (dtype, lo)
 
 
 # -- row: the float dtypes ----------------------------------------------------
@@ -911,6 +971,118 @@ def test_bfloat16_agrees_with_jaxs_own_bfloat16_and_direct_rounding_would_not():
     for v in (math.inf, -math.inf):
         assert ir._float_image(v, "bfloat16") == v
     assert math.isnan(ir._float_image(math.nan, "bfloat16"))
+
+
+def test_the_subnormal_band_is_admitted_and_the_note_is_the_IEEE_route():
+    """**`ir._float_image`'S ROUTE-DEPENDENCE LIVED ONLY IN A DOCSTRING,
+    AND A MEASURED CLAIM WITH NO TEST ROTS SILENTLY.** It also rotted:
+    that paragraph said a value landing in the float32 subnormal band
+    "therefore records INEXACT", and it records NOTHING at all 24 of the
+    magnitudes the same paragraph names, because each of them is an
+    exact float32 subnormal. This test is the paragraph, driven — every
+    figure recomputed here so neither it nor this docstring carries a
+    number that nothing checks.
+
+    Three claims, in the order the paragraph makes them:
+
+    1. **What the module answers.** ``2**e`` for ``e`` in ``-149 … -126``
+       is exactly a float32, so :func:`ir._float_image` is the identity
+       on it and the literal is admitted with NO note. That is the
+       correction; the old sentence predicted the opposite at every one
+       of these cells.
+    2. **When a note does appear.** A value that ROUNDS inside the band
+       gets one — ``1.5 * 2**-149`` has no float32 and stores as the
+       next subnormal up. The band is admitted either way: the underflow
+       REFUSAL lives strictly BELOW it, which is checked here too, since
+       "admitted" is the half of the claim a reader relies on.
+    3. **That the answer is a ROUTE.** `numpy.float32` and
+       `jnp.asarray` agree with `struct` on all 24; an XLA
+       ``convert_element_type`` on an f64 array flushes every subnormal
+       to ``0.0`` and agrees only on the one magnitude that is NORMAL.
+       Counted, not typed — if a future jaxlib stopped flushing, the
+       docstring's "route-dependent" would be stale and this fails.
+
+    The third claim needs an f64 jax array and therefore needs
+    ``jax_enable_x64``, which is set and PUT BACK inside the test — the
+    same set-and-restore `tests/test_ieee_narrow_formats.py` does one
+    scope out, and `tests/_state_guard.py` brackets each test, so it
+    names a LEAK and not a bracketed set. Measured, the flag is not
+    optional here: without it ``jnp.asarray(x, dtype=jnp.float64)``
+    hands back an f32, the convert is a no-op, and the cell goes green
+    having tested nothing.
+    """
+    band = [2.0 ** e for e in range(-149, -125)]
+    assert len(band) == 24
+    assert band[-1] == 2.0 ** -126  # the one NORMAL magnitude in the list
+
+    # (1) exact float32 subnormals: the identity, admitted, no note
+    for x in band:
+        assert ir._float_image(x, "float32") == x
+        assert ir.literal_inexact(admitted(x, "float32")) is None
+
+    # (2) a value that rounds INSIDE the band does get a note...
+    rounder = 1.5 * 2.0 ** -149
+    note = ir.literal_inexact(admitted(rounder, "float32"))
+    assert note is not None and "stores as" in note, note
+    image = ir._float_image(rounder, "float32")
+    assert image == 2.0 ** -148 and repr(image) in note, (image, note)
+    assert 0.0 < abs(image) < 2.0 ** -126  # and the note's value IS subnormal
+    # ...and the whole band is ADMITTED: the underflow refusal is below it
+    assert "underflows float32" in refused(2.0 ** -151, "float32")
+    assert "underflows float32" in refused(2.0 ** -150, "float32")  # exact tie
+    for x in band + [rounder]:
+        ir.Literal(val=x, aval=aval("float32"))  # constructs, does not raise
+
+    # (3) the route disagreement, counted
+    np = pytest.importorskip("numpy")
+    # `jax`, not `jax.numpy`: `tests/test_skip_inventory.py` declares the
+    # optional dependencies this suite may gate on by their TOP-LEVEL
+    # name, and an undeclared gate fails that file
+    jax = pytest.importorskip("jax")
+    jnp = jax.numpy
+    like_numpy = like_asarray = 0
+    for x in band:
+        mine = ir._float_image(x, "float32")
+        like_numpy += float(np.float32(x)) == mine
+        like_asarray += float(jnp.asarray(x, dtype=jnp.float32)) == mine
+    assert like_numpy == 24, like_numpy
+    assert like_asarray == 24, like_asarray
+
+    # THE CONVERT LEG NEEDS AN f64 SOURCE, WHICH NEEDS x64, so it is set
+    # and PUT BACK in a `finally`. x64 is process-global in jax and an
+    # unrestored set leaks into every later test; `tests/_state_guard.py`
+    # brackets each test and names the one that changed something, so a
+    # set-and-restore inside one function is silent to it and a leak is
+    # not. `tests/test_ieee_narrow_formats.py` does the same at module
+    # scope for the same reason. Without the flag there is nothing to
+    # measure rather than something weaker: `jnp.asarray(x,
+    # dtype=jnp.float64)` silently hands back an f32, the convert becomes
+    # a no-op, and all 24 "agree" — a green cell that has tested nothing.
+    old_x64 = jax.config.jax_enable_x64
+    try:
+        jax.config.update("jax_enable_x64", True)
+        convert = jax.jit(lambda a: a.astype(jnp.float32))
+        like_convert = flushed = eager_flushed = 0
+        for x in band:
+            mine = ir._float_image(x, "float32")
+            wide = jnp.asarray(x, dtype=jnp.float64)
+            assert wide.dtype == jnp.float64  # the flag really took
+            back = float(convert(wide))
+            like_convert += back == mine
+            flushed += back == 0.0
+            # JIT IS NOT THE DISCRIMINATOR — the word the docstring at
+            # `ir._float_image` used to use. Eager `.astype` lowers to the
+            # same `convert_element_type` and flushes the same cells.
+            eager_flushed += float(wide.astype(jnp.float32)) == 0.0
+        # and the one it agrees on is the NORMAL magnitude, not an
+        # arbitrary cell
+        normal = jnp.asarray(band[-1], dtype=jnp.float64)
+        assert float(convert(normal)) == band[-1] == 2.0 ** -126
+    finally:
+        jax.config.update("jax_enable_x64", old_x64)
+    assert flushed == 23, flushed
+    assert eager_flushed == 23, eager_flushed
+    assert like_convert == 1, like_convert
 
 
 # -- the INEXACT recording mechanism ------------------------------------------
