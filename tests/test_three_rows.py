@@ -1119,10 +1119,15 @@ def _slack_bound(dtype):
     This was ``-1e30``, written under an INTEGER aval, and it is why this
     file is repaired in the same commit as `ir`'s literal range check:
     **the file whose subject is integer-overflow discipline was itself
-    constructing out-of-range integer literals**, forty of them from this
-    one expression, a latent instance of exactly the class that check
-    closes. The INTENT is legitimate and is unchanged; only the spelling
-    was impossible, since no `int32` value is -1e30.
+    constructing out-of-range integer literals**, FORTY-ONE of them from
+    this one expression, a latent instance of exactly the class that
+    check closes. (Forty-one and not forty: the census that produced the
+    smaller figure was tallied against SPEC-LIT's int8..int64 row, and
+    the check as shipped registers `int4`/`uint4` too — see
+    `test_the_slack_bound_is_a_value_of_the_aval_it_is_written_under`,
+    which also says what part of that census is and is not
+    reproducible.) The INTENT is legitimate and is unchanged; only the
+    spelling was impossible, since no `int32` value is -1e30.
 
     SPEC-LIT says to repair these to `_INT_MIN32`, and that is right for
     `int32` and for nothing else. Measured from the recorder census that
@@ -1205,11 +1210,30 @@ def test_the_slack_bound_is_a_value_of_the_aval_it_is_written_under():
     OUT-OF-RANGE INTEGER LITERALS, and this is the control for the repair.
 
     `wrapping_int_query` asserted against ``lit(-1e30, a)`` under an
-    INTEGER aval — thirty-five of the forty-five violations
+    INTEGER aval — thirty-five of the forty-six violations
     `ir._literal_range_problem`'s recorder census found across the whole
-    suite came from that one expression, and five more from the same
+    suite came from that one expression, and SIX more from the same
     expression under the other integer dtypes this file uses. It was a
     latent instance of the class the check closes.
+
+    **FORTY-SIX, AND THE AGGREGATE IS NOT A MEASUREMENT ANYWAY.** Two
+    corrections to what the first commit recorded. The total it quoted,
+    forty-five, was tallied against SPEC-LIT's int8..int64 row while the
+    check as shipped registers `int4`/`uint4` as well, and that
+    forty-sixth violation is this same expression under `int4` — the one
+    `test_int4_and_uint4_are_registered_not_silently_skipped` builds.
+    More importantly, no aggregate of that census is reproducible: the
+    recorder counted OCCURRENCES over 156 processes, and a full run
+    re-imports and re-runs modules inside the child pytest sessions
+    `test_skip_inventory` and the doc-example tests spawn, so the same
+    test contributes a different number of occurrences depending on what
+    else ran. The census on disk records twelve occurrences for
+    `test_every_computing_transfer_actually_carries_the_guard`; the
+    independent audit run measured twenty-four for it. **What IS stable,
+    and what reproduced exactly between the two runs, is the
+    ATTRIBUTION** — which tests, which expression, which dtypes — and
+    that is the part any claim should rest on. Whichever total is
+    quoted, this file's share of it is every violation but three.
 
     Both directions are driven: the repaired bound is a value of every
     dtype it is written under, and the spelling it replaced is refused
@@ -1221,8 +1245,17 @@ def test_the_slack_bound_is_a_value_of_the_aval_it_is_written_under():
         a = aval((), dtype)
         assert ir._literal_range_problem(_slack_bound(dtype), a) == (None, None)
         assert lit(_slack_bound(dtype), a).val == _INT_DTYPE_BOUNDS[dtype][0]
-        with pytest.raises(ir.TranscriptionError, match="would store as"):
+        # THE REFUSAL IS ASSERTED BY ITS RANGE AND NOT BY A WRAP. This
+        # matched "would store as" until the round-2 audit: -1e30 is a
+        # FLOAT, and `ir` no longer predicts what an out-of-range float
+        # stores as, because numpy and jax do not agree on the answer.
+        # See `tests/test_literal_range.py::
+        # test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing`.
+        lo, hi = _INT_DTYPE_BOUNDS[dtype]
+        with pytest.raises(ir.TranscriptionError,
+                           match=r"PREDICTS NO STORED VALUE"):
             lit(-1e30, a)
+        assert f"[{lo}, {hi}]" in ir._literal_range_problem(-1e30, a)[0]
     # and the two BOUND literals repaired beside it, for the same reason
     for dtype, bound in (("int32", _INT_MAX32),):
         assert ir._literal_range_problem(bound, aval((), dtype)) == (None, None)

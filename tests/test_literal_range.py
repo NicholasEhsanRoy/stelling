@@ -22,6 +22,19 @@ because a range check whose failure mode is over-refusal breaks correct
 programs at construction and cannot be caught downstream — the object
 never exists.
 
+**AND ONE PER VALUE TYPE ON EVERY ROW THAT DISPATCHES ON ONE.** The
+first pass stated the standard above and did not meet it: the no-claim
+row was driven by two ints, and the arm that refuses a complex value ran
+BEFORE the dtype had been recognised, so every unrecognised dtype
+string — `complex32`, `complex256`, `key<fry>` — was told *"no value of
+that dtype is complex"*, a claim about a dtype this module has just said
+it knows nothing about. Two int drives never enter that arm and so could
+not see it. The rule table dispatches on the VALUE's type as hard as on
+the dtype's name, so a row driven by one value type is a row driven by
+one arm; see
+:func:`test_an_unrecognised_dtype_string_gets_no_claim`, now a cross
+product.
+
 **AND THE TABLES ARE CHECKED AGAINST SOMETHING THAT IS NOT THEM.**
 `ir` may import nothing outside the standard library, so its float and
 integer bounds are a second copy of `propagate`'s; the copies are
@@ -95,10 +108,11 @@ def test_a_non_numeric_value_gets_no_claim():
 
 
 def test_an_Array_literal_is_never_decoded():
-    """An `Array`'s bytes ARE the dtype: `_validate_array_value` already
+    """An `Array`'s bytes ARE a dtype: `_validate_array_value` already
     holds ``len(data) == product(shape) x itemsize``, so a fixed-width
-    buffer cannot encode a value outside the width it is measured
-    against. ONLY A SCALAR CAN LIE.
+    buffer cannot encode a value outside THE WIDTH IT IS MEASURED
+    AGAINST — which is the `Array`'s OWN ``.str``, not the aval's dtype.
+    See the next test for what that qualification costs.
 
     Driven rather than asserted: this payload holds 100000 under a `<i4`
     Array whose aval says `int8`. Decoding it under the AVAL's dtype
@@ -111,6 +125,43 @@ def test_an_Array_literal_is_never_decoded():
     assert lit.val is arr
     assert ir._literal_range_problem(arr, aval("int8", (1,))) == (None, None)
     assert ir.literal_inexact(lit) is None
+
+
+def test_an_Array_whose_own_dtype_disagrees_with_the_aval_still_constructs():
+    """**"ONLY A SCALAR CAN LIE" IS FALSE AS AN UNQUALIFIED SENTENCE, and
+    this is the witness.** It stood at the check and in the commit
+    message that armed it, stated as a structural fact; the structural
+    fact is narrower. An `Array`'s buffer is honest about the `Array`'s
+    OWN dtype, and nothing in this pass compares that dtype to the
+    aval's, so the same lie the scalar row refuses can be written through
+    an `Array` — at shape ``()``, where the two spellings denote exactly
+    the same value.
+
+    The class is PRE-EXISTING and this test does not close it: decoding
+    the payload would need numpy, which `ir`'s docstring forbids, and the
+    aval-vs-`Array`-dtype disagreement is a separate open question. What
+    is fixed here is the CLAIM, not the code.
+
+    **AND THE ESCAPE IS WHERE THE POPULATION IS.** `stelling._jax_compat`
+    transcribes a scalar as a shape-``()`` `ir.Array`, so the recorder
+    census counted 38,133 `Array` values against 4,907 scalars out of
+    43,047 literals — a shade under 89 % of them outside this check by
+    construction. A torch frontend that transcribed the same way would
+    land in the same place. A door that reads as though it covers its
+    whole population and covers about a ninth of it is worth saying out
+    loud."""
+    scalar_aval = aval("int8")
+    # the scalar spelling of 256-under-int8, refused
+    assert "[-128, 127]" in refused(256, "int8")
+    # ...and the Array spelling of the SAME value under the SAME aval,
+    # admitted, because the buffer is measured against its own `<q`
+    arr = ir.Array(dtype="<q", shape=(), data=struct.pack("<q", 256))
+    lit = ir.Literal(val=arr, aval=scalar_aval)
+    assert lit.val is arr
+    assert ir._literal_range_problem(arr, scalar_aval) == (None, None)
+    # the disagreement is between two NAMES, and both are readable; this
+    # pass simply never compares them
+    assert arr.dtype == "<q" and scalar_aval.dtype == "int8"
 
 
 # -- row: a dtype-less aval ---------------------------------------------------
@@ -188,6 +239,159 @@ def test_the_integer_row_refuses_the_slack_bound_test_three_rows_used_to_write()
     `int32` value can never be -1e30."""
     msg = refused(-1e30, "int32")
     assert "[-2147483648, 2147483647]" in msg
+    # ...and it predicts NO stored value, because -1e30 is a float
+    assert "would store as" not in msg, msg
+    assert "PREDICTS NO STORED VALUE" in msg, msg
+
+
+@pytest.mark.parametrize("dtype", INTS)
+def test_an_out_of_range_FLOAT_literal_is_refused_WITHOUT_a_prediction(dtype):
+    """**THE MESSAGE SPLITS ON THE SOURCE TYPE, AND SPEC-LIT §3 DID NOT.**
+
+    That row prescribes ``((val - lo) mod 2**bits) + lo`` — "what the
+    value would store as" — for every out-of-range integer refusal
+    without distinguishing an `int` source from a `float` one. The first
+    commit implemented it faithfully. It is correct for an `int`, whose
+    narrowing is defined bit-for-bit, and FALSE for a `float`, whose
+    out-of-range conversion IEEE 754 leaves unspecified. The two
+    spellings of the same magnitude therefore get two different messages,
+    and this drives both at every integer dtype: the int one predicts,
+    the float one does not.
+
+    What settles it is not that the formula picks the wrong answer but
+    that there is no right one to pick — see
+    :func:`test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing`."""
+    lo, hi = ir._LIT_INT_BOUNDS[dtype]
+    over = hi + 1
+    int_msg = refused(over, dtype)
+    float_msg = refused(float(over), dtype)
+    # both name the range, and both name the same one
+    for msg in (int_msg, float_msg):
+        assert f"[{lo}, {hi}]" in msg, msg
+    assert "would store as" in int_msg, int_msg
+    assert "would store as" not in float_msg, float_msg
+    assert "PREDICTS NO STORED VALUE" in float_msg, float_msg
+    assert "unspecified" in float_msg, float_msg
+
+
+def test_the_int_wrap_the_message_quotes_is_what_the_backends_store():
+    """THE INT HALF, VERIFIED AGAINST TWO IMPLEMENTATIONS THAT ARE NOT
+    THIS ONE. The message predicts, so the prediction has to be checked
+    against something that actually stores the value.
+
+    `ir` may not import numpy or jax, so the arithmetic it quotes is its
+    own; here it is compared cell by cell against `numpy`'s narrowing and
+    `jax`'s. Neither backend is asked a question it cannot answer: the
+    SOURCE has to exist as an array before it can be narrowed, so a value
+    outside every 64-bit container (`int64`'s ``2**63`` and `uint64`'s
+    ``2**64``) is skipped rather than fudged, and the jax half is
+    restricted to the dtypes whose out-of-range neighbours fit an `int32`
+    — because widening jax's default container means flipping
+    `jax_enable_x64`, which is exactly what `tests/_state_guard.py`
+    exists to catch a test doing.
+
+    The two lists are not typed: they are computed from
+    `ir._LIT_INT_BOUNDS` and from what each backend actually exposes, and
+    the test asserts it checked something rather than trusting that it
+    did."""
+    np = pytest.importorskip("numpy")
+    # `jax`, not `jax.numpy`: `tests/test_skip_inventory.py` declares the
+    # optional dependencies this suite may gate on by their TOP-LEVEL
+    # name, and an undeclared gate fails that file
+    jnp = pytest.importorskip("jax").numpy
+    by_numpy, by_jax = set(), set()
+    for dtype, (lo, hi) in ir._LIT_INT_BOUNDS.items():
+        bits = ir._LIT_INT_BITS[dtype]
+        for v in (hi + 1, lo - 1):
+            wrap = ((v - lo) % (1 << bits)) + lo
+            # ...and the message really does quote that number
+            assert f"would store as {wrap}" in refused(v, dtype)
+            container = np.uint64 if v >= 0 else np.int64
+            fits = (v < 2 ** 64) if v >= 0 else (v >= -(2 ** 63))
+            if fits and hasattr(np, dtype):
+                stored = np.array(v, dtype=container).astype(
+                    getattr(np, dtype)).item()
+                assert int(stored) == wrap, (dtype, v, stored, wrap)
+                by_numpy.add(dtype)
+            if (-(2 ** 31) <= v < 2 ** 31 and bits <= 32
+                    and hasattr(jnp, dtype)):
+                stored = jnp.array(v, dtype=jnp.int32).astype(
+                    getattr(jnp, dtype)).item()
+                assert int(stored) == wrap, (dtype, v, stored, wrap)
+                by_jax.add(dtype)
+    # COVERAGE IS ASSERTED AS A SET, NOT AS A TOTAL, because the two
+    # backends cover different rows and a typed sum would be a third
+    # number to keep in step: numpy has no `int4`/`uint4` and cannot hold
+    # `2**63`/`2**64` as a source, jax has both widths but is held to
+    # `int32` sources here. What matters is that no row of the table was
+    # checked by NEITHER.
+    assert by_numpy and by_jax
+    assert by_numpy | by_jax == set(ir._LIT_INT_BOUNDS), (
+        sorted(set(ir._LIT_INT_BOUNDS) - (by_numpy | by_jax)))
+
+
+def test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing():
+    """**THE MEASUREMENT THAT SETTLES FINDING 2, RE-DRIVEN RATHER THAN
+    QUOTED.**
+
+    The float half of the integer row predicts nothing, and the reason is
+    not that the wrap formula picks the wrong answer — it is that THERE
+    IS NO SINGLE ANSWER TO PICK. IEEE 754 leaves a float-to-integer
+    conversion whose result is outside the integer format unspecified,
+    and the two backends this tree can reach resolve it differently:
+    numpy's answer follows the platform's C cast and jax CLAMPS to the
+    dtype's endpoints. Every figure below is re-measured by this test
+    rather than typed, including the one that shows numpy is not
+    uniformly "the wrap" either — at 1e30 it raises *"invalid value
+    encountered in cast"* and returns something that is neither the wrap
+    nor an endpoint. There is no second formula to swap in.
+
+    ``300.0`` under `int8` is the cleanest witness and the one this test
+    pins from both sides: numpy answers the wrap this module would have
+    quoted, and jax answers the maximum instead. Neither is wrong; a
+    message claiming either as "what it would store as" is.
+
+    Nothing here is typed. The disagreement is COUNTED over the cells the
+    default jax configuration can reach, and the test asserts the count
+    is nonzero — so if the backends ever converge, this fails and the
+    refusal's wording should be revisited rather than silently left
+    stale."""
+    np = pytest.importorskip("numpy")
+    # `jax`, not `jax.numpy`: `tests/test_skip_inventory.py` declares the
+    # optional dependencies this suite may gate on by their TOP-LEVEL
+    # name, and an undeclared gate fails that file
+    jnp = pytest.importorskip("jax").numpy
+    disagreed = cells = 0
+    for dtype in ("int8", "int16", "uint8", "uint16"):
+        lo, hi = ir._LIT_INT_BOUNDS[dtype]
+        for v in (float(hi + 1), float(lo - 1), 300.0, -300.0):
+            cells += 1
+            npv = np.array(v).astype(getattr(np, dtype)).item()
+            jv = jnp.array(v).astype(getattr(jnp, dtype)).item()
+            disagreed += int(npv) != int(jv)
+    assert disagreed, f"the two backends agreed on all {cells} cells"
+    # the witness, both halves of it derived rather than typed
+    lo, hi = ir._LIT_INT_BOUNDS["int8"]
+    wrap = ((300 - lo) % (1 << ir._LIT_INT_BITS["int8"])) + lo
+    assert int(np.array(300.0).astype(np.int8).item()) == wrap
+    assert int(jnp.array(300.0).astype(jnp.int8).item()) == hi != wrap
+    # ...and numpy is not even uniformly "the wrap", which is what rules
+    # out simply quoting ITS answer instead. At 1e30 it says so itself:
+    # the cast RAISES A WARNING NAMING THE RESULT INVALID, and returns a
+    # number that is neither the wrap nor an endpoint, while jax still
+    # clamps. numpy's own diagnostic is the strongest available evidence
+    # that there is nothing here for a message to predict.
+    with pytest.warns(RuntimeWarning, match="invalid value encountered"):
+        huge_np = int(np.array(1e30).astype(np.int8).item())
+    assert huge_np != wrap and huge_np != hi and huge_np != lo
+    assert int(jnp.array(1e30).astype(jnp.int8).item()) == hi
+    # ...and this is what the refusal says instead of choosing one
+    msg = refused(300.0, "int8")
+    assert "PREDICTS NO STORED VALUE" in msg, msg
+    assert "would store as" not in msg, msg
+    # while the INT spelling of the same magnitude still predicts, and
+    # numpy still agrees with it
+    assert f"would store as {wrap}" in refused(300, "int8")
 
 
 # -- row: the float dtypes ----------------------------------------------------
@@ -354,6 +558,34 @@ def test_a_complex_dtype_judges_each_part_and_names_THE_FAILING_ONE():
     assert note is not None and "the real part" in note, note
 
 
+def test_a_complex_dtype_records_BOTH_parts_when_BOTH_of_them_round():
+    """**THE CONTROL THE ONE-PART CASE DID NOT HAVE, and its absence is
+    why half of a two-half record was being dropped.**
+
+    The loop over the parts ASSIGNED the note instead of accumulating it,
+    so the last part to round was the only one recorded and
+    ``complex(0.1, 0.2)`` under `complex64` reported its imag half alone.
+    The test above drives one rounding part at a time and passes either
+    way; only a value whose BOTH parts round can tell the two
+    implementations apart, which is what this is.
+
+    SPEC-LIT §5's reason for recording rather than warning is that a
+    verdict has to be able to QUOTE the record. Half a record is the
+    failure that channel was chosen to avoid."""
+    note = ir.literal_inexact(admitted(complex(0.1, 0.2), "complex64"))
+    assert note is not None
+    assert "the real part" in note and "the imag part" in note, note
+    # each half names its own stored value, and they are different
+    # numbers — so this is two facts joined, not one fact repeated
+    assert repr(struct.unpack("<f", struct.pack("<f", 0.1))[0]) in note
+    assert repr(struct.unpack("<f", struct.pack("<f", 0.2))[0]) in note
+    # one-part values still record exactly one clause, so the join did
+    # not turn every note into a pair
+    assert " — and " not in ir.literal_inexact(
+        admitted(complex(0.1, 0.0), "complex64"))
+    assert " — and " in note
+
+
 def test_a_real_value_under_a_complex_dtype_is_its_own_real_part():
     """`complex(10**400)` raises the same OverflowError `float()` does, so
     the parts of a REAL value are taken WITHOUT constructing a complex at
@@ -379,22 +611,80 @@ def test_a_complex_value_under_a_non_complex_dtype_is_a_category_error():
 # -- row: an unrecognised dtype gets no claim ---------------------------------
 
 
-@pytest.mark.parametrize("dtype", ["key<fry>", "float0", "float8_e4m3fn",
-                                   "void16", "xx", "int128", "not a dtype"])
-def test_an_unrecognised_dtype_string_gets_no_claim(dtype):
+# every one of these is real, and none is invented. `key<fry>` is a jax
+# extended dtype (`stelling._tripwire.prop_guard` names it); `float0` and
+# `float8_e4m3fn` are jax dtypes with no row here; `void16`, `xx` and
+# `int128` are strings the suite itself builds literals under, measured
+# in the recorder census; `complex256` and `float128` are
+# ``str(np.dtype(np.clongdouble))`` and ``str(np.dtype(np.longdouble))``
+# on this box; and `complex32` is how torch's half-precision complex
+# spells itself, which is the frontend this whole door exists for.
+UNRECOGNISED = ["complex32", "complex256", "float128", "key<fry>", "float0",
+                "float8_e4m3fn", "void16", "xx", "int128", "not a dtype"]
+# ONE VALUE OF EVERY PYTHON TYPE THE RULE TABLE NAMES. The rule table's
+# other rows dispatch on the VALUE's type as hard as on the dtype's name,
+# so a no-claim row driven by one value type is a row driven by one arm.
+# The id is written out rather than left to `repr`, because `repr(HUGE)`
+# is 401 digits and a 493-character node id is not a name.
+NO_CLAIM_VALUES = [
+    ("bool", True),
+    ("int-in-range", 1),
+    ("int-out-of-int8", 256),
+    ("int-past-every-float", HUGE),
+    ("float-non-integral", 0.5),
+    ("float-out-of-int32", -1e30),
+    ("complex", complex(1.0, 2.0)),
+]
+
+
+@pytest.mark.parametrize("dtype", UNRECOGNISED)
+@pytest.mark.parametrize("kind,val", NO_CLAIM_VALUES,
+                         ids=[k for k, _v in NO_CLAIM_VALUES])
+def test_an_unrecognised_dtype_string_gets_no_claim(dtype, kind, val):
     """The same posture `_load_itemsize` takes when a dtype code does not
     name a size: return None rather than guess. A guessed range is worse
     than no range, because it refuses documents this module has no
     standing to judge.
 
-    None of these is invented. `key<fry>` is a real jax extended dtype
-    (`stelling._tripwire.prop_guard` names it); `float0` and
-    `float8_e4m3fn` are real jax dtypes with no row here; and `void16`,
-    `xx` and `int128` are dtype strings the suite itself builds literals
-    under — measured in the recorder census, which found literals under
-    19 distinct dtype strings including those three."""
-    assert ir.Literal(val=HUGE, aval=aval(dtype)).val == HUGE
-    assert ir._literal_range_problem(256, aval(dtype)) == (None, None)
+    **THIS ROW USED TO BE DRIVEN BY TWO INTS, AND THAT IS HOW IT SHIPPED
+    BROKEN.** The complex-category arm ran BEFORE the dtype was
+    recognised, so every one of these dtypes refused a complex value with
+    *"no value of that dtype is complex"* — a claim about a dtype the
+    module has just said it knows nothing about, and a FALSE one for
+    `complex32` and `complex256`, whose values are all complex. Two int
+    drives could not see it: they never entered that arm.
+
+    The asymmetry is the proof and it is in this parametrization rather
+    than in a sentence. `float128` and `complex256` are equally
+    unrecognised; before the fix the first constructed and the second did
+    not. The file's own standard is ONE TEST PER ROW OF THE RULE TABLE,
+    DRIVEN, and for this row that means one per value type, because the
+    rows above it dispatch on the value's type as hard as on the dtype's
+    name."""
+    lit = ir.Literal(val=val, aval=aval(dtype))
+    assert lit.val == val, (kind, dtype)
+    assert ir.literal_inexact(lit) is None, (kind, dtype)
+    assert ir._literal_range_problem(val, aval(dtype)) == (None, None), (
+        kind, dtype)
+
+
+def test_the_unrecognised_row_and_the_recognised_one_disagree_about_NOTHING_but_the_dtype():
+    """The finding stated as the one-line control it needed. Same value,
+    two dtype strings the module is equally ignorant of, one of which
+    merely LOOKS like a float and the other like a complex: the answer
+    must be the same, and it must be no claim.
+
+    Kept beside the parametrization above because the parametrization
+    proves each cell separately and this proves they AGREE, which is the
+    property the shipped arm broke."""
+    v = complex(1.0, 2.0)
+    assert (ir._literal_range_problem(v, aval("float128"))
+            == ir._literal_range_problem(v, aval("complex256"))
+            == ir._literal_range_problem(v, aval("key<fry>"))
+            == (None, None))
+    # ...while a dtype it DOES recognise still gets the category error,
+    # which is what makes the arm above a narrowing rather than a removal
+    assert "non-complex dtype" in refused(v, "float64")
 
 
 # -- the tables, against something that is not them ---------------------------

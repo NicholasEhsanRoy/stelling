@@ -3070,31 +3070,81 @@ def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
         # a dtype-less aval (tokens) claims nothing about values, and `""`
         # is what a document can spell that with
         return None, None
-    # ARRAY PAYLOADS ARE OUT, AND STRUCTURALLY SO — a boundary, not a gap.
-    # An `Array`'s bytes ARE its dtype: :func:`_validate_array_value`
+    # ARRAY PAYLOADS ARE OUT — a boundary, and only PARTLY a structural
+    # one, which is the qualification this comment shipped without.
+    # An `Array`'s bytes ARE a dtype: :func:`_validate_array_value`
     # already holds ``len(data) == product(shape) x itemsize``, and a
     # fixed-width buffer cannot encode a value outside the width it is
-    # measured against. ONLY A SCALAR CAN LIE. Decoding the payload would
-    # also need numpy, which the module docstring forbids.
+    # measured against. Decoding the payload would also need numpy, which
+    # the module docstring forbids.
     #
-    # This exit is also where all the data volume leaves. Measured in the
-    # recorder census over the full suite: 43,047 literals constructed,
-    # of which 38,133 carry an `Array` value and 7 a `str`. Not one of
-    # those 38,140 is decoded, here or anywhere in this pass — the
-    # dispatch is a `type` test and reads no byte of a payload. The
-    # plan's prototype had no such boundary and crashed on the `Array`
-    # ones, which is how the boundary was found; it is written HERE, at
-    # the check, because a commit message is not where the next reader
-    # looks.
+    # BUT THE WIDTH IT IS MEASURED AGAINST IS THE `Array`'S OWN ``.str``,
+    # NOT THE AVAL'S DTYPE, so "only a scalar can lie" — which is what
+    # stood here — is FALSE as an unqualified sentence and was measured
+    # false:
+    #
+    #     arr = Array(dtype='<i8', shape=(), data=struct.pack('<q', 256))
+    #     Literal(arr, Aval(kind='ShapedArray', shape=(), dtype='int8'))
+    #
+    # constructs — 256 under an `int8` aval, the exact lie whose SCALAR
+    # spelling this pass refuses. The `Array`'s own buffer is honest
+    # about `<i8`; the disagreement is between that name and the aval's,
+    # and this pass makes no claim about it. The class is PRE-EXISTING
+    # and still open; it is disclosed and driven in
+    # `tests/test_literal_range.py::test_an_Array_literal_is_never_decoded`
+    # and
+    # `::test_an_Array_whose_own_dtype_disagrees_with_the_aval_still_constructs`.
+    # What can be said without qualification is the narrower thing: a
+    # scalar carries no width of its own, so a scalar's only dtype is the
+    # aval's and the aval's is the one this pass reads.
+    #
+    # THIS EXIT IS ALSO WHERE ALMOST THE WHOLE POPULATION LEAVES, and a
+    # reader deciding what this door covers should meet that here rather
+    # than infer it. Measured in the recorder census over the full suite:
+    # 43,047 literals constructed, of which 38,133 carry an `Array` value
+    # and 7 a `str` — so 38,133/43,047, which is a shade under 89 %, are
+    # outside the check BY DESIGN and only 4,907 scalars are inside it.
+    # That ratio is a fact about the PRODUCER, not about IR in general:
+    # `stelling._jax_compat` writes even a shape-``()`` scalar as an
+    # `ir.Array`, and a torch frontend that transcribed the same way
+    # would land in the same 89 %. Not one of those 38,140 is decoded,
+    # here or anywhere in this pass — the dispatch is a `type` test and
+    # reads no byte of a payload. The plan's prototype had no such
+    # boundary and crashed on the `Array` ones, which is how the boundary
+    # was found; it is written HERE, at the check, because a commit
+    # message is not where the next reader looks.
     if not issubclass(type(val), (bool, int, float, complex)):
         return None, None
-    # A COMPLEX VALUE UNDER A NON-COMPLEX DTYPE is a category error and is
-    # refused as one, ahead of the numeric rows, so the message names the
-    # category rather than an endpoint: 1+2j is not near float64's range,
-    # it is not on its line. (`issubclass(int, complex)` is False — the
-    # built-in numeric types are not a class hierarchy — so an `int` val
-    # never reaches this arm.)
-    if issubclass(type(val), complex) and dtype not in _LIT_COMPLEX_PART:
+    # A COMPLEX VALUE UNDER A RECOGNISED NON-COMPLEX DTYPE is a category
+    # error and is refused as one, ahead of the numeric rows, so the
+    # message names the category rather than an endpoint: 1+2j is not
+    # near float64's range, it is not on its line. (`issubclass(int,
+    # complex)` is False — the built-in numeric types are not a class
+    # hierarchy — so an `int` val never reaches this arm.)
+    #
+    # ``dtype in _LIT_DTYPE_NAME`` IS THE HALF THIS ARM SHIPPED WITHOUT,
+    # AND ITS ABSENCE WAS A FALSE REFUSAL — a rule quietly claiming
+    # something about a dtype it does not know, which is the failure this
+    # whole pass is supposed to be the opposite of. Without it the arm
+    # ran BEFORE the dtype had been recognised, so every string that is
+    # not literally `complex64`/`complex128` — including every one the
+    # unrecognised-dtype row at the bottom of this function makes NO
+    # CLAIM on — was told "no value of that dtype is complex".
+    #
+    # THE ASYMMETRY IS THE PROOF, and it is driven rather than argued:
+    # `float128` and `complex256` are EQUALLY unrecognised here, and the
+    # first constructed while the second was refused. Both are real —
+    # `complex256` is ``str(numpy.dtype(numpy.clongdouble))`` on this box
+    # and `float128` is `numpy.longdouble`'s — and the refusal was
+    # therefore false about a dtype whose values are all complex. It is
+    # live for the frontend this door exists for: torch's
+    # half-precision complex spells itself `complex32`, which has no row
+    # here either. Measured on the rule-row sweep in
+    # `tests/test_literal_range.py::test_an_unrecognised_dtype_string_gets_no_claim`,
+    # which now drives a complex, a float, a bool and an int at every
+    # unrecognised dtype instead of two ints at each.
+    if (issubclass(type(val), complex) and dtype in _LIT_DTYPE_NAME
+            and dtype not in _LIT_COMPLEX_PART):
         return (
             f"complex literal {_safe_repr(val)} under the non-complex dtype "
             f"{_safe_repr(dtype)} — no value of that dtype is complex"
@@ -3128,14 +3178,42 @@ def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
         v = int(val)
         if lo <= v <= hi:
             return None, None
-        # ...and the refusal quotes THE WRAP — what the value would
-        # actually store as under two's complement — because "out of
-        # range" alone does not tell a frontend author which of the two
-        # lies they are about to write.
+        if issubclass(type(val), int):
+            # AN INT SOURCE, AND ONLY AN INT SOURCE, GETS THE WRAP — what
+            # the value would actually store as under two's complement —
+            # because "out of range" alone does not tell a frontend
+            # author which of the two lies they are about to write.
+            # int-to-int narrowing is not a rounding at all: it is
+            # defined bit-for-bit, and both backends this tree can reach
+            # agree with the arithmetic below cell by cell. Driven against
+            # numpy AND jax, one authority per row of the table, in
+            # `test_the_int_wrap_the_message_quotes_is_what_the_backends_store`.
+            return (
+                f"literal {_safe_repr(val)} is outside {name}'s range "
+                f"[{lo}, {hi}] — it would store as "
+                f"{((v - lo) % (1 << _LIT_INT_BITS[dtype])) + lo}"
+            ), None
+        # A FLOAT SOURCE GETS NO PREDICTION, AND THAT IS A CORRECTION TO
+        # SPEC-LIT §3 RATHER THAN AN OMISSION. That row prescribes
+        # ``((val - lo) mod 2**bits) + lo`` for every out-of-range
+        # integer refusal without distinguishing the source type, and the
+        # first commit implemented it faithfully; it is right for an
+        # `int` and false for a `float`. The measurement that settles it
+        # is that THE TWO BACKENDS DISAGREE WITH EACH OTHER, so there is
+        # no single true "would store as" to quote and no other formula
+        # to swap in: 300.0 under `int8` wraps to 44 under numpy and
+        # saturates to 127 under jax. IEEE 754 leaves a conversion whose
+        # result is outside the integer format unspecified, and the
+        # hardware and the library each answer it their own way.
+        #
+        # So the refusal says the range and stops. Driven, with the
+        # disagreement re-measured rather than quoted, in
+        # `test_the_backends_DISAGREE_so_a_float_refusal_predicts_nothing`.
         return (
             f"literal {_safe_repr(val)} is outside {name}'s range "
-            f"[{lo}, {hi}] — it would store as "
-            f"{((v - lo) % (1 << _LIT_INT_BITS[dtype])) + lo}"
+            f"[{lo}, {hi}] — and this refusal PREDICTS NO STORED VALUE, "
+            f"because IEEE 754 leaves an out-of-range float-to-integer "
+            f"conversion unspecified and the backends disagree about it"
         ), None
     if dtype in _LIT_FLOAT_FORMATS:
         return _lit_float_problem(val, _LIT_DTYPE_NAME[dtype])
@@ -3151,14 +3229,30 @@ def _literal_range_problem(val, aval: Aval) -> tuple[str | None, str | None]:
             if issubclass(type(val), complex)
             else (("real", val),)
         )
-        inexact = None
+        # BOTH PARTS CAN ROUND, AND BOTH HAVE TO SURVIVE. This
+        # ACCUMULATES; it used to ASSIGN, and assigning kept only the
+        # LAST part's note, so `complex(0.1, 0.2)` under `complex64`
+        # reported the imag half of a two-half fact and silently dropped
+        # the real one. SPEC-LIT §5's whole reason for recording rather
+        # than warning is that a verdict has to be able to QUOTE the
+        # record, and half a record is the failure that mode exists to
+        # avoid. The control is
+        # `test_a_complex_dtype_records_BOTH_parts_when_BOTH_of_them_round`;
+        # the one-part case had no such control, which is why the drop
+        # survived the first pass.
+        notes: list[str] = []
         for pname, p in parts:
             problem, note = _lit_float_problem(p, part)
             if problem is not None:
                 return f"{problem} — the {pname} part of a {name} literal", None
             if note is not None:
-                inexact = f"{note} — the {pname} part of a {name} literal"
-        return None, inexact
+                notes.append(f"{note} — the {pname} part of a {name} literal")
+        # " — and " and not "; ": a single part's note ALREADY contains a
+        # semicolon (`_lit_float_problem` writes "0.1 has no float32; it
+        # stores as ..."), so a semicolon join would be indistinguishable
+        # from the punctuation inside one clause. Measured by writing it
+        # that way first and watching the control below fail.
+        return None, (" — and ".join(notes) if notes else None)
     # AN UNRECOGNISED DTYPE STRING GETS NO CLAIM, matching
     # :func:`_load_itemsize`, which returns None rather than guess a size
     # for a code it does not know. A guessed range is worse than no range:
